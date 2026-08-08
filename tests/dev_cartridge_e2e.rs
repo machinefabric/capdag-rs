@@ -27,21 +27,17 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Put the in-repo Python mirrors on PYTHONPATH so the scaffolded cartridge
-/// imports the LIVE `capdag`/`tagged_urn` source.
+/// Put the in-repo Python mirror on PYTHONPATH so the scaffolded cartridge
+/// imports the LIVE `capdag` source.
 ///
-/// Both must be named explicitly: `run_capdag` overrides HOME, which takes the
+/// It must be named explicitly: `run_capdag` overrides HOME, which takes the
 /// user site-packages directory (and any editable install living there) out of
-/// the child's sys.path. `ops` and `cbor2` are NOT listed — `ops` lives in its
-/// own repository now and is consumed as the published `opsx-py` package from
-/// the interpreter's real site-packages, so a missing install fails loudly.
+/// the child's sys.path. `tagged_urn`, `ops` and `cbor2` are NOT listed — each
+/// lives in its own repository now and is consumed as a published package
+/// (`tagged-urn`, `opsx-py`) from the interpreter's real site-packages, so a
+/// missing install fails loudly.
 fn pythonpath() -> String {
-    let root = repo_root();
-    format!(
-        "{}:{}",
-        root.join("capdag-py/src").display(),
-        root.join("tagged-urn-py/src").display()
-    )
+    repo_root().join("capdag-py/src").display().to_string()
 }
 
 /// Spawn a mock fabric HTTP server on an ephemeral port that returns an empty
