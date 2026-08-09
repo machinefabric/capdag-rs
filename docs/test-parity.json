@@ -34111,36 +34111,6 @@
       }
     },
     {
-      "number": 6423,
-      "present": [
-        "go",
-        "objc"
-      ],
-      "missing": [
-        "rust",
-        "py",
-        "js"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "rust",
-        "py",
-        "js"
-      ],
-      "canonical": {
-        "go": {
-          "function": "Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings",
-          "description": "Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings is the engine\u2192Go-host (or Swift\u2192Go-host) decode path: incoming JSON uses the snake_case wire format, and the Go side must resolve each string into the matching variant. CartridgeAttachmentErrorKind is just `type ... string`, so this test is also a check that the JSON unmarshaller doesn't normalise/lowercase/etc the bytes behind our backs.",
-          "location": "bifaci/relay_switch_test.go:1038"
-        },
-        "objc": {
-          "function": "test6423_capOutputSurvivesManifestRoundtrip",
-          "description": "TEST6423: a cap's OUTPUT survives a manifest round-trip. The Swift `CapDefinition` carried no `output` at all, so a Swift cartridge could not declare what its cap produces and any manifest that did declare one lost the block on the way through. This is a wire type \u2014 the Rust host reads exactly these bytes \u2014 and the other four implementations have carried `output` all along, so the omission made a Swift cartridge's manifest structurally different from every other language's for the same cap.",
-          "location": "Tests/BifaciTests/ManifestTests.swift:347"
-        }
-      }
-    },
-    {
       "number": 6525,
       "present": [
         "rust",
@@ -36950,6 +36920,120 @@
           "function": "test7122_Renderer_validateRunPayload_requiresForEachRegionCoordinate",
           "description": "TEST7122: Renderer body outcomes reject execution-region tokens for non-ForEach steps",
           "location": "capdag.test.js:5435"
+        }
+      }
+    },
+    {
+      "number": 7150,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7150_cap_output_survives_serialization_roundtrip",
+          "description": "TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read.",
+          "location": "src/cap/definition.rs:1744"
+        },
+        "go": {
+          "function": "Test7150_CapOutputSurvivesSerializationRoundtrip",
+          "description": "TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read.",
+          "location": "cap/definition_test.go:1029"
+        },
+        "py": {
+          "function": "test_7150_cap_output_survives_serialization_roundtrip",
+          "description": "TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read.",
+          "location": "tests/test_cap.py:764"
+        },
+        "objc": {
+          "function": "test7150_capOutputSurvivesSerializationRoundtrip",
+          "description": "TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read.",
+          "location": "Tests/BifaciTests/ManifestTests.swift:340"
+        }
+      }
+    },
+    {
+      "number": 7151,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7151_is_sequence_is_serialized_even_when_false",
+          "description": "TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through.",
+          "location": "src/cap/definition.rs:1797"
+        },
+        "go": {
+          "function": "Test7151_IsSequenceIsSerializedEvenWhenFalse",
+          "description": "TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through.",
+          "location": "cap/definition_test.go:1070"
+        },
+        "py": {
+          "function": "test_7151_is_sequence_is_serialized_even_when_false",
+          "description": "TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through.",
+          "location": "tests/test_cap.py:797"
+        },
+        "objc": {
+          "function": "test7151_isSequenceIsSerializedEvenWhenFalse",
+          "description": "TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through.",
+          "location": "Tests/BifaciTests/ManifestTests.swift:378"
+        }
+      }
+    },
+    {
+      "number": 7152,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7152_empty_adapter_urns_is_omitted",
+          "description": "TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced \u2014 invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared.",
+          "location": "src/bifaci/manifest.rs:789"
+        },
+        "go": {
+          "function": "Test7152_EmptyAdapterUrnsIsOmitted",
+          "description": "TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced \u2014 invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared.",
+          "location": "bifaci/manifest_test.go:485"
+        },
+        "py": {
+          "function": "test_7152_empty_adapter_urns_is_omitted",
+          "description": "TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced \u2014 invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared.",
+          "location": "tests/test_manifest.py:391"
+        },
+        "objc": {
+          "function": "test7152_emptyAdapterUrnsIsOmitted",
+          "description": "TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced \u2014 invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared.",
+          "location": "Tests/BifaciTests/ManifestTests.swift:402"
         }
       }
     },
@@ -40499,6 +40583,13 @@
       "function": "test6422_componentMetadataAccessors",
       "description": "TEST6422: CSCapManifest exposes name / version / channel / description / cap_groups via its accessors. The Obj-C bridge is schema-equivalent to the Swift `Manifest` struct.",
       "location": "Tests/BifaciTests/ManifestTests.swift:254"
+    },
+    {
+      "number": 6423,
+      "mirror": "go",
+      "function": "Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings",
+      "description": "Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings is the engine\u2192Go-host (or Swift\u2192Go-host) decode path: incoming JSON uses the snake_case wire format, and the Go side must resolve each string into the matching variant. CartridgeAttachmentErrorKind is just `type ... string`, so this test is also a check that the JSON unmarshaller doesn't normalise/lowercase/etc the bytes behind our backs.",
+      "location": "bifaci/relay_switch_test.go:1038"
     },
     {
       "number": 6424,

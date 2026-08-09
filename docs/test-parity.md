@@ -8,21 +8,21 @@ Numbers **1–7999** are the SHARED range: the same number must test the same th
 
 | Mirror | Numbered tests |
 |---|---|
-| rust | 1371 |
-| go | 1255 |
-| py | 1225 |
+| rust | 1374 |
+| go | 1258 |
+| py | 1228 |
 | js | 368 |
-| objc | 931 |
+| objc | 933 |
 
 ## Summary
 
-- Distinct numbered tests across all mirrors: **1826**
-- Shared (in ≥2 mirrors): **1204**
-- Solo (in exactly 1 mirror): **622**
-  - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **556**
+- Distinct numbered tests across all mirrors: **1829**
+- Shared (in ≥2 mirrors): **1206**
+- Solo (in exactly 1 mirror): **623**
+  - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **557**
   - …already in the 8000+ impl-specific range (correctly placed): **66**
-- Shared numbers with a parity gap (missing from ≥1 mirror): **1049**
-- Shared numbers with divergent descriptions: **257**
+- Shared numbers with a parity gap (missing from ≥1 mirror): **1051**
+- Shared numbers with divergent descriptions: **256**
 - Within-mirror duplicate numbers: **8**
 
 ---
@@ -380,6 +380,7 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6419 | js | `test6419_Machine_serializationIsDeterministic` | TEST6419: Machine serialization is deterministic | capdag.test.js:3979 |
 | test6421 | js | `test6421_Machine_reorderedEdgesProduceSameNotation` | TEST6421: Machine reordered edges produce same notation | capdag.test.js:3993 |
 | test6422 | objc | `test6422_componentMetadataAccessors` | TEST6422: CSCapManifest exposes name / version / channel / description / cap_groups via its accessors. The Obj-C bridge is schema-equivalent to the Swift `Manifest` struct. | Tests/BifaciTests/ManifestTests.swift:254 |
+| test6423 | go | `Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings` | Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings is the engine→Go-host (or Swift→Go-host) decode path: incoming JSON uses the snake_case wire format, and the Go side must resolve each string into the matching variant. CartridgeAttachmentErrorKind is just `type ... string`, so this test is also a check that the JSON unmarshaller doesn't normalise/lowercase/etc the bytes behind our backs. | bifaci/relay_switch_test.go:1038 |
 | test6424 | objc | `test6424_ResolveMediaUrnNotFound` | TEST6424: Resolve media urn not found | Tests/CapDAGTests/CSMediaDefTests.m:112 |
 | test6425 | objc | `test6425_ExtensionsPropagationFromObjectDef` | Extensions field tests | Tests/CapDAGTests/CSMediaDefTests.m:124 |
 | test6426 | objc | `test6426_ExtensionsEmptyWhenNotSet` | TEST6426: Extensions empty when not set | Tests/CapDAGTests/CSMediaDefTests.m:148 |
@@ -1538,7 +1539,6 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test6388 | rust, go, py, objc | js | TEST6388: Per-cap URL is /caps/<sha256-hex> — no URN-grammar characters in the path, no percent-encoding gymnastics. |
 | test6391 | rust, go, py, objc | js | TEST6391: Equivalent URNs (different tag order, etc.) hash to the same key. |
 | test6396 | rust, go, py, objc | js | TEST6396: A malformed cap URN must FAIL HARD with a ParseError, not be passed through raw (the old fallback) and surface later as a misleading NotFound. The `out` value below contains an unquoted `=`, which the cap grammar rejects. Against the old `Err(_) => urn.to_string()` fallback, `normalize_cap_urn` returned the raw string and `cap_defver` then reported "not part of manifest" (a NotFound); this test asserts the truthful error. |
-| test6423 | go, objc | rust, py, js | Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings is the engine→Go-host (or Swift→Go-host) decode path: incoming JSON uses the snake_case wire format, and the Go side must resolve each string into the matching variant. CartridgeAttachmentErrorKind is just `type ... string`, so this test is also a check that the JSON unmarshaller doesn't normalise/lowercase/etc the bytes behind our backs. |
 | test6525 | rust, go, py, objc | js | TEST6525: Body outcomes serialize an explicit stable failure coordinate |
 | test6544 | go, py, js, objc | rust | TEST6544: Builder rejects reserved structural keys on tag/marker helpers |
 | test6586 | rust, go, py, objc | js | TEST6586: file-path-array with nonexistent path fails clearly |
@@ -1615,6 +1615,9 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test7120 | rust, js | go, py, objc | TEST7120: A runtime-cardinality ForEach is part of the executed graph, so persistence receives the exact plan token rather than a cap token or a separately minted render-only token. |
 | test7121 | rust, js | go, py, objc | TEST7121: Existing shape identity is never silently rewritten. A run whose strand and plan disagree must fail before it can persist invalid provenance. |
 | test7122 | rust, js | go, py, objc | TEST7122: Knitting and re-realizing a strand preserves the ForEach boundary identity independently from its body-entry cap. This is the complete route used by machine execution and catches the identity loss that made persisted body coordinates fail realized-path validation. |
+| test7150 | rust, go, py, objc | js | TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read. |
+| test7151 | rust, go, py, objc | js | TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through. |
+| test7152 | rust, go, py, objc | js | TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced — invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared. |
 | test8064 | rust, go, py, objc | js | TEST8064: a sequence-consuming cap may be reached directly from sequence data, but never through a dangling ForEach boundary. The latter was emitted as `ForEach -> concat` and then correctly rejected by machine resolution, aborting the transmute strand stream. A ForEach followed by a SCALAR cap stays legal — that is the map half of the ordinary map-then-fold plan (TEST1418) — so the invariant is about what may follow the boundary, not about ForEach appearing at all. |
 | test8065 | rust, go, py, objc | js | / TEST8065: cardinality follows the declared main input even when a / secondary stdin-capable argument appears first in declaration order. |
 | test8066 | rust, go, py, objc | js | / TEST8066: a declared void-input producer has no main-input argument and / therefore has scalar input cardinality without inventing an arg. |
@@ -2882,11 +2885,6 @@ Same number, materially different descriptions across mirrors. Heuristic (normal
 - **go**: TEST6396: A malformed cap URN must FAIL HARD, not be passed through raw (the old silent fallback) and surface later as a misleading "not in manifest" / cache-miss. The `out` value below contains an unquoted `=`, which the cap grammar rejects. Against the old `if err == nil { normalized = ... }` fallback, normalizeCapUrn returned the raw string and GetCap then reported a not-found/manifest error; this test asserts the truthful parse error and that no path panics on a bad URN.
 - **py**: TEST6396: A malformed cap URN must FAIL HARD with a ParseError, not be passed through raw (the old fallback) and surface later as a misleading NotFound. The `out` value below contains an unquoted `=`, which the cap grammar rejects. Against the old `except Exception: return urn` fallback, normalize_cap_urn returned the raw string and _cap_defver then reported "not part of manifest" (a NotFoundError); this test asserts the truthful error type on both the direct and the public (get_cap) paths.
 - **objc**: TEST6396: A malformed cap URN must FAIL HARD — surfaced as an NSError, not passed through raw (the old fallback) to surface later as a misleading not-found. The `out` value below contains an unquoted `=`, which the cap grammar rejects. Against the old `parsed ? [parsed toString] : urn` fallback, normalizeCapUrn: returned the raw string and the cache lookup reported a (misleading) miss; this test asserts the truthful error and that the process never crashes. Mirrors Rust test6396_malformed_cap_urn_fails_hard.
-
-### test6423
-
-- **go**: Test6423_CartridgeAttachmentErrorDecodesProtoSnakeCaseStrings is the engine→Go-host (or Swift→Go-host) decode path: incoming JSON uses the snake_case wire format, and the Go side must resolve each string into the matching variant. CartridgeAttachmentErrorKind is just `type ... string`, so this test is also a check that the JSON unmarshaller doesn't normalise/lowercase/etc the bytes behind our backs.
-- **objc**: TEST6423: a cap's OUTPUT survives a manifest round-trip. The Swift `CapDefinition` carried no `output` at all, so a Swift cartridge could not declare what its cap produces and any manifest that did declare one lost the block on the way through. This is a wire type — the Rust host reads exactly these bytes — and the other four implementations have carried `output` all along, so the omission made a Swift cartridge's manifest structurally different from every other language's for the same cap.
 
 ### test6525
 
@@ -4833,7 +4831,7 @@ A number assigned to more than one function inside a single mirror. These must b
 | test6419 | shared | · | · | · | ✓ | · | solo |
 | test6421 | shared | · | · | · | ✓ | · | solo |
 | test6422 | shared | · | · | · | · | ✓ | solo |
-| test6423 | shared | · | ✓ | · | · | ✓ | shared |
+| test6423 | shared | · | ✓ | · | · | · | solo |
 | test6424 | shared | · | · | · | · | ✓ | solo |
 | test6425 | shared | · | · | · | · | ✓ | solo |
 | test6426 | shared | · | · | · | · | ✓ | solo |
@@ -5127,6 +5125,9 @@ A number assigned to more than one function inside a single mirror. These must b
 | test7120 | shared | ✓ | · | · | ✓ | · | shared |
 | test7121 | shared | ✓ | · | · | ✓ | · | shared |
 | test7122 | shared | ✓ | · | · | ✓ | · | shared |
+| test7150 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7151 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7152 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8000 | impl | ✓ | · | · | · | · | solo |
 | test8001 | impl | ✓ | · | · | · | · | solo |
 | test8002 | impl | ✓ | · | · | · | · | solo |
