@@ -1,3 +1,11 @@
+[[bin]]
+name = "capdag"
+path = "src/bin/capdag.rs"
+required-features = ["capture"]
+
+[build-dependencies]
+serde_json = "1.0"
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
@@ -6,18 +14,13 @@ ciborium = "0.2"
 crossbeam-channel = "0.5"
 dirs = "5.0"
 dot-parser = "0.1"
+ed25519-dalek = "2"
 glob = "0.3"
-pest = "2.8"
-pest_derive = "2.8"
 jsonschema = "0.17"
 libc = "0.2"
-# Zero-dependency, pure-Rust minisign signature verification — the runtime
-# integrity check for registry-downloaded cartridge binaries.
 minisign-verify = "0.2"
-# Raw ed25519 verification for the release-key-certificate / manifest-signature
-# layer (signatures over exact bytes). Keys are minisign public keys, parsed in
-# binary_signing.rs.
-ed25519-dalek = "2"
+pest = "2.8"
+pest_derive = "2.8"
 regex = "1.0"
 serde_json = "1.0"
 sha2 = "0.10"
@@ -25,10 +28,16 @@ socket2 = "0.6"
 thiserror = "1.0"
 tracing = "0.1"
 urlencoding = "2.1"
-uuid = { version = "1.0", features = ["v4"] }
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+[dependencies.ffmpeg-bundle]
+optional = true
+path = "../ffmpeg-bundle"
+
+[dependencies.image]
+default-features = false
+features = ["png"]
+optional = true
+version = "0.25"
 
 [dependencies.ops-rs]
 version = "1.63.594"
@@ -48,47 +57,20 @@ version = "1.49.155"
 features = ["full"]
 version = "1.0"
 
-# Device-capture transport resolution (capture/ module): the vendored
-# ffmpeg's avdevice inputs + PNG frame encoding. Optional — only builds
-# that resolve DEVICE references (the CLI, the engine, the capture-capable
-# cartridges) enable the `capture` feature; everything else stays free of
-# the static ffmpeg dist. The synthetic feed needs neither and is always
-# built.
-[dependencies.ffmpeg-bundle]
-path = "../ffmpeg-bundle"
-optional = true
-
-[dependencies.image]
-version = "0.25"
-default-features = false
-features = ["png"]
-optional = true
-
-[features]
-capture = ["dep:ffmpeg-bundle", "dep:image"]
-
-[[bin]]
-name = "capdag"
-path = "src/bin/capdag.rs"
-# The CLI is a capture-capable host (it resolves device references for
-# machines it runs) — built via `dx`, which passes the feature.
-required-features = ["capture"]
-
-[[test]]
-name = "dev_cartridge_e2e"
-# Exercises the built CLI binary (CARGO_BIN_EXE_capdag), which itself
-# requires the capture feature.
-required-features = ["capture"]
+[dependencies.uuid]
+features = ["v4"]
+version = "1.0"
 
 [dev-dependencies]
 serial_test = "3.0"
 tempfile = "3.10"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# build.rs parses MFR_BUNDLED_CARTRIDGE_HASHES (a JSON map) to codegen the baked
-# bundled-cartridge hash table. serde_json only — no other build-time deps.
-[build-dependencies]
-serde_json = "1.0"
+[dev-dependencies.tracing-subscriber]
+features = ["env-filter"]
+version = "0.3"
+
+[features]
+capture = ["dep:ffmpeg-bundle", "dep:image"]
 
 [package]
 authors = ["https://github.com/machinefabric"]
@@ -96,4 +78,12 @@ description = "Core cap URN and definition system for MACHFAB plugins"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.644.6474"
+version = "1.645.6484"
+
+[target."cfg(windows)".dependencies.windows-sys]
+features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"]
+version = "0.61"
+
+[[test]]
+name = "dev_cartridge_e2e"
+required-features = ["capture"]
