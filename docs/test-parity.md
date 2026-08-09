@@ -8,22 +8,22 @@ Numbers **1–7999** are the SHARED range: the same number must test the same th
 
 | Mirror | Numbered tests |
 |---|---|
-| rust | 1374 |
-| go | 1258 |
-| py | 1228 |
+| rust | 1375 |
+| go | 1266 |
+| py | 1236 |
 | js | 368 |
 | objc | 933 |
 
 ## Summary
 
 - Distinct numbered tests across all mirrors: **1829**
-- Shared (in ≥2 mirrors): **1206**
-- Solo (in exactly 1 mirror): **623**
+- Shared (in ≥2 mirrors): **1208**
+- Solo (in exactly 1 mirror): **621**
   - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **557**
-  - …already in the 8000+ impl-specific range (correctly placed): **66**
-- Shared numbers with a parity gap (missing from ≥1 mirror): **1051**
-- Shared numbers with divergent descriptions: **256**
-- Within-mirror duplicate numbers: **8**
+  - …already in the 8000+ impl-specific range (correctly placed): **64**
+- Shared numbers with a parity gap (missing from ≥1 mirror): **1053**
+- Shared numbers with divergent descriptions: **255**
+- Within-mirror duplicate numbers: **13**
 
 ---
 
@@ -193,8 +193,8 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test1848 | js | `test1848_capVersionNonZeroOnWire` | TEST1848: Cap with version=N round-trips with `version: N` on wire | capdag.test.js:6643 |
 | test1879 | rust | `test1879_other_registry_version_subtree_is_skipped` | TEST1879: only the host's registry-VERSION subtree is scanned. A cartridge installed under `{slug}/v{N+1}/nightly/…` (a different registry regime) is invisible to a host that speaks v{N} — the version level is pinned exactly like the channel, so v1 and v2 cartridges of the same registry never mix. | src/cartridge_discovery.rs:805 |
 | test1901 | go | `Test1901_add_master_reattach_verifies_identity` | TEST1901: AddMaster runs an end-to-end identity probe on reattach whenever the host advertises caps (mirrors Rust add_master). When the reattaching host FAILS the probe, the master rejoins as UNHEALTHY — its installed cartridges stay visible in the inventory aggregate while its caps are held out of the routing table — rather than the reattach erroring out. | bifaci/relay_switch_test.go:2025 |
-| test1902 | rust | `test1902_cartridges_resolve_through_launcher_symlink` | / TEST1902: a launcher SYMLINK — the packaging pattern (`/usr/bin/capdag` / → `/opt/capdag/capdag`, Homebrew `bin/capdag` → `libexec/capdag`) — must / resolve to the REAL bundle's `bundled-cartridges/`, not a `bundled-cartridges/` beside the / symlink. This fails if `bundled_cartridges_dir_for_exe` stops canonicalizing. | src/bin/capdag.rs:2905 |
-| test1903 | rust | `test1903_no_bundled_cartridges_dir_when_absent` | / TEST1903: no `bundled-cartridges/` beside the binary ⇒ `None` (a bare `cargo` / build / unpackaged binary — not an error, discovery just skips it). | src/bin/capdag.rs:2927 |
+| test1902 | rust | `test1902_cartridges_resolve_through_launcher_symlink` | / TEST1902: a launcher SYMLINK — the packaging pattern (`/usr/bin/capdag` / → `/opt/capdag/capdag`, Homebrew `bin/capdag` → `libexec/capdag`) — must / resolve to the REAL bundle's `bundled-cartridges/`, not a `bundled-cartridges/` beside the / symlink. This fails if `bundled_cartridges_dir_for_exe` stops canonicalizing. | src/bin/capdag.rs:2952 |
+| test1903 | rust | `test1903_no_bundled_cartridges_dir_when_absent` | / TEST1903: no `bundled-cartridges/` beside the binary ⇒ `None` (a bare `cargo` / build / unpackaged binary — not an error, discovery just skips it). | src/bin/capdag.rs:2974 |
 | test1904 | py | `test_1904_add_master_probe_failure_registers_unhealthy_not_raises` | Gap-5 lock: an add_master identity-probe FAILURE registers the master as UNHEALTHY (inventory visible) rather than RAISING — matching the reference add_master (and unlike the constructor, which raises; see test_488). | tests/test_relay_switch.py:1540 |
 | test1905 | objc | `test1905_peerReqNoHandlerSendsErrToCaller` | TEST0142 (Swift-specific, gap 3): a peer cartridge→cartridge REQ for a cap with NO handler must NOT abort the pump. The switch sends an ERR("NO_HANDLER") frame straight back to the calling master (stamped with the synthetic XID) so the caller fails fast, and handleMasterFrame returns nil — it must NOT throw. | Tests/BifaciTests/RelaySwitchTests.swift:1311 |
 | test1948 | rust | `test1948_progress_log_without_a_value_names_the_missing_value` | TEST1948: a LOG whose level is "progress" but whose numeric value is missing fails as a MISSING PROGRESS VALUE, not as an attribution error. The two questions "is this frame functional progress?" and "must it carry attribution?" have one answer — the level — but the receiver used to ask them differently: it branched on whether a number parsed, while `attribution_class()` branched on the level. A frame that said level="progress" and carried no number fell between them and surfaced as "Log frames do not carry attribution", sending the reader after the wrong defect entirely. | src/orchestrator/stream_io.rs:1989 |
@@ -1526,7 +1526,7 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test1945 | rust, go, py, objc | js | TEST1945: a roster retire DRAINS a busy cartridge instead of killing it. The incident this pins: a transient registry outage shrank the roster and the host killed three cartridges outright, ERRing every request they were serving. Retirement means "no NEW work" — the process must survive until the requests it is already handling terminate. |
 | test1946 | rust, go, py, objc | js | TEST1946: an IDLE cartridge is retired immediately (no reason to keep a process nothing routes to), and its reason is RosterRetired so pending work — and the operator-facing log — is attributed to the environment rather than reported as a user cancellation. |
 | test1947 | rust, go, py, objc | js | TEST1947: a roster that flaps — retire then restore the same identity — keeps the SAME live process. This is the incident's shape end to end: the registry became unreachable, the roster shrank, and 26 seconds later it came back. Nothing about that sequence should cost a running cartridge, its warm model, or the work queued on it. |
-| test1949 | rust, objc | go, py, js | TEST1949: a peer progress LOG with no numeric value FAILS HARD. Forwarding must not silently drop it or substitute a value — a malformed frame is an emitter defect and must surface as one, which is exactly the failure the engine raises for the same frame. |
+| test1949 | rust, go, py, objc | js | TEST1949: a peer progress LOG with no numeric value FAILS HARD. Forwarding must not silently drop it or substitute a value — a malformed frame is an emitter defect and must surface as one, which is exactly the failure the engine raises for the same frame. |
 | test6207 | go, objc | rust, py, js | Mirror-specific coverage: Test that concatenated() returns full payload while final_payload() returns only last chunk |
 | test6282 | go, py, js, objc | rust | TEST6282: Test resolving a custom media URN from a registry-seeded media def |
 | test6283 | go, py, js, objc | rust | TEST6283: Test resolving a custom record media def carrying a schema from a registry-seeded media def |
@@ -1611,7 +1611,7 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test7112 | rust, go, py, objc | js | TEST7112: the post-HELLO capacity update wakes already queued work. This is what changes an unstarted cartridge's one bootstrap slot to its authoritative runtime capacity without waiting for the first body to end. |
 | test7114 | rust, go, py, objc | js | TEST7114: a cartridge that disappears and comes back does NOT terminally fail the work queued behind it. This is 17.2's "queued bodies are not assigned terminal failure from another body's process loss; once a replacement instance advertises capacity, subsequent queued work is admitted to that live instance". The regression this pins: a single failed registry-manifest fetch retired three live cartridges for ~24s, and every queued ForEach body was failed with "became unavailable while waiting for capacity" — 195 bodies lost to an outage that had already healed. |
 | test7117 | rust, go, py, objc | js | TEST7117: non-progress LOG carries the same source attribution tuple as ERR, including an optional argument URN, through the actual wire codec. |
-| test7118 | rust, objc | go, py, js | TEST7118: finite peer collection preserves source diagnostics instead of consuming them as data or dropping them. Progress is mapped into the caller's range and argument attribution survives byte-for-byte. |
+| test7118 | rust, go, py, objc | js | TEST7118: finite peer collection preserves source diagnostics instead of consuming them as data or dropping them. Progress is mapped into the caller's range and argument attribution survives byte-for-byte. |
 | test7120 | rust, js | go, py, objc | TEST7120: A runtime-cardinality ForEach is part of the executed graph, so persistence receives the exact plan token rather than a cap token or a separately minted render-only token. |
 | test7121 | rust, js | go, py, objc | TEST7121: Existing shape identity is never silently rewritten. A run whose strand and plan disagree must fail before it can persist invalid provenance. |
 | test7122 | rust, js | go, py, objc | TEST7122: Knitting and re-realizing a strand preserves the ForEach boundary identity independently from its body-entry cap. This is the complete route used by machine execution and catches the identity loss that made persisted body coordinates fail realized-path validation. |
@@ -1622,11 +1622,13 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test8065 | rust, go, py, objc | js | / TEST8065: cardinality follows the declared main input even when a / secondary stdin-capable argument appears first in declaration order. |
 | test8066 | rust, go, py, objc | js | / TEST8066: a declared void-input producer has no main-input argument and / therefore has scalar input cardinality without inventing an arg. |
 | test8067 | rust, go, py, objc | js | TEST8067: A late death notification from a retired process generation cannot tear down its replacement. The current generation's heartbeat timeout performs the complete death transition and preserves its typed terminal for the request that process actually owned. |
-| test8100 | rust, objc | go, py, js | TEST8100: the Python scaffold writes a runnable-shaped project — the entry exists, is executable, carries the current-regime API (aliases, enc=utf-8, NO `command=`/`textable`), and substitutes the project name into the manifest, alias, and media URNs. |
-| test8101 | rust, py | go, js, objc | TEST8101: scaffolding rejects a bad name and refuses to overwrite. |
-| test8102 | rust, py | go, js, objc | TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias. |
-| test8103 | rust, py | go, js, objc | TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set). |
+| test8100 | rust, go, py, objc | js | TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it. |
+| test8101 | rust, go, py | js, objc | TEST8101: scaffolding rejects a bad name and refuses to overwrite. |
+| test8102 | rust, go, py | js, objc | TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias. |
+| test8103 | rust, go, py | js, objc | TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set). |
 | test8104 | rust, py | go, js, objc | TEST8104: the fabric-conflict guard — a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted. |
+| test8105 | rust, go, py | js, objc | TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees. |
+| test8106 | go, py | rust, js, objc | TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit — which would ship two capdags that disagree about what a cartridge looks like, silently. |
 | test8110 | rust, py | go, js, objc | TEST8110: the full cartridge-development loop through the real CLI and a real Python cartridge — scaffold, install under the dev slug, run the custom cap (never published to the fabric), edit its logic, re-install to update, and observe the changed behavior. |
 | test8111 | go, py, objc | rust, js | TEST8111: DecodeFrame reads narrow-width wire floats into the single in-memory float representation, matching the reference decoder (ciborium yields f64 for every CBOR float width). The reference ENCODER shrinks lossless floats to half-precision on the wire (0.5 travels as 0xf9), so a mirror must read a half- or single-precision progress and still expose it numerically. |
 | test8112 | go, py, objc | rust, js | TEST8112: the relay forwarding hop — decode a cartridge frame whose progress rode the wire as half-precision, re-encode it, and decode again: the value must survive as a number and the re-encoded bytes must never contain CBOR undefined (0xf7). In the Swift mirror this exact hop corrupted progress to undefined (read as null by the engine), failing every ForEach body on macOS. |
@@ -3238,23 +3240,22 @@ Same number, materially different descriptions across mirrors. Heuristic (normal
 
 ### test8100
 
-- **rust**: TEST8100: the Python scaffold writes a runnable-shaped project — the entry exists, is executable, carries the current-regime API (aliases, enc=utf-8, NO `command=`/`textable`), and substitutes the project name into the manifest, alias, and media URNs.
+- **rust**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
+- **go**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
+- **py**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
 - **objc**: TEST8100: Swift handler-error classification preserves a source-declared argument URN together with its code, attribution class, and message.
-
-### test8101
-
-- **rust**: TEST8101: scaffolding rejects a bad name and refuses to overwrite.
-- **py**: TEST8101: (py-specific) Cap.to_dict emits the full wire shape including args and output. Behavior beyond the shared cross-mirror set, kept here as implementation-specific coverage.
 
 ### test8102
 
 - **rust**: TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
-- **py**: TEST8102: (py-specific) CapArg.stream_urn() falls back to the declared slot media URN when the arg declares no Stdin source at all — a producer-fed arg may be delivered by its declared URN without ever appearing on stdin.
+- **go**: TEST8102: ReadEntryManifest + StageDevCartridge + FindDevCapByAlias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
+- **py**: TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
 
 ### test8103
 
 - **rust**: TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set).
-- **py**: TEST8103: (py-specific) CapArg.stream_urn() returns the Stdin source's URN, not the declared slot media URN, when the two differ — e.g. a file-path slot whose piped content is actually a pdf-stream.
+- **go**: TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.
+- **py**: TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.
 
 ### test8104
 
@@ -3391,6 +3392,14 @@ A number assigned to more than one function inside a single mirror. These must b
 - test285: `test0285_empty_handler_returned_with_owning_adapter_drops_everything_in_domain`, `test285_request_response_simple`
 - test286: `test0286_malformed_candidate_urn_passes_through`, `test286_streaming_chunks`
 - test1459: `test1459_live_synthetic_foreach_region_end_to_end`, `test1459_transient_capture_owns_spooled_intermediates`
+
+### py
+
+- test8101: `test_8101_scaffold_guards`, `test_8101_cap_to_dict_wire_shape`
+- test8102: `test_8102_dev_install_and_find_by_alias`, `test_8102_cap_arg_stream_urn_falls_back_to_media_urn_without_stdin_source`
+- test8103: `test_8103_dev_install_rejects_published_manifest`, `test_8103_cap_arg_stream_urn_uses_stdin_source_urn_when_present`
+- test8105: `test_8105_two_entries_is_ambiguous_not_a_coin_flip`, `test_8105_cap_arg_is_main_input_false_without_matching_stdin_source`
+- test8106: `test_8106_vendored_stub_contract_matches_the_canonical_source`, `test_8106_cap_arg_is_main_input_false_on_unparseable_stdin_urn`
 
 ---
 
@@ -4636,7 +4645,7 @@ A number assigned to more than one function inside a single mirror. These must b
 | test1946 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test1947 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test1948 | shared | ✓ | · | · | · | · | solo |
-| test1949 | shared | ✓ | · | · | · | ✓ | shared |
+| test1949 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test6182 | shared | · | ✓ | · | · | · | solo |
 | test6183 | shared | · | ✓ | · | · | · | solo |
 | test6184 | shared | · | ✓ | · | · | · | solo |
@@ -5120,7 +5129,7 @@ A number assigned to more than one function inside a single mirror. These must b
 | test7113 | shared | ✓ | · | · | · | · | solo |
 | test7114 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7117 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
-| test7118 | shared | ✓ | · | · | · | ✓ | shared |
+| test7118 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7119 | shared | ✓ | · | · | · | · | solo |
 | test7120 | shared | ✓ | · | · | ✓ | · | shared |
 | test7121 | shared | ✓ | · | · | ✓ | · | shared |
@@ -5180,13 +5189,13 @@ A number assigned to more than one function inside a single mirror. These must b
 | test8065 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8066 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8067 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
-| test8100 | impl | ✓ | · | · | · | ✓ | shared |
-| test8101 | impl | ✓ | · | ✓ | · | · | shared |
-| test8102 | impl | ✓ | · | ✓ | · | · | shared |
-| test8103 | impl | ✓ | · | ✓ | · | · | shared |
+| test8100 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test8101 | impl | ✓ | ✓ | ✓ | · | · | shared |
+| test8102 | impl | ✓ | ✓ | ✓ | · | · | shared |
+| test8103 | impl | ✓ | ✓ | ✓ | · | · | shared |
 | test8104 | impl | ✓ | · | ✓ | · | · | shared |
-| test8105 | impl | · | · | ✓ | · | · | solo |
-| test8106 | impl | · | · | ✓ | · | · | solo |
+| test8105 | impl | ✓ | ✓ | ✓ | · | · | shared |
+| test8106 | impl | · | ✓ | ✓ | · | · | shared |
 | test8107 | impl | · | · | ✓ | · | · | solo |
 | test8108 | impl | · | · | ✓ | · | · | solo |
 | test8109 | impl | · | · | ✓ | · | · | solo |

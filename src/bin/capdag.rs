@@ -336,7 +336,7 @@ fn print_usage(program: &str) {
            {p} resolve [--no-cache] <cap-alias-or-urn>...            Print cap definition JSON (array for >1)\n\
            {p} cache [clear|refresh]                                 Invalidate/renew the local fabric cache\n\
            {p} install <cap-alias-or-urn-or-cartridge-id>            Download + verify without running\n\
-           {p} new <name> [--python] [-o <dir>]                      Scaffold a new cartridge project\n\
+           {p} new <name> --<language> [-o <dir>]                    Scaffold a new cartridge project\n\
            {p} dev-install <project-dir>                             Install/update a dev cartridge under the dev slug\n\n\
          Single-cap mode drives the cap's OWN declared interface — exactly like\n\
          invoking the cartridge directly, except the cap runs inside a full bifaci\n\
@@ -2764,16 +2764,20 @@ async fn cmd_install(args: &[String]) -> ! {
     }
 }
 
-/// `capdag new <name> [--python] [-o <dir>]` — scaffold a fresh cartridge
-/// project. Python is the only (and default) kind today. Writes a runnable
-/// `cartridge.py`, a README, and a `.gitignore` into `<dir>/<name>/`.
+/// `capdag new <name> --<language> [-o <dir>]` — scaffold a fresh cartridge
+/// project in any language the vendored canonical stubs cover.
+///
+/// The bytes written are the SAME in every capdag implementation, because they
+/// come from one vendored copy of `capdag-stub-cartridges` rather than from a
+/// template each mirror keeps privately.
 async fn cmd_new(args: &[String]) -> ! {
     let mut name: Option<&str> = None;
+    let mut language: Option<&'static capdag::dev::stubs_generated::StubLanguage> = None;
     let mut parent = PathBuf::from(".");
     let mut idx = 2usize;
     while idx < args.len() {
-        match args[idx].as_str() {
-            "--python" => {} // the only kind; explicit is fine.
+        let arg = args[idx].as_str();
+        match arg {
             "-o" | "--output" => {
                 idx += 1;
                 let Some(dir) = args.get(idx) else {
@@ -2782,8 +2786,23 @@ async fn cmd_new(args: &[String]) -> ! {
                 };
                 parent = PathBuf::from(dir);
             }
+            _ if capdag::dev::stub_language(arg).is_some() => {
+                // Two language flags is not a preference to resolve, it is a
+                // command that cannot mean one thing.
+                if let Some(already) = language {
+                    eprintln!(
+                        "`new` takes one language: '{}' was already given, then '{arg}'.",
+                        already.flag
+                    );
+                    process::exit(2);
+                }
+                language = capdag::dev::stub_language(arg);
+            }
             other if other.starts_with("--") => {
-                eprintln!("Unknown option '{other}' for `new` (only --python is supported).");
+                eprintln!(
+                    "Unknown option '{other}' for `new`. Languages: {}.",
+                    language_flag_list()
+                );
                 process::exit(2);
             }
             other if name.is_none() => name = Some(other),
@@ -2795,19 +2814,36 @@ async fn cmd_new(args: &[String]) -> ! {
         idx += 1;
     }
     let Some(name) = name else {
-        eprintln!("Usage: {} new <name> [--python] [-o <dir>]", args[0]);
+        eprintln!(
+            "Usage: {} new <name> <{}> [-o <dir>]",
+            args[0],
+            language_flag_list()
+        );
+        process::exit(2);
+    };
+    // No default language. Defaulting would make `capdag new mycart` produce a
+    // different project as the stub set grows, and silently pick for someone
+    // who simply forgot to say.
+    let Some(language) = language else {
+        eprintln!(
+            "`new` requires a language: {}. Each scaffolds the same cartridge, in that language.",
+            language_flag_list()
+        );
         process::exit(2);
     };
 
-    match capdag::dev::scaffold_python_cartridge(name, &parent) {
+    match capdag::dev::scaffold_cartridge(name, language, &parent) {
         Ok(project_dir) => {
             eprintln!(
-                "Scaffolded Python cartridge '{name}' at {}",
+                "Scaffolded {} cartridge '{name}' at {}",
+                language.display,
                 project_dir.display()
             );
             eprintln!("Next:");
-            eprintln!("  pip install capdag            # the cartridge runtime");
             eprintln!("  cd {}", project_dir.display());
+            for step in language.build {
+                eprintln!("  {}", step.replace(capdag::dev::stubs_generated::STUB_PLACEHOLDER, name));
+            }
             eprintln!("  capdag dev-install .          # install under the local `dev` slug");
             eprintln!("  echo \"I love this\" | capdag {name}");
             println!("{}", project_dir.display());
@@ -2818,6 +2854,17 @@ async fn cmd_new(args: &[String]) -> ! {
             process::exit(1);
         }
     }
+}
+
+/// The scaffoldable language flags, for usage and error messages. Built from
+/// the vendored contract so a newly vendored language appears everywhere at
+/// once rather than in whichever message someone remembered to update.
+fn language_flag_list() -> String {
+    capdag::dev::stub_languages()
+        .iter()
+        .map(|l| l.flag)
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// `capdag dev-install <project-dir>` — install (or update) a dev cartridge

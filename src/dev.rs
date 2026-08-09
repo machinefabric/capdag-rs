@@ -2,9 +2,12 @@
 //!
 //! This module backs three developer commands and the local-manifest run path:
 //!
-//! - [`scaffold_python_cartridge`] — `capdag new <name> --python`: write a
-//!   fresh, runnable Python cartridge project (one custom cap, one Op, one
-//!   manifest) into a new directory.
+//! - [`scaffold_cartridge`] — `capdag new <name> --<language>`: write a fresh,
+//!   runnable cartridge project (one custom cap, one Op that peer-calls a
+//!   model, one manifest) into a new directory, in any language the vendored
+//!   canonical stubs cover. The stubs are the SAME bytes in every capdag
+//!   implementation (see `stubs_generated`), so the project you get does not
+//!   depend on which capdag binary you ran.
 //! - [`stage_dev_cartridge`] — `capdag dev-install <project-dir>`: read the
 //!   project's manifest, then copy it under the per-user cartridge root's
 //!   reserved `dev` slug so the capdag host (and any other host pointed at that
@@ -30,11 +33,7 @@ use crate::bifaci::manifest::CapManifest;
 use crate::cap::definition::Cap;
 use crate::fabric::registry::FabricRegistry;
 
-/// The entry-point filename a `--python` scaffold produces and `dev-install`
-/// expects. The host execs this file directly (it carries a `#!/usr/bin/env
-/// python3` shebang and is made executable), so the cap runs with whatever
-/// `python3` + `capdag` the developer's environment provides.
-pub const PYTHON_ENTRY: &str = "cartridge.py";
+pub mod stubs_generated;
 
 /// Errors from the cartridge-development commands. Each variant is actionable —
 /// it names the file, entry, or conflicting alias so the developer can fix it.
@@ -44,6 +43,10 @@ pub enum DevError {
     InvalidName(String),
     AlreadyExists(PathBuf),
     NoEntry(PathBuf),
+    AmbiguousEntry {
+        project: PathBuf,
+        found: Vec<PathBuf>,
+    },
     ManifestSpawn {
         entry: PathBuf,
         source: String,
@@ -85,9 +88,23 @@ impl std::fmt::Display for DevError {
             }
             DevError::NoEntry(p) => write!(
                 f,
-                "no cartridge entry '{}' found in the project — expected a `{PYTHON_ENTRY}` \
-                 file (create the project with `capdag new`)",
-                p.display()
+                "no cartridge entry found in '{}'. Looked for {}. A compiled cartridge \
+                 must be BUILT before it is installed — the host launches the binary, \
+                 not the sources. Create the project with `capdag new`.",
+                p.display(),
+                stub_entry_candidates_description(p)
+            ),
+            DevError::AmbiguousEntry { project, found } => write!(
+                f,
+                "'{}' contains more than one cartridge entry ({}) — capdag cannot tell \
+                 which one to install. A project is ONE cartridge; remove the build \
+                 outputs of the language you are not developing.",
+                project.display(),
+                found
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             DevError::ManifestSpawn { entry, source } => write!(
                 f,
@@ -158,192 +175,51 @@ pub fn valid_cartridge_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// The Python cartridge source for a fresh scaffold. `__CARTRIDGE_NAME__` is
-/// substituted with the project name so a cap's alias/URN are unique per
-/// project (they will not collide with the fabric or another scaffold). The
-/// example classifies text as positive/neutral/negative; edit `classify()` and
-/// the URNs to build your own capability.
-pub fn python_cartridge_source(name: &str) -> String {
-    PYTHON_CARTRIDGE_TEMPLATE.replace("__CARTRIDGE_NAME__", name)
+/// Every language `capdag new` can scaffold, from the vendored canonical stubs.
+///
+/// The list is the contract's, in its order — a mirror that offered a subset
+/// would silently make `capdag new --rust` mean different things depending on
+/// which capdag binary you happened to run.
+pub fn stub_languages() -> &'static [stubs_generated::StubLanguage] {
+    stubs_generated::STUB_LANGUAGES
 }
 
-const PYTHON_CARTRIDGE_TEMPLATE: &str = r##"#!/usr/bin/env python3
-"""__CARTRIDGE_NAME__ — a MachineFabric cartridge (Python), scaffolded by `capdag new`.
-
-Reads UTF-8 text on stdin and emits a single tag word: `positive`,
-`neutral`, or `negative`. This is the smallest useful shape of a cartridge:
-one custom cap, one Op, one manifest, one main(). Replace `classify()` and
-the input/output media URNs to build your own capability.
-
-Develop it with:
-    capdag dev-install .          # install/update under the local `dev` slug
-    echo "I love this" | capdag __CARTRIDGE_NAME__
-    # edit classify(), then re-run `capdag dev-install .` to update
-"""
-
-from capdag.bifaci.cartridge_runtime import (
-    CartridgeRuntime,
-    Request,
-    WET_KEY_REQUEST,
-)
-from capdag.bifaci.manifest import CapManifest, default_group
-from capdag.cap.definition import (
-    Cap,
-    CapArg,
-    CapOutput,
-    PositionSource,
-    StdinSource,
-)
-from capdag.standard.caps import CAP_IDENTITY
-from capdag.urn.cap_urn import CapUrn, CapUrnBuilder
-from ops import DryContext, Op, OpMetadata, WetContext
-
-
-# --- Domain logic — pure Python, no MachineFabric awareness. ----------------
-
-POSITIVE_WORDS = {
-    "good", "great", "love", "happy", "excellent",
-    "wonderful", "amazing", "fantastic", "delightful",
-}
-NEGATIVE_WORDS = {
-    "bad", "terrible", "hate", "sad", "awful",
-    "disappointing", "horrible", "miserable", "broken",
+/// Look a language up by its id (`python`) or its flag (`--python`).
+///
+/// Returns `None` for anything else; the caller turns that into an error that
+/// lists what IS available, which is the only useful thing to say.
+pub fn stub_language(selector: &str) -> Option<&'static stubs_generated::StubLanguage> {
+    stubs_generated::STUB_LANGUAGES
+        .iter()
+        .find(|l| l.id == selector || l.flag == selector)
 }
 
-
-def classify(text: str) -> str:
-    """Return one of `positive`, `neutral`, `negative` for the input.
-
-    Case-insensitive whole-word match against two small word lists. Replace
-    this with a real model when you graduate from `getting started`.
-    """
-    tokens = {t.strip(".,!?;:").lower() for t in text.split()}
-    pos = len(tokens & POSITIVE_WORDS)
-    neg = len(tokens & NEGATIVE_WORDS)
-    if pos > neg:
-        return "positive"
-    if neg > pos:
-        return "negative"
-    return "neutral"
-
-
-# --- Op — implements the cap. -----------------------------------------------
-
-class TagOp(Op):
-    async def perform(self, dry: DryContext, wet: WetContext) -> None:
-        req: Request = wet.get_required(WET_KEY_REQUEST)
-        # Drain the (finite) input stream(s) and decode as UTF-8 text.
-        text = req.take_input().collect_all_bytes().decode("utf-8")
-        # emit_cbor writes one CHUNK frame; the runtime emits END for us.
-        req.emitter().emit_cbor(classify(text))
-
-    def metadata(self) -> OpMetadata:
-        return (
-            OpMetadata.builder("TagOp")
-            .description("Classify text as positive / neutral / negative")
-            .build()
-        )
-
-
-# --- URN + manifest. Media/cap URNs are seeded from the project name so they -
-#     are unique per project and never collide with the published fabric. -----
-
-IN_MEDIA = "media:enc=utf-8;__CARTRIDGE_NAME__-input"
-OUT_MEDIA = "media:enc=utf-8;__CARTRIDGE_NAME__-tag"
-
-
-def _cap_urn() -> CapUrn:
-    """Build the cap URN ONCE via the builder, so the string we register with
-    matches the runtime's canonical (alphabetically-sorted) byte form."""
-    return (
-        CapUrnBuilder()
-        .marker("__CARTRIDGE_NAME__")
-        .in_spec(IN_MEDIA)
-        .out_spec(OUT_MEDIA)
-        .build()
-    )
-
-
-CAP_URN: str = _cap_urn().to_string()
-
-
-def build_manifest() -> CapManifest:
-    cap = Cap(_cap_urn(), "__CARTRIDGE_NAME__", ["__CARTRIDGE_NAME__"])
-    cap.cap_description = "Classify a piece of text as positive, neutral, or negative."
-    cap.args = [
-        CapArg(
-            media_urn=IN_MEDIA,
-            required=True,
-            sources=[StdinSource(IN_MEDIA), PositionSource(0)],
-            arg_description="UTF-8 text to classify.",
-        )
-    ]
-    cap.output = CapOutput(
-        media_urn=OUT_MEDIA,
-        output_description="One of the literal strings 'positive', 'neutral', or 'negative'.",
-    )
-
-    # Every cartridge advertises CAP_IDENTITY; the runtime auto-registers its handler.
-    identity = Cap(CapUrn.from_string(CAP_IDENTITY), "Identity", ["identity"])
-
-    return CapManifest(
-        name="__CARTRIDGE_NAME__",
-        version="0.1.0",
-        channel="nightly",          # 'nightly' or 'release'; nightly for dev.
-        registry_url=None,           # None => dev cartridge (installed locally).
-        description="Classify a piece of text as positive, neutral, or negative.",
-        cap_groups=[default_group([identity, cap])],
-    )
-
-
-def main() -> None:
-    runtime = CartridgeRuntime.with_manifest(build_manifest())
-    runtime.register_op_type(CAP_URN, TagOp)
-    runtime.run()
-
-
-if __name__ == "__main__":
-    main()
-"##;
-
-fn readme_source(name: &str) -> String {
-    format!(
-        "# {name}\n\n\
-         A MachineFabric cartridge scaffolded by `capdag new`. It reads UTF-8 text on\n\
-         stdin and emits `positive`, `neutral`, or `negative`.\n\n\
-         ## Develop\n\n\
-         ```bash\n\
-         # 1. Install capdag (the cartridge runtime) so `{entry}` can import it:\n\
-         pip install capdag\n\n\
-         # 2. Install this cartridge under the local `dev` slug:\n\
-         capdag dev-install .\n\n\
-         # 3. Run your cap through the capdag host:\n\
-         echo \"I love this\" | capdag {name}\n\
-         # => positive\n\n\
-         # 4. Edit classify() in {entry}, then re-run step 2 to update the install:\n\
-         capdag dev-install .\n\
-         ```\n\n\
-         The cap is a *dev* cap: it is not published to the fabric, so you can develop\n\
-         and run it locally as long as its alias (`{name}`) does not collide with a\n\
-         published cap.\n",
-        name = name,
-        entry = PYTHON_ENTRY,
-    )
+/// Substitute the project name into a stub's text.
+///
+/// The placeholder appears in file CONTENTS, in destination PATHS, and in the
+/// entry — a compiled cartridge's binary is named after the project — so one
+/// function serves all three rather than three call sites each remembering.
+fn render(template: &str, name: &str) -> String {
+    template.replace(stubs_generated::STUB_PLACEHOLDER, name)
 }
 
-const GITIGNORE_SOURCE: &str = "\
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-cartridge.json
-";
+/// The executable the host launches for a scaffolded project, relative to the
+/// project directory.
+pub fn stub_entry(language: &stubs_generated::StubLanguage, name: &str) -> String {
+    render(language.entry, name)
+}
 
-/// Scaffold a new Python cartridge project directory named `name` under
-/// `parent_dir`. Returns the created project directory. Fails hard if the name
-/// is not path-safe or the target already exists (never overwrites existing
-/// work).
-pub fn scaffold_python_cartridge(name: &str, parent_dir: &Path) -> Result<PathBuf, DevError> {
+/// Scaffold a new cartridge project named `name` under `parent_dir`, in
+/// `language`. Returns the created project directory.
+///
+/// Fails hard if the name is not path-safe or the target already exists — never
+/// overwrites existing work, and never half-writes: the directory is created
+/// first and a failure part-way leaves the error naming the exact file.
+pub fn scaffold_cartridge(
+    name: &str,
+    language: &stubs_generated::StubLanguage,
+    parent_dir: &Path,
+) -> Result<PathBuf, DevError> {
     if !valid_cartridge_name(name) {
         return Err(DevError::InvalidName(name.to_string()));
     }
@@ -358,15 +234,18 @@ pub fn scaffold_python_cartridge(name: &str, parent_dir: &Path) -> Result<PathBu
         )
     })?;
 
-    let entry_path = project_dir.join(PYTHON_ENTRY);
-    fs::write(&entry_path, python_cartridge_source(name))
-        .map_err(|e| io_err(&format!("writing '{}'", entry_path.display()), e))?;
-    make_executable(&entry_path)?;
-
-    fs::write(project_dir.join("README.md"), readme_source(name))
-        .map_err(|e| io_err("writing README.md", e))?;
-    fs::write(project_dir.join(".gitignore"), GITIGNORE_SOURCE)
-        .map_err(|e| io_err("writing .gitignore", e))?;
+    for file in language.files {
+        let dest = project_dir.join(render(file.dest, name));
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| io_err(&format!("creating '{}'", parent.display()), e))?;
+        }
+        fs::write(&dest, render(file.contents, name))
+            .map_err(|e| io_err(&format!("writing '{}'", dest.display()), e))?;
+        if file.executable {
+            make_executable(&dest)?;
+        }
+    }
 
     Ok(project_dir)
 }
@@ -418,13 +297,52 @@ pub fn read_entry_manifest(entry: &Path) -> Result<CapManifest, DevError> {
     })
 }
 
-/// The project's entry path (`<project_dir>/cartridge.py`), verifying it exists.
+/// The project name a scaffolded directory carries: its own directory name.
+///
+/// `capdag new <name>` creates `<parent>/<name>`, and every rendered path is
+/// seeded from that name, so the directory IS the name. Reading it back is how
+/// `dev-install` knows what a compiled entry is called without being told.
+fn project_name(project_dir: &Path) -> Result<&str, DevError> {
+    project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| DevError::NoEntry(project_dir.to_path_buf()))
+}
+
+/// Describe every entry path that WOULD have been accepted, for the error when
+/// none exists. Naming them turns "no entry found" into an instruction.
+fn stub_entry_candidates_description(project_dir: &Path) -> String {
+    let Ok(name) = project_name(project_dir) else {
+        return "the entry of each supported language".to_string();
+    };
+    stub_languages()
+        .iter()
+        .map(|l| format!("{} ({})", stub_entry(l, name), l.display))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The project's entry path, discovered across every scaffoldable language and
+/// verified to exist.
+///
+/// A project is ONE cartridge, so finding two entries is an error rather than a
+/// silent pick: installing whichever language happened to sort first would be a
+/// coin flip the developer never sees.
 pub fn project_entry(project_dir: &Path) -> Result<PathBuf, DevError> {
-    let entry = project_dir.join(PYTHON_ENTRY);
-    if !entry.is_file() {
-        return Err(DevError::NoEntry(entry));
+    let name = project_name(project_dir)?;
+    let found: Vec<PathBuf> = stub_languages()
+        .iter()
+        .map(|l| project_dir.join(stub_entry(l, name)))
+        .filter(|p| p.is_file())
+        .collect();
+    match found.len() {
+        1 => Ok(found.into_iter().next().expect("length checked")),
+        0 => Err(DevError::NoEntry(project_dir.to_path_buf())),
+        _ => Err(DevError::AmbiguousEntry {
+            project: project_dir.to_path_buf(),
+            found,
+        }),
     }
-    Ok(entry)
 }
 
 // ---------------------------------------------------------------------------
@@ -486,22 +404,49 @@ pub fn stage_dev_cartridge(
     fs::create_dir_all(&version_dir)
         .map_err(|e| io_err(&format!("creating '{}'", version_dir.display()), e))?;
 
+    // The entry is discovered in the PROJECT, then recorded relative to the
+    // install — a compiled cartridge's entry lives under its build directory
+    // (`target/release/<name>`), which the tree copy preserves, so the two are
+    // the same relative path.
+    let project_entry_path = project_entry(project_dir)?;
+    let relative_entry = project_entry_path
+        .strip_prefix(project_dir)
+        .expect("project_entry returns a path inside the project")
+        .to_str()
+        .ok_or_else(|| DevError::NoEntry(project_dir.to_path_buf()))?
+        .to_string();
+
     copy_project_tree(project_dir, &version_dir)?;
-    make_executable(&version_dir.join(PYTHON_ENTRY))?;
+
+    // The entry is copied explicitly because a compiled one lives INSIDE a
+    // build tree the walk above deliberately skips. Doing it here rather than
+    // exempting the whole tree keeps the install to the sources plus the one
+    // binary the host actually launches.
+    let installed_entry = version_dir.join(&relative_entry);
+    if !installed_entry.is_file() {
+        if let Some(parent) = installed_entry.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| io_err(&format!("creating '{}'", parent.display()), e))?;
+        }
+        fs::copy(&project_entry_path, &installed_entry).map_err(|e| {
+            io_err(
+                &format!(
+                    "copying the cartridge entry '{}' into the install",
+                    project_entry_path.display()
+                ),
+                e,
+            )
+        })?;
+    }
+    make_executable(&installed_entry)?;
 
     let cj = crate::CartridgeJson {
         name: manifest.name.clone(),
         version: manifest.version.clone(),
         channel: manifest.channel,
         registry_url: None,
-        entry: PYTHON_ENTRY.to_string(),
-        installed_at: {
-            use std::time::SystemTime;
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("system clock before epoch");
-            format!("{}Z", now.as_secs())
-        },
+        entry: relative_entry,
+        installed_at: crate::bifaci::cartridge_json::install_timestamp_now(),
         installed_from: Some(crate::CartridgeInstallSource::Dev),
         source_url: String::new(),
         package_sha256: String::new(),
@@ -519,7 +464,14 @@ pub fn stage_dev_cartridge(
 fn is_ignored_project_entry(name: &str) -> bool {
     matches!(
         name,
+        // Developer scratch.
         ".venv" | "__pycache__" | ".git" | ".pytest_cache" | "cartridge.json"
+        // Build trees. A compiled cartridge's intermediates are gigabytes of
+        // object files and dependency sources that the host never reads — only
+        // the linked entry matters, and `stage_dev_cartridge` copies that
+        // explicitly after this walk. Without these, `dev-install` on a Rust
+        // project would copy its whole `target/`.
+        | "target" | ".build" | ".swiftpm" | "node_modules"
     ) || name.ends_with(".pyc")
 }
 
@@ -676,61 +628,140 @@ mod tests {
         base
     }
 
-    // TEST8100: the Python scaffold writes a runnable-shaped project — the entry
-    // exists, is executable, carries the current-regime API (aliases, enc=utf-8,
-    // NO `command=`/`textable`), and substitutes the project name into the
-    // manifest, alias, and media URNs.
+    // TEST7154: EVERY vendored language scaffolds a runnable-shaped project —
+    // every declared file exists, no placeholder survives anywhere (contents or
+    // paths), the manifest/alias/media URNs are seeded from the project name,
+    // and the interpreted languages' entries are executable.
+    //
+    // Iterating the contract rather than testing one language is the point: a
+    // newly vendored language is covered the moment it appears, instead of
+    // whenever someone remembers to add a test for it.
     #[test]
-    fn test8100_scaffold_python_cartridge_shape() {
+    fn test7154_scaffold_writes_a_runnable_project_in_every_language() {
         let root = temp_root("scaffold");
-        let proj = scaffold_python_cartridge("mood-tagger", &root).unwrap();
-        assert_eq!(proj, root.join("mood-tagger"));
+        assert!(
+            !stub_languages().is_empty(),
+            "the vendored contract must declare at least one language"
+        );
 
-        let entry = proj.join(PYTHON_ENTRY);
-        let src = fs::read_to_string(&entry).unwrap();
-        assert!(
-            src.contains("name=\"mood-tagger\""),
-            "manifest name substituted"
-        );
-        assert!(
-            src.contains("[\"mood-tagger\"]"),
-            "cap alias seeded from name"
-        );
-        assert!(
-            src.contains("media:enc=utf-8;mood-tagger-input"),
-            "input media uses enc=utf-8"
-        );
-        assert!(!src.contains("command="), "no removed `command=` field");
-        assert!(!src.contains("textable"), "no removed `textable` marker");
-        assert!(proj.join("README.md").is_file());
-        assert!(proj.join(".gitignore").is_file());
+        for language in stub_languages() {
+            let name = format!("mood-tagger-{}", language.id);
+            let proj = scaffold_cartridge(&name, language, &root).unwrap();
+            assert_eq!(proj, root.join(&name));
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&entry).unwrap().permissions().mode();
-            assert!(mode & 0o111 != 0, "entry is executable");
+            for file in language.files {
+                let dest = proj.join(render(file.dest, &name));
+                assert!(
+                    dest.is_file(),
+                    "{}: declared file {} was not written",
+                    language.id,
+                    dest.display()
+                );
+                let body = fs::read_to_string(&dest).unwrap();
+                assert!(
+                    !body.contains(stubs_generated::STUB_PLACEHOLDER),
+                    "{}: {} still contains the placeholder",
+                    language.id,
+                    dest.display()
+                );
+
+                #[cfg(unix)]
+                if file.executable {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = fs::metadata(&dest).unwrap().permissions().mode();
+                    assert!(
+                        mode & 0o111 != 0,
+                        "{}: {} is declared executable but is not",
+                        language.id,
+                        dest.display()
+                    );
+                }
+            }
+
+            // The rendered entry path must itself be free of the placeholder —
+            // a compiled cartridge's binary is named after the project.
+            let entry = stub_entry(language, &name);
+            assert!(
+                !entry.contains(stubs_generated::STUB_PLACEHOLDER),
+                "{}: the entry path was not rendered",
+                language.id
+            );
+
+            // The project name reaches the cap it declares, in every language.
+            let sources: String = language
+                .files
+                .iter()
+                .map(|f| render(f.contents, &name))
+                .collect();
+            assert!(
+                sources.contains(&format!("media:enc=utf-8;{name}-input")),
+                "{}: input media URN is not seeded from the project name",
+                language.id
+            );
+            assert!(
+                !sources.contains("command="),
+                "{}: carries the removed `command=` field",
+                language.id
+            );
         }
     }
 
-    // TEST8101: scaffolding rejects a bad name and refuses to overwrite.
+    // TEST7155: scaffolding rejects a bad name and refuses to overwrite.
     #[test]
-    fn test8101_scaffold_guards() {
+    fn test7155_scaffold_guards() {
         let root = temp_root("guards");
+        let language = &stub_languages()[0];
         assert!(matches!(
-            scaffold_python_cartridge("Bad Name", &root),
+            scaffold_cartridge("Bad Name", language, &root),
             Err(DevError::InvalidName(_))
         ));
-        scaffold_python_cartridge("greeter", &root).unwrap();
+        scaffold_cartridge("greeter", language, &root).unwrap();
         assert!(matches!(
-            scaffold_python_cartridge("greeter", &root),
+            scaffold_cartridge("greeter", language, &root),
             Err(DevError::AlreadyExists(_))
         ));
     }
 
+    // TEST7159: a project with two languages' entries is REFUSED, not silently
+    // resolved. A project is one cartridge; installing whichever entry sorted
+    // first would be a coin flip the developer never sees.
+    #[cfg(unix)]
+    #[test]
+    fn test7159_two_entries_is_ambiguous_not_a_coin_flip() {
+        let root = temp_root("ambiguous");
+        let proj = root.join("twoheaded");
+        fs::create_dir_all(&proj).unwrap();
+
+        let mut written = 0usize;
+        for language in stub_languages() {
+            let entry = proj.join(stub_entry(language, "twoheaded"));
+            if let Some(parent) = entry.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&entry, "#!/usr/bin/env bash\n").unwrap();
+            written += 1;
+            if written == 2 {
+                break;
+            }
+        }
+        assert_eq!(written, 2, "the contract must cover at least two languages");
+
+        assert!(
+            matches!(
+                project_entry(&proj),
+                Err(DevError::AmbiguousEntry { .. })
+            ),
+            "two entries must be an error, not a pick"
+        );
+    }
+
     /// Write a stub cartridge entry (a bash script) that prints a canned
     /// `CapManifest` JSON on `manifest`. Lets us exercise the capdag-side
-    /// staging/parsing/resolution without the Python runtime.
+    /// staging/parsing/resolution without any language runtime.
+    ///
+    /// It is written at the PYTHON entry because that is the one language whose
+    /// entry is a source file with no build step, so a bash script standing in
+    /// for it is discovered by exactly the same path a real project would be.
     #[cfg(unix)]
     fn write_stub_entry(dir: &Path, name: &str, alias: &str, urn: &str) -> PathBuf {
         // The cap URN quotes its media specs; escape those quotes for JSON.
@@ -739,18 +770,23 @@ mod tests {
             r#"{{"name":"{name}","version":"0.1.0","channel":"nightly","registry_url":null,"description":"stub","cap_groups":[{{"name":"default","caps":[{{"urn":"cap:effect=none","title":"Identity","aliases":["identity"]}},{{"urn":"{urn_json}","title":"{name}","aliases":["{alias}"]}}]}}]}}"#
         );
         let script = format!("#!/usr/bin/env bash\nif [ \"$1\" = manifest ]; then\n  cat <<'EOF'\n{manifest}\nEOF\nfi\n");
-        let path = dir.join(PYTHON_ENTRY);
+        let python = stub_language("python").expect("the contract must cover python");
+        let dir_name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("test project dir has a name");
+        let path = dir.join(stub_entry(python, dir_name));
         fs::write(&path, script).unwrap();
         make_executable(&path).unwrap();
         path
     }
 
-    // TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias
+    // TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias
     // round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/,
     // writes a cartridge.json, and its custom cap is resolvable by alias.
     #[cfg(unix)]
     #[test]
-    fn test8102_dev_install_and_find_by_alias() {
+    fn test7156_dev_install_and_find_by_alias() {
         let root = temp_root("install");
         let project = root.join("proj");
         fs::create_dir_all(&project).unwrap();
@@ -769,7 +805,12 @@ mod tests {
             crate::CARTRIDGE_REGISTRY_VERSION
         )));
         assert!(version_dir.join("cartridge.json").is_file());
-        assert!(version_dir.join(PYTHON_ENTRY).is_file());
+        assert!(version_dir
+            .join(stub_entry(
+                stub_language("python").expect("the contract must cover python"),
+                "proj"
+            ))
+            .is_file());
 
         let found = find_dev_cap_by_alias(&user_dir, "greet").unwrap();
         let (cap, dir) = found.expect("dev cap resolvable by alias");
@@ -779,10 +820,10 @@ mod tests {
         assert!(find_dev_cap_by_alias(&user_dir, "nope").unwrap().is_none());
     }
 
-    // TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set).
+    // TEST7157: stage_dev_cartridge refuses a non-dev project (registry_url set).
     #[cfg(unix)]
     #[test]
-    fn test8103_dev_install_rejects_published_manifest() {
+    fn test7157_dev_install_rejects_published_manifest() {
         let root = temp_root("nondev");
         let project = root.join("proj");
         fs::create_dir_all(&project).unwrap();
@@ -796,11 +837,11 @@ mod tests {
         ));
     }
 
-    // TEST8104: the fabric-conflict guard — a dev cap whose alias the fabric maps
+    // TEST7158: the fabric-conflict guard — a dev cap whose alias the fabric maps
     // to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that
     // matches an existing fabric cap exactly, are both accepted.
     #[tokio::test]
-    async fn test8104_fabric_conflict_guard() {
+    async fn test7158_fabric_conflict_guard() {
         let registry = FabricRegistry::new_for_test();
         // Seed the fabric with a cap `alpha` at a known URN, and publish its
         // alias into the warm alias cache (as the real publisher would).
@@ -841,5 +882,80 @@ mod tests {
 
         // The very same fabric cap (same alias => same URN) => not a conflict.
         assert!(check_no_fabric_conflict(&registry, &alpha).await.is_ok());
+    }
+
+    // TEST7160: the vendored stub contract is IDENTICAL to the canonical
+    // source.
+    //
+    // This is the whole promise of `capdag new`: the same command from any
+    // capdag binary writes the same project. Every mirror's copy is generated
+    // from this one source, so a difference here means the reference itself was
+    // vendored from a different commit than the stub repo currently holds —
+    // which would ship capdags that disagree about what a cartridge looks like,
+    // silently.
+    #[test]
+    fn test7160_vendored_stub_contract_matches_the_canonical_source() {
+        // Locate the canonical stubs relative to this mirror inside the
+        // workspace. Absent (a standalone checkout of capdag), there is nothing
+        // to compare against and the vendored copy IS the contract — that is not
+        // a skip to hide behind, it is the only meaningful statement available.
+        let stub_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the capdag crate always has a parent directory")
+            .join("capdag-stub-cartridges");
+        let canonical = stub_root.join("stubs.json");
+        let Ok(raw) = fs::read(&canonical) else {
+            eprintln!(
+                "canonical stubs not present at {} (standalone checkout)",
+                canonical.display()
+            );
+            return;
+        };
+        let contract: serde_json::Value =
+            serde_json::from_slice(&raw).expect("canonical stubs.json does not parse");
+
+        assert_eq!(
+            contract["contract_version"].as_u64(),
+            Some(u64::from(stubs_generated::STUB_CONTRACT_VERSION)),
+            "vendored contract version differs from canonical — re-run dx stubs vendor"
+        );
+        assert_eq!(
+            contract["placeholder"].as_str(),
+            Some(stubs_generated::STUB_PLACEHOLDER)
+        );
+        let languages = contract["languages"]
+            .as_object()
+            .expect("canonical `languages` is not an object");
+        assert_eq!(
+            languages.len(),
+            stub_languages().len(),
+            "vendored language count differs from canonical — re-run dx stubs vendor"
+        );
+
+        for vendored in stub_languages() {
+            let spec = languages.get(vendored.id).unwrap_or_else(|| {
+                panic!("vendored language {} is not in the canonical contract", vendored.id)
+            });
+            assert_eq!(spec["flag"].as_str(), Some(vendored.flag), "{}", vendored.id);
+            assert_eq!(spec["entry"].as_str(), Some(vendored.entry), "{}", vendored.id);
+            let declared = spec["files"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{}: canonical `files` is not a list", vendored.id));
+            assert_eq!(declared.len(), vendored.files.len(), "{}", vendored.id);
+            for (declared, got) in declared.iter().zip(vendored.files.iter()) {
+                let source = declared["source"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{}: a canonical file declares no source", vendored.id));
+                let want = fs::read_to_string(stub_root.join(source))
+                    .unwrap_or_else(|e| panic!("reading canonical {source}: {e}"));
+                assert_eq!(declared["dest"].as_str(), Some(got.dest), "{}", vendored.id);
+                assert_eq!(declared["executable"].as_bool(), Some(got.executable), "{}", vendored.id);
+                assert_eq!(
+                    got.contents, want,
+                    "{}: vendored {} differs from the canonical bytes — re-run dx stubs vendor",
+                    vendored.id, got.dest
+                );
+            }
+        }
     }
 }

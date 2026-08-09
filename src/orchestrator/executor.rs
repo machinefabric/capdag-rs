@@ -1257,13 +1257,7 @@ impl CartridgeManager {
             channel: self.channel,
             registry_url: Some(registry_url.clone()),
             entry: binary_name.to_string(),
-            installed_at: {
-                use std::time::SystemTime;
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("system clock before epoch");
-                format!("{}Z", now.as_secs())
-            },
+            installed_at: crate::bifaci::cartridge_json::install_timestamp_now(),
             installed_from: Some(crate::CartridgeInstallSource::Registry),
             // Provenance records the URL the publisher committed to, not the
             // content-keyed fetch URL.

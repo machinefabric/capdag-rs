@@ -128,6 +128,59 @@ fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
 
+/// Render `installed_at` for a cartridge being installed right now.
+///
+/// The field is declared RFC3339 and every reader (and every fixture) treats
+/// it as one, so every producer goes through this one function — a bare epoch
+/// count with a `Z` stuck on the end parses as neither a number nor a
+/// timestamp, and would leave the field readable only by a human who already
+/// knew what it was.
+///
+/// Implemented against `SystemTime` rather than a date crate: this is the only
+/// place capdag formats a calendar date, and a dependency for it would be paid
+/// by every consumer of the library.
+pub fn install_timestamp_now() -> String {
+    use std::time::SystemTime;
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("system clock before the Unix epoch")
+        .as_secs();
+    format_rfc3339_utc(secs)
+}
+
+/// Format Unix seconds as `YYYY-MM-DDTHH:MM:SSZ`.
+///
+/// Uses Howard Hinnant's `civil_from_days`, which is exact for the whole
+/// proleptic Gregorian calendar — no leap-year special-casing to get wrong.
+pub(crate) fn format_rfc3339_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let time_of_day = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year,
+        month,
+        day,
+        time_of_day / 3600,
+        (time_of_day % 3600) / 60,
+        time_of_day % 60
+    )
+}
+
+/// Days since 1970-01-01 → (year, month, day), civil Gregorian.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11], March-based
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 impl<'de> Deserialize<'de> for CartridgeJson {
     /// Manual deserializer that enforces "required-but-nullable" for
     /// `registry_url` — the JSON key MUST be present (otherwise parse
@@ -982,5 +1035,40 @@ mod tests {
         let hash = hash_cartridge_directory(dir.path()).unwrap();
         assert!(!hash.is_empty());
         assert_eq!(hash.len(), 64); // SHA256 hex length
+    }
+
+    // TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known
+    // epoch instants and at the instants that break naive date arithmetic —
+    // a leap day, the day after one, and a century year that is NOT a leap
+    // year. Emitting a bare epoch count with a `Z` appended would satisfy
+    // "some string ending in Z" and satisfy nothing else; every reader and
+    // every fixture in the tree treats this field as a parseable timestamp.
+    #[test]
+    fn test7153_install_timestamp_is_rfc3339_utc() {
+        for (secs, want) in [
+            (0u64, "1970-01-01T00:00:00Z"),
+            (1_000_000_000, "2001-09-09T01:46:40Z"),
+            // 2024-02-29 — a leap day in a leap year divisible by 4.
+            (1_709_164_800, "2024-02-29T00:00:00Z"),
+            // The instant after it: the rollover a naive +1 gets wrong.
+            (1_709_251_199, "2024-02-29T23:59:59Z"),
+            // 2100-03-01 — 2100 is divisible by 100 but not 400, so it has
+            // NO Feb 29. A leap rule of "divisible by 4" lands a day early.
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+        ] {
+            assert_eq!(format_rfc3339_utc(secs), want, "epoch {secs}");
+        }
+
+        // The live producer emits the same shape, and a plausible present
+        // instant — a broken epoch-to-civil conversion typically lands in
+        // 1970 or the far future rather than producing a malformed string.
+        let now = install_timestamp_now();
+        assert_eq!(now.len(), 20, "not RFC3339-shaped: {now}");
+        assert!(now.ends_with('Z'), "not UTC-marked: {now}");
+        let year: i64 = now[..4].parse().expect("year is not numeric");
+        assert!(
+            (2020..2200).contains(&year),
+            "the current year came out as {year}: {now}"
+        );
     }
 }

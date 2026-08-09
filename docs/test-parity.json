@@ -33647,17 +33647,15 @@
       "number": 1949,
       "present": [
         "rust",
+        "go",
+        "py",
         "objc"
       ],
       "missing": [
-        "go",
-        "py",
         "js"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
-        "py",
         "js"
       ],
       "canonical": {
@@ -33665,6 +33663,16 @@
           "function": "test1949_peer_progress_without_numeric_value_fails_hard",
           "description": "TEST1949: a peer progress LOG with no numeric value FAILS HARD. Forwarding must not silently drop it or substitute a value \u2014 a malformed frame is an emitter defect and must surface as one, which is exactly the failure the engine raises for the same frame.",
           "location": "src/bifaci/cartridge_runtime.rs:11649"
+        },
+        "go": {
+          "function": "Test1949_peer_progress_without_numeric_value_fails_hard",
+          "description": "TEST1949: a peer progress LOG with no numeric value FAILS HARD. Forwarding must not silently drop it or substitute a value \u2014 a malformed frame is an emitter defect and must surface as one, which is exactly the failure the engine raises for the same frame.",
+          "location": "bifaci/cartridge_runtime_test.go:4846"
+        },
+        "py": {
+          "function": "test_1949_peer_progress_without_numeric_value_fails_hard",
+          "description": "TEST1949: a peer progress LOG with no numeric value FAILS HARD. Forwarding must not silently drop it or substitute a value \u2014 a malformed frame is an emitter defect and must surface as one, which is exactly the failure the engine raises for the same frame.",
+          "location": "tests/test_cartridge_runtime.py:3566"
         },
         "objc": {
           "function": "test1949_peerProgressWithoutNumericValueFailsHard",
@@ -36807,17 +36815,15 @@
       "number": 7118,
       "present": [
         "rust",
+        "go",
+        "py",
         "objc"
       ],
       "missing": [
-        "go",
-        "py",
         "js"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
-        "py",
         "js"
       ],
       "canonical": {
@@ -36825,6 +36831,16 @@
           "function": "test7118_collect_bytes_forwarding_preserves_peer_side_channels",
           "description": "TEST7118: finite peer collection preserves source diagnostics instead of consuming them as data or dropping them. Progress is mapped into the caller's range and argument attribution survives byte-for-byte.",
           "location": "src/bifaci/cartridge_runtime.rs:11583"
+        },
+        "go": {
+          "function": "Test7118_collect_bytes_forwarding_preserves_peer_side_channels",
+          "description": "TEST7118: finite peer collection preserves source diagnostics instead of consuming them as data or dropping them. Progress is mapped into the caller's range and argument attribution survives byte-for-byte.",
+          "location": "bifaci/cartridge_runtime_test.go:4794"
+        },
+        "py": {
+          "function": "test_7118_collect_bytes_forwarding_preserves_peer_side_channels",
+          "description": "TEST7118: finite peer collection preserves source diagnostics instead of consuming them as data or dropping them. Progress is mapped into the caller's range and argument attribution survives byte-for-byte.",
+          "location": "tests/test_cartridge_runtime.py:3528"
         },
         "objc": {
           "function": "test7118_collectBytesForwardingPreservesPeerSideChannels",
@@ -37193,24 +37209,32 @@
       "number": 8100,
       "present": [
         "rust",
+        "go",
+        "py",
         "objc"
       ],
       "missing": [
-        "go",
-        "py",
         "js"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
-        "py",
         "js"
       ],
       "canonical": {
         "rust": {
-          "function": "test8100_scaffold_python_cartridge_shape",
-          "description": "TEST8100: the Python scaffold writes a runnable-shaped project \u2014 the entry exists, is executable, carries the current-regime API (aliases, enc=utf-8, NO `command=`/`textable`), and substitutes the project name into the manifest, alias, and media URNs.",
-          "location": "src/dev.rs:684"
+          "function": "test8100_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "src/dev.rs:646"
+        },
+        "go": {
+          "function": "Test8100_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "dev/dev_test.go:32"
+        },
+        "py": {
+          "function": "test_8100_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "tests/test_dev.py:42"
         },
         "objc": {
           "function": "test8100_classifyHandlerErrorPreservesOpArgumentAttribution",
@@ -37223,16 +37247,15 @@
       "number": 8101,
       "present": [
         "rust",
+        "go",
         "py"
       ],
       "missing": [
-        "go",
         "js",
         "objc"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
         "js",
         "objc"
       ],
@@ -37240,12 +37263,17 @@
         "rust": {
           "function": "test8101_scaffold_guards",
           "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
-          "location": "src/dev.rs:718"
+          "location": "src/dev.rs:717"
+        },
+        "go": {
+          "function": "Test8101_scaffold_guards",
+          "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "dev/dev_test.go:88"
         },
         "py": {
-          "function": "test_8101_cap_to_dict_wire_shape",
-          "description": "TEST8101: (py-specific) Cap.to_dict emits the full wire shape including args and output. Behavior beyond the shared cross-mirror set, kept here as implementation-specific coverage.",
-          "location": "tests/test_cap.py:125"
+          "function": "test_8101_scaffold_guards",
+          "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "tests/test_dev.py:76"
         }
       }
     },
@@ -37253,16 +37281,15 @@
       "number": 8102,
       "present": [
         "rust",
+        "go",
         "py"
       ],
       "missing": [
-        "go",
         "js",
         "objc"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
         "js",
         "objc"
       ],
@@ -37270,12 +37297,17 @@
         "rust": {
           "function": "test8102_dev_install_and_find_by_alias",
           "description": "TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
-          "location": "src/dev.rs:753"
+          "location": "src/dev.rs:795"
+        },
+        "go": {
+          "function": "Test8102_dev_install_and_find_by_alias",
+          "description": "TEST8102: ReadEntryManifest + StageDevCartridge + FindDevCapByAlias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "dev/dev_test.go:143"
         },
         "py": {
-          "function": "test_8102_cap_arg_stream_urn_falls_back_to_media_urn_without_stdin_source",
-          "description": "TEST8102: (py-specific) CapArg.stream_urn() falls back to the declared slot media URN when the arg declares no Stdin source at all \u2014 a producer-fed arg may be delivered by its declared URN without ever appearing on stdin.",
-          "location": "tests/test_cap.py:498"
+          "function": "test_8102_dev_install_and_find_by_alias",
+          "description": "TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "tests/test_dev.py:114"
         }
       }
     },
@@ -37283,16 +37315,15 @@
       "number": 8103,
       "present": [
         "rust",
+        "go",
         "py"
       ],
       "missing": [
-        "go",
         "js",
         "objc"
       ],
       "aliased_in": {},
       "true_missing": [
-        "go",
         "js",
         "objc"
       ],
@@ -37300,12 +37331,17 @@
         "rust": {
           "function": "test8103_dev_install_rejects_published_manifest",
           "description": "TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set).",
-          "location": "src/dev.rs:785"
+          "location": "src/dev.rs:832"
+        },
+        "go": {
+          "function": "Test8103_dev_install_rejects_published_manifest",
+          "description": "TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "dev/dev_test.go:208"
         },
         "py": {
-          "function": "test_8103_cap_arg_stream_urn_uses_stdin_source_urn_when_present",
-          "description": "TEST8103: (py-specific) CapArg.stream_urn() returns the Stdin source's URN, not the declared slot media URN, when the two differ \u2014 e.g. a file-path slot whose piped content is actually a pdf-stream.",
-          "location": "tests/test_cap.py:510"
+          "function": "test_8103_dev_install_rejects_published_manifest",
+          "description": "TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "tests/test_dev.py:141"
         }
       }
     },
@@ -37330,12 +37366,76 @@
         "rust": {
           "function": "test8104_fabric_conflict_guard",
           "description": "TEST8104: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
-          "location": "src/dev.rs:803"
+          "location": "src/dev.rs:850"
         },
         "py": {
           "function": "test_8104_cap_arg_is_main_input_true_when_stdin_urn_equivalent_to_in_spec",
           "description": "TEST8104: (py-specific) CapArg.is_main_input() is True when the arg's Stdin source URN is order-theoretically equivalent to the cap's in= spec \u2014 even when the two strings list their tags in a different order. Compared by tagged-URN equivalence, never as strings.",
           "location": "tests/test_cap.py:524"
+        }
+      }
+    },
+    {
+      "number": 8105,
+      "present": [
+        "rust",
+        "go",
+        "py"
+      ],
+      "missing": [
+        "js",
+        "objc"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js",
+        "objc"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test8105_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "src/dev.rs:736"
+        },
+        "go": {
+          "function": "Test8105_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "dev/dev_test.go:235"
+        },
+        "py": {
+          "function": "test_8105_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "tests/test_dev.py:159"
+        }
+      }
+    },
+    {
+      "number": 8106,
+      "present": [
+        "go",
+        "py"
+      ],
+      "missing": [
+        "rust",
+        "js",
+        "objc"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "rust",
+        "js",
+        "objc"
+      ],
+      "canonical": {
+        "go": {
+          "function": "Test8106_vendored_stub_contract_matches_the_canonical_source",
+          "description": "TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit \u2014 which would ship two capdags that disagree about what a cartridge looks like, silently.",
+          "location": "dev/dev_test.go:274"
+        },
+        "py": {
+          "function": "test_8106_vendored_stub_contract_matches_the_canonical_source",
+          "description": "TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit \u2014 which would ship two capdags that disagree about what a cartridge looks like, silently.",
+          "location": "tests/test_dev.py:185"
         }
       }
     },
@@ -39280,14 +39380,14 @@
       "mirror": "rust",
       "function": "test1902_cartridges_resolve_through_launcher_symlink",
       "description": "/ TEST1902: a launcher SYMLINK \u2014 the packaging pattern (`/usr/bin/capdag` / \u2192 `/opt/capdag/capdag`, Homebrew `bin/capdag` \u2192 `libexec/capdag`) \u2014 must / resolve to the REAL bundle's `bundled-cartridges/`, not a `bundled-cartridges/` beside the / symlink. This fails if `bundled_cartridges_dir_for_exe` stops canonicalizing.",
-      "location": "src/bin/capdag.rs:2905"
+      "location": "src/bin/capdag.rs:2952"
     },
     {
       "number": 1903,
       "mirror": "rust",
       "function": "test1903_no_bundled_cartridges_dir_when_absent",
       "description": "/ TEST1903: no `bundled-cartridges/` beside the binary \u21d2 `None` (a bare `cargo` / build / unpackaged binary \u2014 not an error, discovery just skips it).",
-      "location": "src/bin/capdag.rs:2927"
+      "location": "src/bin/capdag.rs:2974"
     },
     {
       "number": 1904,
