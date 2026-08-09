@@ -820,7 +820,9 @@ mod tests {
         assert!(find_dev_cap_by_alias(&user_dir, "nope").unwrap().is_none());
     }
 
-    // TEST7157: stage_dev_cartridge refuses a non-dev project (registry_url set).
+    // TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null
+    // means the cartridge belongs to a registry, and staging it under the dev
+    // slug would put a published identity in a slot reserved for local work.
     #[cfg(unix)]
     #[test]
     fn test7157_dev_install_rejects_published_manifest() {

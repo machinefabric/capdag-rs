@@ -8,22 +8,22 @@ Numbers **1–7999** are the SHARED range: the same number must test the same th
 
 | Mirror | Numbered tests |
 |---|---|
-| rust | 1375 |
-| go | 1266 |
-| py | 1236 |
+| rust | 1377 |
+| go | 1268 |
+| py | 1238 |
 | js | 368 |
-| objc | 933 |
+| objc | 941 |
 
 ## Summary
 
-- Distinct numbered tests across all mirrors: **1829**
-- Shared (in ≥2 mirrors): **1208**
-- Solo (in exactly 1 mirror): **621**
+- Distinct numbered tests across all mirrors: **1837**
+- Shared (in ≥2 mirrors): **1209**
+- Solo (in exactly 1 mirror): **628**
   - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **557**
-  - …already in the 8000+ impl-specific range (correctly placed): **64**
-- Shared numbers with a parity gap (missing from ≥1 mirror): **1053**
+  - …already in the 8000+ impl-specific range (correctly placed): **71**
+- Shared numbers with a parity gap (missing from ≥1 mirror): **1054**
 - Shared numbers with divergent descriptions: **255**
-- Within-mirror duplicate numbers: **13**
+- Within-mirror duplicate numbers: **8**
 
 ---
 
@@ -52,14 +52,14 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test87 | rust | `test0087_model_spec_does_not_conform_to_any_numeric_parameter` | / The model-spec URN is rich but has its own dedicated branch / because the handler knows the canonical full URN. Verify it / doesn't accidentally conform to any of the parameter patterns / (which would route the model-spec content into a numeric slot). | tests/cap_arg_stream_dispatch.rs:236 |
 | test121 | rust | `test0121_step_title_query_filters_paths_server_side` | TEST0121: Step title query filters paths server side | src/planner/live_cap_fab.rs:2896 |
 | test122 | rust | `test0122_step_title_query_constrains_streaming_progress_counts` | TEST0122: Step title query constrains streaming progress counts | src/planner/live_cap_fab.rs:2938 |
-| test123 | go | `Test0123_CapExists` | TEST0123: Cap exists | cap/registry_test.go:115 |
-| test124 | go | `Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError` | Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError verifies the ErrNoEdges case. | machine/machine_test.go:519 |
+| test123 | go | `Test0123_CapExists` | TEST0123: Cap exists | fabric/registry_test.go:29 |
+| test124 | go | `Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError` | Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError verifies the ErrNoEdges case. | machine/machine_test.go:520 |
 | test130 | rust | `test0130_registry_cache_revision_rebuilds_live_cap_fab_without_capability_change` | TEST0130: A cartridge can advertise a cap before the registry cache has finished hydrating that cap's canonical definition. LiveCapFab must retry the already-advertised aggregate capability set when the registry cache later warms; otherwise the cap remains absent from machine selection until an unrelated cartridge reconnect occurs. | src/bifaci/relay_switch.rs:4296 |
-| test183 | go | `Test0183_IntegrationMediaUrnResolution` | Test0183_IntegrationMediaUrnResolution verifies media URN resolution | bifaci/integration_test.go:163 |
-| test209 | go | `Test0209_IntegrationMediaDefConstruction` | Test0209_IntegrationMediaDefConstruction verifies media.MediaDef construction | bifaci/integration_test.go:214 |
-| test265 | go | `Test0265_CartridgeErrorResponse` | Mirror-specific coverage: Test cartridge ERR frame is received by host as error | bifaci/integration_test.go:505 |
-| test267 | go | `Test0267_HeartbeatDuringStreaming` | Mirror-specific coverage: Test cartridge-initiated heartbeat mid-stream is handled transparently by host | bifaci/integration_test.go:850 |
-| test269 | go | `Test0269_ArgumentsRoundtrip` | Mirror-specific coverage: Test host call with unified CBOR arguments sends correct content_type and payload | bifaci/integration_test.go:1031 |
+| test183 | go | `Test0183_IntegrationMediaUrnResolution` | Test0183_IntegrationMediaUrnResolution verifies media URN resolution | bifaci/integration_test.go:162 |
+| test209 | go | `Test0209_IntegrationMediaDefConstruction` | Test0209_IntegrationMediaDefConstruction verifies media.MediaDef construction | bifaci/integration_test.go:213 |
+| test265 | go | `Test0265_CartridgeErrorResponse` | Mirror-specific coverage: Test cartridge ERR frame is received by host as error | bifaci/integration_test.go:504 |
+| test267 | go | `Test0267_HeartbeatDuringStreaming` | Mirror-specific coverage: Test cartridge-initiated heartbeat mid-stream is handled transparently by host | bifaci/integration_test.go:849 |
+| test269 | go | `Test0269_ArgumentsRoundtrip` | Mirror-specific coverage: Test host call with unified CBOR arguments sends correct content_type and payload | bifaci/integration_test.go:1030 |
 | test314 | objc | `test0314_CapWithDescription` | TEST0314: Cap with description | Tests/CapDAGTests/CSCapTests.m:59 |
 | test315 | objc | `test0315_CapStdinType` | TEST0315: Cap stdin type | Tests/CapDAGTests/CSCapTests.m:81 |
 | test317 | objc | `test0317_CapStdinSerialization` | TEST0317: Cap stdin serialization | Tests/CapDAGTests/CSCapTests.m:149 |
@@ -76,7 +76,7 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test888 | rust | `test888_execute_edge1_to_edge2_chain` | TEST888: Execute two-edge chain (test-edge1 -> test-edge2) | tests/orchestrator_integration.rs:474 |
 | test889 | rust | `test889_execute_single_edge_dag` | TEST889: Execute single-edge DAG (test-edge1) | tests/orchestrator_integration.rs:424 |
 | test905 | rust | `test905_send_to_master_build_request_frames_roundtrip` | TEST905: send_to_master + build_request_frames through RelaySwitch → RelaySlave → InProcessCartridgeHost roundtrip | src/bifaci/relay_switch.rs:6076 |
-| test916 | rust | `test916_foreach_item_subdivision` | TEST916: ForEach item subdivision produces correct, monotonic ranges Mirrors the production code in interpreter.rs: pre-compute item boundaries from the same formula so the end of item N and the start of item N+1 are the same f32 value (no divergent accumulation paths). | src/orchestrator/executor.rs:4219 |
+| test916 | rust | `test916_foreach_item_subdivision` | TEST916: ForEach item subdivision produces correct, monotonic ranges Mirrors the production code in interpreter.rs: pre-compute item boundaries from the same formula so the end of item N and the start of item N+1 are the same f32 value (no divergent accumulation paths). | src/orchestrator/executor.rs:4213 |
 | test938 | py | `test_938_different_caps_different_hashes` | TEST938: Two genuinely different caps must hash to different keys. If the canonical-form algorithm ever drifts to coalesce non-equivalent URNs (e.g. by stripping a tag that has functional meaning), this test fails immediately. Renumbered from TEST141 to resolve a collision with Go/ObjC's TEST141 (URL-shape). | tests/test_registry.py:214 |
 | test943 | rust | `test943_same_media_different_names_is_not_a_cycle` | TEST943: Two nodes with the same media type but different names are two distinct graph positions — NOT a loop. The identity cap has `in = out` by type, so its upstream and downstream node carry the same media URN; this must not collapse them into a self-loop. Node identity comes from the user-written name, not the media URN. | tests/orchestrator_integration.rs:711 |
 | test952 | rust | `test952_execute_large_payload` | TEST952: Execute large payload (test-large cap) | tests/orchestrator_integration.rs:574 |
@@ -85,18 +85,18 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test990 | rust | `test990_observer_is_optional` | / Pins the optional-observer contract: a brand-new runtime with / no observer attached must close cleanly on an empty cartridge / list. A regression here would mean the observer-firing path / became non-optional and broke every call site that doesn't / register an observer (engine in-process runtime, in-process / host tests, integration tests). | src/bifaci/host_runtime.rs:3683 |
 | test1110 | rust | `test1110_strand_round_trips_through_serde_without_losing_step_types` | TEST1110: Strand serializes to JSON and deserializes back preserving all step types | src/planner/live_cap_fab.rs:2189 |
 | test1121 | rust | `test1121_cbor_array_file_paths_in_cbor_mode` | TEST1121: CBOR Array of file-paths in CBOR mode (validates new Array support) | src/bifaci/cartridge_runtime.rs:10437 |
-| test1125 | rust | `test1125_map_progress_basic_mapping` | TEST1125: map_progress clamps child to [0.0, 1.0] and maps to [base, base+weight] | src/orchestrator/executor.rs:3965 |
+| test1125 | rust | `test1125_map_progress_basic_mapping` | TEST1125: map_progress clamps child to [0.0, 1.0] and maps to [base, base+weight] | src/orchestrator/executor.rs:3959 |
 | test1134 | rust | `test1134_all_abstraction_error_variants_are_machine_abstraction_error` | TEST1134: All MachineAbstractionError variants are of type MachineAbstractionError and are convertible to MachineParseError::Resolution. This pins the error hierarchy so a refactor that accidentally changes the type relationship is caught immediately. | src/machine/error.rs:291 |
 | test1137 | rust | `test1137_two_strand_machine_serializes_to_notation_containing_both_ops` | TEST1137: A machine built from two independent strands serializes to a non-empty notation string that contains both op tags. Checks that multi-strand serialization doesn't lose or merge strands. | src/machine/serializer.rs:768 |
 | test1139 | rust | `test1139_resolve_inputs_confirmed_delegates_to_detect_file_confirmed` | TEST1139: resolve_inputs_confirmed delegates to detect_file_confirmed and returns the resolved URN for each file. A mock invoker returning a single URN must propagate through to the ResolvedInputSet. | src/input_resolver/resolver.rs:963 |
 | test1235 | py | `test_1235_disc_1_plain_text_eliminates_model_specs` | TEST1235: Plain text without model-spec syntax eliminates model-spec TXT candidates. | tests/test_input_resolver.py:421 |
-| test1243 | rust | `test1243_roundtrip_serialize_deserialize` | TEST1243: Cartridge JSON round-trips through serde without losing required fields. | src/bifaci/cartridge_json.rs:508 |
-| test1244 | rust | `test1244_dev_install_omits_optional_fields` | TEST1244: Dev-installed cartridge metadata omits registry-only package fields when serialized. | src/bifaci/cartridge_json.rs:616 |
-| test1245 | rust | `test1245_read_from_dir_validates_entry_exists` | TEST1245: Reading cartridge metadata fails when the declared entry binary is missing. | src/bifaci/cartridge_json.rs:710 |
-| test1246 | rust | `test1246_read_from_dir_rejects_path_escape` | TEST1246: Cartridge entry points cannot escape the cartridge directory with relative paths. | src/bifaci/cartridge_json.rs:735 |
-| test1247 | rust | `test1247_read_from_dir_succeeds_with_valid_cartridge` | TEST1247: Valid cartridge directories load successfully and resolve their entry point. | src/bifaci/cartridge_json.rs:769 |
-| test1248 | rust | `test1248_hash_cartridge_directory_is_deterministic` | TEST1248: Cartridge directory hashes stay stable across metadata changes and change on content edits. | src/bifaci/cartridge_json.rs:949 |
-| test1249 | rust | `test1249_hash_single_binary_matches_flat_layout` | TEST1249: A flat single-binary cartridge directory still produces a SHA-256 content hash. | src/bifaci/cartridge_json.rs:976 |
+| test1243 | rust | `test1243_roundtrip_serialize_deserialize` | TEST1243: Cartridge JSON round-trips through serde without losing required fields. | src/bifaci/cartridge_json.rs:561 |
+| test1244 | rust | `test1244_dev_install_omits_optional_fields` | TEST1244: Dev-installed cartridge metadata omits registry-only package fields when serialized. | src/bifaci/cartridge_json.rs:669 |
+| test1245 | rust | `test1245_read_from_dir_validates_entry_exists` | TEST1245: Reading cartridge metadata fails when the declared entry binary is missing. | src/bifaci/cartridge_json.rs:763 |
+| test1246 | rust | `test1246_read_from_dir_rejects_path_escape` | TEST1246: Cartridge entry points cannot escape the cartridge directory with relative paths. | src/bifaci/cartridge_json.rs:788 |
+| test1247 | rust | `test1247_read_from_dir_succeeds_with_valid_cartridge` | TEST1247: Valid cartridge directories load successfully and resolve their entry point. | src/bifaci/cartridge_json.rs:822 |
+| test1248 | rust | `test1248_hash_cartridge_directory_is_deterministic` | TEST1248: Cartridge directory hashes stay stable across metadata changes and change on content edits. | src/bifaci/cartridge_json.rs:1002 |
+| test1249 | rust | `test1249_hash_single_binary_matches_flat_layout` | TEST1249: A flat single-binary cartridge directory still produces a SHA-256 content hash. | src/bifaci/cartridge_json.rs:1029 |
 | test1250 | rust | `test1250_process_handle_snapshot_empty_initially` | TEST1250: Process snapshots start empty before any cartridges are attached or spawned. | src/bifaci/host_runtime.rs:5849 |
 | test1251 | rust | `test1251_process_handle_snapshot_excludes_attached_cartridges` | TEST1251: Attached cartridges without child PIDs are excluded from process snapshots. | src/bifaci/host_runtime.rs:5861 |
 | test1252 | rust | `test1252_process_handle_is_clone_and_send` | TEST1252: Cartridge process handles remain usable after clone-and-send across tasks. | src/bifaci/host_runtime.rs:5893 |
@@ -136,11 +136,11 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test1430 | rust | `test1430_discovery_names_dead_ends_and_continues` | TEST1430 (dead ends in discovery): pdf + audio — discovery names the audio dead end and still returns pdf's targets instead of blanking the whole list (previously the audio source emptied the intersection). | src/planner/plan_engine.rs:2714 |
 | test1431 | rust | `test1431_candidate_sink_dedups_by_notation` | TEST1431 (sink dedup): two strategies assembling the SAME machine must present ONE row — the duplicate is dropped at the source, and the observer never sees it. | src/planner/plan_engine.rs:2739 |
 | test1432 | rust | `test1432_divergence_at_source_duplicates_prefix` | TEST1432 (axis I): divergence AtSource shares NOTHING — the common pdf2text prefix is duplicated per branch instead of shared. | src/planner/plan_engine.rs:2527 |
-| test1433 | rust | `test1433_multi_edge_group_heads_a_chain` | TEST1433: a multi-edge group (fan-in / gather) ALWAYS heads its own chain — mid-chain streaming forwards exactly one producer stream, so a multi-input invocation must be fed from materialised node_data. A single-edge group with one dedicated producer still chains linearly. | src/orchestrator/executor.rs:3905 |
+| test1433 | rust | `test1433_multi_edge_group_heads_a_chain` | TEST1433: a multi-edge group (fan-in / gather) ALWAYS heads its own chain — mid-chain streaming forwards exactly one producer stream, so a multi-input invocation must be fed from materialised node_data. A single-edge group with one dedicated producer still chains linearly. | src/orchestrator/executor.rs:3899 |
 | test1434 | rust | `test1434_post_region_partition` | TEST1434: the post-region partition is exactly the transitive consumers of region output — the fold, NOT the independent pre-trunk cap. The pre-trunk subplan excludes both region and post caps; the post subplan carries the fold with its external-producer edge intact. | src/orchestrator/execute_plan.rs:2836 |
 | test1446 | rust | `test1446_per_anchor_cardinality_drives_foreach` | TEST1446: per-anchor cardinality — a Sequence anchor feeding a scalar entry cap gets its per-file ForEach; a Single anchor beside it does not. | src/orchestrator/machine_plan.rs:466 |
 | test1447 | rust | `test1447_globally_inconsistent_names_conflict` | TEST1447: locally admissible, globally inconsistent — every source is individually routable to the target, but the demanded convergence admits no compatible family (here: the at_type pin excludes every shared apex). The failure is the DISTINGUISHED GloballyInconsistent error naming the sources that cannot agree and the failed restriction — never a generic no-apex message. | src/planner/plan_engine.rs:2068 |
-| test1448 | rust | `test1448_chain_split_only_at_same_domain_bounded_adjacency` | TEST1448: chains split ONLY at the permit-deadlock boundary — two adjacent groups in the SAME admission DOMAIN (the cartridge behind the master, never the master index: one relay slot can aggregate many cartridges) with a bounded capacity between them. Bounded caps in different domains keep streaming in one live chain (the property unbounded live pipelines depend on: only chain sinks are collected, and unbounded intermediates cannot be materialised, L16). | src/orchestrator/executor.rs:3851 |
+| test1448 | rust | `test1448_chain_split_only_at_same_domain_bounded_adjacency` | TEST1448: chains split ONLY at the permit-deadlock boundary — two adjacent groups in the SAME admission DOMAIN (the cartridge behind the master, never the master index: one relay slot can aggregate many cartridges) with a bounded capacity between them. Bounded caps in different domains keep streaming in one live chain (the property unbounded live pipelines depend on: only chain sinks are collected, and unbounded intermediates cannot be materialised, L16). | src/orchestrator/executor.rs:3845 |
 | test1449 | rust | `test1449_live_reference_reaches_segment_intact` | TEST1449: a live source enters the executor as PlanInput::LiveReference and reaches run_segment INTACT — reference urn and selector bytes unchanged, sequence flag true. This is the engine half of reference-forwarding (13.2 §Reference Media): losing the reference (or flattening it to bytes-only) would silently run the machine on the SELECTOR TEXT as content. | src/orchestrator/execute_plan.rs:2071 |
 | test1450 | js | `test1450_planRequestDefaults` | TEST1450: a defaults-only request is AUTO with every knob at its default, and the proto JSON carries the documented wire shape. | capdag.test.js:6968 |
 | test1451 | js | `test1451_planRequestKnobValidation` | TEST1451: at-depth REQUIRES a positive depth; a depth anywhere else is invalid; ranking never flips the request to CONFIGURED but any space-constraining knob does (mode is forced to CONFIGURED on the wire). | capdag.test.js:6987 |
@@ -158,14 +158,14 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test1503 | rust | `test1503_slug_is_deterministic` | / TEST1503: `slug_for` is deterministic — same URL, same slug every time. | src/bifaci/cartridge_slug.rs:189 |
 | test1504 | rust | `test1504_dev_never_collides_with_registry_slug` | / TEST1504: A registry slug never equals the reserved `dev` sentinel for / any real registry URL — that invariant is what lets the folder name be a / dev-vs-registry discriminator without reading any file inside. | src/bifaci/cartridge_slug.rs:201 |
 | test1505 | rust | `test1505_is_registry_slug_classification` | / TEST1505: `is_registry_slug` rejects the dev sentinel and non-path-safe / strings, accepts a lowercase authority. Used by the XPC service and / engine to distinguish dev folders from registry folders during the scan. | src/bifaci/cartridge_slug.rs:219 |
-| test1506 | rust | `test1506_channel_roundtrip_nightly` | TEST1506: Channel round-trips correctly. A nightly cartridge.json must deserialize back to the Nightly variant — channels are independent namespaces, conflating them would be a real bug. | src/bifaci/cartridge_json.rs:542 |
-| test1507 | rust | `test1507_missing_channel_fails_to_parse` | TEST1507: Reading a cartridge.json without `channel` is a hard error. We never assume a default — that would let an unrecognized install silently masquerade as release. | src/bifaci/cartridge_json.rs:573 |
-| test1508 | rust | `test1508_missing_registry_url_fails_to_parse` | TEST1508: Reading a cartridge.json without `registry_url` is a hard error too. The field is required-but-nullable; absence means the file was written by a pre-registry-aware installer and we can't tell whether it was meant to be dev or registry — both cases fail the three-place check, so we surface the schema gap immediately. | src/bifaci/cartridge_json.rs:597 |
-| test1509 | rust | `test1509_read_from_dir_rejects_slug_mismatch` | TEST1509: Three-place rule — a registry cartridge whose folder slug doesn't match `slug_for(registry_url)` is rejected. This catches the case where a cartridge tree was hand-copied between registry roots, or a buggy installer wrote the wrong slug. The error names both slugs so the operator can tell at a glance which side is wrong. | src/bifaci/cartridge_json.rs:804 |
-| test1510 | rust | `test1510_read_from_dir_rejects_dev_in_registry_folder` | TEST1510: Three-place rule — a dev cartridge.json under a non-dev folder is rejected. Equivalent to a dev-built cartridge being moved into a registry's folder; the host refuses because the binary was never built/signed for that registry. | src/bifaci/cartridge_json.rs:850 |
-| test1511 | rust | `test1511_read_from_dir_rejects_registry_in_dev_folder` | TEST1511: Three-place rule — a registry cartridge.json under the dev folder is rejected. Equivalent to a published cartridge being dropped into the dev tree; the dev tree is explicitly the only place a null `registry_url` is allowed, so a non-null one here means the layout is corrupted. | src/bifaci/cartridge_json.rs:886 |
-| test1512 | rust | `test1512_read_from_dir_accepts_dev_in_dev_folder` | TEST1512: A dev cartridge.json under the dev folder is accepted. This is the only path that ends with a successful dev install; together with 1510/1511 it pins the rule that dev provenance and the dev folder are an inseparable pair. | src/bifaci/cartridge_json.rs:921 |
-| test1513 | rust | `test1513_installed_from_optional_round_trip` | TEST1513: `installed_from` is opaque optional metadata. A cartridge.json that omits the field MUST parse cleanly with `installed_from == None`, and a CartridgeJson with `installed_from == None` MUST NOT emit the key on serialize. Pins the new contract that nothing in the host or engine branches on this field — it's audit/telemetry hint only and the absence-vs-Some distinction must round-trip. | src/bifaci/cartridge_json.rs:654 |
+| test1506 | rust | `test1506_channel_roundtrip_nightly` | TEST1506: Channel round-trips correctly. A nightly cartridge.json must deserialize back to the Nightly variant — channels are independent namespaces, conflating them would be a real bug. | src/bifaci/cartridge_json.rs:595 |
+| test1507 | rust | `test1507_missing_channel_fails_to_parse` | TEST1507: Reading a cartridge.json without `channel` is a hard error. We never assume a default — that would let an unrecognized install silently masquerade as release. | src/bifaci/cartridge_json.rs:626 |
+| test1508 | rust | `test1508_missing_registry_url_fails_to_parse` | TEST1508: Reading a cartridge.json without `registry_url` is a hard error too. The field is required-but-nullable; absence means the file was written by a pre-registry-aware installer and we can't tell whether it was meant to be dev or registry — both cases fail the three-place check, so we surface the schema gap immediately. | src/bifaci/cartridge_json.rs:650 |
+| test1509 | rust | `test1509_read_from_dir_rejects_slug_mismatch` | TEST1509: Three-place rule — a registry cartridge whose folder slug doesn't match `slug_for(registry_url)` is rejected. This catches the case where a cartridge tree was hand-copied between registry roots, or a buggy installer wrote the wrong slug. The error names both slugs so the operator can tell at a glance which side is wrong. | src/bifaci/cartridge_json.rs:857 |
+| test1510 | rust | `test1510_read_from_dir_rejects_dev_in_registry_folder` | TEST1510: Three-place rule — a dev cartridge.json under a non-dev folder is rejected. Equivalent to a dev-built cartridge being moved into a registry's folder; the host refuses because the binary was never built/signed for that registry. | src/bifaci/cartridge_json.rs:903 |
+| test1511 | rust | `test1511_read_from_dir_rejects_registry_in_dev_folder` | TEST1511: Three-place rule — a registry cartridge.json under the dev folder is rejected. Equivalent to a published cartridge being dropped into the dev tree; the dev tree is explicitly the only place a null `registry_url` is allowed, so a non-null one here means the layout is corrupted. | src/bifaci/cartridge_json.rs:939 |
+| test1512 | rust | `test1512_read_from_dir_accepts_dev_in_dev_folder` | TEST1512: A dev cartridge.json under the dev folder is accepted. This is the only path that ends with a successful dev install; together with 1510/1511 it pins the rule that dev provenance and the dev folder are an inseparable pair. | src/bifaci/cartridge_json.rs:974 |
+| test1513 | rust | `test1513_installed_from_optional_round_trip` | TEST1513: `installed_from` is opaque optional metadata. A cartridge.json that omits the field MUST parse cleanly with `installed_from == None`, and a CartridgeJson with `installed_from == None` MUST NOT emit the key on serialize. Pins the new contract that nothing in the host or engine branches on this field — it's audit/telemetry hint only and the absence-vs-Some distinction must round-trip. | src/bifaci/cartridge_json.rs:707 |
 | test1600 | objc | `test1600_hashesFileLargerThanOneChunk` | TEST1600: Hashing a directory containing a file LARGER than the streaming chunk size produces the same hash as an independent reference implementation. Exercises the multi-iteration read loop in `computeCartridgeDirectoryHash` — if a future refactor reverted to slurping whole files, the hash would still match (slurp gives the right answer too), so this is the necessary correctness pin even though it is not the tightest possible regression. | Tests/BifaciTests/CartridgeDirectoryHashTests.swift:92 |
 | test1601 | objc | `test1601_streamChunkSizeIsBounded` | TEST1601: The streaming chunk size is bounded so no single allocation scales with file size. This is the structural guard that prevents a future revert to FileManager.contents(atPath:) on a 200+ MB cartridge binary — that revert silently corrupted state in the sandboxed XPC service. Anything above 16 MiB is in the "you're slurping" zone and must not land. | Tests/BifaciTests/CartridgeDirectoryHashTests.swift:114 |
 | test1602 | objc | `test1602_cartridgeJsonExcluded` | TEST1602: cartridge.json is excluded from the hash — adding it (or changing its contents) must not change the directory hash, because cartridge.json carries install-time metadata that varies between installs of the same logical content. | Tests/BifaciTests/CartridgeDirectoryHashTests.swift:122 |
@@ -202,7 +202,7 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6183 | go | `Test6183_OutputValidator_WithSchemaValidation` | TEST6183: Output validator  with schema validation | cap/schema_validation_test.go:358 |
 | test6184 | go | `Test6184_CapValidationCoordinator_EndToEnd` | TEST6184: Cap validation coordinator  end to end | cap/schema_validation_test.go:417 |
 | test6185 | go | `Test6185_FileSchemaResolver_ErrorHandling` | TEST6185: File schema resolver reads and parses the referenced file, and fails hard (never returns a fabricated/empty schema) on a missing file or invalid JSON — mirroring the Rust FileSchemaResolver::resolve_schema. | cap/schema_validation_test.go:534 |
-| test6186 | go | `Test6186_RegistryGetCap` | TEST136 (deleted): exercised the private `cacheKey` method on the unified FabricRegistry. The on-disk cache filename scheme is an implementation detail of the persistence layer; equivalent observable behavior — that two equivalent URNs land in the same cache slot — is covered by Test140 (`same_cap_different_spellings_same_url`). Rust and Python dropped this; this deletion keeps the Go mirror in parity. | cap/registry_test.go:42 |
+| test6186 | go | `Test6186_RegistryGetCap` | TEST136 (deleted): exercised the private `cacheKey` method on the unified FabricRegistry. The on-disk cache filename scheme is an implementation detail of the persistence layer; equivalent observable behavior — that two equivalent URNs land in the same cache slot — is covered by Test140 (`same_cap_different_spellings_same_url`). Rust and Python dropped this; this deletion keeps the Go mirror in parity. | fabric/registry_test.go:606 |
 | test6189 | py | `test_6189_same_cap_different_spellings_same_hash` | TEST6189: Different URN spellings of the same cap (different tag order, whitespace, quoting) MUST produce the same SHA-256 hash, because the canonicaliser reduces them to the same string before hashing. This is the property that makes cross-language lookups land at the same registry key regardless of which capdag implementation issued the request. | tests/test_registry.py:152 |
 | test6200 | objc | `test6200_csCapManifestWithPageUrl` | MARK: - CSCapManifest With PageUrl Test | Tests/BifaciTests/ManifestTests.swift:277 |
 | test6201 | js | `test6201_emptyCapIsIllegal` | TEST6201: cap: (empty) is the illegal bare top form | capdag.test.js:3038 |
@@ -299,11 +299,11 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6322 | objc | `test6322_BuilderMissingInSpecFails` | TEST6322: Builder missing in spec fails | Tests/CapDAGTests/CSCapUrnBuilderTests.m:111 |
 | test6323 | js | `test6323_Machine_unterminatedBracketFails` | TEST6323: Machine unterminated bracket fails | capdag.test.js:3498 |
 | test6324 | objc | `test6324_BuilderMissingOutSpecFails` | TEST6324: Builder missing out spec fails | Tests/CapDAGTests/CSCapUrnBuilderTests.m:125 |
-| test6325 | go | `Test6325_RegistryValidation` | TEST6325: Registry validation | cap/registry_test.go:56 |
+| test6325 | go | `Test6325_RegistryValidation` | TEST6325: Registry validation | fabric/registry_test.go:623 |
 | test6326 | py | `test_6326_max_chunk_plus_one_splits_into_two_chunks` | TEST6326: Test payload of max_chunk + 1 bytes produces exactly two chunks | tests/test_cbor_io.py:943 |
 | test6327 | js | `test6327_Machine_lineBasedSimpleChain` | --- Machine parser line-based mode tests --- | capdag.test.js:3507 |
 | test6328 | objc | `test6328_BuilderEmptyBuildFailsWithMissingInSpec` | TEST6328: Builder empty build fails with missing in spec | Tests/CapDAGTests/CSCapUrnBuilderTests.m:139 |
-| test6329 | go | `Test6329_CacheOperations` | TEST6329: Cache operations | cap/registry_test.go:71 |
+| test6329 | go | `Test6329_CacheOperations` | TEST6329: Cache operations | fabric/registry_test.go:641 |
 | test6331 | js | `test6331_Machine_lineBasedTwoStepChain` | TEST6331: Machine line based two step chain | capdag.test.js:3521 |
 | test6332 | objc | `test6332_BuilderTagIgnoresInOut` | TEST6332: Builder tag ignores in out | Tests/CapDAGTests/CSCapUrnBuilderTests.m:149 |
 | test6333 | py | `test_6333_registry_add_caps_to_cache` | TEST6333: Test adding caps to the registry cache and retrieving them | tests/test_registry.py:365 |
@@ -384,11 +384,11 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6424 | objc | `test6424_ResolveMediaUrnNotFound` | TEST6424: Resolve media urn not found | Tests/CapDAGTests/CSMediaDefTests.m:112 |
 | test6425 | objc | `test6425_ExtensionsPropagationFromObjectDef` | Extensions field tests | Tests/CapDAGTests/CSMediaDefTests.m:124 |
 | test6426 | objc | `test6426_ExtensionsEmptyWhenNotSet` | TEST6426: Extensions empty when not set | Tests/CapDAGTests/CSMediaDefTests.m:148 |
-| test6428 | go | `Test6428_IntegrationVersionlessCapCreation` | Test6428_IntegrationVersionlessCapCreation verifies caps can be created without version fields | bifaci/integration_test.go:47 |
+| test6428 | go | `Test6428_IntegrationVersionlessCapCreation` | Test6428_IntegrationVersionlessCapCreation verifies caps can be created without version fields | bifaci/integration_test.go:46 |
 | test6429 | js | `test6429_Machine_multilineSerializeFormat` | TEST6429: Machine multiline serialize format | capdag.test.js:4010 |
-| test6431 | go | `Test6431_IntegrationCaseInsensitiveUrns` | Test6431_IntegrationCaseInsensitiveUrns verifies URNs are case-insensitive | bifaci/integration_test.go:75 |
+| test6431 | go | `Test6431_IntegrationCaseInsensitiveUrns` | Test6431_IntegrationCaseInsensitiveUrns verifies URNs are case-insensitive | bifaci/integration_test.go:74 |
 | test6432 | js | `test6432_Machine_aliasFromOpTag` | Aliases are pure-index `edge_<N>` regardless of the cap's tags; there is no privileged `op` tag to derive a friendlier name from. | capdag.test.js:4026 |
-| test6433 | go | `Test6433_IntegrationCapValidation` | Test6433_IntegrationCapValidation verifies cap schema validation | bifaci/integration_test.go:119 |
+| test6433 | go | `Test6433_IntegrationCapValidation` | Test6433_IntegrationCapValidation verifies cap schema validation | bifaci/integration_test.go:118 |
 | test6434 | js | `test6434_Machine_aliasFallbackWithoutOpTag` | TEST6434: Machine alias fallback without op tag | capdag.test.js:4038 |
 | test6435 | objc | `test6435_RegistryValidCapCheck` | Registry validator tests removed - not part of current API | Tests/CapDAGTests/CSFabricRegistryTests.m:138 |
 | test6436 | js | `test6436_Machine_duplicateOpTagsDisambiguated` | Pure-index aliases inherently disambiguate edges that share a marker tag. | capdag.test.js:4050 |
@@ -479,18 +479,18 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6521 | js | `test6521_Renderer_buildResolvedMachineGraphData_duplicateNodeIdAcrossStrandsFailsHard` | TEST6521: Renderer build resolved machine graph data duplicate node id across strands fails hard | capdag.test.js:6222 |
 | test6522 | js | `test6522_Renderer_validateResolvedMachinePayload_rejectsMissingFields` | TEST6522: Renderer validate resolved machine payload rejects missing fields | capdag.test.js:6258 |
 | test6523 | objc | `test6523_CapAndForEachAreNotStandaloneCollect` | TEST6523: Cap and for each are not standalone collect | Tests/CapDAGTests/CSPlanDecompositionTests.m:76 |
-| test6524 | go | `Test6524_LogFramesDuringRequest` | Mirror-specific coverage: Test LOG frames sent during a request are transparently skipped by host | bifaci/integration_test.go:562 |
-| test6526 | go | `Test6526_HostInitiatedHeartbeatNoPingPong` | Mirror-specific coverage: Test host does not echo back cartridge's heartbeat response (no infinite ping-pong) | bifaci/integration_test.go:950 |
+| test6524 | go | `Test6524_LogFramesDuringRequest` | Mirror-specific coverage: Test LOG frames sent during a request are transparently skipped by host | bifaci/integration_test.go:561 |
+| test6526 | go | `Test6526_HostInitiatedHeartbeatNoPingPong` | Mirror-specific coverage: Test host does not echo back cartridge's heartbeat response (no infinite ping-pong) | bifaci/integration_test.go:949 |
 | test6527 | objc | `test6527_Coding` | Obj-C specific: NSCoding support | Tests/CapDAGTests/CSCapUrnTests.m:524 |
-| test6528 | go | `Test6528_CartridgeSuddenDisconnect` | Mirror-specific coverage: Test host receives error when cartridge closes connection unexpectedly | bifaci/integration_test.go:1108 |
-| test6529 | go | `Test6529_EndFrameNoPayload` | Mirror-specific coverage: Test END frame without payload is handled as complete response with empty data | bifaci/integration_test.go:1216 |
-| test6530 | go | `Test6530_StreamingSequenceNumbers` | Mirror-specific coverage: Test streaming response sequence numbers are contiguous and start from 0 | bifaci/integration_test.go:1272 |
-| test6531 | go | `Test6531_RequestAfterShutdown` | Mirror-specific coverage: Test host request on a closed host returns error | bifaci/integration_test.go:1348 |
-| test6532 | go | `Test6532_ArgumentsMultiple` | Mirror-specific coverage: Test multiple arguments are correctly serialized in CBOR payload | bifaci/integration_test.go:1391 |
-| test6533 | go | `Test6533_AutoChunkingReassembly` | Mirror-specific coverage: Test auto-chunking splits payload larger than max_chunk into CHUNK frames + END frame, and host concatenated() reassembles the full original data | bifaci/integration_test.go:1464 |
+| test6528 | go | `Test6528_CartridgeSuddenDisconnect` | Mirror-specific coverage: Test host receives error when cartridge closes connection unexpectedly | bifaci/integration_test.go:1107 |
+| test6529 | go | `Test6529_EndFrameNoPayload` | Mirror-specific coverage: Test END frame without payload is handled as complete response with empty data | bifaci/integration_test.go:1215 |
+| test6530 | go | `Test6530_StreamingSequenceNumbers` | Mirror-specific coverage: Test streaming response sequence numbers are contiguous and start from 0 | bifaci/integration_test.go:1271 |
+| test6531 | go | `Test6531_RequestAfterShutdown` | Mirror-specific coverage: Test host request on a closed host returns error | bifaci/integration_test.go:1347 |
+| test6532 | go | `Test6532_ArgumentsMultiple` | Mirror-specific coverage: Test multiple arguments are correctly serialized in CBOR payload | bifaci/integration_test.go:1390 |
+| test6533 | go | `Test6533_AutoChunkingReassembly` | Mirror-specific coverage: Test auto-chunking splits payload larger than max_chunk into CHUNK frames + END frame, and host concatenated() reassembles the full original data | bifaci/integration_test.go:1463 |
 | test6534 | objc | `test6534_Copying` | Obj-C specific: NSCopying support | Tests/CapDAGTests/CSCapUrnTests.m:546 |
-| test6535 | go | `Test6535_ExactMaxChunkSingleEnd` | Mirror-specific coverage: Test payload exactly equal to max_chunk produces single END frame (no CHUNK frames) | bifaci/integration_test.go:1550 |
-| test6537 | go | `Test6537_MaxChunkPlusOneSplitsIntoTwo` | Mirror-specific coverage: Test payload of max_chunk + 1 produces exactly one CHUNK frame + one END frame | bifaci/integration_test.go:1615 |
+| test6535 | go | `Test6535_ExactMaxChunkSingleEnd` | Mirror-specific coverage: Test payload exactly equal to max_chunk produces single END frame (no CHUNK frames) | bifaci/integration_test.go:1549 |
+| test6537 | go | `Test6537_MaxChunkPlusOneSplitsIntoTwo` | Mirror-specific coverage: Test payload of max_chunk + 1 produces exactly one CHUNK frame + one END frame | bifaci/integration_test.go:1614 |
 | test6541 | objc | `test6541_Wildcard004InOutNoValuesAreIllegal` | TEST_WILDCARD_004: cap:in;out collapses to the same illegal bare top form | Tests/CapDAGTests/CSCapUrnTests.m:1049 |
 | test6547 | objc | `test6547_effectPatchAppliesMediaDelta` | TEST655 variant: patch effect applies the declared media delta to runtime input | Tests/CapDAGTests/CSCapUrnTests.m:1609 |
 | test6549 | objc | `test6549_CanonicalArgumentsDeserialization` | TEST6549: Canonical arguments deserialization | Tests/CapDAGTests/CSCapTests.m:227 |
@@ -533,10 +533,10 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6638 | go | `Test6638_merge_strategy_values` | TEST6638: Tests MergeStrategy enum values Verifies MergeConcat and MergeZipWith have correct string representations | planner/plan_test.go:249 |
 | test6639 | go | `Test6639_output_node_registered_on_add` | TEST6639: Tests Output node is automatically registered as output_node on AddNode Verifies that Validate() accepts a plan where the Output node is the plan's only output_node | planner/plan_test.go:256 |
 | test6640 | go | `Test6640_split_and_merge_not_classified_as_cap_fanout_fanin` | TEST6640: Tests that IsCap/IsFanOut/IsFanIn return false for Split and Merge node types Verifies that node type classification methods correctly reject non-cap, non-foreach, non-collect kinds | planner/plan_test.go:292 |
-| test6645 | go | `Test6645_argument_resolution_string_representations` | TEST6645: Tests ArgumentResolution String() returns correct snake_case names ArgumentInfo.Resolution is serialized to JSON using String(). Verifies that each resolution variant maps to the correct identifier expected by API consumers. | planner/plan_builder_test.go:52 |
-| test6646 | go | `Test6646_analyze_path_arguments_stdin_is_from_input_file` | TEST6646: Tests AnalyzePathArguments classifies stdin arg as FromInputFile for first cap Verifies that the argument analysis correctly identifies input-file arguments when the cap's stdin arg media URN matches the cap's in_spec. | planner/plan_builder_test.go:71 |
-| test6647 | go | `Test6647_analyze_path_arguments_user_input_arg_appears_in_slots` | TEST6647: Tests AnalyzePathArguments puts RequiresUserInput args in slots and sets CanExecuteWithoutInput=false Verifies that caps with non-stdin, non-default arguments are identified as requiring user input, appear in slots, and the requirements reflect that execution cannot proceed without them. | planner/plan_builder_test.go:112 |
-| test6649 | go | `Test6649_rejects_foreach_paired_collect` | TEST6649: PlanToResolvedGraph rejects plans containing ForEach-paired Collect nodes Verifies that Collect nodes without OutputMediaUrn (ForEach-paired) are rejected | orchestrator/orchestrator_test.go:635 |
+| test6645 | go | `Test6645_argument_resolution_string_representations` | TEST6645: Tests ArgumentResolution String() returns correct snake_case names ArgumentInfo.Resolution is serialized to JSON using String(). Verifies that each resolution variant maps to the correct identifier expected by API consumers. | planner/plan_builder_test.go:53 |
+| test6646 | go | `Test6646_analyze_path_arguments_stdin_is_from_input_file` | TEST6646: Tests AnalyzePathArguments classifies stdin arg as FromInputFile for first cap Verifies that the argument analysis correctly identifies input-file arguments when the cap's stdin arg media URN matches the cap's in_spec. | planner/plan_builder_test.go:72 |
+| test6647 | go | `Test6647_analyze_path_arguments_user_input_arg_appears_in_slots` | TEST6647: Tests AnalyzePathArguments puts RequiresUserInput args in slots and sets CanExecuteWithoutInput=false Verifies that caps with non-stdin, non-default arguments are identified as requiring user input, appear in slots, and the requirements reflect that execution cannot proceed without them. | planner/plan_builder_test.go:113 |
+| test6649 | go | `Test6649_rejects_foreach_paired_collect` | TEST6649: PlanToResolvedGraph rejects plans containing ForEach-paired Collect nodes Verifies that Collect nodes without OutputMediaUrn (ForEach-paired) are rejected | orchestrator/orchestrator_test.go:636 |
 | test6650 | objc | `test6650_findPathsMultiStep` | TEST6650: Multi-step path through intermediate node | Tests/CapDAGTests/CSLiveCapFabTests.m:157 |
 | test6651 | objc | `test6651_findPathsEmptyWhenNoPath` | TEST6651: Empty when target unreachable | Tests/CapDAGTests/CSLiveCapFabTests.m:179 |
 | test6652 | objc | `test6652_getReachableTargetsAll` | TEST6652: BFS finds multiple direct targets | Tests/CapDAGTests/CSLiveCapFabTests.m:195 |
@@ -557,7 +557,7 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6692 | py | `test_6692_assignment_bindings_sorted_by_slot_urn` | Mirror-specific coverage: Assignment bindings are sorted by cap_arg_media_urn for canonical form | tests/test_machine.py:658 |
 | test6693 | py | `test_6693_resolve_inputs_confirmed_wraps_detect_file_confirmed` | TEST6693: Resolve inputs confirmed wraps detect file confirmed | tests/test_input_resolver.py:569 |
 | test6698 | py | `test_6698_parse_machine_shared_node_name_yields_one_strand` | TEST6698: Two caps whose wirings share a node name are folded into a single strand with two edges. | tests/test_machine.py:423 |
-| test6700 | go | `Test6700_line_based_format_round_trips` | TEST6700: Line-based notation format round-trips back to the same machine. ToMachineNotationFormatted(NotationFormatLineBased) must not contain '[', and re-parsing must yield an equivalent machine. | machine/machine_test.go:838 |
+| test6700 | go | `Test6700_line_based_format_round_trips` | TEST6700: Line-based notation format round-trips back to the same machine. ToMachineNotationFormatted(NotationFormatLineBased) must not contain '[', and re-parsing must yield an equivalent machine. | machine/machine_test.go:839 |
 | test6703 | py | `test_6703_match_sources_to_args_single_trivial` | TEST6703: Source-to-arg matching: single source picks the unique arg. | tests/test_machine.py:274 |
 | test6709 | py | `test_6709_two_step_chain_shares_intermediate_node` | TEST6709: Resolving a strand with two chained caps shares the intermediate node. | tests/test_machine.py:166 |
 | test6710 | py | `test_6710_resolve_strand_foreach_sets_is_loop_on_next_cap` | TEST6710: A cap step fed by a sequence-producing predecessor maps per item (is_loop=True), derived purely from cardinality — the retired `LOOP` keyword and bare ForEach steps carry no wiring effect any more. | tests/test_machine.py:517 |
@@ -568,8 +568,8 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test6723 | objc | `test6723_concurrentCloseAndWriteDoesNotCrash` | TEST6723: Concurrent close() + write() must not raise an Objective-C NSException. This is the regression test for the CartridgeXPCService crash on cartridge OOM: the old writer accessed `handle.fileDescriptor` on every write, so a close() racing a write() called the accessor on a closed handle and aborted the process. The cached-fd writer keeps the descriptor in the writer's own state, so the worst outcome of the race is a clean FrameError thrown from write(). | Tests/BifaciTests/FrameTests.swift:1979 |
 | test6724 | objc | `test6724_closeShutsTheUnderlyingPipe` | TEST6724: After FrameWriter.close(), the underlying FileHandle is closed. A subsequent read on the paired read end must observe EOF — proving that close() actually closes the pipe (not just marks the writer dead in software). This guards against the regression where close() flips the writer flag but leaves the pipe open, which would let buffered data still drain into a peer that's been told the writer is gone. | Tests/BifaciTests/FrameTests.swift:2046 |
 | test6725 | objc | `test6725_deinitDoesNotAccessClosedHandle` | TEST6725: A FrameWriter going through deinit must NOT touch the underlying handle's `fileDescriptor` accessor. The original bug used to deinit-flush by reading `handle.fileDescriptor`, which raises NSFileHandleOperationException on a closed handle and aborts the process. The new contract: deinit does no I/O. This test deinits a writer whose handle was closed externally, then asserts the test process is still alive (i.e. did not crash via NSException). | Tests/BifaciTests/FrameTests.swift:2058 |
-| test6726 | go | `Test6726_cartridge_json_fabric_manifest_version_zero_round_trip` | TEST6726: CartridgeJson with FabricManifestVersion=0 (zero value) is absent on the wire. | bifaci/cartridge_json_test.go:13 |
-| test6727 | go | `Test6727_cartridge_json_fabric_manifest_version_nonzero_round_trip` | TEST6727: CartridgeJson with FabricManifestVersion>0 round-trips the value correctly. | bifaci/cartridge_json_test.go:44 |
+| test6726 | go | `Test6726_cartridge_json_fabric_manifest_version_zero_round_trip` | TEST6726: CartridgeJson with FabricManifestVersion=0 (zero value) is absent on the wire. | bifaci/cartridge_json_test.go:14 |
+| test6727 | go | `Test6727_cartridge_json_fabric_manifest_version_nonzero_round_trip` | TEST6727: CartridgeJson with FabricManifestVersion>0 round-trips the value correctly. | bifaci/cartridge_json_test.go:45 |
 | test6737 | js | `test6737_capVersionZeroOmittedOnWire` | TEST6737: Cap with version=0 round-trips with no `version` key on wire | capdag.test.js:6631 |
 | test6746 | rust | `test6746_all_masters_ready_true_when_expectation_met` | TEST6746: All masters ready true when expectation met | src/bifaci/relay_switch.rs:6948 |
 | test6747 | rust | `test6747_local_socket_pair_round_trips_in_both_directions` | TEST6747: Local socket pair round trips in both directions | src/bifaci/local_socket.rs:350 |
@@ -1618,17 +1618,18 @@ A shared-range number present in some mirrors but absent in others. A gap is leg
 | test7150 | rust, go, py, objc | js | TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire key names the other implementations read. |
 | test7151 | rust, go, py, objc | js | TEST7151: `is_sequence` is serialized even when false, on both CapArg and CapOutput. It is not a `skip_serializing_if` field. Mirrors that omitted it produced a manifest for the identical cap that differed from this one's bytes, which is how a cross-language manifest comparison finds drift that every per-mirror test passes through. |
 | test7152 | rust, go, py, objc | js | TEST7152: an empty `adapter_urns` is omitted from a serialized cap group. Most cartridges claim no adapters, so a mirror that wrote `[]` put an extra key in nearly every manifest it produced — invisible to that mirror's own tests, and a difference the moment two languages' manifests for the same cartridge are compared. |
+| test7153 | rust, go, py, objc | js | TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known epoch instants and at the instants that break naive date arithmetic — a leap day, the day after one, and a century year that is NOT a leap year. Emitting a bare epoch count with a `Z` appended would satisfy "some string ending in Z" and satisfy nothing else; every reader and every fixture in the tree treats this field as a parseable timestamp. |
+| test7154 | rust, go, py, objc | js | TEST7154: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it. |
+| test7155 | rust, go, py, objc | js | TEST7155: scaffolding rejects a bad name and refuses to overwrite. |
+| test7156 | rust, go, py, objc | js | TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias. |
+| test7157 | rust, go, py, objc | js | TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work. |
+| test7158 | rust, go, py, objc | js | TEST7158: the fabric-conflict guard — a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted. |
+| test7159 | rust, go, py, objc | js | TEST7159: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees. |
+| test7160 | rust, go, py, objc | js | TEST7160: the vendored stub contract is IDENTICAL to the canonical source. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. Every mirror's copy is generated from this one source, so a difference here means the reference itself was vendored from a different commit than the stub repo currently holds — which would ship capdags that disagree about what a cartridge looks like, silently. |
 | test8064 | rust, go, py, objc | js | TEST8064: a sequence-consuming cap may be reached directly from sequence data, but never through a dangling ForEach boundary. The latter was emitted as `ForEach -> concat` and then correctly rejected by machine resolution, aborting the transmute strand stream. A ForEach followed by a SCALAR cap stays legal — that is the map half of the ordinary map-then-fold plan (TEST1418) — so the invariant is about what may follow the boundary, not about ForEach appearing at all. |
 | test8065 | rust, go, py, objc | js | / TEST8065: cardinality follows the declared main input even when a / secondary stdin-capable argument appears first in declaration order. |
 | test8066 | rust, go, py, objc | js | / TEST8066: a declared void-input producer has no main-input argument and / therefore has scalar input cardinality without inventing an arg. |
 | test8067 | rust, go, py, objc | js | TEST8067: A late death notification from a retired process generation cannot tear down its replacement. The current generation's heartbeat timeout performs the complete death transition and preserves its typed terminal for the request that process actually owned. |
-| test8100 | rust, go, py, objc | js | TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it. |
-| test8101 | rust, go, py | js, objc | TEST8101: scaffolding rejects a bad name and refuses to overwrite. |
-| test8102 | rust, go, py | js, objc | TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias. |
-| test8103 | rust, go, py | js, objc | TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set). |
-| test8104 | rust, py | go, js, objc | TEST8104: the fabric-conflict guard — a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted. |
-| test8105 | rust, go, py | js, objc | TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees. |
-| test8106 | go, py | rust, js, objc | TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit — which would ship two capdags that disagree about what a cartridge looks like, silently. |
 | test8110 | rust, py | go, js, objc | TEST8110: the full cartridge-development loop through the real CLI and a real Python cartridge — scaffold, install under the dev slug, run the custom cap (never published to the fabric), edit its logic, re-install to update, and observe the changed behavior. |
 | test8111 | go, py, objc | rust, js | TEST8111: DecodeFrame reads narrow-width wire floats into the single in-memory float representation, matching the reference decoder (ciborium yields f64 for every CBOR float width). The reference ENCODER shrinks lossless floats to half-precision on the wire (0.5 travels as 0xf9), so a mirror must read a half- or single-precision progress and still expose it numerically. |
 | test8112 | go, py, objc | rust, js | TEST8112: the relay forwarding hop — decode a cartridge frame whose progress rode the wire as half-precision, re-encode it, and decode again: the value must survive as a number and the re-encoded bytes must never contain CBOR undefined (0xf7). In the Swift mirror this exact hop corrupted progress to undefined (read as null by the engine), failing every ForEach body on macOS. |
@@ -2076,12 +2077,30 @@ Same number, materially different descriptions across mirrors. Heuristic (normal
 - **js**: TEST559: without_tag removes tag, rejects structural keys, case-insensitive for keys
 - **objc**: TEST559: withoutTag removes a tag and returns a new URN, leaving the original unchanged (mirror-local)
 
+### test608
+
+- **rust**: TEST608: media_urns_for_extension returns URNs after adding a spec with extensions
+- **go**: TEST615 (deleted): exercised the on-disk cache-key hashing scheme — an internal persistence detail with no user-observable behavior. Rust and Python dropped this for the same reason; this deletion keeps the Go mirror in parity.
+- **py**: TEST608: media_urns_for_extension returns URNs after adding a spec with extensions
+
+### test609
+
+- **rust**: TEST609: get_extension_mappings returns all registered extension→URN pairs.
+- **go**: TEST608: media_urns_for_extension returns URNs after adding a spec with extensions TEST609: get_extension_mappings returns all registered extension→URN pairs.
+- **py**: TEST609: get_extension_mappings returns all registered extension→URN pairs.
+
 ### test614
 
 - **rust**: TEST614: Verify registry creation succeeds and cache directory exists
 - **go**: TEST614: Verify registry creation succeeds and cache directory exists
 - **py**: TEST614: Verify registry creation succeeds and cache directory exists
 - **objc**: TEST614: Registry creation. Uses the network-free test constructor — the production `init` blocks on a manifest fetch (and fails hard if the registry is unreachable), so unit tests use initForTest, mirroring Rust new_for_test.
+
+### test616
+
+- **rust**: TEST616: Verify StoredMediaDef converts to MediaDef preserving all fields
+- **go**: TEST616: StoredMediaDef converts to MediaDef preserving every field.
+- **py**: TEST616: Verify StoredMediaDef converts to MediaDef preserving all fields
 
 ### test618
 
@@ -2276,6 +2295,13 @@ Same number, materially different descriptions across mirrors. Heuristic (normal
 - **py**: TEST891: Semantic direction specificity — more constraints in either axis means a higher score under the truth-table-driven sum. media: (top, no tags) scores 0; each marker tag scores 2; each exact tag scores 3.
 - **js**: TEST891: Semantic direction specificity — more constraints in either axis means a higher score under the truth-table-driven sum. media: (top, no tags) scores 0; each marker tag scores 2; each exact tag scores 3.
 - **objc**: TEST891: Semantic direction specificity - more media URN tags = higher specificity (mirror-local variant of TEST052)
+
+### test908
+
+- **rust**: TEST908: cached caps remain accessible while offline.
+- **go**: TEST908: cached caps remain accessible while offline; an UNCACHED one is a hard network-blocked error rather than a silent miss, so a caller can tell "not in the fabric" from "we refused to look".
+- **py**: TEST908: cached caps remain accessible while offline.
+- **objc**: TEST908: cached caps remain accessible while offline.
 
 ### test921
 
@@ -3238,30 +3264,6 @@ Same number, materially different descriptions across mirrors. Heuristic (normal
 - **py**: TEST8067: a delayed reader death from a retired process generation cannot tear down the replacement occupying the same cartridge slot. The current generation still performs the real death transition.
 - **objc**: / TEST8067: a late death event from an obsolete reader generation must / not retire the live process in the same cartridge slot. A death from / the current generation must perform the real teardown and notify the / lifecycle observer once.
 
-### test8100
-
-- **rust**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
-- **go**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
-- **py**: TEST8100: EVERY vendored language scaffolds a runnable-shaped project — every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.
-- **objc**: TEST8100: Swift handler-error classification preserves a source-declared argument URN together with its code, attribution class, and message.
-
-### test8102
-
-- **rust**: TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
-- **go**: TEST8102: ReadEntryManifest + StageDevCartridge + FindDevCapByAlias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
-- **py**: TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.
-
-### test8103
-
-- **rust**: TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set).
-- **go**: TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.
-- **py**: TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.
-
-### test8104
-
-- **rust**: TEST8104: the fabric-conflict guard — a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.
-- **py**: TEST8104: (py-specific) CapArg.is_main_input() is True when the arg's Stdin source URN is order-theoretically equivalent to the cap's in= spec — even when the two strings list their tags in a different order. Compared by tagged-URN equivalence, never as strings.
-
 ### test8110
 
 - **rust**: TEST8110: the full cartridge-development loop through the real CLI and a real Python cartridge — scaffold, install under the dev slug, run the custom cap (never published to the fabric), edit its logic, re-install to update, and observe the changed behavior.
@@ -3392,14 +3394,6 @@ A number assigned to more than one function inside a single mirror. These must b
 - test285: `test0285_empty_handler_returned_with_owning_adapter_drops_everything_in_domain`, `test285_request_response_simple`
 - test286: `test0286_malformed_candidate_urn_passes_through`, `test286_streaming_chunks`
 - test1459: `test1459_live_synthetic_foreach_region_end_to_end`, `test1459_transient_capture_owns_spooled_intermediates`
-
-### py
-
-- test8101: `test_8101_scaffold_guards`, `test_8101_cap_to_dict_wire_shape`
-- test8102: `test_8102_dev_install_and_find_by_alias`, `test_8102_cap_arg_stream_urn_falls_back_to_media_urn_without_stdin_source`
-- test8103: `test_8103_dev_install_rejects_published_manifest`, `test_8103_cap_arg_stream_urn_uses_stdin_source_urn_when_present`
-- test8105: `test_8105_two_entries_is_ambiguous_not_a_coin_flip`, `test_8105_cap_arg_is_main_input_false_without_matching_stdin_source`
-- test8106: `test_8106_vendored_stub_contract_matches_the_canonical_source`, `test_8106_cap_arg_is_main_input_false_on_unparseable_stdin_urn`
 
 ---
 
@@ -5137,6 +5131,14 @@ A number assigned to more than one function inside a single mirror. These must b
 | test7150 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7151 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7152 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7153 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7154 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7155 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7156 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7157 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7158 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7159 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7160 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8000 | impl | ✓ | · | · | · | · | solo |
 | test8001 | impl | ✓ | · | · | · | · | solo |
 | test8002 | impl | ✓ | · | · | · | · | solo |
@@ -5189,13 +5191,13 @@ A number assigned to more than one function inside a single mirror. These must b
 | test8065 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8066 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test8067 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
-| test8100 | impl | ✓ | ✓ | ✓ | · | ✓ | shared |
-| test8101 | impl | ✓ | ✓ | ✓ | · | · | shared |
-| test8102 | impl | ✓ | ✓ | ✓ | · | · | shared |
-| test8103 | impl | ✓ | ✓ | ✓ | · | · | shared |
-| test8104 | impl | ✓ | · | ✓ | · | · | shared |
-| test8105 | impl | ✓ | ✓ | ✓ | · | · | shared |
-| test8106 | impl | · | ✓ | ✓ | · | · | shared |
+| test8100 | impl | · | · | · | · | ✓ | solo |
+| test8101 | impl | · | · | ✓ | · | · | solo |
+| test8102 | impl | · | · | ✓ | · | · | solo |
+| test8103 | impl | · | · | ✓ | · | · | solo |
+| test8104 | impl | · | · | ✓ | · | · | solo |
+| test8105 | impl | · | · | ✓ | · | · | solo |
+| test8106 | impl | · | · | ✓ | · | · | solo |
 | test8107 | impl | · | · | ✓ | · | · | solo |
 | test8108 | impl | · | · | ✓ | · | · | solo |
 | test8109 | impl | · | · | ✓ | · | · | solo |

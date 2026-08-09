@@ -66,7 +66,7 @@
         "go": {
           "function": "Test052_input_validation_missing_required",
           "description": "TEST52: Test input validation fails with MissingRequiredArgument when required arg missing",
-          "location": "cap/validation_test.go:83"
+          "location": "cap/validation_test.go:82"
         },
         "py": {
           "function": "test_052_input_validation_missing_required",
@@ -100,7 +100,7 @@
         "go": {
           "function": "Test053_input_validation_wrong_type",
           "description": "TEST53: Test input validation fails with InvalidArgumentType when wrong type provided",
-          "location": "cap/validation_test.go:101"
+          "location": "cap/validation_test.go:99"
         },
         "py": {
           "function": "test_053_input_validation_wrong_type",
@@ -206,7 +206,7 @@
         "go": {
           "function": "Test088_resolve_seeded_spec",
           "description": "TEST88: Resolving a media URN seeded into the registry returns the seeded spec verbatim. A regression in the registry-resolution path would surface as a `None`-shaped result here, since there is no local-override fallback to mask it.",
-          "location": "media/spec_test.go:42"
+          "location": "media/spec_test.go:40"
         },
         "py": {
           "function": "test_088_resolve_seeded_spec",
@@ -240,7 +240,7 @@
         "go": {
           "function": "Test089_resolve_seeded_record_spec",
           "description": "TEST89: A seeded record-shaped media def carries its schema and profile_uri intact through resolution. Catches a regression that dropped optional fields when copying into ResolvedMediaDef.",
-          "location": "media/spec_test.go:56"
+          "location": "media/spec_test.go:54"
         },
         "py": {
           "function": "test_089_resolve_seeded_record_spec",
@@ -375,7 +375,7 @@
         "go": {
           "function": "Test93_resolve_unresolvable_fails_hard",
           "description": "TEST93: Test resolving unknown media URN fails with UnresolvableMediaUrn error",
-          "location": "media/spec_test.go:132"
+          "location": "media/spec_test.go:128"
         },
         "py": {
           "function": "test_093_resolve_unresolvable_fails_hard",
@@ -448,7 +448,7 @@
         "go": {
           "function": "Test095_media_def_def_serialize",
           "description": "TEST95: Test MediaDef serializes with required fields and skips None fields",
-          "location": "media/spec_test.go:149"
+          "location": "media/spec_test.go:145"
         },
         "py": {
           "function": "test_095_media_def_def_serialize",
@@ -482,7 +482,7 @@
         "go": {
           "function": "Test096_media_def_def_deserialize",
           "description": "TEST96: Test deserializing MediaDef from JSON object",
-          "location": "media/spec_test.go:175"
+          "location": "media/spec_test.go:171"
         },
         "py": {
           "function": "test_096_media_def_def_deserialize",
@@ -516,7 +516,7 @@
         "go": {
           "function": "Test097_validate_no_duplicate_urns_catches_duplicates",
           "description": "TEST97: Test duplicate URN validation catches duplicates",
-          "location": "media/spec_test.go:191"
+          "location": "media/spec_test.go:187"
         },
         "py": {
           "function": "test_097_validate_no_duplicate_urns_catches_duplicates",
@@ -550,7 +550,7 @@
         "go": {
           "function": "Test098_validate_no_duplicate_urns_passes_for_unique",
           "description": "TEST98: Test duplicate URN validation passes for unique URNs",
-          "location": "media/spec_test.go:203"
+          "location": "media/spec_test.go:199"
         },
         "py": {
           "function": "test_098_validate_no_duplicate_urns_passes_for_unique",
@@ -583,7 +583,7 @@
         "go": {
           "function": "Test105_metadata_propagation",
           "description": "TEST105: Test metadata propagates from media def def to resolved media def",
-          "location": "media/spec_test.go:330"
+          "location": "media/spec_test.go:326"
         },
         "py": {
           "function": "test_105_metadata_propagation",
@@ -621,7 +621,7 @@
         "go": {
           "function": "Test107_extensions_propagation",
           "description": "TEST107: Test extensions field propagates from media def def to resolved",
-          "location": "media/spec_test.go:405"
+          "location": "media/spec_test.go:401"
         },
         "py": {
           "function": "test_107_extensions_propagation",
@@ -1266,7 +1266,7 @@
         "go": {
           "function": "Test138_parse_registry_json_with_stdin",
           "description": "TEST138: Test parsing registry JSON with stdin args verifies stdin media URN extraction",
-          "location": "cap/registry_test.go:97"
+          "location": "fabric/registry_test.go:55"
         },
         "py": {
           "function": "test_138_parse_registry_json_with_stdin",
@@ -1367,7 +1367,7 @@
         "go": {
           "function": "Test141_per_cap_url_shape",
           "description": "TEST141: URL has the right shape \u2014 protocol, host, /caps/ prefix, 64 hex chars, no extension.",
-          "location": "cap/registry_test.go:158"
+          "location": "fabric/registry_test.go:77"
         },
         "py": {
           "function": "test_141_per_cap_url_shape",
@@ -1405,7 +1405,7 @@
         "go": {
           "function": "Test142_normalize_handles_different_tag_orders",
           "description": "TEST142: Different tag orders normalise to the same URL \u2014 the canonicaliser strips the variation before hashing.",
-          "location": "cap/registry_test.go:170"
+          "location": "fabric/registry_test.go:93"
         },
         "py": {
           "function": "test_142_normalize_handles_different_tag_orders",
@@ -1443,7 +1443,7 @@
         "go": {
           "function": "Test143_default_config",
           "description": "TEST143: Default config points at https://fabric.capdag.com/ unless overridden by CDG_FABRIC_REGISTRY_URL.",
-          "location": "cap/registry_test.go:181"
+          "location": "fabric/registry_test.go:108"
         },
         "py": {
           "function": "test_143_default_config",
@@ -1482,7 +1482,7 @@
         "go": {
           "function": "Test144_custom_registry_url",
           "description": "TEST144: Test custom registry URL updates both registry and schema base URLs",
-          "location": "cap/registry_test.go:194"
+          "location": "fabric/registry_test.go:125"
         },
         "py": {
           "function": "test_144_custom_registry_url",
@@ -1516,7 +1516,7 @@
         "go": {
           "function": "Test145_custom_registry_and_schema_url",
           "description": "TEST145: Test custom registry and schema URLs set independently",
-          "location": "cap/registry_test.go:202"
+          "location": "fabric/registry_test.go:137"
         },
         "py": {
           "function": "test_145_custom_registry_and_schema_url",
@@ -1550,7 +1550,7 @@
         "go": {
           "function": "Test146_schema_url_not_overwritten_when_explicit",
           "description": "TEST146: Test schema URL not overwritten when set explicitly before registry URL",
-          "location": "cap/registry_test.go:211"
+          "location": "fabric/registry_test.go:150"
         },
         "py": {
           "function": "test_146_schema_url_not_overwritten_when_explicit",
@@ -1584,7 +1584,7 @@
         "go": {
           "function": "Test147_registry_for_test_with_config",
           "description": "TEST147: Test registry for test with custom config creates registry with specified URLs",
-          "location": "cap/registry_test.go:221"
+          "location": "fabric/registry_test.go:164"
         },
         "py": {
           "function": "test_147_registry_for_test_with_config",
@@ -6273,7 +6273,7 @@
         "go": {
           "function": "Test284_HandshakeHostCartridge",
           "description": "TEST284: Handshake exchanges HELLO frames, negotiates limits",
-          "location": "bifaci/integration_test.go:264"
+          "location": "bifaci/integration_test.go:263"
         },
         "py": {
           "function": "test_284_handshake_host_cartridge",
@@ -6311,7 +6311,7 @@
         "go": {
           "function": "Test285_RequestResponseSimple",
           "description": "TEST285: Simple request-response flow (REQ \u2192 END with payload)",
-          "location": "bifaci/integration_test.go:306"
+          "location": "bifaci/integration_test.go:305"
         },
         "py": {
           "function": "test_285_request_response_simple",
@@ -6349,7 +6349,7 @@
         "go": {
           "function": "Test286_StreamingChunks",
           "description": "TEST286: Streaming response with multiple CHUNK frames",
-          "location": "bifaci/integration_test.go:368"
+          "location": "bifaci/integration_test.go:367"
         },
         "py": {
           "function": "test_286_streaming_chunks",
@@ -6387,7 +6387,7 @@
         "go": {
           "function": "Test287_HeartbeatFromHost",
           "description": "TEST287: Host-initiated heartbeat",
-          "location": "bifaci/integration_test.go:446"
+          "location": "bifaci/integration_test.go:445"
         },
         "py": {
           "function": "test_287_heartbeat_from_host",
@@ -6426,7 +6426,7 @@
         "go": {
           "function": "Test288_media_documentation_propagates_through_resolve",
           "description": "TEST288: Documentation propagates from MediaDef through ResolveMediaUrn into ResolvedMediaDef. Verifies description and documentation remain distinct.",
-          "location": "media/spec_test.go:650"
+          "location": "media/spec_test.go:533"
         },
         "py": {
           "function": "test_288_media_documentation_propagates_through_resolve",
@@ -6460,7 +6460,7 @@
         "go": {
           "function": "Test0289_media_def_def_documentation_round_trip",
           "description": "TEST289: MediaDef serializes documentation only when present and round-trips losslessly. Mirrors TEST1127/1128 for the cap side.",
-          "location": "media/spec_test.go:676"
+          "location": "media/spec_test.go:559"
         },
         "py": {
           "function": "test_289_media_def_def_documentation_round_trip",
@@ -6493,7 +6493,7 @@
         "go": {
           "function": "Test290_LimitsNegotiation",
           "description": "TEST290: Limit negotiation picks minimum",
-          "location": "bifaci/integration_test.go:638"
+          "location": "bifaci/integration_test.go:637"
         },
         "py": {
           "function": "test_290_limits_negotiation",
@@ -6531,7 +6531,7 @@
         "go": {
           "function": "Test291_BinaryPayloadRoundtrip",
           "description": "TEST291: Binary payload roundtrip (all 256 byte values)",
-          "location": "bifaci/integration_test.go:678"
+          "location": "bifaci/integration_test.go:677"
         },
         "py": {
           "function": "test_291_binary_payload_roundtrip",
@@ -6569,7 +6569,7 @@
         "go": {
           "function": "Test292_MessageIdUniqueness",
           "description": "TEST292: Sequential requests get distinct MessageIds",
-          "location": "bifaci/integration_test.go:752"
+          "location": "bifaci/integration_test.go:751"
         },
         "py": {
           "function": "test_292_message_id_uniqueness",
@@ -6607,7 +6607,7 @@
         "go": {
           "function": "Test293_CartridgeRuntimeHandlerRegistration",
           "description": "TEST293: Test CartridgeRuntime Op registration and lookup by exact and non-existent cap URN",
-          "location": "bifaci/integration_test.go:823"
+          "location": "bifaci/integration_test.go:822"
         },
         "py": {
           "function": "test_293_cartridge_runtime_handler_registration",
@@ -6645,7 +6645,7 @@
         "go": {
           "function": "Test299_EmptyPayloadRoundtrip",
           "description": "TEST299: Empty payload request/response roundtrip",
-          "location": "bifaci/integration_test.go:1160"
+          "location": "bifaci/integration_test.go:1159"
         },
         "py": {
           "function": "test_299_empty_payload_roundtrip",
@@ -11908,7 +11908,7 @@
         "go": {
           "function": "Test489_FullPathIdentityVerification",
           "description": "TEST489: Full path identity verification: engine \u2192 host (AttachCartridge) \u2192 cartridge In both the Rust and Go mirrors, attach_cartridge runs identity verification end-to-end (simulateCartridge answers the identity REQ during attach); this then verifies that after attach the cartridge is live and handles a real request through the full relay path.",
-          "location": "bifaci/integration_test.go:2498"
+          "location": "bifaci/integration_test.go:2497"
         },
         "py": {
           "function": "test_489_full_path_identity_verification",
@@ -11941,7 +11941,7 @@
         "go": {
           "function": "Test490_IdentityVerificationMultipleCartridges",
           "description": "TEST490: Identity verification with multiple cartridges through single relay Both cartridges must be live and routed independently after attach. Each cartridge answers the identity REQ during attach (simulateCartridge), matching Rust's attach_cartridge identity verification.",
-          "location": "bifaci/integration_test.go:2616"
+          "location": "bifaci/integration_test.go:2615"
         },
         "py": {
           "function": "test_490_identity_verification_multiple_cartridges",
@@ -14494,7 +14494,7 @@
         "go": {
           "function": "Test578_rule1_duplicate_media_urns",
           "description": "TEST578: RULE1 - duplicate media_urns rejected",
-          "location": "cap/validation_test.go:134"
+          "location": "cap/validation_test.go:131"
         },
         "py": {
           "function": "test_578_rule1_duplicate_media_urns",
@@ -14528,7 +14528,7 @@
         "go": {
           "function": "Test579_rule2_empty_sources",
           "description": "TEST579: RULE2 - empty sources rejected",
-          "location": "cap/validation_test.go:145"
+          "location": "cap/validation_test.go:142"
         },
         "py": {
           "function": "test_579_rule2_empty_sources",
@@ -14562,7 +14562,7 @@
         "go": {
           "function": "Test580_rule3_different_stdin_urns",
           "description": "TEST580: RULE3 - multiple stdin sources with different URNs rejected",
-          "location": "cap/validation_test.go:155"
+          "location": "cap/validation_test.go:152"
         },
         "py": {
           "function": "test_580_rule3_different_stdin_urns",
@@ -14596,7 +14596,7 @@
         "go": {
           "function": "Test581_rule3_same_stdin_urns_ok",
           "description": "TEST581: RULE3 - multiple stdin sources with same URN is OK",
-          "location": "cap/validation_test.go:169"
+          "location": "cap/validation_test.go:166"
         },
         "py": {
           "function": "test_581_rule3_same_stdin_urns_ok",
@@ -14630,7 +14630,7 @@
         "go": {
           "function": "Test582_rule4_duplicate_source_type",
           "description": "TEST582: RULE4 - duplicate source type in single arg rejected",
-          "location": "cap/validation_test.go:182"
+          "location": "cap/validation_test.go:179"
         },
         "py": {
           "function": "test_582_rule4_duplicate_source_type",
@@ -14664,7 +14664,7 @@
         "go": {
           "function": "Test583_rule5_duplicate_position",
           "description": "TEST583: RULE5 - duplicate position across args rejected",
-          "location": "cap/validation_test.go:195"
+          "location": "cap/validation_test.go:192"
         },
         "py": {
           "function": "test_583_rule5_duplicate_position",
@@ -14698,7 +14698,7 @@
         "go": {
           "function": "Test584_rule6_position_gap",
           "description": "TEST584: RULE6 - position gap rejected (0, 2 without 1)",
-          "location": "cap/validation_test.go:206"
+          "location": "cap/validation_test.go:203"
         },
         "py": {
           "function": "test_584_rule6_position_gap",
@@ -14732,7 +14732,7 @@
         "go": {
           "function": "Test585_rule6_sequential_ok",
           "description": "TEST585: RULE6 - sequential positions (0, 1, 2) pass",
-          "location": "cap/validation_test.go:217"
+          "location": "cap/validation_test.go:214"
         },
         "py": {
           "function": "test_585_rule6_sequential_ok",
@@ -14766,7 +14766,7 @@
         "go": {
           "function": "Test586_rule7_position_and_cli_flag",
           "description": "TEST586: RULE7 - arg with both position and cli_flag rejected",
-          "location": "cap/validation_test.go:227"
+          "location": "cap/validation_test.go:224"
         },
         "py": {
           "function": "test_586_rule7_position_and_cli_flag",
@@ -14800,7 +14800,7 @@
         "go": {
           "function": "Test587_rule9_duplicate_cli_flag",
           "description": "TEST587: RULE9 - duplicate cli_flag across args rejected",
-          "location": "cap/validation_test.go:240"
+          "location": "cap/validation_test.go:237"
         },
         "py": {
           "function": "test_587_rule9_duplicate_cli_flag",
@@ -14834,7 +14834,7 @@
         "go": {
           "function": "Test588_rule10_reserved_cli_flags",
           "description": "TEST588: RULE10 - reserved cli_flags rejected",
-          "location": "cap/validation_test.go:251"
+          "location": "cap/validation_test.go:248"
         },
         "py": {
           "function": "test_588_rule10_reserved_cli_flags",
@@ -14868,7 +14868,7 @@
         "go": {
           "function": "Test589_all_rules_pass",
           "description": "TEST589: valid cap args with mixed sources pass all rules",
-          "location": "cap/validation_test.go:264"
+          "location": "cap/validation_test.go:261"
         },
         "py": {
           "function": "test_589_all_rules_pass",
@@ -14902,7 +14902,7 @@
         "go": {
           "function": "Test590_cli_flag_only_args",
           "description": "TEST590: validate_cap_args accepts cap with only cli_flag sources (no positions)",
-          "location": "cap/validation_test.go:282"
+          "location": "cap/validation_test.go:279"
         },
         "py": {
           "function": "test_590_cli_flag_only_args",
@@ -15412,7 +15412,7 @@
         "go": {
           "function": "Test607_media_urns_for_extension_unknown",
           "description": "TEST607: media_urns_for_extension returns error for unknown extension",
-          "location": "media/spec_test.go:521"
+          "location": "fabric/registry_test.go:843"
         },
         "py": {
           "function": "test_607_media_urns_for_extension_unknown",
@@ -15445,8 +15445,8 @@
         },
         "go": {
           "function": "Test608_media_urns_for_extension_populated",
-          "description": "TEST608: media_urns_for_extension returns URNs after adding a spec with extensions",
-          "location": "media/spec_test.go:531"
+          "description": "TEST615 (deleted): exercised the on-disk cache-key hashing scheme \u2014 an internal persistence detail with no user-observable behavior. Rust and Python dropped this for the same reason; this deletion keeps the Go mirror in parity.",
+          "location": "fabric/registry_test.go:908"
         },
         "py": {
           "function": "test_608_media_urns_for_extension_populated",
@@ -15479,8 +15479,8 @@
         },
         "go": {
           "function": "Test609_get_extension_mappings",
-          "description": "TEST609: get_extension_mappings returns all registered extension\u2192URN pairs.",
-          "location": "media/spec_test.go:562"
+          "description": "TEST608: media_urns_for_extension returns URNs after adding a spec with extensions TEST609: get_extension_mappings returns all registered extension\u2192URN pairs.",
+          "location": "fabric/registry_test.go:853"
         },
         "py": {
           "function": "test_609_get_extension_mappings",
@@ -15514,7 +15514,7 @@
         "go": {
           "function": "Test610_get_cached_spec",
           "description": "TEST610: get_cached_spec returns None for unknown and Some for known",
-          "location": "media/spec_test.go:589"
+          "location": "fabric/registry_test.go:880"
         },
         "py": {
           "function": "test_610_get_cached_spec",
@@ -15615,7 +15615,7 @@
         "go": {
           "function": "Test614_registry_creation",
           "description": "TEST614: Verify registry creation succeeds and cache directory exists",
-          "location": "cap/registry_test.go:28"
+          "location": "fabric/registry_test.go:178"
         },
         "py": {
           "function": "test_614_registry_creation",
@@ -15652,9 +15652,9 @@
           "location": "src/fabric/registry.rs:3568"
         },
         "go": {
-          "function": "Test616_stored_media_def_to_def",
-          "description": "TEST616: Verify StoredMediaDef converts to MediaDef preserving all fields",
-          "location": "media/spec_test.go:619"
+          "function": "Test616_stored_media_def_to_media_def",
+          "description": "TEST616: StoredMediaDef converts to MediaDef preserving every field.",
+          "location": "media/spec_test.go:513"
         },
         "py": {
           "function": "test_616_stored_media_def_to_def",
@@ -15688,7 +15688,7 @@
         "go": {
           "function": "Test617_normalize_media_urn",
           "description": "TEST617: Verify normalize_media_urn produces consistent non-empty results",
-          "location": "media/spec_test.go:638"
+          "location": "fabric/registry_test.go:940"
         },
         "py": {
           "function": "test_617_normalize_media_urn",
@@ -16097,7 +16097,7 @@
         "go": {
           "function": "Test629_profile_constants_format",
           "description": "TEST629: Verify profile URL constants all start with capdag.com schema prefix",
-          "location": "media/spec_test.go:728"
+          "location": "media/spec_test.go:611"
         },
         "py": {
           "function": "test_629_profile_constants_format",
@@ -19783,7 +19783,7 @@
         "go": {
           "function": "Test765_validation_to_json_empty",
           "description": "TEST765: Tests validation_to_json() returns None for empty validation constraints Verifies that default MediaValidation with no constraints produces JSON None",
-          "location": "planner/plan_builder_test.go:167"
+          "location": "planner/plan_builder_test.go:168"
         },
         "py": {
           "function": "test_765_validation_to_json_empty",
@@ -19817,7 +19817,7 @@
         "go": {
           "function": "Test766_validation_to_json_with_constraints",
           "description": "TEST766: Tests validation_to_json() converts MediaValidation with constraints to JSON Verifies that min/max validation rules are correctly serialized as JSON fields",
-          "location": "planner/plan_builder_test.go:174"
+          "location": "planner/plan_builder_test.go:175"
         },
         "py": {
           "function": "test_766_validation_to_json_with_constraints",
@@ -19851,7 +19851,7 @@
         "go": {
           "function": "Test767_argument_info_serialization",
           "description": "TEST767: Tests ArgumentInfo struct serialization to JSON Verifies that argument metadata including resolution status and validation is correctly serialized",
-          "location": "planner/plan_builder_test.go:347"
+          "location": "planner/plan_builder_test.go:348"
         },
         "py": {
           "function": "test_767_argument_info_serialization",
@@ -19885,7 +19885,7 @@
         "go": {
           "function": "Test768_path_argument_requirements_structure",
           "description": "TEST768: Tests PathArgumentRequirements structure for single-step execution paths Verifies that argument requirements are correctly organized by step with resolution information",
-          "location": "planner/plan_builder_test.go:367"
+          "location": "planner/plan_builder_test.go:368"
         },
         "py": {
           "function": "test_768_path_argument_requirements_structure",
@@ -19919,7 +19919,7 @@
         "go": {
           "function": "Test769_path_with_required_slot",
           "description": "TEST769: Tests PathArgumentRequirements tracking of required user-input slots Verifies that arguments requiring user input are collected in slots and can_execute_without_input is false",
-          "location": "planner/plan_builder_test.go:401"
+          "location": "planner/plan_builder_test.go:402"
         },
         "py": {
           "function": "test_769_path_with_required_slot",
@@ -19953,7 +19953,7 @@
         "go": {
           "function": "Test770_rejects_foreach",
           "description": "TEST770: plan_to_resolved_graph rejects plans containing ForEach nodes",
-          "location": "orchestrator/orchestrator_test.go:155"
+          "location": "orchestrator/orchestrator_test.go:156"
         },
         "py": {
           "function": "test_770_rejects_foreach",
@@ -19987,7 +19987,7 @@
         "go": {
           "function": "Test771_rejects_collect",
           "description": "TEST771: plan_to_resolved_graph rejects plans containing Collect nodes",
-          "location": "orchestrator/orchestrator_test.go:186"
+          "location": "orchestrator/orchestrator_test.go:187"
         },
         "py": {
           "function": "test_771_rejects_collect",
@@ -20021,7 +20021,7 @@
         "go": {
           "function": "Test772_find_paths_finds_multi_step_paths",
           "description": "TEST772: Tests find_paths_to_exact_target() finds multi-step paths Verifies that paths through intermediate nodes are found correctly",
-          "location": "planner/live_cap_fab_test.go:22"
+          "location": "planner/live_cap_fab_test.go:23"
         },
         "py": {
           "function": "test_772_find_paths_finds_multi_step_paths",
@@ -20055,7 +20055,7 @@
         "go": {
           "function": "Test773_find_paths_returns_empty_when_no_path",
           "description": "TEST773: Tests find_paths_to_exact_target() returns empty when no path exists Verifies that pathfinding returns no paths when target is unreachable",
-          "location": "planner/live_cap_fab_test.go:45"
+          "location": "planner/live_cap_fab_test.go:46"
         },
         "py": {
           "function": "test_773_find_paths_returns_empty_when_no_path",
@@ -20089,7 +20089,7 @@
         "go": {
           "function": "Test774_get_reachable_targets_finds_all_targets",
           "description": "TEST774: Tests get_reachable_targets() returns all reachable targets Verifies that reachable targets include direct cap targets and cardinality variants (list versions via Collect)",
-          "location": "planner/live_cap_fab_test.go:62"
+          "location": "planner/live_cap_fab_test.go:63"
         },
         "py": {
           "function": "test_774_get_reachable_targets_finds_all_targets",
@@ -20123,7 +20123,7 @@
         "go": {
           "function": "Test777_type_mismatch_pdf_cap_does_not_match_png_input",
           "description": "TEST777: Tests type checking prevents using PDF-specific cap with PNG input Verifies that media type compatibility is enforced during pathfinding",
-          "location": "planner/live_cap_fab_test.go:95"
+          "location": "planner/live_cap_fab_test.go:96"
         },
         "py": {
           "function": "test_777_type_mismatch_pdf_cap_does_not_match_png_input",
@@ -20157,7 +20157,7 @@
         "go": {
           "function": "Test778_type_mismatch_png_cap_does_not_match_pdf_input",
           "description": "TEST778: Tests type checking prevents using PNG-specific cap with PDF input Verifies that media type compatibility is enforced during pathfinding",
-          "location": "planner/live_cap_fab_test.go:110"
+          "location": "planner/live_cap_fab_test.go:111"
         },
         "py": {
           "function": "test_778_type_mismatch_png_cap_does_not_match_pdf_input",
@@ -20191,7 +20191,7 @@
         "go": {
           "function": "Test779_get_reachable_targets_respects_type_matching",
           "description": "TEST779: Tests get_reachable_targets() only returns targets reachable via type-compatible caps Verifies that PNG and PDF inputs reach different cap targets (not each other's)",
-          "location": "planner/live_cap_fab_test.go:125"
+          "location": "planner/live_cap_fab_test.go:126"
         },
         "py": {
           "function": "test_779_get_reachable_targets_respects_type_matching",
@@ -20263,7 +20263,7 @@
         "go": {
           "function": "Test781_find_paths_respects_type_chain",
           "description": "TEST781: Tests find_paths_to_exact_target() enforces type compatibility across multi-step chains Verifies that paths are only found when all intermediate types are compatible",
-          "location": "planner/live_cap_fab_test.go:162"
+          "location": "planner/live_cap_fab_test.go:163"
         },
         "py": {
           "function": "test_781_find_paths_respects_type_chain",
@@ -20487,7 +20487,7 @@
         "go": {
           "function": "Test787_find_paths_sorting_prefers_shorter",
           "description": "TEST787: Tests find_paths_to_exact_target() sorts paths by length, preferring shorter ones Verifies that among multiple paths, the shortest is ranked first",
-          "location": "planner/live_cap_fab_test.go:189"
+          "location": "planner/live_cap_fab_test.go:190"
         },
         "py": {
           "function": "test_787_find_paths_sorting_prefers_shorter",
@@ -20521,7 +20521,7 @@
         "go": {
           "function": "Test788_foreach_only_with_sequence_input",
           "description": "TEST788: ForEach is only synthesized when is_sequence=true",
-          "location": "planner/live_cap_fab_test.go:212"
+          "location": "planner/live_cap_fab_test.go:213"
         },
         "py": {
           "function": "test_788_foreach_only_with_sequence_input",
@@ -20555,7 +20555,7 @@
         "go": {
           "function": "Test789_cap_from_json_has_valid_specs",
           "description": "TEST789: Tests that caps loaded from JSON have correct in_spec/out_spec",
-          "location": "planner/live_cap_fab_test.go:646"
+          "location": "planner/live_cap_fab_test.go:647"
         },
         "py": {
           "function": "test_789_cap_from_json_has_valid_specs",
@@ -20588,7 +20588,7 @@
         "go": {
           "function": "Test790_identity_urn_is_specific",
           "description": "TEST790: Tests identity_urn is specific and doesn't match everything",
-          "location": "planner/live_cap_fab_test.go:669"
+          "location": "planner/live_cap_fab_test.go:670"
         },
         "py": {
           "function": "test_790_identity_urn_is_specific",
@@ -20627,7 +20627,7 @@
         "go": {
           "function": "Test791_sync_from_cap_urns_adds_edges",
           "description": "TEST791: Tests sync_from_cap_urns actually adds edges",
-          "location": "planner/live_cap_fab_test.go:845"
+          "location": "planner/live_cap_fab_test.go:846"
         },
         "py": {
           "function": "test_791_sync_from_cap_urns_adds_edges",
@@ -23119,7 +23119,7 @@
         "go": {
           "function": "Test880_no_duplicates_with_unique_caps",
           "description": "TEST880: Tests duplicate detection passes for caps with unique URN combinations Verifies that check_for_duplicate_caps() correctly accepts caps with different op/in/out combinations",
-          "location": "planner/plan_builder_test.go:193"
+          "location": "planner/plan_builder_test.go:194"
         },
         "py": {
           "function": "test_880_no_duplicates_with_unique_caps",
@@ -23153,7 +23153,7 @@
         "go": {
           "function": "Test886_optional_non_io_arg_with_default_has_default",
           "description": "TEST886: Tests optional non-IO arguments with default values are marked as HasDefault Verifies that optional arguments with defaults behave the same as required ones with defaults",
-          "location": "planner/plan_builder_test.go:186"
+          "location": "planner/plan_builder_test.go:187"
         },
         "py": {
           "function": "test_886_optional_non_io_arg_with_default_has_default",
@@ -23188,7 +23188,7 @@
         "go": {
           "function": "Test892_extensions_serialization",
           "description": "TEST892: Test extensions serializes/deserializes correctly in MediaDef",
-          "location": "media/spec_test.go:430"
+          "location": "media/spec_test.go:426"
         },
         "py": {
           "function": "test_892_extensions_serialization",
@@ -23221,7 +23221,7 @@
         "go": {
           "function": "Test893_extensions_with_metadata_and_validation",
           "description": "TEST893: Test extensions can coexist with metadata and validation",
-          "location": "media/spec_test.go:455"
+          "location": "media/spec_test.go:451"
         },
         "py": {
           "function": "test_893_extensions_with_metadata_and_validation",
@@ -23259,7 +23259,7 @@
         "go": {
           "function": "Test894_multiple_extensions",
           "description": "TEST894: Test multiple extensions in a media def",
-          "location": "media/spec_test.go:491"
+          "location": "media/spec_test.go:487"
         },
         "py": {
           "function": "test_894_multiple_extensions",
@@ -23297,7 +23297,7 @@
         "go": {
           "function": "Test898_BinaryIntegrityThroughRelay",
           "description": "TEST898: Binary data integrity through full relay path (256 byte values)",
-          "location": "bifaci/integration_test.go:2018"
+          "location": "bifaci/integration_test.go:2017"
         },
         "py": {
           "function": "test_898_binary_integrity_through_relay",
@@ -23335,7 +23335,7 @@
         "go": {
           "function": "Test899_StreamingChunksThroughRelay",
           "description": "TEST899: Streaming chunks flow through relay without accumulation",
-          "location": "bifaci/integration_test.go:2147"
+          "location": "bifaci/integration_test.go:2146"
         },
         "py": {
           "function": "test_899_streaming_chunks_through_relay",
@@ -23373,7 +23373,7 @@
         "go": {
           "function": "Test900_TwoCartridgesRoutedIndependently",
           "description": "TEST900: Two cartridges routed independently by cap_urn",
-          "location": "bifaci/integration_test.go:2255"
+          "location": "bifaci/integration_test.go:2254"
         },
         "py": {
           "function": "test_900_two_cartridges_routed_independently",
@@ -23411,7 +23411,7 @@
         "go": {
           "function": "Test901_ReqForUnknownCapReturnsErrFrame",
           "description": "TEST901: REQ for unknown cap returns ERR frame (not fatal)",
-          "location": "bifaci/integration_test.go:2421"
+          "location": "bifaci/integration_test.go:2420"
         },
         "py": {
           "function": "test_901_req_for_unknown_cap_returns_err_frame",
@@ -23562,8 +23562,8 @@
         },
         "go": {
           "function": "Test908_cached_caps_accessible_when_offline",
-          "description": "TEST908: cached caps remain accessible while offline.",
-          "location": "cap/registry_test.go:229"
+          "description": "TEST908: cached caps remain accessible while offline; an UNCACHED one is a hard network-blocked error rather than a silent miss, so a caller can tell \"not in the fabric\" from \"we refused to look\".",
+          "location": "fabric/registry_test.go:203"
         },
         "py": {
           "function": "test_908_cached_caps_accessible_when_offline",
@@ -23596,7 +23596,7 @@
         "rust": {
           "function": "test910_map_progress_monotonic",
           "description": "TEST910: map_progress output is monotonic for monotonically increasing input",
-          "location": "src/orchestrator/executor.rs:3994"
+          "location": "src/orchestrator/executor.rs:3988"
         },
         "go": {
           "function": "Test910_map_progress_monotonic",
@@ -23634,7 +23634,7 @@
         "rust": {
           "function": "test911_map_progress_bounded",
           "description": "TEST911: map_progress output is bounded within [base, base+weight]",
-          "location": "src/orchestrator/executor.rs:4012"
+          "location": "src/orchestrator/executor.rs:4006"
         },
         "go": {
           "function": "Test911_map_progress_bounded",
@@ -23672,7 +23672,7 @@
         "rust": {
           "function": "test912_progress_mapper_reports_through_parent",
           "description": "TEST912: ProgressMapper correctly maps through a CapProgressFn",
-          "location": "src/orchestrator/executor.rs:4033"
+          "location": "src/orchestrator/executor.rs:4027"
         },
         "go": {
           "function": "Test912_progress_mapper_reports_through_parent",
@@ -23710,7 +23710,7 @@
         "rust": {
           "function": "test913_progress_mapper_as_cap_progress_fn",
           "description": "TEST913: ProgressMapper.as_cap_progress_fn produces same mapping",
-          "location": "src/orchestrator/executor.rs:4057"
+          "location": "src/orchestrator/executor.rs:4051"
         },
         "go": {
           "function": "Test913_progress_mapper_as_cap_progress_fn",
@@ -23748,7 +23748,7 @@
         "rust": {
           "function": "test914_progress_mapper_sub_mapper",
           "description": "TEST914: ProgressMapper.sub_mapper chains correctly",
-          "location": "src/orchestrator/executor.rs:4080"
+          "location": "src/orchestrator/executor.rs:4074"
         },
         "go": {
           "function": "Test914_progress_mapper_sub_mapper",
@@ -23786,7 +23786,7 @@
         "rust": {
           "function": "test915_per_group_subdivision_monotonic_bounded",
           "description": "TEST915: Per-group subdivision produces monotonic, bounded progress for N groups Uses pre-computed boundaries (same pattern as production code) to guarantee monotonicity regardless of f32 rounding.",
-          "location": "src/orchestrator/executor.rs:4162"
+          "location": "src/orchestrator/executor.rs:4156"
         },
         "go": {
           "function": "Test915_per_group_subdivision_monotonic_bounded",
@@ -23824,7 +23824,7 @@
         "rust": {
           "function": "test917_high_frequency_progress_bounded",
           "description": "TEST917: High-frequency progress emission does not violate bounds (Regression test for the deadlock scenario \u2014 verifies computation stays bounded)",
-          "location": "src/orchestrator/executor.rs:4283"
+          "location": "src/orchestrator/executor.rs:4277"
         },
         "go": {
           "function": "Test917_high_frequency_progress_bounded",
@@ -23867,7 +23867,7 @@
         "go": {
           "function": "Test919_parse_simple_testcartridge_graph",
           "description": "TEST919: Parse simple machine notation graph with test-edge1",
-          "location": "orchestrator/orchestrator_test.go:693"
+          "location": "orchestrator/orchestrator_test.go:694"
         },
         "py": {
           "function": "test_919_parse_simple_testcartridge_graph",
@@ -24623,7 +24623,7 @@
         "go": {
           "function": "Test947_cap_not_found",
           "description": "TEST947: Cap not found in registry",
-          "location": "orchestrator/orchestrator_test.go:785"
+          "location": "orchestrator/orchestrator_test.go:786"
         },
         "py": {
           "function": "test_947_cap_not_found",
@@ -24661,7 +24661,7 @@
         "go": {
           "function": "Test948_invalid_cap_urn",
           "description": "TEST948: Invalid cap URN in machine notation",
-          "location": "orchestrator/orchestrator_test.go:773"
+          "location": "orchestrator/orchestrator_test.go:774"
         },
         "py": {
           "function": "test_948_invalid_cap_urn",
@@ -24699,7 +24699,7 @@
         "go": {
           "function": "Test949_empty_graph",
           "description": "TEST949: Empty machine notation (no edges)",
-          "location": "orchestrator/orchestrator_test.go:756"
+          "location": "orchestrator/orchestrator_test.go:757"
         },
         "py": {
           "function": "test_949_empty_graph",
@@ -24737,7 +24737,7 @@
         "go": {
           "function": "Test950_reject_cycles",
           "description": "TEST950: Validate that cycles are rejected",
-          "location": "orchestrator/orchestrator_test.go:731"
+          "location": "orchestrator/orchestrator_test.go:732"
         },
         "py": {
           "function": "test_950_reject_cycles",
@@ -24814,7 +24814,7 @@
         "go": {
           "function": "Test953_linear_plan_still_works",
           "description": "TEST953: Linear plans (no ForEach/Collect) still convert successfully",
-          "location": "orchestrator/orchestrator_test.go:217"
+          "location": "orchestrator/orchestrator_test.go:218"
         },
         "py": {
           "function": "test_953_linear_plan_still_works",
@@ -24848,7 +24848,7 @@
         "go": {
           "function": "Test954_standalone_collect_passthrough",
           "description": "TEST954: Standalone Collect nodes are handled as pass-through Plan: input \u2192 cap_0 \u2192 Collect \u2192 cap_1 \u2192 output The standalone Collect is transparent \u2014 the resolved edge from Collect to cap_1 should be rewritten to go from cap_0 to cap_1 directly.",
-          "location": "orchestrator/orchestrator_test.go:237"
+          "location": "orchestrator/orchestrator_test.go:238"
         },
         "py": {
           "function": "test_954_standalone_collect_passthrough",
@@ -25660,7 +25660,7 @@
         "go": {
           "function": "Test977_OsFilesExcludedIntegration",
           "description": "TEST977: OS files excluded in resolve_paths",
-          "location": "input_resolver/resolver_test.go:164"
+          "location": "input_resolver/resolver_test.go:161"
         },
         "py": {
           "function": "test_977_os_files_excluded_integration",
@@ -25770,7 +25770,7 @@
         "go": {
           "function": "Test991_detects_duplicate_cap_urns",
           "description": "TEST991: Tests duplicate detection identifies caps with identical URNs Verifies that check_for_duplicate_caps() returns an error when multiple caps share the same cap_urn",
-          "location": "planner/plan_builder_test.go:207"
+          "location": "planner/plan_builder_test.go:208"
         },
         "py": {
           "function": "test_991_detects_duplicate_cap_urns",
@@ -25804,7 +25804,7 @@
         "go": {
           "function": "Test992_different_ops_same_types_not_duplicates",
           "description": "TEST992: Tests caps with different operations but same input/output types are not duplicates Verifies that only the complete URN (including op) is used for duplicate detection",
-          "location": "planner/plan_builder_test.go:221"
+          "location": "planner/plan_builder_test.go:222"
         },
         "py": {
           "function": "test_992_different_ops_same_types_not_duplicates",
@@ -25838,7 +25838,7 @@
         "go": {
           "function": "Test993_same_op_different_input_types_not_duplicates",
           "description": "TEST993: Tests caps with same operation but different input types are not duplicates Verifies that input type differences distinguish caps with the same operation name",
-          "location": "planner/plan_builder_test.go:233"
+          "location": "planner/plan_builder_test.go:234"
         },
         "py": {
           "function": "test_993_same_op_different_input_types_not_duplicates",
@@ -25872,7 +25872,7 @@
         "go": {
           "function": "Test994_input_arg_first_cap_auto_resolved_from_input",
           "description": "TEST994: Tests first cap's input argument is automatically resolved from input file Verifies that determine_resolution_with_io_check() returns FromInputFile for the first cap in a chain",
-          "location": "planner/plan_builder_test.go:245"
+          "location": "planner/plan_builder_test.go:246"
         },
         "py": {
           "function": "test_994_input_arg_first_cap_auto_resolved_from_input",
@@ -25906,7 +25906,7 @@
         "go": {
           "function": "Test995_input_arg_subsequent_cap_auto_resolved_from_previous",
           "description": "TEST995: Tests subsequent caps' input arguments are automatically resolved from previous output Verifies that determine_resolution_with_io_check() returns FromPreviousOutput for caps after the first",
-          "location": "planner/plan_builder_test.go:251"
+          "location": "planner/plan_builder_test.go:252"
         },
         "py": {
           "function": "test_995_input_arg_subsequent_cap_auto_resolved_from_previous",
@@ -25940,7 +25940,7 @@
         "go": {
           "function": "Test996_output_arg_auto_resolved",
           "description": "TEST996: Tests output arguments are automatically resolved from previous cap's output Verifies that arguments matching the output spec are always resolved as FromPreviousOutput",
-          "location": "planner/plan_builder_test.go:260"
+          "location": "planner/plan_builder_test.go:261"
         },
         "py": {
           "function": "test_996_output_arg_auto_resolved",
@@ -25974,7 +25974,7 @@
         "go": {
           "function": "Test997_file_path_type_fallback_first_cap",
           "description": "TEST997: Tests MEDIA_FILE_PATH argument type resolves to input file for first cap Verifies that generic file-path arguments are bound to input file in the first cap",
-          "location": "planner/plan_builder_test.go:266"
+          "location": "planner/plan_builder_test.go:267"
         },
         "py": {
           "function": "test_997_file_path_type_fallback_first_cap",
@@ -26008,7 +26008,7 @@
         "go": {
           "function": "Test998_file_path_type_fallback_subsequent_cap",
           "description": "TEST998: Tests MEDIA_FILE_PATH argument type resolves to previous output for subsequent caps Verifies that generic file-path arguments are bound to previous cap's output after the first cap",
-          "location": "planner/plan_builder_test.go:272"
+          "location": "planner/plan_builder_test.go:273"
         },
         "py": {
           "function": "test_998_file_path_type_fallback_subsequent_cap",
@@ -26384,7 +26384,7 @@
         "go": {
           "function": "Test1009_non_io_arg_with_default_has_default",
           "description": "TEST1009: Tests required non-IO arguments with default values are marked as HasDefault Verifies that arguments like integers with defaults don't require user input",
-          "location": "planner/plan_builder_test.go:278"
+          "location": "planner/plan_builder_test.go:279"
         },
         "py": {
           "function": "test_1009_non_io_arg_with_default_has_default",
@@ -26494,7 +26494,7 @@
         "go": {
           "function": "Test1012_non_io_arg_without_default_requires_user_input",
           "description": "TEST1012: Tests required non-IO arguments without defaults require user input Verifies that arguments like strings without defaults are marked as RequiresUserInput",
-          "location": "planner/plan_builder_test.go:285"
+          "location": "planner/plan_builder_test.go:286"
         },
         "py": {
           "function": "test_1012_non_io_arg_without_default_requires_user_input",
@@ -26604,7 +26604,7 @@
         "go": {
           "function": "Test1015_optional_non_io_arg_without_default_requires_user_input",
           "description": "TEST1015: Tests optional non-IO arguments without defaults still require user input Verifies that optional arguments without defaults must be explicitly provided or skipped",
-          "location": "planner/plan_builder_test.go:291"
+          "location": "planner/plan_builder_test.go:292"
         },
         "py": {
           "function": "test_1015_optional_non_io_arg_without_default_requires_user_input",
@@ -26752,7 +26752,7 @@
         "go": {
           "function": "Test1019_validation_to_json_nil",
           "description": "TEST1019: Tests validation_to_json() returns None for None input Verifies that missing validation metadata is converted to JSON None",
-          "location": "planner/plan_builder_test.go:297"
+          "location": "planner/plan_builder_test.go:298"
         },
         "py": {
           "function": "test_1019_validation_to_json_none",
@@ -27165,7 +27165,7 @@
         "go": {
           "function": "Test1090_SingleFileScalar",
           "description": "TEST1090: 1 file \u2192 is_sequence=false",
-          "location": "input_resolver/resolver_test.go:89"
+          "location": "input_resolver/resolver_test.go:86"
         },
         "py": {
           "function": "test_1090_single_file_scalar",
@@ -27203,7 +27203,7 @@
         "go": {
           "function": "Test1092_TwoFiles",
           "description": "TEST1092: 2 files \u2192 is_sequence=true",
-          "location": "input_resolver/resolver_test.go:107"
+          "location": "input_resolver/resolver_test.go:104"
         },
         "py": {
           "function": "test_1092_two_files",
@@ -27241,7 +27241,7 @@
         "go": {
           "function": "Test1093_DirSingleFile",
           "description": "TEST1093: 1 dir with 1 file \u2192 is_sequence=false",
-          "location": "input_resolver/resolver_test.go:126"
+          "location": "input_resolver/resolver_test.go:123"
         },
         "py": {
           "function": "test_1093_dir_single_file",
@@ -27279,7 +27279,7 @@
         "go": {
           "function": "Test1094_DirMultipleFiles",
           "description": "TEST1094: 1 dir with 3 files \u2192 is_sequence=true",
-          "location": "input_resolver/resolver_test.go:144"
+          "location": "input_resolver/resolver_test.go:141"
         },
         "py": {
           "function": "test_1094_dir_multiple_files",
@@ -27317,7 +27317,7 @@
         "go": {
           "function": "Test1098_ExtensionBasedPdf",
           "description": "TEST1098: Extension-based detection picks up pdf tag for .pdf files",
-          "location": "input_resolver/resolver_test.go:183"
+          "location": "input_resolver/resolver_test.go:180"
         },
         "py": {
           "function": "test_1098_extension_based_pdf",
@@ -27356,7 +27356,7 @@
         "go": {
           "function": "Test1100_cap_urn_normalizes_media_urn_tag_order",
           "description": "TEST1100: Tests that CapUrn normalizes media URN tags to canonical order Two CapUrns with different tag ordering in out spec must produce the same canonical string.",
-          "location": "planner/plan_builder_test.go:304"
+          "location": "planner/plan_builder_test.go:305"
         },
         "py": {
           "function": "test_1100_cap_urn_normalizes_media_urn_tag_order",
@@ -27390,7 +27390,7 @@
         "go": {
           "function": "Test1103_is_dispatchable_uses_correct_directionality",
           "description": "TEST1103: Tests that IsDispatchable has correct directionality A specific candidate is dispatchable for a general request; the reverse is false.",
-          "location": "planner/plan_builder_test.go:321"
+          "location": "planner/plan_builder_test.go:322"
         },
         "py": {
           "function": "test_1103_is_dispatchable_uses_correct_directionality",
@@ -27424,7 +27424,7 @@
         "go": {
           "function": "Test1104_is_dispatchable_rejects_non_dispatchable",
           "description": "TEST1104: Tests that is_dispatchable rejects when candidate cannot dispatch request",
-          "location": "planner/plan_builder_test.go:335"
+          "location": "planner/plan_builder_test.go:336"
         },
         "py": {
           "function": "test_1104_is_dispatchable_rejects_non_dispatchable",
@@ -27628,7 +27628,7 @@
         "go": {
           "function": "Test1111_foreach_for_user_provided_list_source",
           "description": "TEST1111: ForEach works for user-provided list sources not in the graph. User provides media:list;txt;enc=utf-8 with is_sequence=true \u2192 ForEach+cap path found.",
-          "location": "planner/live_cap_fab_test.go:299"
+          "location": "planner/live_cap_fab_test.go:300"
         },
         "py": {
           "function": "test_1111_foreach_for_user_provided_list_source",
@@ -27662,7 +27662,7 @@
         "go": {
           "function": "Test1112_no_collect_in_path_finding",
           "description": "TEST1112: Collect is not synthesized during path finding. Reaching a list target type requires the cap itself to output a list type.",
-          "location": "planner/live_cap_fab_test.go:339"
+          "location": "planner/live_cap_fab_test.go:340"
         },
         "py": {
           "function": "test_1112_no_collect_in_path_finding",
@@ -27696,7 +27696,7 @@
         "go": {
           "function": "Test1113_multi_cap_path_no_collect",
           "description": "TEST1113: Multi-cap path without Collect \u2014 Collect is not synthesized",
-          "location": "planner/live_cap_fab_test.go:362"
+          "location": "planner/live_cap_fab_test.go:363"
         },
         "py": {
           "function": "test_1113_multi_cap_path_no_collect",
@@ -27730,7 +27730,7 @@
         "go": {
           "function": "Test1114_graph_stores_only_cap_edges",
           "description": "TEST1114: Graph stores only Cap edges after sync",
-          "location": "planner/live_cap_fab_test.go:385"
+          "location": "planner/live_cap_fab_test.go:386"
         },
         "py": {
           "function": "test_1114_graph_stores_only_cap_edges",
@@ -27764,7 +27764,7 @@
         "go": {
           "function": "Test1115_dynamic_foreach_with_is_sequence",
           "description": "TEST1115: ForEach is synthesized when is_sequence=true AND caps can consume items",
-          "location": "planner/live_cap_fab_test.go:403"
+          "location": "planner/live_cap_fab_test.go:404"
         },
         "py": {
           "function": "test_1115_dynamic_foreach_with_is_sequence",
@@ -27798,7 +27798,7 @@
         "go": {
           "function": "Test1116_collect_never_synthesized",
           "description": "TEST1116: Collect is never synthesized during path finding",
-          "location": "planner/live_cap_fab_test.go:436"
+          "location": "planner/live_cap_fab_test.go:437"
         },
         "py": {
           "function": "test_1116_collect_never_synthesized",
@@ -27832,7 +27832,7 @@
         "go": {
           "function": "Test1117_no_foreach_when_not_sequence",
           "description": "TEST1117: ForEach is NOT synthesized when is_sequence=false",
-          "location": "planner/live_cap_fab_test.go:455"
+          "location": "planner/live_cap_fab_test.go:456"
         },
         "py": {
           "function": "test_1117_no_foreach_when_not_sequence",
@@ -27866,7 +27866,7 @@
         "go": {
           "function": "Test1118_no_foreach_without_cap_consumers",
           "description": "TEST1118: ForEach not synthesized without cap consumers even with is_sequence=true",
-          "location": "planner/live_cap_fab_test.go:476"
+          "location": "planner/live_cap_fab_test.go:477"
         },
         "py": {
           "function": "test_1118_no_foreach_without_cap_consumers",
@@ -27900,7 +27900,7 @@
         "go": {
           "function": "Test1119_FromStrand_returns_single_strand_machine",
           "description": "TEST1119: Strand::knit returns a single-strand Machine via the new resolver. Smoke test the registry-threaded API end-to-end.",
-          "location": "machine/machine_test.go:748"
+          "location": "machine/machine_test.go:749"
         },
         "py": {
           "function": "test_1119_strand_knit_with_registry_returns_single_strand_machine",
@@ -27934,7 +27934,7 @@
         "go": {
           "function": "Test1120_FromStrand_unknown_cap_fails_hard",
           "description": "TEST1120: Strand::knit fails hard when the cap is not in the registry \u2014 the planner produces strands referencing caps that must be present in the cap registry's cache for resolution to succeed.",
-          "location": "machine/machine_test.go:774"
+          "location": "machine/machine_test.go:775"
         },
         "py": {
           "function": "test_1120_strand_knit_unknown_cap_fails_hard",
@@ -27967,7 +27967,7 @@
         "go": {
           "function": "Test1122_FullPathEngineReqToCartridgeResponse",
           "description": "TEST1122: Full path: engine REQ \u2192 runtime \u2192 cartridge \u2192 response back through relay",
-          "location": "bifaci/integration_test.go:1813"
+          "location": "bifaci/integration_test.go:1812"
         },
         "py": {
           "function": "test_1122_full_path_engine_req_to_cartridge_response",
@@ -28005,7 +28005,7 @@
         "go": {
           "function": "Test1123_CartridgeErrorFlowsToEngine",
           "description": "TEST1123: Cartridge ERR frame flows back to engine through relay",
-          "location": "bifaci/integration_test.go:1940"
+          "location": "bifaci/integration_test.go:1939"
         },
         "py": {
           "function": "test_1123_cartridge_error_flows_to_engine",
@@ -28038,7 +28038,7 @@
         "rust": {
           "function": "test1126_map_progress_deterministic",
           "description": "TEST1126: map_progress is deterministic \u2014 same inputs always produce same output",
-          "location": "src/orchestrator/executor.rs:3983"
+          "location": "src/orchestrator/executor.rs:3977"
         },
         "go": {
           "function": "Test1126_map_progress_deterministic",
@@ -28218,7 +28218,7 @@
         "go": {
           "function": "Test1133_media_def_def_documentation_lifecycle",
           "description": "TEST1133: MediaDef set/clear lifecycle for documentation. Setter and clearer must not cross-contaminate the description field.",
-          "location": "media/spec_test.go:706"
+          "location": "media/spec_test.go:589"
         },
         "py": {
           "function": "test_1133_media_def_def_documentation_lifecycle",
@@ -28252,7 +28252,7 @@
         "go": {
           "function": "Test1135_StrandNodeUrnReturnsMediaUrnAtNodeId",
           "description": "TEST1135: MachineStrand::node_urn(id) returns the MediaUrn at that NodeId. For a single-cap strand (pdf \u2192 extract \u2192 txt), there are exactly two nodes and each returns a valid URN.",
-          "location": "machine/machine_test.go:197"
+          "location": "machine/machine_test.go:198"
         },
         "py": {
           "function": "test_1135_strand_node_urn_accessor",
@@ -28286,7 +28286,7 @@
         "go": {
           "function": "Test1136_ParseMachineUndefinedAliasRaisesSyntaxError",
           "description": "TEST1136: parse_machine with an undefined cap alias raises MachineParseError wrapping MachineSyntaxError::UndefinedAlias. This pins the error path so an alias lookup failure is always surfaced as a syntax error (not a resolution error or a panic).",
-          "location": "machine/machine_test.go:506"
+          "location": "machine/machine_test.go:507"
         },
         "py": {
           "function": "test_1136_parse_machine_undefined_alias_raises_syntax_error",
@@ -28321,7 +28321,7 @@
         "go": {
           "function": "Test1138_assignment_bindings_are_sorted_by_cap_arg_media_urn",
           "description": "TEST1138: EdgeAssignmentBinding list is sorted by CapArgMediaUrn for canonical form. A two-source cap whose args are added in reverse-alphabetical order must still produce bindings sorted alphabetically by CapArgMediaUrn, enabling canonical comparison regardless of creation order.",
-          "location": "machine/machine_test.go:1149"
+          "location": "machine/machine_test.go:1150"
         }
       }
     },
@@ -28418,7 +28418,7 @@
         "go": {
           "function": "Test1142_resolved_graph_to_mermaid_renders_shapes_dedupes_edges_and_escapes",
           "description": "TEST1142: ResolvedGraph.to_mermaid() renders node shapes, deduplicates edges, and escapes labels",
-          "location": "orchestrator/orchestrator_test.go:68"
+          "location": "orchestrator/orchestrator_test.go:69"
         },
         "py": {
           "function": "test_1142_resolved_graph_to_mermaid_renders_shapes_dedupes_edges_and_escapes",
@@ -28596,7 +28596,7 @@
         "go": {
           "function": "Test1147_machine_syntax_error_display_is_specific",
           "description": "TEST1147: MachineSyntaxError.Error() includes position and detail. invalidWiringError(7) must produce a message containing \"statement 7\" and \"invalid wiring\".",
-          "location": "machine/machine_test.go:792"
+          "location": "machine/machine_test.go:793"
         },
         "py": {
           "function": "test_1147_machine_syntax_error_display_is_specific",
@@ -28630,7 +28630,7 @@
         "go": {
           "function": "Test1148_machine_parse_error_from_syntax_preserves_variant",
           "description": "TEST1148: MachineParseError::from(MachineSyntaxError) preserves the syntax error variant",
-          "location": "machine/machine_test.go:804"
+          "location": "machine/machine_test.go:805"
         },
         "py": {
           "function": "test_1148_machine_parse_error_from_syntax_preserves_variant",
@@ -28664,7 +28664,7 @@
         "go": {
           "function": "Test1149_machine_parse_error_from_resolution_preserves_variant",
           "description": "TEST1149: MachineParseError::from(MachineAbstractionError) preserves the resolution error variant",
-          "location": "machine/machine_test.go:820"
+          "location": "machine/machine_test.go:821"
         },
         "py": {
           "function": "test_1149_machine_parse_error_from_resolution_preserves_variant",
@@ -28697,7 +28697,7 @@
         "go": {
           "function": "Test1150_add_cap_and_basic_traversal",
           "description": "TEST1150: Adding one cap creates one edge and makes its output reachable in one step.",
-          "location": "planner/live_cap_fab_test.go:686"
+          "location": "planner/live_cap_fab_test.go:687"
         },
         "py": {
           "function": "test_1150_add_cap_and_basic_traversal",
@@ -28735,7 +28735,7 @@
         "go": {
           "function": "Test1151_exact_vs_conformance_matching",
           "description": "TEST1151: Exact target lookup prefers the direct singular or list-producing path over longer alternatives.",
-          "location": "planner/live_cap_fab_test.go:714"
+          "location": "planner/live_cap_fab_test.go:715"
         },
         "py": {
           "function": "test_1151_exact_vs_conformance_matching",
@@ -28773,7 +28773,7 @@
         "go": {
           "function": "Test1152_multi_step_path",
           "description": "TEST1152: Path finding returns the expected two-cap chain through an intermediate media type.",
-          "location": "planner/live_cap_fab_test.go:755"
+          "location": "planner/live_cap_fab_test.go:756"
         },
         "py": {
           "function": "test_1152_multi_step_path",
@@ -28811,7 +28811,7 @@
         "go": {
           "function": "Test1153_deterministic_ordering",
           "description": "TEST1153: Repeated path searches return the same path order for the same graph and target.",
-          "location": "planner/live_cap_fab_test.go:776"
+          "location": "planner/live_cap_fab_test.go:777"
         },
         "py": {
           "function": "test_1153_deterministic_ordering",
@@ -28849,7 +28849,7 @@
         "go": {
           "function": "Test1154_sync_from_caps",
           "description": "TEST1154: Syncing from caps replaces the existing graph contents with the new cap set.",
-          "location": "planner/live_cap_fab_test.go:804"
+          "location": "planner/live_cap_fab_test.go:805"
         },
         "py": {
           "function": "test_1154_sync_from_caps",
@@ -28888,7 +28888,7 @@
         "go": {
           "function": "Test1155_FromStrandProducesSingleStrandMachine",
           "description": "TEST1155: Building a machine from one strand produces one strand with one resolved edge.",
-          "location": "machine/machine_test.go:214"
+          "location": "machine/machine_test.go:215"
         },
         "py": {
           "function": "test_1155_from_strand_produces_single_strand_machine",
@@ -28922,7 +28922,7 @@
         "go": {
           "function": "Test1156_FromStrandsKeepStrandsDisjoint",
           "description": "TEST1156: Building from multiple strands keeps them disjoint and preserves input strand order.",
-          "location": "machine/machine_test.go:229"
+          "location": "machine/machine_test.go:230"
         },
         "py": {
           "function": "test_1156_from_strands_keeps_strands_disjoint",
@@ -28956,7 +28956,7 @@
         "go": {
           "function": "Test1157_FromStrandsEmptyInputFailsHard",
           "description": "TEST1157: Building from zero strands fails with NoCapabilitySteps.",
-          "location": "machine/machine_test.go:254"
+          "location": "machine/machine_test.go:255"
         },
         "py": {
           "function": "test_1157_from_strands_empty_raises_no_capability_steps",
@@ -28990,7 +28990,7 @@
         "go": {
           "function": "Test1158_MachineIsEquivalentIsStrictPositional",
           "description": "TEST1158: Machine equivalence is strict about strand order and rejects reordered strands.",
-          "location": "machine/machine_test.go:266"
+          "location": "machine/machine_test.go:267"
         },
         "py": {
           "function": "test_1158_machine_is_equivalent_strict_positional_order_matters",
@@ -29024,7 +29024,7 @@
         "go": {
           "function": "Test1159_MachineStrandIsEquivalentWalksNodeBijection",
           "description": "TEST1159: MachineStrand equivalence accepts two separately built but structurally identical strands.",
-          "location": "machine/machine_test.go:288"
+          "location": "machine/machine_test.go:289"
         },
         "py": {
           "function": "test_1159_strand_is_equivalent_consistent_node_bijection",
@@ -29058,7 +29058,7 @@
         "go": {
           "function": "Test1160_InputOutputAnchors",
           "description": "TEST1160: Creating a MachineRun stores the canonical notation and starts in the pending state.",
-          "location": "machine/machine_test.go:305"
+          "location": "machine/machine_test.go:306"
         },
         "py": {
           "function": "test_1160_machine_run_new_stores_canonical_notation",
@@ -29092,7 +29092,7 @@
         "go": {
           "function": "Test1161_simple_linear_chain_conversion",
           "description": "TEST1161: Converting a simple linear plan produces resolved edges for the cap-to-cap chain.",
-          "location": "orchestrator/orchestrator_test.go:118"
+          "location": "orchestrator/orchestrator_test.go:119"
         },
         "py": {
           "function": "test_1161_simple_linear_chain_conversion",
@@ -29160,7 +29160,7 @@
         "go": {
           "function": "Test1163_ParseSingleStrandTwoCapsConnectedViaSharedNode",
           "description": "TEST1163: Parsing one connected strand yields a single machine strand with both caps connected by the shared node.",
-          "location": "machine/machine_test.go:422"
+          "location": "machine/machine_test.go:423"
         },
         "py": {
           "function": "test_1163_parse_single_strand_two_caps_connected_via_shared_node",
@@ -29194,7 +29194,7 @@
         "go": {
           "function": "Test1164_ParseTwoDisconnectedStrandsYieldsTwoMachineStrands",
           "description": "TEST1164: Parsing two disconnected strand definitions yields two separate machine strands.",
-          "location": "machine/machine_test.go:450"
+          "location": "machine/machine_test.go:451"
         },
         "py": {
           "function": "test_1164_parse_machine_disconnected_wirings_become_separate_strands",
@@ -29228,7 +29228,7 @@
         "go": {
           "function": "Test1165_ParseUnknownCapInRegistryReturnsAbstractionError",
           "description": "TEST1165: Parsing fails hard when a referenced cap is missing from the registry cache.",
-          "location": "machine/machine_test.go:560"
+          "location": "machine/machine_test.go:561"
         },
         "py": {
           "function": "test_1165_parse_machine_unknown_cap_raises_parse_error_with_abstraction_cause",
@@ -29262,7 +29262,7 @@
         "go": {
           "function": "Test1166_ParseDuplicateAliasReturnsError",
           "description": "TEST1166: Duplicate header aliases are reported as syntax errors.",
-          "location": "machine/machine_test.go:532"
+          "location": "machine/machine_test.go:533"
         },
         "py": {
           "function": "test_1166_parse_duplicate_alias_is_syntax_error",
@@ -29296,7 +29296,7 @@
         "go": {
           "function": "Test1167_ParseUndefinedAliasReturnsError",
           "description": "TEST1167: Wiring that references an undefined alias is reported as a syntax error.",
-          "location": "machine/machine_test.go:547"
+          "location": "machine/machine_test.go:548"
         },
         "py": {
           "function": "test_1167_parse_undefined_alias_is_syntax_error",
@@ -29330,7 +29330,7 @@
         "go": {
           "function": "Test1168_ParseNodeNameCollidesWithCapAlias",
           "description": "TEST1168: Parsing rejects node names that collide with declared cap aliases.",
-          "location": "machine/machine_test.go:575"
+          "location": "machine/machine_test.go:576"
         },
         "py": {
           "function": "test_1168_parse_node_alias_collision_with_header_alias_fails_hard",
@@ -29364,7 +29364,7 @@
         "go": {
           "function": "Test1169_SequenceIntoScalarCapDerivesIsLoop",
           "description": "TEST1169: A sequence-output cap feeding a scalar-input cap makes the resolved edge a per-item map (IsLoop), derived from cardinality \u2014 the single rule cap.NeedsForeach, which replaces the retired LOOP keyword. The scalar->sequence producer edge itself does not loop.",
-          "location": "machine/machine_test.go:341"
+          "location": "machine/machine_test.go:342"
         },
         "py": {
           "function": "test_1169_sequence_into_scalar_cap_derives_is_loop",
@@ -29398,7 +29398,7 @@
         "go": {
           "function": "Test1170_CollectIsElided",
           "description": "TEST1170: Parsing and then serializing machine notation round-trips to the canonical form.",
-          "location": "machine/machine_test.go:384"
+          "location": "machine/machine_test.go:385"
         },
         "py": {
           "function": "test_1170_parse_then_serialize_round_trips_to_canonical_form",
@@ -29432,7 +29432,7 @@
         "go": {
           "function": "Test1171_ParseEmptyInputReturnsError",
           "description": "TEST1171: Empty machine notation is rejected as a syntax error.",
-          "location": "machine/machine_test.go:494"
+          "location": "machine/machine_test.go:495"
         },
         "py": {
           "function": "test_1171_machine_parse_error_wraps_syntax_error",
@@ -29466,7 +29466,7 @@
         "go": {
           "function": "Test1172_MachineStringRepr",
           "description": "TEST1172: Serializing a two-step strand emits the expected aliases and node names.",
-          "location": "machine/machine_test.go:659"
+          "location": "machine/machine_test.go:660"
         },
         "py": {
           "function": "test_1172_serialize_two_step_strand_emits_global_aliases_and_node_names",
@@ -29500,7 +29500,7 @@
         "go": {
           "function": "Test1173_ToMachineNotationRoundTrips",
           "description": "TEST1173: Serializing and reparsing a machine preserves strict machine equivalence.",
-          "location": "machine/machine_test.go:594"
+          "location": "machine/machine_test.go:595"
         },
         "py": {
           "function": "test_1173_serialize_then_parse_round_trip_preserves_strict_equivalence",
@@ -29534,7 +29534,7 @@
         "go": {
           "function": "Test1174_LineBasedFormatRoundTripsToSameMachine",
           "description": "TEST1174: The line-based notation format round-trips back to the same machine.",
-          "location": "machine/machine_test.go:623"
+          "location": "machine/machine_test.go:624"
         },
         "py": {
           "function": "test_1174_line_based_format_round_trips_to_same_machine",
@@ -29568,7 +29568,7 @@
         "go": {
           "function": "Test1175_EmptyMachineSerializesToEmpty",
           "description": "TEST1175: Serializing an empty machine produces an empty string.",
-          "location": "machine/machine_test.go:651"
+          "location": "machine/machine_test.go:652"
         },
         "py": {
           "function": "test_1175_empty_machine_serializes_to_empty_string",
@@ -29602,7 +29602,7 @@
         "go": {
           "function": "Test1176_render_payload_json_includes_strand_with_anchors",
           "description": "TEST1176: ToRenderPayloadJSON for a populated machine includes strand with nodes, edges, input_anchor_nodes, and output_anchor_nodes.",
-          "location": "machine/machine_test.go:1196"
+          "location": "machine/machine_test.go:1197"
         },
         "py": {
           "function": "test_1176_render_payload_json_includes_strand_with_anchors",
@@ -29636,7 +29636,7 @@
         "go": {
           "function": "Test1177_render_payload_for_empty_machine_has_empty_strands_array",
           "description": "TEST1177: Rendering payload JSON for an empty machine emits an empty strands array.",
-          "location": "machine/machine_test.go:1235"
+          "location": "machine/machine_test.go:1236"
         },
         "py": {
           "function": "test_1177_render_payload_for_empty_machine_has_empty_strands_array",
@@ -29670,7 +29670,7 @@
         "go": {
           "function": "Test1178_match_single_source_picks_unique_arg",
           "description": "TEST1178: One source is assigned to the single compatible cap argument.",
-          "location": "machine/machine_test.go:866"
+          "location": "machine/machine_test.go:867"
         },
         "py": {
           "function": "test_1178_match_single_source_picks_unique_arg",
@@ -29704,7 +29704,7 @@
         "go": {
           "function": "Test1179_match_more_specific_source_assigned_to_general_arg",
           "description": "TEST1179: Source-to-arg matching assigns a more specific source to a compatible general argument.",
-          "location": "machine/machine_test.go:879"
+          "location": "machine/machine_test.go:880"
         },
         "py": {
           "function": "test_1179_match_sources_more_specific_source_matches_general_arg",
@@ -29738,7 +29738,7 @@
         "go": {
           "function": "Test1180_match_unmatched_source_fails_hard",
           "description": "TEST1180: Matching fails when a source does not conform to any cap input argument.",
-          "location": "machine/machine_test.go:892"
+          "location": "machine/machine_test.go:893"
         },
         "py": {
           "function": "test_1180_match_sources_unmatched_source_fails_hard",
@@ -29772,7 +29772,7 @@
         "go": {
           "function": "Test1181_match_two_sources_disambiguated_by_specificity",
           "description": "TEST1181: matchSourcesToArgs disambiguates two sources by specificity.",
-          "location": "machine/machine_test.go:903"
+          "location": "machine/machine_test.go:904"
         },
         "py": {
           "function": "test_1181_match_two_sources_disambiguated_by_specificity",
@@ -29806,7 +29806,7 @@
         "go": {
           "function": "Test1182_match_ambiguous_when_two_sources_could_swap",
           "description": "TEST1182: Matching fails as ambiguous when two sources can be swapped at equal minimum cost.",
-          "location": "machine/machine_test.go:927"
+          "location": "machine/machine_test.go:928"
         },
         "py": {
           "function": "test_1182_match_sources_ambiguous_raises_ambiguous_error",
@@ -29840,7 +29840,7 @@
         "go": {
           "function": "Test1183_match_more_sources_than_args_fails_hard",
           "description": "TEST1183: Matching fails when more sources are provided than the cap has input arguments.",
-          "location": "machine/machine_test.go:938"
+          "location": "machine/machine_test.go:939"
         },
         "py": {
           "function": "test_1183_match_more_sources_than_args_fails_hard",
@@ -29874,7 +29874,7 @@
         "go": {
           "function": "Test1184_resolve_strand_single_cap_produces_one_edge",
           "description": "TEST1184: Resolving a strand with one cap produces one resolved machine edge.",
-          "location": "machine/machine_test.go:949"
+          "location": "machine/machine_test.go:950"
         },
         "py": {
           "function": "test_1184_single_edge_strand_resolves_correctly",
@@ -29908,7 +29908,7 @@
         "go": {
           "function": "Test1185_resolve_strand_chained_caps_share_intermediate_node",
           "description": "TEST1185: Resolving a chained strand reuses the intermediate node between adjacent caps.",
-          "location": "machine/machine_test.go:980"
+          "location": "machine/machine_test.go:981"
         },
         "py": {
           "function": "test_1185_resolve_strand_chained_caps_share_intermediate_node",
@@ -29942,7 +29942,7 @@
         "go": {
           "function": "Test1186_resolve_strand_foreach_marks_following_cap_as_loop",
           "description": "TEST1186: Resolving a strand with ForEach marks the following cap edge as a loop. IsLoop is derived from cardinality: disbind produces a SEQUENCE of pages, and make_decision consumes a scalar page, so make_decision's edge maps per item. Collect at the end is elided.",
-          "location": "machine/machine_test.go:1011"
+          "location": "machine/machine_test.go:1012"
         },
         "py": {
           "function": "test_1186_resolve_strand_foreach_marks_following_cap_as_loop",
@@ -29976,7 +29976,7 @@
         "go": {
           "function": "Test1187_StrandNonEquivalenceDifferentCap",
           "description": "TEST1187: Strand resolution fails when a referenced cap is not found in the registry.",
-          "location": "machine/machine_test.go:723"
+          "location": "machine/machine_test.go:724"
         },
         "py": {
           "function": "test_1187_unknown_cap_error_when_not_in_registry",
@@ -30010,7 +30010,7 @@
         "go": {
           "function": "Test1188_resolve_strand_no_cap_steps_fails_hard",
           "description": "TEST1188: Strand resolution fails when the strand contains no capability steps.",
-          "location": "machine/machine_test.go:1062"
+          "location": "machine/machine_test.go:1063"
         },
         "py": {
           "function": "test_1188_resolve_strand_no_cap_steps_fails_hard",
@@ -30044,7 +30044,7 @@
         "go": {
           "function": "Test1189_StrandEquivalenceWithDifferentNodeAllocationOrders",
           "description": "TEST1189: Strand resolution keeps canonical anchor ordering stable across equivalent inputs.",
-          "location": "machine/machine_test.go:676"
+          "location": "machine/machine_test.go:677"
         },
         "py": {
           "function": "test_1189_resolve_strand_canonical_anchor_order_is_stable",
@@ -30078,7 +30078,7 @@
         "go": {
           "function": "Test1190_resolve_strand_inverse_format_converters_no_cycle",
           "description": "TEST1190: resolveStrand with inverse format converters produces 3 distinct nodes, no cycle.",
-          "location": "machine/machine_test.go:1075"
+          "location": "machine/machine_test.go:1076"
         },
         "py": {
           "function": "test_1190_resolve_strand_inverse_format_converters_no_cycle",
@@ -30112,7 +30112,7 @@
         "go": {
           "function": "Test1191_resolve_strand_disbind_pdf_with_file_path_slot_identity",
           "description": "TEST1191: Disbinding a PDF with a file-path slot preserves the expected identity of the slot binding.",
-          "location": "machine/machine_test.go:1108"
+          "location": "machine/machine_test.go:1109"
         },
         "py": {
           "function": "test_1191_resolve_strand_disbind_pdf_with_file_path_slot_identity",
@@ -30145,7 +30145,7 @@
         "go": {
           "function": "Test1196_AliasedSerializationUsesAliasAndRoundTrips",
           "description": "TEST1196: ToMachineNotationAliased renders a cap by its registered display alias (shortest, then alphabetical), referencing it DIRECTLY in the wiring with NO header, while a cap with no alias keeps its synthetic edge_N header + raw URN; the result round-trips back to the same machine (the parser resolves the alias from the warm cache). Mirrors Rust serializer::test1196.",
-          "location": "machine/alias_test.go:216"
+          "location": "machine/alias_test.go:110"
         },
         "py": {
           "function": "test_1196_aliased_serialization_uses_alias_and_round_trips",
@@ -30490,7 +30490,7 @@
         "go": {
           "function": "Test1236_Disc2ModelSpecValidationPatternFiltersContent",
           "description": "TEST1236: Colon-delimited model spec text survives TXT candidate discrimination.",
-          "location": "input_resolver/resolver_test.go:202"
+          "location": "input_resolver/resolver_test.go:199"
         },
         "py": {
           "function": "test_1236_disc_2_model_spec_validation_pattern_filters_content",
@@ -30524,7 +30524,7 @@
         "go": {
           "function": "Test1237_Disc5EmptyCandidates",
           "description": "TEST1237: Empty candidates \u2192 empty result",
-          "location": "input_resolver/resolver_test.go:230"
+          "location": "input_resolver/resolver_test.go:227"
         },
         "py": {
           "function": "test_1237_disc_5_empty_candidates",
@@ -30558,7 +30558,7 @@
         "go": {
           "function": "Test1238_Disc6UnknownUrnSurvives",
           "description": "TEST1238: Unknown URN survives discrimination",
-          "location": "input_resolver/resolver_test.go:239"
+          "location": "input_resolver/resolver_test.go:236"
         },
         "py": {
           "function": "test_1238_disc_6_unknown_urn_survives",
@@ -30592,7 +30592,7 @@
         "go": {
           "function": "Test1256_parse_simple_machine",
           "description": "TEST1256: A single declared cap and one wiring parse into a two-node one-edge DAG.",
-          "location": "orchestrator/orchestrator_test.go:285"
+          "location": "orchestrator/orchestrator_test.go:286"
         },
         "py": {
           "function": "test_1256_parse_simple_machine",
@@ -30626,7 +30626,7 @@
         "go": {
           "function": "Test1257_parse_two_step_chain",
           "description": "TEST1257: Two sequential wirings preserve the intermediate node media type.",
-          "location": "orchestrator/orchestrator_test.go:312"
+          "location": "orchestrator/orchestrator_test.go:313"
         },
         "py": {
           "function": "test_1257_parse_two_step_chain",
@@ -30660,7 +30660,7 @@
         "go": {
           "function": "Test1258_parse_fan_out",
           "description": "TEST1258: One source node can fan out into multiple caps and target nodes.",
-          "location": "orchestrator/orchestrator_test.go:345"
+          "location": "orchestrator/orchestrator_test.go:346"
         },
         "py": {
           "function": "test_1258_parse_fan_out",
@@ -30694,7 +30694,7 @@
         "go": {
           "function": "Test1259_parse_fan_in",
           "description": "TEST1259: Fan-in wiring resolves multiple upstream outputs into one multi-arg cap.",
-          "location": "orchestrator/orchestrator_test.go:372"
+          "location": "orchestrator/orchestrator_test.go:373"
         },
         "py": {
           "function": "test_1259_parse_fan_in",
@@ -30728,7 +30728,7 @@
         "go": {
           "function": "Test1260_loop_keyword_retired",
           "description": "TEST1260: The LOOP keyword is retired from the grammar. A keyword-free wiring parses to a single edge; the old LOOP form no longer parses. ForEach is never authored \u2014 it is derived from cardinality in the resolver/realizer.",
-          "location": "orchestrator/orchestrator_test.go:414"
+          "location": "orchestrator/orchestrator_test.go:415"
         },
         "py": {
           "function": "test_1260_loop_keyword_retired",
@@ -30762,7 +30762,7 @@
         "go": {
           "function": "Test1261_cap_not_found_in_registry",
           "description": "TEST1261: Parsing fails when a declared cap is absent from the registry. In Go the machine parser resolves caps before the orchestrator layer checks, so the error may be ErrMachineSyntaxParseFailed or ErrCapNotFound.",
-          "location": "orchestrator/orchestrator_test.go:442"
+          "location": "orchestrator/orchestrator_test.go:443"
         },
         "py": {
           "function": "test_1261_cap_not_found_in_registry",
@@ -30796,7 +30796,7 @@
         "go": {
           "function": "Test1262_invalid_machine_notation",
           "description": "TEST1262: Non-machine text fails with a machine syntax parse error.",
-          "location": "orchestrator/orchestrator_test.go:460"
+          "location": "orchestrator/orchestrator_test.go:461"
         },
         "py": {
           "function": "test_1262_invalid_machine_notation",
@@ -30830,7 +30830,7 @@
         "go": {
           "function": "Test1263_cycle_detection",
           "description": "TEST1263: Cyclic wirings are rejected as non-DAG orchestrations. In Go the machine parser may reject cycles at the parse layer or the orchestrator layer.",
-          "location": "orchestrator/orchestrator_test.go:477"
+          "location": "orchestrator/orchestrator_test.go:478"
         },
         "py": {
           "function": "test_1263_cycle_detection",
@@ -30864,7 +30864,7 @@
         "go": {
           "function": "Test1264_incompatible_media_types_at_shared_node",
           "description": "TEST1264: Shared nodes with incompatible upstream and downstream media fail during parsing.",
-          "location": "orchestrator/orchestrator_test.go:501"
+          "location": "orchestrator/orchestrator_test.go:502"
         },
         "py": {
           "function": "test_1264_incompatible_media_types_at_shared_node",
@@ -30898,7 +30898,7 @@
         "go": {
           "function": "Test1265_compatible_media_urns_at_shared_node",
           "description": "TEST1265: Shared nodes accept compatible media URNs when one is a more specific form of the other.",
-          "location": "orchestrator/orchestrator_test.go:523"
+          "location": "orchestrator/orchestrator_test.go:524"
         },
         "py": {
           "function": "test_1265_compatible_media_urns_at_shared_node",
@@ -30932,7 +30932,7 @@
         "go": {
           "function": "Test1266_structure_mismatch_record_to_opaque",
           "description": "TEST1266: Record-to-opaque structure mismatches are rejected once structure checking is enabled. Skipped, mirroring Rust's #[ignore = \"structure mismatch detection between node media and cap input not yet implemented\"]. The orchestrator keys node media on the strand's interned node URN (the resolver's source-to-arg assignment), so a single node carries one media URN: the produce edge's record output and the process edge's source both resolve to that same interned URN, and there is no separate opaque cap-input URN left to compare against. Detecting a record-vs-opaque mismatch between a node's media and a downstream cap's declared input requires comparing the node URN to the cap's in= spec \u2014 a check the resolver-based design does not yet perform.",
-          "location": "orchestrator/orchestrator_test.go:551"
+          "location": "orchestrator/orchestrator_test.go:552"
         },
         "py": {
           "function": "test_1266_structure_mismatch_record_to_opaque",
@@ -30966,7 +30966,7 @@
         "go": {
           "function": "Test1267_structure_match_both_record",
           "description": "TEST1267: Record-shaped outputs can feed record-shaped inputs without error.",
-          "location": "orchestrator/orchestrator_test.go:581"
+          "location": "orchestrator/orchestrator_test.go:582"
         },
         "py": {
           "function": "test_1267_structure_match_both_record",
@@ -31000,7 +31000,7 @@
         "go": {
           "function": "Test1268_structure_match_both_opaque",
           "description": "TEST1268: Opaque outputs can feed opaque inputs without triggering structure conflicts.",
-          "location": "orchestrator/orchestrator_test.go:599"
+          "location": "orchestrator/orchestrator_test.go:600"
         },
         "py": {
           "function": "test_1268_structure_match_both_opaque",
@@ -31034,7 +31034,7 @@
         "go": {
           "function": "Test1269_parse_multiline_machine",
           "description": "TEST1269: Multi-line machine notation parses successfully with the same semantics as inline notation.",
-          "location": "orchestrator/orchestrator_test.go:617"
+          "location": "orchestrator/orchestrator_test.go:618"
         },
         "py": {
           "function": "test_1269_parse_multiline_machine",
@@ -31246,7 +31246,7 @@
         "go": {
           "function": "Test1276_RegisterNonConflicting",
           "description": "TEST1276: Registration of a cap group with non-conflicting adapters succeeds",
-          "location": "input_resolver/adapter_registry_test.go:30"
+          "location": "input_resolver/adapter_registry_test.go:27"
         },
         "py": {
           "function": "test_1276_register_non_conflicting",
@@ -31280,7 +31280,7 @@
         "go": {
           "function": "Test1277_RejectConformingOverlap",
           "description": "TEST1277: Registration of a cap group with an adapter that conforms_to an existing adapter is rejected",
-          "location": "input_resolver/adapter_registry_test.go:47"
+          "location": "input_resolver/adapter_registry_test.go:44"
         },
         "py": {
           "function": "test_1277_reject_conforming_overlap",
@@ -31314,7 +31314,7 @@
         "go": {
           "function": "Test1278_RejectEntireGroup",
           "description": "TEST1278: Registration rejects the entire group \u2014 no partial registration",
-          "location": "input_resolver/adapter_registry_test.go:69"
+          "location": "input_resolver/adapter_registry_test.go:66"
         },
         "py": {
           "function": "test_1278_reject_entire_group",
@@ -31348,7 +31348,7 @@
         "go": {
           "function": "Test1279_IntraGroupConflict",
           "description": "TEST1279: Intra-group conflict (two adapters within same group overlap) is rejected",
-          "location": "input_resolver/adapter_registry_test.go:98"
+          "location": "input_resolver/adapter_registry_test.go:95"
         },
         "py": {
           "function": "test_1279_intra_group_conflict",
@@ -31382,7 +31382,7 @@
         "go": {
           "function": "Test1280_FindAdaptersForExtension",
           "description": "TEST1280: find_adapters_for_extension returns correct cartridge IDs",
-          "location": "input_resolver/adapter_registry_test.go:118"
+          "location": "input_resolver/adapter_registry_test.go:115"
         },
         "py": {
           "function": "test_1280_find_adapters_for_extension",
@@ -31416,7 +31416,7 @@
         "go": {
           "function": "Test1281_NoAdapterForUnknown",
           "description": "TEST1281: has_adapter_for_extension returns false for unregistered extension",
-          "location": "input_resolver/adapter_registry_test.go:136"
+          "location": "input_resolver/adapter_registry_test.go:133"
         },
         "py": {
           "function": "test_1281_no_adapter_for_unknown",
@@ -31552,7 +31552,7 @@
         "go": {
           "function": "Test1285_ConfirmedNoAdaptersFails",
           "description": "TEST1285: detect_file_confirmed fails when no adapters are registered for the extension",
-          "location": "input_resolver/resolver_test.go:273"
+          "location": "input_resolver/resolver_test.go:270"
         },
         "py": {
           "function": "test_1285_confirmed_no_adapters_fails",
@@ -31586,7 +31586,7 @@
         "go": {
           "function": "Test1286_ConfirmedAdapterReturnsUrns",
           "description": "TEST1286: detect_file_confirmed succeeds when adapter returns URNs",
-          "location": "input_resolver/resolver_test.go:291"
+          "location": "input_resolver/resolver_test.go:288"
         },
         "py": {
           "function": "test_1286_confirmed_adapter_returns_urns",
@@ -31620,7 +31620,7 @@
         "go": {
           "function": "Test1287_ConfirmedAllAdaptersNoMatch",
           "description": "TEST1287: detect_file_confirmed fails when all adapters return empty END (no match)",
-          "location": "input_resolver/resolver_test.go:318"
+          "location": "input_resolver/resolver_test.go:315"
         },
         "py": {
           "function": "test_1287_confirmed_all_adapters_no_match",
@@ -31654,7 +31654,7 @@
         "go": {
           "function": "Test1288_StructureFromMarkerTags",
           "description": "TEST1288: structure_from_marker_tags correctly maps tag combinations to ContentStructure",
-          "location": "input_resolver/resolver_test.go:249"
+          "location": "input_resolver/resolver_test.go:246"
         },
         "py": {
           "function": "test_1288_structure_from_marker_tags",
@@ -31688,7 +31688,7 @@
         "go": {
           "function": "Test1289_bfs_reachable_includes_source_roundtrip",
           "description": "TEST1289: BFS reachable targets includes the source itself when round-trip paths exist. A\u2192B and B\u2192A means A is reachable from A (via A\u2192B\u2192A).",
-          "location": "planner/live_cap_fab_test.go:489"
+          "location": "planner/live_cap_fab_test.go:490"
         },
         "py": {
           "function": "test_1289_bfs_reachable_includes_source_roundtrip",
@@ -31722,7 +31722,7 @@
         "go": {
           "function": "Test1290_iddfs_finds_roundtrip_paths",
           "description": "TEST1290: IDDFS find_paths_to_exact_target finds round-trip paths when source == target.",
-          "location": "planner/live_cap_fab_test.go:523"
+          "location": "planner/live_cap_fab_test.go:524"
         },
         "py": {
           "function": "test_1290_iddfs_finds_roundtrip_paths",
@@ -31756,7 +31756,7 @@
         "go": {
           "function": "Test1291_iddfs_roundtrip_with_sequence",
           "description": "TEST1291: IDDFS round-trip paths are also found with is_sequence=true. The ForEach/Collect edges must not block round-trip discovery.",
-          "location": "planner/live_cap_fab_test.go:560"
+          "location": "planner/live_cap_fab_test.go:561"
         },
         "py": {
           "function": "test_1291_iddfs_roundtrip_with_sequence",
@@ -31790,7 +31790,7 @@
         "go": {
           "function": "Test1292_bfs_iddfs_roundtrip_consistency",
           "description": "TEST1292: BFS and IDDFS agree that round-trip targets exist. If BFS says target X is reachable from source X, IDDFS must find at least one path.",
-          "location": "planner/live_cap_fab_test.go:589"
+          "location": "planner/live_cap_fab_test.go:590"
         },
         "py": {
           "function": "test_1292_bfs_iddfs_roundtrip_consistency",
@@ -31824,7 +31824,7 @@
         "go": {
           "function": "Test1293_roundtrip_requires_cap_steps",
           "description": "TEST1293: IDDFS round-trip does not produce paths with 0 cap steps. Identity-only round trips (no real transformation) must be excluded.",
-          "location": "planner/live_cap_fab_test.go:630"
+          "location": "planner/live_cap_fab_test.go:631"
         },
         "py": {
           "function": "test_1293_roundtrip_requires_cap_steps",
@@ -31857,7 +31857,7 @@
         "go": {
           "function": "Test1294_rule11_void_input_with_stdin_rejected",
           "description": "TEST1294: RULE11 - void-input cap with stdin source rejected",
-          "location": "cap/validation_test.go:296"
+          "location": "cap/validation_test.go:293"
         },
         "py": {
           "function": "test_1294_rule11_void_input_with_stdin",
@@ -31895,7 +31895,7 @@
         "go": {
           "function": "Test1295_rule11_non_void_input_without_stdin_rejected",
           "description": "TEST1295: RULE11 - non-void-input cap without stdin source rejected",
-          "location": "cap/validation_test.go:309"
+          "location": "cap/validation_test.go:306"
         },
         "py": {
           "function": "test_1295_rule11_non_void_input_without_stdin",
@@ -31933,7 +31933,7 @@
         "go": {
           "function": "Test1296_rule11_void_input_cli_flag_only_passes",
           "description": "TEST1296: RULE11 - void-input cap with only cli_flag sources passes",
-          "location": "cap/validation_test.go:322"
+          "location": "cap/validation_test.go:319"
         },
         "py": {
           "function": "test_1296_rule11_void_input_cli_flag_only",
@@ -31971,7 +31971,7 @@
         "go": {
           "function": "Test1297_rule11_non_void_input_with_stdin_passes",
           "description": "TEST1297: RULE11 - non-void-input cap with stdin source passes",
-          "location": "cap/validation_test.go:334"
+          "location": "cap/validation_test.go:331"
         },
         "py": {
           "function": "test_1297_rule11_non_void_input_with_stdin",
@@ -32124,7 +32124,7 @@
         "go": {
           "function": "Test1308_CyclicStrandFailsHard",
           "description": "TEST1308: A wiring set that feeds a cap's output back into an ancestor forms a cycle and must fail hard with CyclicMachineStrand carrying the strand index. Cycle: node 0 \u2192 cap A \u2192 node 1 \u2192 cap B \u2192 node 0.",
-          "location": "machine/machine_test.go:1244"
+          "location": "machine/machine_test.go:1245"
         },
         "py": {
           "function": "test_1308_cyclic_strand_fails_hard",
@@ -32886,7 +32886,7 @@
         "go": {
           "function": "Test1883_CapPositionAliasResolvesToCap",
           "description": "Test1883: a cap-position name with no local header resolves as a cap alias.",
-          "location": "machine/alias_test.go:167"
+          "location": "machine/alias_test.go:61"
         },
         "py": {
           "function": "test_1883_cap_position_alias_resolves_to_cap",
@@ -32920,7 +32920,7 @@
         "go": {
           "function": "Test1884_LocalHeaderShadowsCapAlias",
           "description": "Test1884: a local header alias shadows a fabric alias of the same name.",
-          "location": "machine/alias_test.go:178"
+          "location": "machine/alias_test.go:72"
         },
         "py": {
           "function": "test_1884_local_header_shadows_cap_alias",
@@ -32954,7 +32954,7 @@
         "go": {
           "function": "Test1885_CapPositionAliasToMediaIsError",
           "description": "Test1885: a cap-position alias that resolves to a MEDIA URN is a hard error.",
-          "location": "machine/alias_test.go:191"
+          "location": "machine/alias_test.go:85"
         },
         "py": {
           "function": "test_1885_cap_position_alias_to_media_is_error",
@@ -32988,7 +32988,7 @@
         "go": {
           "function": "Test1886_UnregisteredCapNameIsUndefinedAlias",
           "description": "TEST1886: a cap-position name that is neither a local header nor a registered alias still raises UndefinedAlias. The alias mechanism must not mask a genuinely undefined name.",
-          "location": "machine/alias_test.go:203"
+          "location": "machine/alias_test.go:97"
         },
         "py": {
           "function": "test_1886_unregistered_cap_name_is_undefined_alias",
@@ -33021,7 +33021,7 @@
         "go": {
           "function": "Test1888_ResolveAliasReturnsTarget",
           "description": "TEST1888: resolve_alias returns the alias target untyped. Seeding a media alias and resolving it yields the media URN; a malformed alias name is rejected before any lookup.",
-          "location": "machine/alias_test.go:75"
+          "location": "fabric/registry_test.go:256"
         },
         "py": {
           "function": "test_1888_resolve_alias_returns_target",
@@ -33059,7 +33059,7 @@
         "go": {
           "function": "Test1889_ResolveAliasTypedEnforcesKind",
           "description": "Test1889: resolve alias typed enforces the expected kind.",
-          "location": "machine/alias_test.go:92"
+          "location": "fabric/registry_test.go:277"
         },
         "py": {
           "function": "test_1889_resolve_alias_typed_enforces_kind",
@@ -33097,7 +33097,7 @@
         "go": {
           "function": "Test1890_GetCapViaAliasAndTypeMismatch",
           "description": "TEST1890: get_cap accepts a cap alias and returns the aliased cap; a media alias passed to get_cap fails hard (typed boundary). This proves alias substitution AND type enforcement at the registry's cap surface.",
-          "location": "machine/alias_test.go:105"
+          "location": "fabric/registry_test.go:294"
         },
         "py": {
           "function": "test_1890_get_cap_via_alias_and_type_mismatch",
@@ -33135,7 +33135,7 @@
         "go": {
           "function": "Test1891_GetMediaDefViaAliasAndTypeMismatch",
           "description": "TEST1891: get_media_def accepts a media alias and returns the aliased spec; a cap alias passed to get_media_def fails hard.",
-          "location": "machine/alias_test.go:122"
+          "location": "fabric/registry_test.go:315"
         },
         "py": {
           "function": "test_1891_get_media_def_via_alias_and_type_mismatch",
@@ -33173,7 +33173,7 @@
         "go": {
           "function": "Test1892_UnknownAliasIsNotFound",
           "description": "TEST1892: an unknown alias name is a hard not-found, never a silent empty; unknown and malformed names are treated the same. This is the \"expose issues, no fallback\" contract.",
-          "location": "machine/alias_test.go:142"
+          "location": "fabric/registry_test.go:338"
         },
         "py": {
           "function": "test_1892_unknown_alias_is_not_found",
@@ -33211,7 +33211,7 @@
         "go": {
           "function": "Test1893_CacheRootIsNamespacedPerRegistryOrigin",
           "description": "TEST1893: The fabric registry's on-disk cache root is namespaced per registry origin. A cache populated from one origin must never be reused to satisfy a lookup against another \u2014 prod and staging serve different bytes for the same URN/version, so an origin-blind cache silently resolves against the wrong snapshot. This pins three properties: distinct origins \u2192 distinct roots; same origin \u2192 identical root (deterministic, so caching actually hits); and the slug is the same slug_for scheme the cartridge registry layout uses, living under the shared \"capdag\" cache directory.",
-          "location": "cap/registry_test.go:250"
+          "location": "fabric/registry_test.go:369"
         },
         "py": {
           "function": "test_1893_cache_root_is_namespaced_per_registry_origin",
@@ -33249,7 +33249,7 @@
         "go": {
           "function": "Test1894_SelectDisplayAliasOrdering",
           "description": "TEST1894: selectDisplayAlias picks the SHORTEST name, ties broken alphabetically. This is the deterministic ordering every aliased-display surface relies on; a regression here silently changes which alias the whole UI renders. Mirrors Rust registry::test1894.",
-          "location": "cap/registry_test.go:314"
+          "location": "fabric/registry_test.go:415"
         },
         "py": {
           "function": "test_1894_select_display_alias_ordering",
@@ -33287,7 +33287,7 @@
         "go": {
           "function": "Test1895_DisplayAliasForURN",
           "description": "TEST1895: DisplayAliasForURN reverse-resolves a URN to its display alias. Proves: (1) the shortest-then-alphabetical winner among multiple aliases on the same target, (2) a NON-canonical query URN (different tag order) still resolves because the query is canonicalised before matching, (3) a URN with no alias returns not-found, (4) a non-URN string returns not-found. Mirrors Rust registry::test1895.",
-          "location": "cap/registry_test.go:341"
+          "location": "fabric/registry_test.go:456"
         },
         "py": {
           "function": "test_1895_display_alias_for_urn",
@@ -33325,7 +33325,7 @@
         "go": {
           "function": "Test1896_CachedCapAliasesFiltersToCapTargets",
           "description": "TEST1896: CachedCapAliases returns only CAP-targeted aliases as (name, target) pairs \u2014 media aliases are excluded. Drives the notation editor's registered- alias completions. Mirrors Rust registry::test1896.",
-          "location": "cap/registry_test.go:385"
+          "location": "fabric/registry_test.go:508"
         },
         "py": {
           "function": "test_1896_cached_cap_aliases_filters_to_cap_targets",
@@ -33439,7 +33439,7 @@
         "go": {
           "function": "Test1899_MediaDefResolvesToVersionedObjectPathUnderManifest",
           "description": "TEST1899: a media def published under a manifest (v >= 1) resolves to the VERSIONED object path `/media/<sha>/<defver>.json`, never the legacy flat path `/media/<sha>`. The flat path is the pre-manifest (v0) layout; a registry that silently runs in v0 mode fetches it and 404s every lookup against a versioned registry \u2014 the exact regression where a fabric-registry mirror defaulted its manifest version to 0. This pins both the URL rule and the manifest-driven defver resolution. Mirrors the Rust reference's test0144_media_def_resolves_to_versioned_object_path_under_manifest.",
-          "location": "media/registry_test.go:20"
+          "location": "fabric/registry_test.go:547"
         },
         "py": {
           "function": "test_1899_media_def_resolves_to_versioned_object_path_under_manifest",
@@ -33703,7 +33703,7 @@
         "go": {
           "function": "Test6207_ConcatenatedVsFinalPayloadDivergence",
           "description": "Mirror-specific coverage: Test that concatenated() returns full payload while final_payload() returns only last chunk",
-          "location": "bifaci/integration_test.go:1694"
+          "location": "bifaci/integration_test.go:1693"
         },
         "objc": {
           "function": "test6207_concatenatedVsFinalPayloadDivergence",
@@ -33731,7 +33731,7 @@
         "go": {
           "function": "Test6282_resolve_custom_media_def",
           "description": "TEST6282: Test resolving a custom media URN from a registry-seeded media def",
-          "location": "media/spec_test.go:77"
+          "location": "media/spec_test.go:75"
         },
         "py": {
           "function": "test_6282_resolve_custom_media_def",
@@ -33769,7 +33769,7 @@
         "go": {
           "function": "Test6283_resolve_custom_with_schema",
           "description": "TEST6283: Test resolving a custom record media def carrying a schema from a registry-seeded media def",
-          "location": "media/spec_test.go:96"
+          "location": "media/spec_test.go:93"
         },
         "py": {
           "function": "test_6283_resolve_custom_with_schema",
@@ -33885,7 +33885,7 @@
         "go": {
           "function": "Test6330_ChunkingDataIntegrity3x",
           "description": "Mirror-specific coverage: Test auto-chunking preserves data integrity across chunk boundaries for 3x max_chunk payload",
-          "location": "bifaci/integration_test.go:1718"
+          "location": "bifaci/integration_test.go:1717"
         },
         "py": {
           "function": "test_6330_chunking_data_integrity_3x",
@@ -33995,7 +33995,7 @@
         "go": {
           "function": "Test6382_parse_registry_json",
           "description": "TEST6382: Test parsing registry JSON without stdin args verifies cap structure",
-          "location": "cap/registry_test.go:81"
+          "location": "fabric/registry_test.go:662"
         },
         "py": {
           "function": "test_6382_parse_registry_json",
@@ -34028,7 +34028,7 @@
         "go": {
           "function": "Test6388_per_cap_url_uses_sha256",
           "description": "TEST6388: Per-cap URL is /caps/<sha256-hex> \u2014 no URN-grammar characters in the path, no percent-encoding gymnastics.",
-          "location": "cap/registry_test.go:137"
+          "location": "fabric/registry_test.go:684"
         },
         "py": {
           "function": "test_6388_per_cap_url_uses_sha256",
@@ -34066,7 +34066,7 @@
         "go": {
           "function": "Test6391_same_cap_different_spellings_same_url",
           "description": "TEST6391: Equivalent URNs (different tag order, etc.) hash to the same key. This is the property that makes cross-language lookups land at the same registry object regardless of which capdag implementation issued the request.",
-          "location": "cap/registry_test.go:151"
+          "location": "fabric/registry_test.go:708"
         },
         "py": {
           "function": "test_6391_same_cap_different_spellings_same_url",
@@ -34104,7 +34104,7 @@
         "go": {
           "function": "Test6396_MalformedCapUrnFailsHard",
           "description": "TEST6396: A malformed cap URN must FAIL HARD, not be passed through raw (the old silent fallback) and surface later as a misleading \"not in manifest\" / cache-miss. The `out` value below contains an unquoted `=`, which the cap grammar rejects. Against the old `if err == nil { normalized = ... }` fallback, normalizeCapUrn returned the raw string and GetCap then reported a not-found/manifest error; this test asserts the truthful parse error and that no path panics on a bad URN.",
-          "location": "cap/registry_test.go:281"
+          "location": "fabric/registry_test.go:739"
         },
         "py": {
           "function": "test_6396_malformed_cap_urn_fails_hard",
@@ -37054,6 +37054,310 @@
       }
     },
     {
+      "number": 7153,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7153_install_timestamp_is_rfc3339_utc",
+          "description": "TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known epoch instants and at the instants that break naive date arithmetic \u2014 a leap day, the day after one, and a century year that is NOT a leap year. Emitting a bare epoch count with a `Z` appended would satisfy \"some string ending in Z\" and satisfy nothing else; every reader and every fixture in the tree treats this field as a parseable timestamp.",
+          "location": "src/bifaci/cartridge_json.rs:1047"
+        },
+        "go": {
+          "function": "Test7153_install_timestamp_is_rfc3339_utc",
+          "description": "TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known epoch instants and at the instants that break naive date arithmetic \u2014 a leap day, the day after one, and a century year that is NOT a leap year. Emitting a bare epoch count with a `Z` appended would satisfy \"some string ending in Z\" and satisfy nothing else; every reader and every fixture in the tree treats this field as a parseable timestamp.",
+          "location": "bifaci/cartridge_json_test.go:81"
+        },
+        "py": {
+          "function": "test_7153_install_timestamp_is_rfc3339_utc",
+          "description": "TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known epoch instants and at the instants that break naive date arithmetic \u2014 a leap day, the day after one, and a century year that is NOT a leap year. Emitting a bare epoch count with a `Z` appended would satisfy \"some string ending in Z\" and satisfy nothing else; every reader and every fixture in the tree treats this field as a parseable timestamp.",
+          "location": "tests/test_cartridge_json.py:15"
+        },
+        "objc": {
+          "function": "test7153_installTimestampIsRfc3339Utc",
+          "description": "TEST7153: `installed_at` is a real RFC3339 UTC timestamp, at known epoch instants and at the instants that break naive date arithmetic \u2014 a leap day, the day after one, and a century year that is NOT a leap year. Emitting a bare epoch count with a `Z` appended would satisfy \"some string ending in Z\" and satisfy nothing else; every reader and every fixture in the tree treats this field as a parseable timestamp.",
+          "location": "Tests/BifaciTests/DevTests.swift:30"
+        }
+      }
+    },
+    {
+      "number": 7154,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7154_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST7154: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "src/dev.rs:640"
+        },
+        "go": {
+          "function": "Test7154_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST7154: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "dev/dev_test.go:35"
+        },
+        "py": {
+          "function": "test_7154_scaffold_writes_a_runnable_project_in_every_language",
+          "description": "TEST7154: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "tests/test_dev.py:46"
+        },
+        "objc": {
+          "function": "test7154_scaffoldWritesARunnableProjectInEveryLanguage",
+          "description": "TEST7154: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
+          "location": "Tests/BifaciTests/DevTests.swift:67"
+        }
+      }
+    },
+    {
+      "number": 7155,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7155_scaffold_guards",
+          "description": "TEST7155: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "src/dev.rs:711"
+        },
+        "go": {
+          "function": "Test7155_scaffold_guards",
+          "description": "TEST7155: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "dev/dev_test.go:91"
+        },
+        "py": {
+          "function": "test_7155_scaffold_guards",
+          "description": "TEST7155: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "tests/test_dev.py:80"
+        },
+        "objc": {
+          "function": "test7155_scaffoldGuards",
+          "description": "TEST7155: scaffolding rejects a bad name and refuses to overwrite.",
+          "location": "Tests/BifaciTests/DevTests.swift:120"
+        }
+      }
+    },
+    {
+      "number": 7156,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7156_dev_install_and_find_by_alias",
+          "description": "TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "src/dev.rs:789"
+        },
+        "go": {
+          "function": "Test7156_dev_install_and_find_by_alias",
+          "description": "TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "dev/dev_test.go:146"
+        },
+        "py": {
+          "function": "test_7156_dev_install_and_find_by_alias",
+          "description": "TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "tests/test_dev.py:118"
+        },
+        "objc": {
+          "function": "test7156_devInstallAndFindByAlias",
+          "description": "TEST7156: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
+          "location": "Tests/BifaciTests/DevTests.swift:188"
+        }
+      }
+    },
+    {
+      "number": 7157,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7157_dev_install_rejects_published_manifest",
+          "description": "TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "src/dev.rs:828"
+        },
+        "go": {
+          "function": "Test7157_dev_install_rejects_published_manifest",
+          "description": "TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "dev/dev_test.go:211"
+        },
+        "py": {
+          "function": "test_7157_dev_install_rejects_published_manifest",
+          "description": "TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "tests/test_dev.py:145"
+        },
+        "objc": {
+          "function": "test7157_devInstallRejectsPublishedManifest",
+          "description": "TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
+          "location": "Tests/BifaciTests/DevTests.swift:230"
+        }
+      }
+    },
+    {
+      "number": 7158,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7158_fabric_conflict_guard",
+          "description": "TEST7158: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
+          "location": "src/dev.rs:846"
+        },
+        "go": {
+          "function": "Test7158_fabric_conflict_guard",
+          "description": "TEST7158: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
+          "location": "dev/dev_test.go:352"
+        },
+        "py": {
+          "function": "test_7158_fabric_conflict_guard",
+          "description": "TEST7158: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
+          "location": "tests/test_dev.py:227"
+        },
+        "objc": {
+          "function": "test7158_fabricConflictGuard",
+          "description": "TEST7158: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
+          "location": "Tests/BifaciTests/DevTests.swift:261"
+        }
+      }
+    },
+    {
+      "number": 7159,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7159_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST7159: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "src/dev.rs:730"
+        },
+        "go": {
+          "function": "Test7159_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST7159: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "dev/dev_test.go:238"
+        },
+        "py": {
+          "function": "test_7159_two_entries_is_ambiguous_not_a_coin_flip",
+          "description": "TEST7159: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "tests/test_dev.py:163"
+        },
+        "objc": {
+          "function": "test7159_twoEntriesIsAmbiguousNotACoinFlip",
+          "description": "TEST7159: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
+          "location": "Tests/BifaciTests/DevTests.swift:296"
+        }
+      }
+    },
+    {
+      "number": 7160,
+      "present": [
+        "rust",
+        "go",
+        "py",
+        "objc"
+      ],
+      "missing": [
+        "js"
+      ],
+      "aliased_in": {},
+      "true_missing": [
+        "js"
+      ],
+      "canonical": {
+        "rust": {
+          "function": "test7160_vendored_stub_contract_matches_the_canonical_source",
+          "description": "TEST7160: the vendored stub contract is IDENTICAL to the canonical source. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. Every mirror's copy is generated from this one source, so a difference here means the reference itself was vendored from a different commit than the stub repo currently holds \u2014 which would ship capdags that disagree about what a cartridge looks like, silently.",
+          "location": "src/dev.rs:899"
+        },
+        "go": {
+          "function": "Test7160_vendored_stub_contract_matches_the_canonical_source",
+          "description": "TEST7160: the vendored stub contract is IDENTICAL to the canonical source. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. Every mirror's copy is generated from this one source, so a difference here means the reference itself was vendored from a different commit than the stub repo currently holds \u2014 which would ship capdags that disagree about what a cartridge looks like, silently.",
+          "location": "dev/dev_test.go:277"
+        },
+        "py": {
+          "function": "test_7160_vendored_stub_contract_matches_the_canonical_source",
+          "description": "TEST7160: the vendored stub contract is IDENTICAL to the canonical source. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. Every mirror's copy is generated from this one source, so a difference here means the reference itself was vendored from a different commit than the stub repo currently holds \u2014 which would ship capdags that disagree about what a cartridge looks like, silently.",
+          "location": "tests/test_dev.py:189"
+        },
+        "objc": {
+          "function": "test7160_vendoredStubContractMatchesTheCanonicalSource",
+          "description": "TEST7160: the vendored stub contract is IDENTICAL to the canonical source. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. Every mirror's copy is generated from this one source, so a difference here means the reference itself was vendored from a different commit than the stub repo currently holds \u2014 which would ship capdags that disagree about what a cartridge looks like, silently.",
+          "location": "Tests/BifaciTests/DevTests.swift:332"
+        }
+      }
+    },
+    {
       "number": 8064,
       "present": [
         "rust",
@@ -37077,7 +37381,7 @@
         "go": {
           "function": "Test8064_sequence_consumer_never_follows_foreach_directly",
           "description": "TEST8064: a sequence-consuming cap is reached directly from sequence data, never through a dangling ForEach boundary. A ForEach followed by a SCALAR cap stays legal \u2014 that is the map half of the ordinary map-then-fold plan \u2014 so the invariant is about what may follow the boundary, not about ForEach appearing.",
-          "location": "planner/live_cap_fab_test.go:251"
+          "location": "planner/live_cap_fab_test.go:252"
         },
         "py": {
           "function": "test_8064_sequence_consumer_never_follows_foreach_directly",
@@ -37202,240 +37506,6 @@
           "function": "test8067_StaleReaderDeathCannotKillReplacementGeneration",
           "description": "/ TEST8067: a late death event from an obsolete reader generation must / not retire the live process in the same cartridge slot. A death from / the current generation must perform the real teardown and notify the / lifecycle observer once.",
           "location": "Tests/BifaciTests/CartridgeHostSessionLifecycleTests.swift:67"
-        }
-      }
-    },
-    {
-      "number": 8100,
-      "present": [
-        "rust",
-        "go",
-        "py",
-        "objc"
-      ],
-      "missing": [
-        "js"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "js"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8100_scaffold_writes_a_runnable_project_in_every_language",
-          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
-          "location": "src/dev.rs:646"
-        },
-        "go": {
-          "function": "Test8100_scaffold_writes_a_runnable_project_in_every_language",
-          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
-          "location": "dev/dev_test.go:32"
-        },
-        "py": {
-          "function": "test_8100_scaffold_writes_a_runnable_project_in_every_language",
-          "description": "TEST8100: EVERY vendored language scaffolds a runnable-shaped project \u2014 every declared file exists, no placeholder survives anywhere (contents or paths), the manifest/alias/media URNs are seeded from the project name, and the interpreted languages' entries are executable. Iterating the contract rather than testing one language is the point: a newly vendored language is covered the moment it appears, instead of whenever someone remembers to add a test for it.",
-          "location": "tests/test_dev.py:42"
-        },
-        "objc": {
-          "function": "test8100_classifyHandlerErrorPreservesOpArgumentAttribution",
-          "description": "TEST8100: Swift handler-error classification preserves a source-declared argument URN together with its code, attribution class, and message.",
-          "location": "Tests/BifaciTests/StreamingAPITests.swift:1011"
-        }
-      }
-    },
-    {
-      "number": 8101,
-      "present": [
-        "rust",
-        "go",
-        "py"
-      ],
-      "missing": [
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8101_scaffold_guards",
-          "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
-          "location": "src/dev.rs:717"
-        },
-        "go": {
-          "function": "Test8101_scaffold_guards",
-          "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
-          "location": "dev/dev_test.go:88"
-        },
-        "py": {
-          "function": "test_8101_scaffold_guards",
-          "description": "TEST8101: scaffolding rejects a bad name and refuses to overwrite.",
-          "location": "tests/test_dev.py:76"
-        }
-      }
-    },
-    {
-      "number": 8102,
-      "present": [
-        "rust",
-        "go",
-        "py"
-      ],
-      "missing": [
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8102_dev_install_and_find_by_alias",
-          "description": "TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
-          "location": "src/dev.rs:795"
-        },
-        "go": {
-          "function": "Test8102_dev_install_and_find_by_alias",
-          "description": "TEST8102: ReadEntryManifest + StageDevCartridge + FindDevCapByAlias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
-          "location": "dev/dev_test.go:143"
-        },
-        "py": {
-          "function": "test_8102_dev_install_and_find_by_alias",
-          "description": "TEST8102: read_entry_manifest + stage_dev_cartridge + find_dev_cap_by_alias round-trip: a stub project installs under dev/v{N}/nightly/<name>/<ver>/, writes a cartridge.json, and its custom cap is resolvable by alias.",
-          "location": "tests/test_dev.py:114"
-        }
-      }
-    },
-    {
-      "number": 8103,
-      "present": [
-        "rust",
-        "go",
-        "py"
-      ],
-      "missing": [
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8103_dev_install_rejects_published_manifest",
-          "description": "TEST8103: stage_dev_cartridge refuses a non-dev project (registry_url set).",
-          "location": "src/dev.rs:832"
-        },
-        "go": {
-          "function": "Test8103_dev_install_rejects_published_manifest",
-          "description": "TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
-          "location": "dev/dev_test.go:208"
-        },
-        "py": {
-          "function": "test_8103_dev_install_rejects_published_manifest",
-          "description": "TEST8103: dev-install refuses a PUBLISHED manifest. `registry_url` non-null means the cartridge belongs to a registry, and staging it under the dev slug would put a published identity in a slot reserved for local work.",
-          "location": "tests/test_dev.py:141"
-        }
-      }
-    },
-    {
-      "number": 8104,
-      "present": [
-        "rust",
-        "py"
-      ],
-      "missing": [
-        "go",
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "go",
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8104_fabric_conflict_guard",
-          "description": "TEST8104: the fabric-conflict guard \u2014 a dev cap whose alias the fabric maps to a DIFFERENT cap is rejected; a brand-new alias, and a dev cap that matches an existing fabric cap exactly, are both accepted.",
-          "location": "src/dev.rs:850"
-        },
-        "py": {
-          "function": "test_8104_cap_arg_is_main_input_true_when_stdin_urn_equivalent_to_in_spec",
-          "description": "TEST8104: (py-specific) CapArg.is_main_input() is True when the arg's Stdin source URN is order-theoretically equivalent to the cap's in= spec \u2014 even when the two strings list their tags in a different order. Compared by tagged-URN equivalence, never as strings.",
-          "location": "tests/test_cap.py:524"
-        }
-      }
-    },
-    {
-      "number": 8105,
-      "present": [
-        "rust",
-        "go",
-        "py"
-      ],
-      "missing": [
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "rust": {
-          "function": "test8105_two_entries_is_ambiguous_not_a_coin_flip",
-          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
-          "location": "src/dev.rs:736"
-        },
-        "go": {
-          "function": "Test8105_two_entries_is_ambiguous_not_a_coin_flip",
-          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
-          "location": "dev/dev_test.go:235"
-        },
-        "py": {
-          "function": "test_8105_two_entries_is_ambiguous_not_a_coin_flip",
-          "description": "TEST8105: a project with two languages' entries is REFUSED, not silently resolved. A project is one cartridge; installing whichever entry sorted first would be a coin flip the developer never sees.",
-          "location": "tests/test_dev.py:159"
-        }
-      }
-    },
-    {
-      "number": 8106,
-      "present": [
-        "go",
-        "py"
-      ],
-      "missing": [
-        "rust",
-        "js",
-        "objc"
-      ],
-      "aliased_in": {},
-      "true_missing": [
-        "rust",
-        "js",
-        "objc"
-      ],
-      "canonical": {
-        "go": {
-          "function": "Test8106_vendored_stub_contract_matches_the_canonical_source",
-          "description": "TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit \u2014 which would ship two capdags that disagree about what a cartridge looks like, silently.",
-          "location": "dev/dev_test.go:274"
-        },
-        "py": {
-          "function": "test_8106_vendored_stub_contract_matches_the_canonical_source",
-          "description": "TEST8106: the vendored stub contract is IDENTICAL to the reference's. This is the whole promise of `capdag new`: the same command from any capdag binary writes the same project. The vendored copies are generated from one source, so a difference here means a mirror was vendored from a different commit \u2014 which would ship two capdags that disagree about what a cartridge looks like, silently.",
-          "location": "tests/test_dev.py:185"
         }
       }
     },
@@ -38393,14 +38463,14 @@
       "mirror": "go",
       "function": "Test0123_CapExists",
       "description": "TEST0123: Cap exists",
-      "location": "cap/registry_test.go:115"
+      "location": "fabric/registry_test.go:29"
     },
     {
       "number": 124,
       "mirror": "go",
       "function": "Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError",
       "description": "Test0124_ParseHeadersWithNoWiringsReturnsNoEdgesError verifies the ErrNoEdges case.",
-      "location": "machine/machine_test.go:519"
+      "location": "machine/machine_test.go:520"
     },
     {
       "number": 130,
@@ -38414,35 +38484,35 @@
       "mirror": "go",
       "function": "Test0183_IntegrationMediaUrnResolution",
       "description": "Test0183_IntegrationMediaUrnResolution verifies media URN resolution",
-      "location": "bifaci/integration_test.go:163"
+      "location": "bifaci/integration_test.go:162"
     },
     {
       "number": 209,
       "mirror": "go",
       "function": "Test0209_IntegrationMediaDefConstruction",
       "description": "Test0209_IntegrationMediaDefConstruction verifies media.MediaDef construction",
-      "location": "bifaci/integration_test.go:214"
+      "location": "bifaci/integration_test.go:213"
     },
     {
       "number": 265,
       "mirror": "go",
       "function": "Test0265_CartridgeErrorResponse",
       "description": "Mirror-specific coverage: Test cartridge ERR frame is received by host as error",
-      "location": "bifaci/integration_test.go:505"
+      "location": "bifaci/integration_test.go:504"
     },
     {
       "number": 267,
       "mirror": "go",
       "function": "Test0267_HeartbeatDuringStreaming",
       "description": "Mirror-specific coverage: Test cartridge-initiated heartbeat mid-stream is handled transparently by host",
-      "location": "bifaci/integration_test.go:850"
+      "location": "bifaci/integration_test.go:849"
     },
     {
       "number": 269,
       "mirror": "go",
       "function": "Test0269_ArgumentsRoundtrip",
       "description": "Mirror-specific coverage: Test host call with unified CBOR arguments sends correct content_type and payload",
-      "location": "bifaci/integration_test.go:1031"
+      "location": "bifaci/integration_test.go:1030"
     },
     {
       "number": 314,
@@ -38561,7 +38631,7 @@
       "mirror": "rust",
       "function": "test916_foreach_item_subdivision",
       "description": "TEST916: ForEach item subdivision produces correct, monotonic ranges Mirrors the production code in interpreter.rs: pre-compute item boundaries from the same formula so the end of item N and the start of item N+1 are the same f32 value (no divergent accumulation paths).",
-      "location": "src/orchestrator/executor.rs:4219"
+      "location": "src/orchestrator/executor.rs:4213"
     },
     {
       "number": 938,
@@ -38624,7 +38694,7 @@
       "mirror": "rust",
       "function": "test1125_map_progress_basic_mapping",
       "description": "TEST1125: map_progress clamps child to [0.0, 1.0] and maps to [base, base+weight]",
-      "location": "src/orchestrator/executor.rs:3965"
+      "location": "src/orchestrator/executor.rs:3959"
     },
     {
       "number": 1134,
@@ -38659,49 +38729,49 @@
       "mirror": "rust",
       "function": "test1243_roundtrip_serialize_deserialize",
       "description": "TEST1243: Cartridge JSON round-trips through serde without losing required fields.",
-      "location": "src/bifaci/cartridge_json.rs:508"
+      "location": "src/bifaci/cartridge_json.rs:561"
     },
     {
       "number": 1244,
       "mirror": "rust",
       "function": "test1244_dev_install_omits_optional_fields",
       "description": "TEST1244: Dev-installed cartridge metadata omits registry-only package fields when serialized.",
-      "location": "src/bifaci/cartridge_json.rs:616"
+      "location": "src/bifaci/cartridge_json.rs:669"
     },
     {
       "number": 1245,
       "mirror": "rust",
       "function": "test1245_read_from_dir_validates_entry_exists",
       "description": "TEST1245: Reading cartridge metadata fails when the declared entry binary is missing.",
-      "location": "src/bifaci/cartridge_json.rs:710"
+      "location": "src/bifaci/cartridge_json.rs:763"
     },
     {
       "number": 1246,
       "mirror": "rust",
       "function": "test1246_read_from_dir_rejects_path_escape",
       "description": "TEST1246: Cartridge entry points cannot escape the cartridge directory with relative paths.",
-      "location": "src/bifaci/cartridge_json.rs:735"
+      "location": "src/bifaci/cartridge_json.rs:788"
     },
     {
       "number": 1247,
       "mirror": "rust",
       "function": "test1247_read_from_dir_succeeds_with_valid_cartridge",
       "description": "TEST1247: Valid cartridge directories load successfully and resolve their entry point.",
-      "location": "src/bifaci/cartridge_json.rs:769"
+      "location": "src/bifaci/cartridge_json.rs:822"
     },
     {
       "number": 1248,
       "mirror": "rust",
       "function": "test1248_hash_cartridge_directory_is_deterministic",
       "description": "TEST1248: Cartridge directory hashes stay stable across metadata changes and change on content edits.",
-      "location": "src/bifaci/cartridge_json.rs:949"
+      "location": "src/bifaci/cartridge_json.rs:1002"
     },
     {
       "number": 1249,
       "mirror": "rust",
       "function": "test1249_hash_single_binary_matches_flat_layout",
       "description": "TEST1249: A flat single-binary cartridge directory still produces a SHA-256 content hash.",
-      "location": "src/bifaci/cartridge_json.rs:976"
+      "location": "src/bifaci/cartridge_json.rs:1029"
     },
     {
       "number": 1250,
@@ -38981,7 +39051,7 @@
       "mirror": "rust",
       "function": "test1433_multi_edge_group_heads_a_chain",
       "description": "TEST1433: a multi-edge group (fan-in / gather) ALWAYS heads its own chain \u2014 mid-chain streaming forwards exactly one producer stream, so a multi-input invocation must be fed from materialised node_data. A single-edge group with one dedicated producer still chains linearly.",
-      "location": "src/orchestrator/executor.rs:3905"
+      "location": "src/orchestrator/executor.rs:3899"
     },
     {
       "number": 1434,
@@ -39009,7 +39079,7 @@
       "mirror": "rust",
       "function": "test1448_chain_split_only_at_same_domain_bounded_adjacency",
       "description": "TEST1448: chains split ONLY at the permit-deadlock boundary \u2014 two adjacent groups in the SAME admission DOMAIN (the cartridge behind the master, never the master index: one relay slot can aggregate many cartridges) with a bounded capacity between them. Bounded caps in different domains keep streaming in one live chain (the property unbounded live pipelines depend on: only chain sinks are collected, and unbounded intermediates cannot be materialised, L16).",
-      "location": "src/orchestrator/executor.rs:3851"
+      "location": "src/orchestrator/executor.rs:3845"
     },
     {
       "number": 1449,
@@ -39135,56 +39205,56 @@
       "mirror": "rust",
       "function": "test1506_channel_roundtrip_nightly",
       "description": "TEST1506: Channel round-trips correctly. A nightly cartridge.json must deserialize back to the Nightly variant \u2014 channels are independent namespaces, conflating them would be a real bug.",
-      "location": "src/bifaci/cartridge_json.rs:542"
+      "location": "src/bifaci/cartridge_json.rs:595"
     },
     {
       "number": 1507,
       "mirror": "rust",
       "function": "test1507_missing_channel_fails_to_parse",
       "description": "TEST1507: Reading a cartridge.json without `channel` is a hard error. We never assume a default \u2014 that would let an unrecognized install silently masquerade as release.",
-      "location": "src/bifaci/cartridge_json.rs:573"
+      "location": "src/bifaci/cartridge_json.rs:626"
     },
     {
       "number": 1508,
       "mirror": "rust",
       "function": "test1508_missing_registry_url_fails_to_parse",
       "description": "TEST1508: Reading a cartridge.json without `registry_url` is a hard error too. The field is required-but-nullable; absence means the file was written by a pre-registry-aware installer and we can't tell whether it was meant to be dev or registry \u2014 both cases fail the three-place check, so we surface the schema gap immediately.",
-      "location": "src/bifaci/cartridge_json.rs:597"
+      "location": "src/bifaci/cartridge_json.rs:650"
     },
     {
       "number": 1509,
       "mirror": "rust",
       "function": "test1509_read_from_dir_rejects_slug_mismatch",
       "description": "TEST1509: Three-place rule \u2014 a registry cartridge whose folder slug doesn't match `slug_for(registry_url)` is rejected. This catches the case where a cartridge tree was hand-copied between registry roots, or a buggy installer wrote the wrong slug. The error names both slugs so the operator can tell at a glance which side is wrong.",
-      "location": "src/bifaci/cartridge_json.rs:804"
+      "location": "src/bifaci/cartridge_json.rs:857"
     },
     {
       "number": 1510,
       "mirror": "rust",
       "function": "test1510_read_from_dir_rejects_dev_in_registry_folder",
       "description": "TEST1510: Three-place rule \u2014 a dev cartridge.json under a non-dev folder is rejected. Equivalent to a dev-built cartridge being moved into a registry's folder; the host refuses because the binary was never built/signed for that registry.",
-      "location": "src/bifaci/cartridge_json.rs:850"
+      "location": "src/bifaci/cartridge_json.rs:903"
     },
     {
       "number": 1511,
       "mirror": "rust",
       "function": "test1511_read_from_dir_rejects_registry_in_dev_folder",
       "description": "TEST1511: Three-place rule \u2014 a registry cartridge.json under the dev folder is rejected. Equivalent to a published cartridge being dropped into the dev tree; the dev tree is explicitly the only place a null `registry_url` is allowed, so a non-null one here means the layout is corrupted.",
-      "location": "src/bifaci/cartridge_json.rs:886"
+      "location": "src/bifaci/cartridge_json.rs:939"
     },
     {
       "number": 1512,
       "mirror": "rust",
       "function": "test1512_read_from_dir_accepts_dev_in_dev_folder",
       "description": "TEST1512: A dev cartridge.json under the dev folder is accepted. This is the only path that ends with a successful dev install; together with 1510/1511 it pins the rule that dev provenance and the dev folder are an inseparable pair.",
-      "location": "src/bifaci/cartridge_json.rs:921"
+      "location": "src/bifaci/cartridge_json.rs:974"
     },
     {
       "number": 1513,
       "mirror": "rust",
       "function": "test1513_installed_from_optional_round_trip",
       "description": "TEST1513: `installed_from` is opaque optional metadata. A cartridge.json that omits the field MUST parse cleanly with `installed_from == None`, and a CartridgeJson with `installed_from == None` MUST NOT emit the key on serialize. Pins the new contract that nothing in the host or engine branches on this field \u2014 it's audit/telemetry hint only and the absence-vs-Some distinction must round-trip.",
-      "location": "src/bifaci/cartridge_json.rs:654"
+      "location": "src/bifaci/cartridge_json.rs:707"
     },
     {
       "number": 1600,
@@ -39443,7 +39513,7 @@
       "mirror": "go",
       "function": "Test6186_RegistryGetCap",
       "description": "TEST136 (deleted): exercised the private `cacheKey` method on the unified FabricRegistry. The on-disk cache filename scheme is an implementation detail of the persistence layer; equivalent observable behavior \u2014 that two equivalent URNs land in the same cache slot \u2014 is covered by Test140 (`same_cap_different_spellings_same_url`). Rust and Python dropped this; this deletion keeps the Go mirror in parity.",
-      "location": "cap/registry_test.go:42"
+      "location": "fabric/registry_test.go:606"
     },
     {
       "number": 6189,
@@ -40122,7 +40192,7 @@
       "mirror": "go",
       "function": "Test6325_RegistryValidation",
       "description": "TEST6325: Registry validation",
-      "location": "cap/registry_test.go:56"
+      "location": "fabric/registry_test.go:623"
     },
     {
       "number": 6326,
@@ -40150,7 +40220,7 @@
       "mirror": "go",
       "function": "Test6329_CacheOperations",
       "description": "TEST6329: Cache operations",
-      "location": "cap/registry_test.go:71"
+      "location": "fabric/registry_test.go:641"
     },
     {
       "number": 6331,
@@ -40717,7 +40787,7 @@
       "mirror": "go",
       "function": "Test6428_IntegrationVersionlessCapCreation",
       "description": "Test6428_IntegrationVersionlessCapCreation verifies caps can be created without version fields",
-      "location": "bifaci/integration_test.go:47"
+      "location": "bifaci/integration_test.go:46"
     },
     {
       "number": 6429,
@@ -40731,7 +40801,7 @@
       "mirror": "go",
       "function": "Test6431_IntegrationCaseInsensitiveUrns",
       "description": "Test6431_IntegrationCaseInsensitiveUrns verifies URNs are case-insensitive",
-      "location": "bifaci/integration_test.go:75"
+      "location": "bifaci/integration_test.go:74"
     },
     {
       "number": 6432,
@@ -40745,7 +40815,7 @@
       "mirror": "go",
       "function": "Test6433_IntegrationCapValidation",
       "description": "Test6433_IntegrationCapValidation verifies cap schema validation",
-      "location": "bifaci/integration_test.go:119"
+      "location": "bifaci/integration_test.go:118"
     },
     {
       "number": 6434,
@@ -41382,14 +41452,14 @@
       "mirror": "go",
       "function": "Test6524_LogFramesDuringRequest",
       "description": "Mirror-specific coverage: Test LOG frames sent during a request are transparently skipped by host",
-      "location": "bifaci/integration_test.go:562"
+      "location": "bifaci/integration_test.go:561"
     },
     {
       "number": 6526,
       "mirror": "go",
       "function": "Test6526_HostInitiatedHeartbeatNoPingPong",
       "description": "Mirror-specific coverage: Test host does not echo back cartridge's heartbeat response (no infinite ping-pong)",
-      "location": "bifaci/integration_test.go:950"
+      "location": "bifaci/integration_test.go:949"
     },
     {
       "number": 6527,
@@ -41403,42 +41473,42 @@
       "mirror": "go",
       "function": "Test6528_CartridgeSuddenDisconnect",
       "description": "Mirror-specific coverage: Test host receives error when cartridge closes connection unexpectedly",
-      "location": "bifaci/integration_test.go:1108"
+      "location": "bifaci/integration_test.go:1107"
     },
     {
       "number": 6529,
       "mirror": "go",
       "function": "Test6529_EndFrameNoPayload",
       "description": "Mirror-specific coverage: Test END frame without payload is handled as complete response with empty data",
-      "location": "bifaci/integration_test.go:1216"
+      "location": "bifaci/integration_test.go:1215"
     },
     {
       "number": 6530,
       "mirror": "go",
       "function": "Test6530_StreamingSequenceNumbers",
       "description": "Mirror-specific coverage: Test streaming response sequence numbers are contiguous and start from 0",
-      "location": "bifaci/integration_test.go:1272"
+      "location": "bifaci/integration_test.go:1271"
     },
     {
       "number": 6531,
       "mirror": "go",
       "function": "Test6531_RequestAfterShutdown",
       "description": "Mirror-specific coverage: Test host request on a closed host returns error",
-      "location": "bifaci/integration_test.go:1348"
+      "location": "bifaci/integration_test.go:1347"
     },
     {
       "number": 6532,
       "mirror": "go",
       "function": "Test6532_ArgumentsMultiple",
       "description": "Mirror-specific coverage: Test multiple arguments are correctly serialized in CBOR payload",
-      "location": "bifaci/integration_test.go:1391"
+      "location": "bifaci/integration_test.go:1390"
     },
     {
       "number": 6533,
       "mirror": "go",
       "function": "Test6533_AutoChunkingReassembly",
       "description": "Mirror-specific coverage: Test auto-chunking splits payload larger than max_chunk into CHUNK frames + END frame, and host concatenated() reassembles the full original data",
-      "location": "bifaci/integration_test.go:1464"
+      "location": "bifaci/integration_test.go:1463"
     },
     {
       "number": 6534,
@@ -41452,14 +41522,14 @@
       "mirror": "go",
       "function": "Test6535_ExactMaxChunkSingleEnd",
       "description": "Mirror-specific coverage: Test payload exactly equal to max_chunk produces single END frame (no CHUNK frames)",
-      "location": "bifaci/integration_test.go:1550"
+      "location": "bifaci/integration_test.go:1549"
     },
     {
       "number": 6537,
       "mirror": "go",
       "function": "Test6537_MaxChunkPlusOneSplitsIntoTwo",
       "description": "Mirror-specific coverage: Test payload of max_chunk + 1 produces exactly one CHUNK frame + one END frame",
-      "location": "bifaci/integration_test.go:1615"
+      "location": "bifaci/integration_test.go:1614"
     },
     {
       "number": 6541,
@@ -41760,28 +41830,28 @@
       "mirror": "go",
       "function": "Test6645_argument_resolution_string_representations",
       "description": "TEST6645: Tests ArgumentResolution String() returns correct snake_case names ArgumentInfo.Resolution is serialized to JSON using String(). Verifies that each resolution variant maps to the correct identifier expected by API consumers.",
-      "location": "planner/plan_builder_test.go:52"
+      "location": "planner/plan_builder_test.go:53"
     },
     {
       "number": 6646,
       "mirror": "go",
       "function": "Test6646_analyze_path_arguments_stdin_is_from_input_file",
       "description": "TEST6646: Tests AnalyzePathArguments classifies stdin arg as FromInputFile for first cap Verifies that the argument analysis correctly identifies input-file arguments when the cap's stdin arg media URN matches the cap's in_spec.",
-      "location": "planner/plan_builder_test.go:71"
+      "location": "planner/plan_builder_test.go:72"
     },
     {
       "number": 6647,
       "mirror": "go",
       "function": "Test6647_analyze_path_arguments_user_input_arg_appears_in_slots",
       "description": "TEST6647: Tests AnalyzePathArguments puts RequiresUserInput args in slots and sets CanExecuteWithoutInput=false Verifies that caps with non-stdin, non-default arguments are identified as requiring user input, appear in slots, and the requirements reflect that execution cannot proceed without them.",
-      "location": "planner/plan_builder_test.go:112"
+      "location": "planner/plan_builder_test.go:113"
     },
     {
       "number": 6649,
       "mirror": "go",
       "function": "Test6649_rejects_foreach_paired_collect",
       "description": "TEST6649: PlanToResolvedGraph rejects plans containing ForEach-paired Collect nodes Verifies that Collect nodes without OutputMediaUrn (ForEach-paired) are rejected",
-      "location": "orchestrator/orchestrator_test.go:635"
+      "location": "orchestrator/orchestrator_test.go:636"
     },
     {
       "number": 6650,
@@ -41928,7 +41998,7 @@
       "mirror": "go",
       "function": "Test6700_line_based_format_round_trips",
       "description": "TEST6700: Line-based notation format round-trips back to the same machine. ToMachineNotationFormatted(NotationFormatLineBased) must not contain '[', and re-parsing must yield an equivalent machine.",
-      "location": "machine/machine_test.go:838"
+      "location": "machine/machine_test.go:839"
     },
     {
       "number": 6703,
@@ -42005,14 +42075,14 @@
       "mirror": "go",
       "function": "Test6726_cartridge_json_fabric_manifest_version_zero_round_trip",
       "description": "TEST6726: CartridgeJson with FabricManifestVersion=0 (zero value) is absent on the wire.",
-      "location": "bifaci/cartridge_json_test.go:13"
+      "location": "bifaci/cartridge_json_test.go:14"
     },
     {
       "number": 6727,
       "mirror": "go",
       "function": "Test6727_cartridge_json_fabric_manifest_version_nonzero_round_trip",
       "description": "TEST6727: CartridgeJson with FabricManifestVersion>0 round-trips the value correctly.",
-      "location": "bifaci/cartridge_json_test.go:44"
+      "location": "bifaci/cartridge_json_test.go:45"
     },
     {
       "number": 6737,
