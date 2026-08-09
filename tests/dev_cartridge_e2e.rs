@@ -7,6 +7,19 @@
 //! to the locally dev-installed cartridge's own manifest (the local-manifest dev
 //! path).
 //!
+//! The scaffolded cartridge does no inference itself — it PEER-CALLS
+//! `classify-en`. In a real install that call is answered by a BUNDLED model
+//! cartridge sitting beside the capdag binary; a `cargo test` build has no
+//! bundled tree, and a real model cartridge would download weights and want a
+//! GPU, so neither is usable here. The test supplies a stand-in through
+//! `--dev-bins`, the same affordance a developer uses to substitute a local
+//! cartridge binary — so the host is assembled exactly as production assembles
+//! it, with one participant swapped rather than the routing rules changed.
+//!
+//! That makes the flow this exercises strictly larger than before: the peer call
+//! itself, with arguments addressed by media URN and the peer's progress
+//! forwarded through the caller.
+//!
 //! It REQUIRES a Python runtime with `capdag`, `cbor2`, and `ops` importable —
 //! the scaffolded cartridge is launched via its `#!/usr/bin/env python3` shebang,
 //! so `python3` on PATH must have them. Under `dx test` the machinefabric conda
@@ -148,6 +161,19 @@ fn test8110_dev_cartridge_create_install_run_update() {
 
     let name = "e2e-tagger";
 
+    // The stand-in for the model cartridge that answers `classify-en`. Passed
+    // with `--dev-bins` on every run of the tagger: it is standing in for a
+    // BUNDLED cartridge, not a dev-installed one, and `--dev-bins` is the
+    // affordance that substitutes a local cartridge binary without changing how
+    // the host resolves anything else.
+    let classifier = repo_root()
+        .join("capdag/tests/fixtures/e2e_classify_standin/cartridge.py")
+        .display()
+        .to_string();
+    // `--dev-bins` consumes following non-flag tokens, so the cap alias must not
+    // trail it; the alias leads and the flag comes after.
+    let run_tagger: Vec<&str> = vec![name, "--dev-bins", &classifier];
+
     // 1. Scaffold a new Python cartridge.
     let (proj_out, ok, err) = run_capdag(
         &home,
@@ -174,8 +200,9 @@ fn test8110_dev_cartridge_create_install_run_update() {
     assert!(ok, "`dev-install` failed: {err}");
 
     // 3. Run the custom cap through the capdag host — it is NOT in the fabric,
-    //    so this exercises the local-manifest dev path end to end.
-    let (out, ok, err) = run_capdag(&home, &fabric, &pp, &[name], Some("I love this good great"));
+    //    so this exercises the local-manifest dev path end to end, including the
+    //    peer call out to the classifier.
+    let (out, ok, err) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("I love this good great"));
     assert!(ok, "run failed: {err}");
     assert_eq!(out, "positive", "positive input; stderr:\n{err}");
 
@@ -183,20 +210,28 @@ fn test8110_dev_cartridge_create_install_run_update() {
         &home,
         &fabric,
         &pp,
-        &[name],
+        &run_tagger,
         Some("awful terrible bad hate"),
     );
     assert_eq!(out, "negative", "negative input; stderr:\n{err}");
 
-    let (out, _, _) = run_capdag(&home, &fabric, &pp, &[name], Some("the sky is blue"));
+    let (out, _, _) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("the sky is blue"));
     assert_eq!(out, "neutral", "neutral input before the edit");
 
-    // 4. Edit the classifier — teach it that "blue" is positive — then update
-    //    the install by re-running dev-install.
+    // 4. Edit the cartridge — shout the label instead of returning it plain —
+    //    then update the install by re-running dev-install.
+    //
+    //    The edit is on the OUTPUT rather than on the judgment, because the
+    //    judgment is the peer's to make: this cartridge owns what it does with
+    //    the answer, and that is what a developer edits here.
     let src_path = proj.join("cartridge.py");
     let src = std::fs::read_to_string(&src_path).unwrap();
-    let edited = src.replace("\"delightful\",\n}", "\"delightful\", \"blue\",\n}");
-    assert_ne!(src, edited, "the edit anchor changed — update the test");
+    let edited = src.replace("emitter.emit_cbor(label)", "emitter.emit_cbor(label.upper())");
+    assert_ne!(
+        src, edited,
+        "the edit anchor `emitter.emit_cbor(label)` is no longer in the scaffolded \
+         cartridge — the stub changed, so update this test with it"
+    );
     std::fs::write(&src_path, &edited).unwrap();
 
     let (_, ok, err) = run_capdag(
@@ -208,10 +243,10 @@ fn test8110_dev_cartridge_create_install_run_update() {
     );
     assert!(ok, "update `dev-install` failed: {err}");
 
-    // 5. The same input now classifies differently — the update took effect.
-    let (out, _, err) = run_capdag(&home, &fabric, &pp, &[name], Some("the sky is blue"));
+    // 5. The same input now renders differently — the update took effect.
+    let (out, _, err) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("the sky is blue"));
     assert_eq!(
-        out, "positive",
+        out, "NEUTRAL",
         "update did not take effect; stderr:\n{err}"
     );
 
