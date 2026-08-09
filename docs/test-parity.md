@@ -9,17 +9,17 @@ Numbers **1–7999** are the SHARED range: the same number must test the same th
 | Mirror | Numbered tests |
 |---|---|
 | rust | 1377 |
-| go | 1268 |
+| go | 1269 |
 | py | 1238 |
 | js | 368 |
 | objc | 941 |
 
 ## Summary
 
-- Distinct numbered tests across all mirrors: **1837**
+- Distinct numbered tests across all mirrors: **1838**
 - Shared (in ≥2 mirrors): **1209**
-- Solo (in exactly 1 mirror): **628**
-  - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **557**
+- Solo (in exactly 1 mirror): **629**
+  - …in the shared range 1–7999 — **port targets** (shared behavior present in one mirror, to be ported to the others keeping the number), unless a given test is genuinely implementation-specific, in which case it moves to 8000+: **558**
   - …already in the 8000+ impl-specific range (correctly placed): **71**
 - Shared numbers with a parity gap (missing from ≥1 mirror): **1054**
 - Shared numbers with divergent descriptions: **255**
@@ -590,6 +590,7 @@ These numbered tests exist in exactly ONE mirror but occupy the shared range (1�
 | test7107 | rust | `test7107_live_source_input_file_contract_and_roundtrip` | TEST7107: the live-source CapInputFile contract — `live_source()` builds a device input (empty file_path, CONTENT urn as media_urn, reference + selector set), and BOTH live fields survive the serde round-trip the task payload performs (a run resumed from persistence must still know its input is a device, or the interpreter would try to read an empty path as a file). | src/planner/argument_binding.rs:622 |
 | test7113 | rust | `test7113_cartridge_loss_releases_next_engine_invocation` | TEST7113: a capacity-one cartridge owns only the active body. If that invocation dies, its ERR releases the slot and the next queued body is dispatched; the queued body is not failed as pending work of the dead process. | src/bifaci/relay_switch.rs:4488 |
 | test7119 | rust | `test7119_foreach_progress_emits_the_stable_strand_token` | TEST7119: the actual ForEach body-progress path emits the immutable strand token consumed by the rendered graph, never its structural node id. | src/orchestrator/execute_plan.rs:2874 |
+| test7161 | go | `Test7161_cartridge_build_identity_comes_from_the_build` | TEST7161: a cartridge's channel and registry identity are baked by the BUILD and reach the manifest the host reads; a build that omits the channel refuses to start rather than shipping a cartridge with no identity. Checked by building the fixture three ways and running each, because that is the only level at which the claim is meaningful — the source compiles identically in all three cases, so compiling it proves nothing about the contract. Renaming the injected variable in the build script, or dropping the injection, fails here. | bifaci/build_contract_test.go:104 |
 
 ---
 
@@ -5139,6 +5140,7 @@ A number assigned to more than one function inside a single mirror. These must b
 | test7158 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7159 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
 | test7160 | shared | ✓ | ✓ | ✓ | · | ✓ | shared |
+| test7161 | shared | · | ✓ | · | · | · | solo |
 | test8000 | impl | ✓ | · | · | · | · | solo |
 | test8001 | impl | ✓ | · | · | · | · | solo |
 | test8002 | impl | ✓ | · | · | · | · | solo |

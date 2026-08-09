@@ -37530,7 +37530,7 @@
         "rust": {
           "function": "test8110_dev_cartridge_create_install_run_update",
           "description": "TEST8110: the full cartridge-development loop through the real CLI and a real Python cartridge \u2014 scaffold, install under the dev slug, run the custom cap (never published to the fabric), edit its logic, re-install to update, and observe the changed behavior.",
-          "location": "tests/dev_cartridge_e2e.rs:132"
+          "location": "tests/dev_cartridge_e2e.rs:145"
         },
         "py": {
           "function": "test_8110_realize_strand_disconnected_strand_fails_hard",
@@ -42223,6 +42223,13 @@
       "function": "test7119_foreach_progress_emits_the_stable_strand_token",
       "description": "TEST7119: the actual ForEach body-progress path emits the immutable strand token consumed by the rendered graph, never its structural node id.",
       "location": "src/orchestrator/execute_plan.rs:2874"
+    },
+    {
+      "number": 7161,
+      "mirror": "go",
+      "function": "Test7161_cartridge_build_identity_comes_from_the_build",
+      "description": "TEST7161: a cartridge's channel and registry identity are baked by the BUILD and reach the manifest the host reads; a build that omits the channel refuses to start rather than shipping a cartridge with no identity. Checked by building the fixture three ways and running each, because that is the only level at which the claim is meaningful \u2014 the source compiles identically in all three cases, so compiling it proves nothing about the contract. Renaming the injected variable in the build script, or dropping the injection, fails here.",
+      "location": "bifaci/build_contract_test.go:104"
     }
   ]
 }
