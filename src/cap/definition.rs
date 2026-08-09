@@ -1737,4 +1737,89 @@ mod tests {
 
         assert_eq!(cap.sequence_shape(), (false, false));
     }
+
+    // TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire
+    // key names the other implementations read.
+    #[test]
+    fn test7150_cap_output_survives_serialization_roundtrip() {
+        let mut cap = Cap::new(
+            CapUrn::from_string(r#"cap:in="media:enc=utf-8;in";out="media:enc=utf-8;tag";tag"#)
+                .expect("valid urn"),
+            "tag".to_string(),
+            vec!["tag".to_string()],
+        );
+        cap.set_output(CapOutput {
+            media_urn: "media:enc=utf-8;tag".to_string(),
+            output_description: "One of 'positive', 'neutral', or 'negative'.".to_string(),
+            is_sequence: false,
+            metadata: None,
+        });
+
+        let json = serde_json::to_value(&cap).expect("cap serializes");
+        let output = json
+            .get("output")
+            .expect("a cap that declares an output must serialize one");
+        assert_eq!(
+            output.get("media_urn").and_then(|v| v.as_str()),
+            Some("media:enc=utf-8;tag")
+        );
+        assert_eq!(
+            output.get("output_description").and_then(|v| v.as_str()),
+            Some("One of 'positive', 'neutral', or 'negative'.")
+        );
+
+        let back: Cap = serde_json::from_value(json).expect("cap deserializes");
+        let back_output = back.output.expect("output survives the round-trip");
+        assert_eq!(back_output.media_urn, "media:enc=utf-8;tag");
+        assert_eq!(back_output.is_sequence, false);
+
+        // A cap with no output must not carry the key at all.
+        let bare = Cap::new(
+            CapUrn::from_string("cap:effect=none").expect("valid urn"),
+            "Identity".to_string(),
+            vec!["identity".to_string()],
+        );
+        let bare_json = serde_json::to_value(&bare).expect("cap serializes");
+        assert!(
+            bare_json.get("output").is_none(),
+            "a cap without an output must omit the key"
+        );
+    }
+
+    // TEST7151: `is_sequence` is serialized even when false, on both CapArg and
+    // CapOutput.
+    //
+    // It is not a `skip_serializing_if` field. Mirrors that omitted it produced
+    // a manifest for the identical cap that differed from this one's bytes,
+    // which is how a cross-language manifest comparison finds drift that every
+    // per-mirror test passes through.
+    #[test]
+    fn test7151_is_sequence_is_serialized_even_when_false() {
+        let arg = CapArg::new(
+            "media:enc=utf-8;in",
+            true,
+            vec![ArgSource::Stdin {
+                stdin: "media:enc=utf-8;in".to_string(),
+            }],
+        );
+        let arg_json = serde_json::to_value(&arg).expect("arg serializes");
+        assert_eq!(
+            arg_json.get("is_sequence").and_then(|v| v.as_bool()),
+            Some(false),
+            "CapArg must write is_sequence even when false"
+        );
+
+        let output = CapOutput {
+            media_urn: "media:enc=utf-8;tag".to_string(),
+            output_description: "a tag".to_string(),
+            is_sequence: false,
+            metadata: None,
+        };
+        let output_json = serde_json::to_value(&output).expect("output serializes");
+        assert_eq!(
+            output_json.get("is_sequence").and_then(|v| v.as_bool()),
+            Some(false),
+            "CapOutput must write is_sequence even when false"
+        );
+    }
 }

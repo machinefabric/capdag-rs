@@ -778,4 +778,40 @@ mod tests {
             assert!(legacy_cartridge_map.contains_key(key), "missing key {key}");
         }
     }
+
+    // TEST7152: an empty `adapter_urns` is omitted from a serialized cap group.
+    //
+    // Most cartridges claim no adapters, so a mirror that wrote `[]` put an
+    // extra key in nearly every manifest it produced — invisible to that
+    // mirror's own tests, and a difference the moment two languages' manifests
+    // for the same cartridge are compared.
+    #[test]
+    fn test7152_empty_adapter_urns_is_omitted() {
+        let group = CapGroup {
+            name: "default".to_string(),
+            caps: Vec::new(),
+            adapter_urns: Vec::new(),
+        };
+        let json = serde_json::to_value(&group).expect("group serializes");
+        assert!(
+            json.get("adapter_urns").is_none(),
+            "an empty adapter_urns must be omitted, not written as []"
+        );
+
+        // A group that DOES claim adapters still writes them.
+        let claiming = CapGroup {
+            name: "default".to_string(),
+            caps: Vec::new(),
+            adapter_urns: vec!["media:ext=pdf".to_string()],
+        };
+        let claiming_json = serde_json::to_value(&claiming).expect("group serializes");
+        assert_eq!(
+            claiming_json
+                .get("adapter_urns")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(1),
+            "a non-empty adapter_urns must be written"
+        );
+    }
 }
