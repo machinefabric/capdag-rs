@@ -147,14 +147,28 @@ fn build_combine_cap() -> Cap {
 // Test Helpers
 // =============================================================================
 
-/// Get the testcartridge source directory
+/// Get the testcartridge source directory.
+///
+/// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
+/// `machfab-tests` is two levels up. Missing is a hard error here rather than an
+/// opaque spawn failure later: `Command::current_dir` on an absent directory
+/// reports only `NotFound`, which reads as a missing `cargo`.
 fn testcartridge_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    PathBuf::from(&manifest_dir)
+    let dir = PathBuf::from(&manifest_dir)
         .parent()
-        .expect("No parent dir")
+        .expect("capdag-rs has a parent (the capdag superrepo)")
+        .parent()
+        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
         .join("machfab-tests")
-        .join("testcartridge")
+        .join("testcartridge");
+    assert!(
+        dir.is_dir(),
+        "testcartridge source not found at {}; these tests need the machinefabric workspace \
+         checkout, not a standalone capdag-rs clone",
+        dir.display()
+    );
+    dir
 }
 
 /// Check if testcartridge needs rebuilding
@@ -274,9 +288,24 @@ fn testcartridge_target_dir() -> PathBuf {
             return PathBuf::from(build_dir).join("testcartridge");
         }
     }
-    // Local `cargo test` (no workspace runner): fall back to the
-    // cartridge's in-tree target directory.
-    testcartridge_dir().join("target")
+    // No runner env: derive the SAME location from the workspace layout. There
+    // is deliberately no in-tree fallback — build output belongs under
+    // machinefabric/build, and a `target/` beside the source both violates that
+    // and hides the missing variable behind a second 600 MB copy.
+    workspace_root()
+        .join("build")
+        .join("cargo")
+        .join("testcartridge")
+}
+
+/// The machinefabric workspace root: the crate is `machinefabric/capdag/capdag-rs`.
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("capdag-rs has a parent (the capdag superrepo)")
+        .parent()
+        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
+        .to_path_buf()
 }
 
 /// Get path to testcartridge binary, building if necessary.
