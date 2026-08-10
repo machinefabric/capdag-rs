@@ -506,7 +506,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
-capdag = { git = "https://github.com/machinefabric/capdag", tag = "v1.644.6474" }
+# capdag is resolved from a git TAG, not crates.io: it depends on ffmpeg-bundle,
+# which is unpublishable, and cargo requires a version requirement on every
+# dependency. The tag is stamped from capdag's own version.txt, so it tracks
+# what `dx publish capdag` tags instead of drifting until someone notices.
+capdag = { git = "https://github.com/machinefabric/capdag", tag = "v1.648.6494" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -812,7 +816,9 @@ func main() {
 
 go 1.21
 
-require github.com/machinefabric/capdag-go v1.333.2790
+// Stamped from capdag-go's own version.txt, so the required version tracks what
+// `dx publish capdag-go` tags rather than drifting until someone notices.
+require github.com/machinefabric/capdag-go v1.342.2907
 "#,
                 executable: false,
             },
@@ -1068,7 +1074,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.395.3928"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.402.3970"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.18.132"),
     ],
     targets: [
