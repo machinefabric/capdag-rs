@@ -56,7 +56,7 @@ version = "1.0"
 # built.
 [dependencies.ffmpeg-bundle]
 git = "https://github.com/jowharshamshiri/ffmpeg-bundle"
-tag = "v1.24.76"
+tag = "v1.27.0"
 optional = true
 
 [dependencies.image]
@@ -97,4 +97,4 @@ description = "Core cap URN and definition system for MACHFAB plugins"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.654.26"
+version = "1.655.29"
