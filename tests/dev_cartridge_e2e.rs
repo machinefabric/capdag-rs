@@ -33,10 +33,17 @@ use std::process::{Command, Stdio};
 
 const CAPDAG_BIN: &str = env!("CARGO_BIN_EXE_capdag");
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+/// This crate's own directory. Fixtures under `tests/` are resolved from here
+/// rather than from a parent, so moving the crate cannot silently break them.
+fn crate_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The capdag superrepo — the crate's parent, holding the sibling mirrors.
+fn capdag_root() -> PathBuf {
+    crate_dir()
         .parent()
-        .expect("capdag crate has a parent (the repo root)")
+        .expect("capdag-rs has a parent (the capdag superrepo)")
         .to_path_buf()
 }
 
@@ -50,7 +57,7 @@ fn repo_root() -> PathBuf {
 /// (`tagged-urn`, `opsx-py`) from the interpreter's real site-packages, so a
 /// missing install fails loudly.
 fn pythonpath() -> String {
-    repo_root().join("capdag-py/src").display().to_string()
+    capdag_root().join("capdag-py/src").display().to_string()
 }
 
 /// Spawn a mock fabric HTTP server on an ephemeral port that returns an empty
@@ -166,8 +173,8 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // BUNDLED cartridge, not a dev-installed one, and `--dev-bins` is the
     // affordance that substitutes a local cartridge binary without changing how
     // the host resolves anything else.
-    let classifier = repo_root()
-        .join("capdag/tests/fixtures/e2e_classify_standin/cartridge.py")
+    let classifier = crate_dir()
+        .join("tests/fixtures/e2e_classify_standin/cartridge.py")
         .display()
         .to_string();
     // `--dev-bins` consumes following non-flag tokens, so the cap alias must not

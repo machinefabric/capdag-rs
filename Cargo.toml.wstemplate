@@ -55,7 +55,7 @@ version = "1.0"
 # the static ffmpeg dist. The synthetic feed needs neither and is always
 # built.
 [dependencies.ffmpeg-bundle]
-path = "../ffmpeg-bundle"
+path = "../../ffmpeg-bundle"
 optional = true
 
 [dependencies.image]
