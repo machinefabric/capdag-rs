@@ -55,7 +55,7 @@ version = "1.0"
 # the static ffmpeg dist. The synthetic feed needs neither and is always
 # built.
 [dependencies.ffmpeg-bundle]
-git = "https://github.com/machinefabric/ffmpeg-bundle"
+git = "https://github.com/jowharshamshiri/ffmpeg-bundle"
 tag = "v1.24.76"
 optional = true
 

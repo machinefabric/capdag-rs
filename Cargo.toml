@@ -55,7 +55,7 @@ version = "1.0"
 # the static ffmpeg dist. The synthetic feed needs neither and is always
 # built.
 [dependencies.ffmpeg-bundle]
-git = "https://github.com/machinefabric/ffmpeg-bundle"
+git = "https://github.com/jowharshamshiri/ffmpeg-bundle"
 tag = "v1.24.76"
 optional = true
 
@@ -97,4 +97,4 @@ description = "Core cap URN and definition system for MACHFAB plugins"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.653.23"
+version = "1.654.26"
