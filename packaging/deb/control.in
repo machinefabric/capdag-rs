@@ -1,0 +1,13 @@
+Package: @{package}
+Version: @{version}
+Architecture: @{arch}
+Maintainer: MachineFabric <support@machinefabric.com>
+Section: utils
+Priority: optional
+Depends: libc6 (>= 2.31)
+Homepage: https://capdag.com
+Description: @{package} — machine-notation and single-cap executor CLI
+ Runs machine-notation pipelines and individual capability executions, shipping
+ its bundled cartridges (data/fetch/model cartridges) with baked content-hash
+ verification. Installs the bundle under @{prefix} with a @{link}
+ launcher.
