@@ -16,7 +16,7 @@
 
 use super::types::{ParseOrchestrationError, ResolvedEdge, ResolvedGraph};
 use crate::cap::registry::FabricRegistry;
-use crate::planner::{ExecutionNodeType, MachinePlan};
+use crate::planner::{ExecutionNodeType, MachinePlan, StepToken};
 use std::collections::HashMap;
 
 /// Convert a MachinePlan to a ResolvedGraph for execution.

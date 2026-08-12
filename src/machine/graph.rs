@@ -66,7 +66,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cap::registry::FabricRegistry;
-use crate::planner::Strand;
+use crate::planner::{StepToken, Strand};
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
@@ -139,14 +139,14 @@ pub struct MachineEdge {
     /// sequence. Present exactly when `is_loop` is true. This is distinct from
     /// `token_id`: a ForEach boundary and its body-entry cap are separate graph
     /// elements and must never share an attribution identity.
-    pub foreach_token_id: Option<String>,
+    pub foreach_token_id: Option<StepToken>,
     /// Stable identity of the originating resolved-strand step (see
     /// `StrandStep::token_id`), carried onto the executable DAG unit so a running
     /// cap can report *which* step it is — the key the run's live updates route
     /// by. It is IDENTITY, not semantics: `is_equivalent_with` deliberately
     /// ignores it (two structurally-identical machines stay equivalent even with
     /// different per-run token_ids).
-    pub token_id: String,
+    pub token_id: StepToken,
 }
 
 impl MachineEdge {

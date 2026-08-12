@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::cap::definition::{ArgSource, Cap, CapArg, CapOutput};
 use crate::cap::registry::FabricRegistry;
-use crate::planner::{ArgSourceRef, CapInput, Strand, StrandStep, StrandStepType};
+use crate::planner::{ArgSourceRef, CapInput, StepToken, Strand, StrandStep, StrandStepType};
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
@@ -152,7 +152,7 @@ pub(crate) fn cap_step(cap_urn_str: &str, title: &str, from: &str, to: &str) -> 
 /// than rely on position, so fixtures that build linear strands wrap their step vec in
 /// this before constructing the `Strand`.
 pub(crate) fn chain_cap_steps(mut steps: Vec<StrandStep>) -> Vec<StrandStep> {
-    let mut prev_cap_token: Option<String> = None;
+    let mut prev_cap_token: Option<StepToken> = None;
     for step in &mut steps {
         let token = step.token_id.clone();
         if let StrandStepType::Cap { inputs, .. } = &mut step.step_type {

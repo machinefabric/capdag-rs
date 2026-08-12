@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+use crate::planner::StepToken;
+
 /// Errors raised when building or resolving a `Machine`.
 ///
 /// These cover anchor-realization (computing each `MachineStrand`'s
@@ -136,15 +138,15 @@ pub enum MachineAbstractionError {
     )]
     DanglingForEach {
         strand_index: usize,
-        token_id: String,
+        token_id: StepToken,
     },
 
     /// Two ForEach boundaries cannot qualify the same cap step.
     #[error("strand {strand_index}: ForEach step '{token_id}' follows unresolved ForEach step '{previous_token_id}'")]
     ConsecutiveForEach {
         strand_index: usize,
-        previous_token_id: String,
-        token_id: String,
+        previous_token_id: StepToken,
+        token_id: StepToken,
     },
 
     /// Anchor binding: the number of run-supplied sources does not equal the number

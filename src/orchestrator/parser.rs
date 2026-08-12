@@ -178,7 +178,7 @@ pub async fn parse_machine_to_cap_dag(
                     // This orchestration path parses notation directly (no resolved
                     // strand), so there is no upstream StrandStep identity to carry —
                     // mint a fresh per-edge token_id, same as the notation editor path.
-                    token_id: uuid::Uuid::new_v4().to_string(),
+                    token_id: crate::planner::StepToken::mint(),
                     from: source_name,
                     to: target_name.clone(),
                     cap_urn: cap_urn_str.clone(),

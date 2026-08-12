@@ -46,7 +46,7 @@ use std::collections::HashMap;
 use crate::cap::registry::FabricRegistry;
 use crate::machine::graph::{MachineStrand, NodeId};
 use crate::machine::MachineAbstractionError;
-use crate::planner::{ArgSourceRef, CapInput, Strand, StrandStep, StrandStepType};
+use crate::planner::{ArgSourceRef, CapInput, StepToken, Strand, StrandStep, StrandStepType};
 use crate::urn::media_urn::MediaUrn;
 
 /// Realize a single resolved `MachineStrand` into a `Strand`, instantiating runtime
@@ -129,7 +129,7 @@ pub fn realize_strand_with_anchor_sources(
     }
     // The step (by stable `token_id`) that produced each node, for wiring convergence
     // args. Input anchors have no producing step.
-    let mut node_producer: HashMap<NodeId, String> = HashMap::new();
+    let mut node_producer: HashMap<NodeId, StepToken> = HashMap::new();
 
     let edges = machine_strand.edges();
     let mut emitted = vec![false; edges.len()];

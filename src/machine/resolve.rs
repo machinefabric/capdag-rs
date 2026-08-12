@@ -63,7 +63,7 @@
 use std::collections::HashMap;
 
 use crate::cap::registry::FabricRegistry;
-use crate::planner::{ArgSourceRef, Strand, StrandStepType};
+use crate::planner::{ArgSourceRef, StepToken, Strand, StrandStepType};
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
@@ -89,7 +89,7 @@ use super::graph::{EdgeAssignmentBinding, MachineEdge, MachineStrand, NodeId};
 pub struct PreInternedWiring {
     /// The originating resolved-strand step's stable identity, carried onto the
     /// resulting `MachineEdge` (see `MachineEdge::token_id`).
-    pub token_id: String,
+    pub token_id: StepToken,
     /// Origin of the identity for a possible ForEach boundary on this wiring.
     /// Resolved strands carry an exact boundary (or exact absence); notation and
     /// programmatic machine assembly have no shape node yet, so resolution mints
@@ -107,7 +107,7 @@ pub struct PreInternedWiring {
 
 #[derive(Debug, Clone)]
 pub enum ForEachIdentity {
-    Exact(Option<String>),
+    Exact(Option<StepToken>),
     MintIfRequired,
 }
 
@@ -158,11 +158,11 @@ pub fn resolve_strand(
     // `NodeId`. Explicit input sources (`CapInput::source`) resolve against this — no
     // positional predecessor assumption, so fan-out and convergence both wire
     // correctly.
-    let mut producer_node: HashMap<String, NodeId> = HashMap::new();
+    let mut producer_node: HashMap<StepToken, NodeId> = HashMap::new();
     // The single shared strand input anchor node, allocated on first `StrandInput`
     // reference and refined to the most specific consuming `from_spec`.
     let mut strand_input_node: Option<NodeId> = None;
-    let mut pending_foreach_token_id: Option<String> = None;
+    let mut pending_foreach_token_id: Option<StepToken> = None;
 
     for step in &strand.steps {
         match &step.step_type {
@@ -524,7 +524,7 @@ pub fn resolve_pre_interned(
             }
             ForEachIdentity::Exact(None) if !derived_is_loop => (false, None),
             ForEachIdentity::MintIfRequired if derived_is_loop => {
-                (true, Some(uuid::Uuid::new_v4().to_string()))
+                (true, Some(StepToken::mint()))
             }
             ForEachIdentity::MintIfRequired => (false, None),
             ForEachIdentity::Exact(explicit) => {
@@ -1654,7 +1654,7 @@ mod tests {
             CapUrn::from_string("cap:in=\"media:ext=pdf\";merge;out=\"media:enc=utf-8;ext=txt\"")
                 .unwrap();
         let wirings = vec![PreInternedWiring {
-            token_id: "tok-1".to_string(),
+            token_id: "tok-1".parse().unwrap(),
             foreach_identity: ForEachIdentity::MintIfRequired,
             cap_urn,
             source_node_ids: vec![0, 1], // pdf first, enc=utf-8 second
@@ -1695,14 +1695,14 @@ mod tests {
         // node 0 -> cap_a -> node 1  and  node 1 -> cap_b -> node 0 (cycle)
         let wirings = vec![
             PreInternedWiring {
-                token_id: "tok-2".to_string(),
+                token_id: "tok-2".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(urn_a).unwrap(),
                 source_node_ids: vec![0],
                 target_node_id: 1,
             },
             PreInternedWiring {
-                token_id: "tok-3".to_string(),
+                token_id: "tok-3".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(urn_b).unwrap(),
                 source_node_ids: vec![1],
@@ -1844,7 +1844,7 @@ mod tests {
         ];
         let wirings = vec![
             PreInternedWiring {
-                token_id: "tok-a".to_string(),
+                token_id: "tok-a".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
@@ -1854,7 +1854,7 @@ mod tests {
                 target_node_id: 2,
             },
             PreInternedWiring {
-                token_id: "tok-b".to_string(),
+                token_id: "tok-b".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
@@ -1864,7 +1864,7 @@ mod tests {
                 target_node_id: 3,
             },
             PreInternedWiring {
-                token_id: "tok-concat".to_string(),
+                token_id: "tok-concat".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
@@ -1944,7 +1944,7 @@ mod tests {
         ];
         let wirings = vec![
             PreInternedWiring {
-                token_id: "tok-a".to_string(),
+                token_id: "tok-a".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
@@ -1954,7 +1954,7 @@ mod tests {
                 target_node_id: 2,
             },
             PreInternedWiring {
-                token_id: "tok-b".to_string(),
+                token_id: "tok-b".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
@@ -1964,7 +1964,7 @@ mod tests {
                 target_node_id: 3,
             },
             PreInternedWiring {
-                token_id: "tok-concat".to_string(),
+                token_id: "tok-concat".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
                     "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
@@ -2009,14 +2009,14 @@ mod tests {
         );
         let registry = registry_with(vec![cap]);
         let mut boundary = for_each_step("media:enc=utf-8;page");
-        boundary.token_id = "tok-foreach".to_string();
+        boundary.token_id = "tok-foreach".parse().unwrap();
         let mut body = cap_step(
             cap_urn,
             "Summarize",
             "media:enc=utf-8;page",
             "media:enc=utf-8;ext=txt;plain-text",
         );
-        body.token_id = "tok-cap".to_string();
+        body.token_id = "tok-cap".parse().unwrap();
         let source = media("media:enc=utf-8;page");
         let strand = strand_from_steps(vec![boundary, body], "foreach identity");
 

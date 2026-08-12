@@ -35,7 +35,7 @@ use crate::orchestrator::types::ResolvedGraph;
 use crate::orchestrator::ParseOrchestrationError;
 use crate::planner::plan_analysis::derive_foreach_media_urns;
 use crate::planner::{
-    ExecutionNodeType, InputCardinality, MachineNode, MachinePlan, MachinePlanEdge,
+    ExecutionNodeType, InputCardinality, MachineNode, MachinePlan, MachinePlanEdge, StepToken,
 };
 use crate::{
     BodyOutcome, CapProgressFn, CapStepProgressFn, ExecutionError, PipelineLogFn, StreamMeta,
@@ -152,7 +152,7 @@ impl PlanInput {
 /// Stable address of one body within a particular ForEach boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForEachBodyCoordinate {
-    pub foreach_token_id: String,
+    pub foreach_token_id: StepToken,
     pub body_index: usize,
 }
 
@@ -160,7 +160,7 @@ pub struct ForEachBodyCoordinate {
 /// on the pipeline wire; only this bounded UI snapshot leaves the executor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForEachItemSnapshot {
-    pub foreach_token_id: String,
+    pub foreach_token_id: StepToken,
     pub body_index: usize,
     pub item_preview_text: Option<String>,
     pub item_byte_count: u64,
@@ -446,7 +446,7 @@ struct Region {
     fe_id: String,
     /// Stable identity of the originating ForEach strand step. `fe_id` is only
     /// the planner-local node key and must never cross the run-state boundary.
-    step_token_id: String,
+    step_token_id: StepToken,
     /// The producer node whose sequence output this region iterates.
     input_node: String,
     /// The body's per-item entry cap (fed the single item).
@@ -1607,7 +1607,7 @@ async fn run_region_bodies(
                             body_index: i,
                             success: false,
                             cap_urns: region.body_cap_urns.clone(),
-                            failed_token_id: e.step_token_id().map(str::to_string),
+                            failed_token_id: e.step_token_id().cloned(),
                             error: Some(error_str),
                             failed_arg_urn: e.failure_arg_urn().map(str::to_string),
                             title: None,
@@ -2243,7 +2243,7 @@ mod tests {
             "input",
             "mapper",
             "mapper",
-            "live-foreach-token".to_string(),
+            "live-foreach-token".parse().unwrap(),
         ));
         plan.add_node(MachineNode::output("out", "result", "mapper"));
         plan.add_edge(MachinePlanEdge::direct("input", "fe"));
@@ -2460,7 +2460,7 @@ mod tests {
             "bridge",
             "mapper",
             "mapper",
-            "spooled-foreach-token".to_string(),
+            "spooled-foreach-token".parse().unwrap(),
         ));
         plan.add_node(MachineNode::output("out", "result", "mapper"));
         plan.add_edge(MachinePlanEdge::direct("input", "bridge"));
@@ -2580,7 +2580,7 @@ mod tests {
             "bridge",
             "mapper",
             "mapper",
-            "spooled-foreach-conflict-token".to_string(),
+            "spooled-foreach-conflict-token".parse().unwrap(),
         ));
         plan.add_node(MachineNode::output("out", "result", "mapper"));
         plan.add_edge(MachinePlanEdge::direct("input", "bridge"));
@@ -2719,7 +2719,7 @@ mod tests {
             "bridge",
             "mapper",
             "mapper",
-            "spooled-foreach-transient-token".to_string(),
+            "spooled-foreach-transient-token".parse().unwrap(),
         ));
         plan.add_node(MachineNode::output("out", "result", "mapper"));
         plan.add_edge(MachinePlanEdge::direct("input", "bridge"));
@@ -2803,7 +2803,7 @@ mod tests {
             "render",
             "mapper",
             "mapper",
-            "stable-foreach-token".to_string(),
+            "stable-foreach-token".parse().unwrap(),
         ));
         plan.add_node(MachineNode::cap(
             "fold",

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::argument_binding::{ArgumentBinding, ArgumentBindings};
 use super::cardinality::InputCardinality;
-use super::live_cap_fab::Strand;
+use super::live_cap_fab::{StepToken, Strand};
 use super::plan::{ExecutionNodeType, MachineNode, MachinePlan, MachinePlanEdge};
 use super::PlannerError;
 use crate::{Cap, FabricRegistry, MediaUrn, MediaValidation};
@@ -153,7 +153,7 @@ impl MachinePlanBuilder {
         struct PendingForEach {
             input_producer: String,
             body_entry: String,
-            token_id: String,
+            token_id: StepToken,
         }
         let mut pending_foreach: HashMap<String, PendingForEach> = HashMap::new();
         let mut region_exit: HashMap<String, String> = HashMap::new();
@@ -465,17 +465,17 @@ impl MachinePlanBuilder {
                 } else {
                     // Runtime input cardinality introduced this boundary; this is
                     // the point where that executed graph element is born.
-                    uuid::Uuid::new_v4().to_string()
+                    StepToken::mint()
                 };
                 pending_foreach.insert(
                     fe_id.clone(),
                     PendingForEach {
                         input_producer: prev_node_id.clone(),
-                        body_entry: cap_node_id.clone(),
+                        body_entry: cap_node_id.to_string(),
                         token_id: foreach_token_id,
                     },
                 );
-                region_exit.insert(fe_id.clone(), cap_node_id.clone());
+                region_exit.insert(fe_id.clone(), cap_node_id.to_string());
                 node_region.insert(tgt, fe_id);
             } else if let Some(region) = src_region {
                 if cap_input_is_seq {
@@ -489,7 +489,7 @@ impl MachinePlanBuilder {
                     // Scalar cap extending an existing ForEach body — chain onto the
                     // producer and extend the region's exit.
                     plan.add_edge(MachinePlanEdge::direct(&prev_node_id, &cap_node_id));
-                    region_exit.insert(region.clone(), cap_node_id.clone());
+                    region_exit.insert(region.clone(), cap_node_id.to_string());
                     node_region.insert(tgt, region);
                 }
             } else {
@@ -559,7 +559,7 @@ impl MachinePlanBuilder {
                     ))
                 })?;
             node_runtime.insert(tgt, out_media);
-            producer.insert(tgt, cap_node_id);
+            producer.insert(tgt, cap_node_id.to_string());
             emitted[i] = true;
             remaining -= 1;
         }
@@ -665,8 +665,16 @@ pub struct ArgumentInfo {
 pub struct StepArgumentRequirements {
     /// Cap URN for this step
     pub cap_urn: String,
-    /// Step index (0-based)
-    pub step_index: usize,
+    /// The planner-minted `StrandStep::token_id` of the step these requirements
+    /// describe — the ONLY address an argument value is ever bound to.
+    ///
+    /// A token exists because a plan exists. It is never derived from a
+    /// position, a notation string, or anything else: the plan mints it and
+    /// everything downstream carries it unchanged. Positions cannot address a
+    /// step because a strand is a DAG — parallel branches merging downstream
+    /// have no ordinal, and two identical caps on separate branches are
+    /// distinguishable only by token.
+    pub token_id: StepToken,
     /// Cap title
     pub title: String,
     /// All arguments for this cap with their resolution status
@@ -719,12 +727,13 @@ impl MachinePlanBuilder {
         // Track cap step index for determining first cap (affects file_path resolution)
         let mut cap_step_index = 0;
 
-        for (step_index, step) in path.steps.iter().enumerate() {
+        for step in path.steps.iter() {
             // Only analyze Cap steps - cardinality transitions have no arguments
             let cap_urn = match step.cap_urn() {
                 Some(urn) => urn,
                 None => continue, // Skip ForEach/Collect steps
             };
+
 
             let cap_urn_str = cap_urn.to_string();
             let cap = caps
@@ -789,7 +798,7 @@ impl MachinePlanBuilder {
 
             step_requirements.push(StepArgumentRequirements {
                 cap_urn: cap_urn_str,
-                step_index,
+                token_id: step.token_id.clone(),
                 title: step.title(),
                 arguments,
                 slots,
@@ -1296,7 +1305,7 @@ mod tests {
             target_media_urn: "media:ext=png;image".to_string(),
             steps: vec![StepArgumentRequirements {
                 cap_urn: "cap:generate-thumbnail;in=pdf;out=png".to_string(),
-                step_index: 0,
+                token_id: "tok-thumbnail".parse().unwrap(),
                 title: "Generate Thumbnail".to_string(),
                 arguments: vec![ArgumentInfo {
                     name: "file_path".to_string(),
@@ -1334,7 +1343,7 @@ mod tests {
             target_media_urn: "media:translated".to_string(),
             steps: vec![StepArgumentRequirements {
                 cap_urn: "cap:translate;in=text;out=translated".to_string(),
-                step_index: 0,
+                token_id: "tok-translate".parse().unwrap(),
                 title: "Translate".to_string(),
                 arguments: vec![
                     ArgumentInfo {
@@ -1624,5 +1633,166 @@ mod tests {
                 other => panic!("unexpected non-main arg '{other}' in step requirements"),
             }
         }
+    }
+
+    /// Build a one-cap-URN-repeated strand: two steps running the SAME cap,
+    /// which is the shape that makes positional identity indistinguishable
+    /// from token identity unless the tokens are actually carried.
+    #[cfg(test)]
+    fn repeated_cap_strand(cap: &Cap) -> Strand {
+        use crate::planner::live_cap_fab::{ArgSourceRef, CapInput, StrandStep, StrandStepType};
+
+        let source = MediaUrn::from_string("media:ext=txt;text").unwrap();
+        let target = MediaUrn::from_string("media:ext=txt;text").unwrap();
+        let step = |source_ref: ArgSourceRef| {
+            StrandStep::new(
+                StrandStepType::Cap {
+                    cap_urn: cap.urn.clone(),
+                    title: "Rewrite".to_string(),
+                    specificity: 1,
+                    input_is_sequence: false,
+                    output_is_sequence: false,
+                    inputs: vec![CapInput {
+                        arg_urn: MediaUrn::from_string("media:enc=utf-8;file-path").unwrap(),
+                        source: source_ref,
+                    }],
+                },
+                source.clone(),
+                target.clone(),
+            )
+        };
+
+        Strand {
+            steps: vec![step(ArgSourceRef::StrandInput), step(ArgSourceRef::StrandInput)],
+            source_media_urn: source,
+            target_media_urn: target,
+            total_steps: 2,
+            cap_step_count: 2,
+            description: "Rewrite twice".to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    fn rewrite_cap() -> Cap {
+        use crate::cap::definition::{ArgSource, CapArg};
+
+        let urn =
+            CapUrn::from_string(r#"cap:in="media:ext=txt;text";out="media:ext=txt;text";rewrite"#)
+                .unwrap();
+        let mut cap = Cap::new(urn, "Rewrite".to_string(), vec!["rewrite".to_string()]);
+        cap.args = vec![
+            CapArg::with_full_definition(
+                "media:enc=utf-8;file-path",
+                true,
+                false,
+                vec![ArgSource::Stdin {
+                    stdin: "media:ext=txt;text".to_string(),
+                }],
+                Some("Text to rewrite".to_string()),
+                None,
+                None,
+            ),
+            CapArg::with_full_definition(
+                "media:numeric;temperature",
+                false,
+                false,
+                vec![ArgSource::CliFlag {
+                    cli_flag: "--temperature".to_string(),
+                }],
+                Some("Sampling temperature".to_string()),
+                Some(serde_json::json!(0.7)),
+                None,
+            ),
+        ];
+        cap
+    }
+
+    /// TEST1461: step requirements are addressed by the plan's own token.
+    ///
+    /// Two steps of the SAME cap in one strand: the requirements must carry the
+    /// two DISTINCT `StrandStep::token_id` values the planner minted, in
+    /// correspondence with the steps they describe. Nothing about a requirement
+    /// entry may be recoverable only by counting — a caller holding a
+    /// requirement must be able to bind a value without consulting the strand.
+    #[tokio::test]
+    async fn test1461_step_requirements_carry_the_plans_own_tokens() {
+        let cap = rewrite_cap();
+        let registry = FabricRegistry::new_for_test();
+        registry.add_caps_to_cache(vec![cap.clone()]);
+        let builder = MachinePlanBuilder::new(Arc::new(registry));
+        let strand = repeated_cap_strand(&cap);
+
+        let strand_tokens: Vec<StepToken> =
+            strand.steps.iter().map(|s| s.token_id.clone()).collect();
+        assert_ne!(
+            strand_tokens[0], strand_tokens[1],
+            "the planner mints a distinct token per step even for a repeated cap"
+        );
+
+        let requirements = builder
+            .analyze_path_arguments(&strand)
+            .await
+            .expect("step-requirements assembly must succeed");
+
+        assert_eq!(requirements.steps.len(), 2);
+        let requirement_tokens: Vec<StepToken> = requirements
+            .steps
+            .iter()
+            .map(|s| s.token_id.clone())
+            .collect();
+        assert_eq!(
+            requirement_tokens, strand_tokens,
+            "each requirement carries the token of the step it describes — the \
+             address a value is bound to, not a position to be counted"
+        );
+    }
+
+    /// TEST1462: an unidentified step is not a state the program can hold.
+    ///
+    /// `StepToken` is the type that makes it so: minting is the only way to
+    /// create one, and `parse` — the sole path back from text, which
+    /// `Deserialize` goes through — refuses an empty id. Deserialization is the
+    /// one boundary where a strand arrives as data rather than being
+    /// constructed, so it is the one place the illegal state could otherwise
+    /// enter. A persisted strand carrying `""` must fail to load, not load into
+    /// a strand whose steps cannot be addressed.
+    #[test]
+    fn test1462_a_step_token_cannot_be_empty() {
+        use crate::planner::live_cap_fab::{StepToken, StepTokenError};
+
+        assert_eq!(
+            StepToken::parse(""),
+            Err(StepTokenError::Empty),
+            "an empty id names no step and is not a token"
+        );
+
+        // The deserialization boundary refuses it, so no strand can be loaded
+        // into an unaddressable state.
+        let failure = serde_json::from_str::<StepToken>(r#""""#)
+            .expect_err("deserializing an empty token must fail");
+        assert!(
+            failure.to_string().contains("came from no plan"),
+            "the refusal must say why an empty token is impossible, got: {failure}"
+        );
+
+        // A whole strand step carrying an empty token is refused with it —
+        // this is the shape that actually arrives from a persisted run.
+        let step_json = serde_json::json!({
+            "token_id": "",
+            "step_type": { "ForEach": { "media_def": "media:ext=txt;text" } },
+            "from_spec": "media:ext=txt;text",
+            "to_spec": "media:ext=txt;text",
+        });
+        assert!(
+            serde_json::from_value::<crate::planner::live_cap_fab::StrandStep>(step_json).is_err(),
+            "a strand step with an empty token must not deserialize"
+        );
+
+        // And a minted token round-trips through the same boundary unchanged.
+        let minted = StepToken::mint();
+        let encoded = serde_json::to_string(&minted).expect("a token serializes as its text");
+        let decoded: StepToken =
+            serde_json::from_str(&encoded).expect("a minted token survives the round trip");
+        assert_eq!(decoded, minted);
     }
 }

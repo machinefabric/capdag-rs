@@ -57,7 +57,8 @@ pub use cardinality::{
 pub use collection_input::{CapInputCollection, CollectionFile};
 pub use live_cap_fab::{
     ArgSourceRef, CapInput, LiveCapFab, LiveMachinePlanEdge, LiveMachinePlanEdgeType,
-    PathFindingEvent, ReachableTargetInfo, Strand, StrandStep, StrandStepType,
+    PathFindingEvent, ReachableTargetInfo, StepToken, StepTokenError, Strand, StrandStep,
+    StrandStepType,
 };
 pub use plan::{
     BodyOutcome, EdgeType, ExecutionNodeType, MachineNode, MachinePlan, MachinePlanEdge,

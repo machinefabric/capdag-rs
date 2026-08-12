@@ -40,7 +40,7 @@ use crate::machine::{Machine, MachineStrand, NodeId};
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
-use super::live_cap_fab::{LiveCapFab, LiveMachinePlanEdgeType, Strand, StrandStepType};
+use super::live_cap_fab::{LiveCapFab, LiveMachinePlanEdgeType, StepToken, Strand, StrandStepType};
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence, PlanApex,
@@ -137,9 +137,9 @@ impl Assembler {
         cap_urn: &CapUrn,
         sources: Vec<NodeId>,
         out: MediaUrn,
-    ) -> (NodeId, String) {
+    ) -> (NodeId, StepToken) {
         let target = self.add_node(out);
-        let token_id = uuid::Uuid::new_v4().to_string();
+        let token_id = StepToken::mint();
         self.wirings.push(PreInternedWiring {
             token_id: token_id.clone(),
             foreach_identity: ForEachIdentity::MintIfRequired,
@@ -171,9 +171,9 @@ impl Assembler {
         &mut self,
         strand: &Strand,
         entries: Vec<NodeId>,
-    ) -> Result<(NodeId, String), PlanError> {
+    ) -> Result<(NodeId, StepToken), PlanError> {
         let mut current: Option<NodeId> = None;
-        let mut fold_token: Option<String> = None;
+        let mut fold_token: Option<StepToken> = None;
         for step in &strand.steps {
             if let StrandStepType::Cap { cap_urn, .. } = &step.step_type {
                 match current {
@@ -215,8 +215,8 @@ fn notation_of(strands: Vec<MachineStrand>) -> Result<String, PlanError> {
 /// `fold_token` must carry `n` bindings on one arg slot. A fold cap whose
 /// extra scalar args stole leg outputs via product precedence is NOT a valid
 /// fold for these types — the candidate is dropped, never silently mis-wired.
-fn fold_gathered(strand: &MachineStrand, fold_token: &str, n: usize) -> bool {
-    let Some(edge) = strand.edges().iter().find(|e| e.token_id == fold_token) else {
+fn fold_gathered(strand: &MachineStrand, fold_token: &StepToken, n: usize) -> bool {
+    let Some(edge) = strand.edges().iter().find(|e| &e.token_id == fold_token) else {
         return false;
     };
     if edge.assignment.len() != n {

@@ -11,7 +11,7 @@
 
 use super::argument_binding::ArgumentBindings;
 use super::cardinality::InputCardinality;
-use super::live_cap_fab::{Strand, StrandStep, StrandStepType};
+use super::live_cap_fab::{StepToken, Strand, StrandStep, StrandStepType};
 use super::PlannerError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -30,7 +30,7 @@ pub enum ExecutionNodeType {
         /// canonical, alias-free key by which a run's progress updates map back to the
         /// exact graph element the client rendered. It is minted once at the strand's
         /// source and threaded verbatim through the plan → resolved graph → progress.
-        token_id: String,
+        token_id: StepToken,
         /// The cap URN to execute
         cap_urn: String,
         /// Argument bindings for this cap
@@ -52,7 +52,7 @@ pub enum ExecutionNodeType {
         /// Stable per-step identity (the ForEach `StrandStep.token_id`). The run's
         /// aggregate per-item progress is reported under this identity so it maps to
         /// the exact ForEach graph element the client rendered.
-        token_id: String,
+        token_id: StepToken,
         /// Node that provides the input sequence
         input_node: NodeId,
         /// Entry point of the per-item sub-graph
@@ -154,7 +154,7 @@ impl MachineNode {
         Self {
             id: id.to_string(),
             node_type: ExecutionNodeType::Cap {
-                token_id: Uuid::new_v4().to_string(),
+                token_id: StepToken::mint(),
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: ArgumentBindings::new(),
                 preferred_cap: None,
@@ -171,7 +171,7 @@ impl MachineNode {
         Self {
             id: id.to_string(),
             node_type: ExecutionNodeType::Cap {
-                token_id: Uuid::new_v4().to_string(),
+                token_id: StepToken::mint(),
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: bindings,
                 preferred_cap: None,
@@ -189,7 +189,7 @@ impl MachineNode {
         id: &str,
         cap_urn: &str,
         bindings: ArgumentBindings,
-        token_id: String,
+        token_id: StepToken,
     ) -> Self {
         Self {
             id: id.to_string(),
@@ -213,7 +213,7 @@ impl MachineNode {
         Self {
             id: id.to_string(),
             node_type: ExecutionNodeType::Cap {
-                token_id: Uuid::new_v4().to_string(),
+                token_id: StepToken::mint(),
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: bindings,
                 preferred_cap,
@@ -233,7 +233,7 @@ impl MachineNode {
             input_node,
             body_entry,
             body_exit,
-            Uuid::new_v4().to_string(),
+            StepToken::mint(),
         )
     }
 
@@ -243,7 +243,7 @@ impl MachineNode {
         input_node: &str,
         body_entry: &str,
         body_exit: &str,
-        token_id: String,
+        token_id: StepToken,
     ) -> Self {
         Self {
             id: id.to_string(),
@@ -610,7 +610,7 @@ impl MachinePlan {
             }
         }
 
-        let mut boundaries: Vec<(usize, String, String)> = Vec::new();
+        let mut boundaries: Vec<(usize, StepToken, StepToken)> = Vec::new();
         for node in self.nodes.values() {
             let ExecutionNodeType::ForEach {
                 token_id,
@@ -1303,7 +1303,7 @@ pub struct BodyOutcome {
     /// Stable StrandStep.token_id of the ForEach boundary this body belongs to.
     /// Null only for the synthetic whole-run outcome of a linear machine.
     #[serde(deserialize_with = "deserialize_required_nullable_string")]
-    pub foreach_token_id: Option<String>,
+    pub foreach_token_id: Option<StepToken>,
     /// Index of this body within the ForEach (0-based). 0 for linear pipelines.
     pub body_index: usize,
     /// Whether this body completed successfully.
@@ -1312,7 +1312,7 @@ pub struct BodyOutcome {
     pub cap_urns: Vec<String>,
     /// Exact immutable strand-step token that failed.
     #[serde(deserialize_with = "deserialize_required_nullable_string")]
-    pub failed_token_id: Option<String>,
+    pub failed_token_id: Option<StepToken>,
     /// Error message if the body failed.
     pub error: Option<String>,
     /// Media URN of the argument attributed by the failure's emit source.
@@ -1343,13 +1343,13 @@ pub struct BodyOutcome {
 
 #[derive(Deserialize)]
 struct BodyOutcomeWire {
-    #[serde(deserialize_with = "deserialize_required_nullable_string")]
-    foreach_token_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable_token")]
+    foreach_token_id: Option<StepToken>,
     body_index: usize,
     success: bool,
     cap_urns: Vec<String>,
-    #[serde(deserialize_with = "deserialize_required_nullable_string")]
-    failed_token_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_required_nullable_token")]
+    failed_token_id: Option<StepToken>,
     error: Option<String>,
     #[serde(deserialize_with = "deserialize_required_nullable_string")]
     failed_arg_urn: Option<String>,
@@ -1368,14 +1368,11 @@ impl TryFrom<BodyOutcomeWire> for BodyOutcome {
     type Error = String;
 
     fn try_from(wire: BodyOutcomeWire) -> Result<Self, Self::Error> {
-        if wire.foreach_token_id.as_deref() == Some("") {
-            return Err("BodyOutcome.foreach_token_id must be null or non-empty".to_string());
-        }
+        // foreach_token_id and failed_token_id need no emptiness check: a
+        // StepToken cannot BE empty, and decoding one from "" already failed
+        // before this wire value existed.
         if wire.foreach_token_id.is_none() && wire.body_index != 0 {
             return Err("a linear BodyOutcome must use body_index 0".to_string());
-        }
-        if wire.failed_token_id.as_deref() == Some("") {
-            return Err("BodyOutcome.failed_token_id must be null or non-empty".to_string());
         }
         if wire.failed_arg_urn.as_deref() == Some("") {
             return Err("BodyOutcome.failed_arg_urn must be null or non-empty".to_string());
@@ -1403,6 +1400,17 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::<String>::deserialize(deserializer)
+}
+
+/// As [`deserialize_required_nullable_string`], for a step identity: the field
+/// must be PRESENT and may be null, and a present non-null value goes through
+/// [`StepToken`]'s own validating decode — so `""` is refused here exactly as it
+/// is everywhere else a token crosses into the process.
+fn deserialize_required_nullable_token<'de, D>(deserializer: D) -> Result<Option<StepToken>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<StepToken>::deserialize(deserializer)
 }
 
 /// Overall result of executing a machine
@@ -1890,7 +1898,7 @@ mod tests {
     #[test]
     fn test743_execution_node_type_serialization() {
         let cap_node = ExecutionNodeType::Cap {
-            token_id: "tok-cap-test".to_string(),
+            token_id: "tok-cap-test".parse().unwrap(),
             cap_urn: "cap:test".to_string(),
             arg_bindings: ArgumentBindings::new(),
             preferred_cap: None,
@@ -1905,7 +1913,7 @@ mod tests {
         );
 
         let foreach_node = ExecutionNodeType::ForEach {
-            token_id: "tok-foreach".to_string(),
+            token_id: "tok-foreach".parse().unwrap(),
             input_node: "input".to_string(),
             body_entry: "body".to_string(),
             body_exit: "body".to_string(),
@@ -2416,7 +2424,7 @@ mod tests {
         )
         .unwrap();
         let cap_step = StrandStep {
-            token_id: "tok-cap".to_string(),
+            token_id: "tok-cap".parse().unwrap(),
             step_type: StrandStepType::Cap {
                 cap_urn: cap,
                 title: "Summarize".to_string(),
@@ -2431,7 +2439,7 @@ mod tests {
         let mut steps = Vec::new();
         if let Some(token_id) = prefix {
             steps.push(StrandStep {
-                token_id: token_id.to_string(),
+                token_id: token_id.parse().unwrap(),
                 step_type: StrandStepType::ForEach {
                     media_def: input.clone(),
                 },
@@ -2460,14 +2468,14 @@ mod tests {
             "tok-cap",
             "cap:constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8;ext=txt;plain-text\";summarize",
             ArgumentBindings::new(),
-            "tok-cap".to_string(),
+            "tok-cap".parse().unwrap(),
         ));
         plan.add_node(MachineNode::for_each_token(
             "foreach_0",
             "input_slot_0",
             "tok-cap",
             "tok-cap",
-            "tok-foreach".to_string(),
+            "tok-foreach".parse().unwrap(),
         ));
 
         let executed = plan.executed_strand(&one_cap_strand(None)).unwrap();
@@ -2490,14 +2498,14 @@ mod tests {
             "tok-cap",
             "cap:test",
             ArgumentBindings::new(),
-            "tok-cap".to_string(),
+            "tok-cap".parse().unwrap(),
         ));
         plan.add_node(MachineNode::for_each_token(
             "foreach_0",
             "input_slot_0",
             "tok-cap",
             "tok-cap",
-            "tok-plan-foreach".to_string(),
+            "tok-plan-foreach".parse().unwrap(),
         ));
 
         let error = plan

@@ -434,7 +434,7 @@ pub fn parse_machine_with_node_names(
                 // The notation (static-machine) path has no resolved-strand step to
                 // inherit from, so each parsed wiring's edge gets its own freshly
                 // minted stable identity.
-                token_id: uuid::Uuid::new_v4().to_string(),
+                token_id: crate::planner::StepToken::mint(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: cap_urn.clone(),
                 source_node_ids,

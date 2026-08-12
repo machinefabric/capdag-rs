@@ -193,6 +193,118 @@ impl LiveMachinePlanEdge {
     }
 }
 
+/// The stable identity of one step of a resolved strand — the ONLY address by
+/// which a step, or an argument value destined for it, is ever named.
+///
+/// This is a newtype rather than a bare `String` so that an unidentified step is
+/// not a state the program can be in. There is exactly one way to make a token
+/// ([`StepToken::mint`]) and exactly one way to recover one that was already
+/// minted ([`StepToken::parse`], which refuses an empty id). `Deserialize` goes
+/// through `parse`, so a persisted strand carrying `""` fails to load rather
+/// than loading into a strand whose steps cannot be addressed.
+///
+/// Nothing derives a token. Not from a position — a strand is a DAG, and
+/// parallel branches merging downstream have no ordinal, so two identical caps
+/// on separate branches differ only by token. Not from notation — a plan holds
+/// strictly more than the notation it was planned from, and reducing one back
+/// to the other discards exactly the identities this type exists to carry. A
+/// token comes from the plan that minted it or it does not exist.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
+pub struct StepToken(String);
+
+impl StepToken {
+    /// Mint a fresh identity. This is how every step in production is born.
+    pub fn mint() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Recover an already-minted token — from deserialization, from a protocol
+    /// message, from a persisted run. An empty id is not a token: it names no
+    /// step, so a value bound to it could never be delivered.
+    pub fn parse(raw: impl Into<String>) -> Result<Self, StepTokenError> {
+        let raw = raw.into();
+        if raw.is_empty() {
+            return Err(StepTokenError::Empty);
+        }
+        Ok(Self(raw))
+    }
+
+    /// The token's text, for protocol encoding and diagnostics.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for StepToken {
+    type Err = StepTokenError;
+    /// The same single recovery path as [`StepToken::parse`], so `"…".parse()`
+    /// and an explicit `parse` call cannot disagree about what a token is.
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::parse(raw)
+    }
+}
+
+impl std::fmt::Display for StepToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::ops::Deref for StepToken {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for StepToken {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for StepToken {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for StepToken {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<StepToken> for str {
+    fn eq(&self, other: &StepToken) -> bool {
+        self == other.0
+    }
+}
+
+impl PartialEq<&str> for StepToken {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+/// The only way a [`StepToken`] can fail to exist.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum StepTokenError {
+    #[error(
+        "a strand step token_id is empty; a step without a token came from no plan \
+         and cannot be addressed"
+    )]
+    Empty,
+}
+
+impl<'de> serde::Deserialize<'de> for StepToken {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        StepToken::parse(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// The producer of one of a cap step's inputs.
 ///
 /// A `Strand` is a DAG of steps: an input is fed either by the strand's own input
@@ -204,8 +316,8 @@ impl LiveMachinePlanEdge {
 pub enum ArgSourceRef {
     /// Fed by the strand's input anchor — the strand's own input flows into this arg.
     StrandInput,
-    /// Fed by another cap step's output, identified by that step's stable `token_id`.
-    Step { token_id: String },
+    /// Fed by another cap step's output, identified by that step's stable token.
+    Step { token_id: StepToken },
 }
 
 /// One input to a cap step: the cap argument it feeds (by the argument's slot media
@@ -265,7 +377,7 @@ pub struct StrandStep {
     /// notation-independent (aliases are display-only); it travels verbatim
     /// through serialization, the run's persisted `resolved_strand`, the render
     /// payload, and every progress message.
-    pub token_id: String,
+    pub token_id: StepToken,
     /// Type of step (cap or cardinality transition)
     pub step_type: StrandStepType,
     /// Input media type for this step
@@ -280,7 +392,7 @@ impl StrandStep {
     /// from creation; deserialization preserves the stored id verbatim.
     pub fn new(step_type: StrandStepType, from_spec: MediaUrn, to_spec: MediaUrn) -> Self {
         Self {
-            token_id: uuid::Uuid::new_v4().to_string(),
+            token_id: StepToken::mint(),
             step_type,
             from_spec,
             to_spec,
@@ -288,7 +400,7 @@ impl StrandStep {
     }
 
     /// The step's stable identity (see `token_id`).
-    pub fn token_id(&self) -> &str {
+    pub fn token_id(&self) -> &StepToken {
         &self.token_id
     }
 
@@ -1261,7 +1373,7 @@ impl LiveCapFab {
                     .rev()
                     .find(|s| s.is_cap())
                     .map(|s| ArgSourceRef::Step {
-                        token_id: s.token_id().to_string(),
+                        token_id: s.token_id().clone(),
                     })
                     .unwrap_or(ArgSourceRef::StrandInput);
                 let step_type = match &edge.edge_type {
@@ -2229,10 +2341,6 @@ mod tests {
         // it would silently break update→element routing.
         assert_eq!(recovered.steps.len(), strand.steps.len());
         for (orig, got) in strand.steps.iter().zip(recovered.steps.iter()) {
-            assert!(
-                !orig.token_id.is_empty(),
-                "each step is minted with a token_id"
-            );
             assert_eq!(
                 orig.token_id, got.token_id,
                 "token_id must round-trip unchanged"

@@ -14,6 +14,7 @@
 use crate::bifaci::frame::{Frame, FrameType, MessageId};
 use crate::bifaci::relay_switch::RelaySwitch;
 use crate::orchestrator::executor::CapProgressFn;
+use crate::planner::StepToken;
 use crate::StreamMeta;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -295,7 +296,7 @@ impl PipelineProgressTracker {
 /// ForEach item within that step and is never used as a node address.
 #[derive(Debug, Clone)]
 pub struct PipelineLogRecord {
-    pub step_token_id: Option<String>,
+    pub step_token_id: Option<StepToken>,
     pub cap_urn: Option<String>,
     pub level: String,
     pub attribution_class: crate::failure::AttributionClass,
@@ -307,14 +308,14 @@ pub struct PipelineLogRecord {
 
 impl PipelineLogRecord {
     pub fn attributed(
-        step_token_id: impl Into<String>,
+        step_token_id: &StepToken,
         cap_urn: impl Into<String>,
         level: impl Into<String>,
         attribution_class: crate::failure::AttributionClass,
         message: impl Into<String>,
     ) -> Self {
         Self {
-            step_token_id: Some(step_token_id.into()),
+            step_token_id: Some(step_token_id.clone()),
             cap_urn: Some(cap_urn.into()),
             level: level.into(),
             attribution_class,
@@ -330,7 +331,7 @@ pub type PipelineLogFn = Arc<dyn Fn(PipelineLogRecord) + Send + Sync>;
 
 fn emit_pipeline_log(
     log_fn: Option<&PipelineLogFn>,
-    step_token_id: &str,
+    step_token_id: &StepToken,
     cap_urn: &str,
     level: &str,
     attribution_class: crate::failure::AttributionClass,
@@ -1225,7 +1226,7 @@ pub struct TerminalItem {
 pub struct TerminalOutput {
     rx: mpsc::UnboundedReceiver<Frame>,
     cap_urn: String,
-    step_token_id: String,
+    step_token_id: StepToken,
     progress_fn: Option<CapProgressFn>,
     log_fn: Option<PipelineLogFn>,
     credit: Option<CreditPlumbing>,
@@ -1248,7 +1249,7 @@ impl TerminalOutput {
     pub fn new(
         rx: mpsc::UnboundedReceiver<Frame>,
         cap_urn: &str,
-        step_token_id: &str,
+        step_token_id: &StepToken,
         progress_fn: Option<CapProgressFn>,
         log_fn: Option<PipelineLogFn>,
         credit: Option<CreditPlumbing>,
@@ -1257,7 +1258,7 @@ impl TerminalOutput {
         Ok(Self {
             rx,
             cap_urn: cap_urn.to_string(),
-            step_token_id: step_token_id.to_string(),
+            step_token_id: step_token_id.clone(),
             progress_fn,
             log_fn,
             credit,
@@ -1541,7 +1542,7 @@ pub async fn collect_terminal_output(
     mut rx: mpsc::UnboundedReceiver<Frame>,
     progress_fn: Option<&CapProgressFn>,
     cap_urn: &str,
-    step_token_id: &str,
+    step_token_id: &StepToken,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
     stall_tracker: Option<&Arc<PipelineProgressTracker>>,
@@ -2118,7 +2119,7 @@ mod tests {
             rx,
             None,
             "cap:echo;effect=none",
-            "step_test",
+            &"step_test".parse().unwrap(),
             None,
             None,
             None,
@@ -2166,7 +2167,7 @@ mod tests {
         drop(tx);
 
         let mut terminal =
-            TerminalOutput::new(rx, "cap:echo;effect=none", "step_test", None, None, None)
+            TerminalOutput::new(rx, "cap:echo;effect=none", &"step_test".parse().unwrap(), None, None, None)
                 .expect("cap:echo;effect=none builds a valid effect audit");
         let first = terminal
             .next_item()
@@ -2202,7 +2203,7 @@ mod tests {
             rx,
             None,
             "cap:test",
-            "step_test",
+            &"step_test".parse().unwrap(),
             None,
             None,
             None,
@@ -2332,7 +2333,7 @@ mod tests {
             rx,
             None,
             "cap:test",
-            "step_test",
+            &"step_test".parse().unwrap(),
             None,
             None,
             None,
@@ -2367,7 +2368,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            "step_test",
+            &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
             None,
@@ -2412,7 +2413,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            "step_test",
+            &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
             None,
@@ -2456,7 +2457,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            "step_test",
+            &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
             None,
@@ -2502,7 +2503,7 @@ mod tests {
     async fn test7071_terminal_output_yields_before_stream_end() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", "step_test", None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         // Announce an unbounded stream and one item — nothing has ended.
@@ -2543,7 +2544,7 @@ mod tests {
     async fn test7077_per_item_meta_incremental() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", "step_test", None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         tx.send(stream_start(&rid)).unwrap();

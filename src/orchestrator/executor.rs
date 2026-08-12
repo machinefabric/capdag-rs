@@ -62,6 +62,7 @@ const ACTIVITY_TIMEOUT_METADATA_KEY: &str = "activity_timeout_secs";
 /// genuinely unprovided cap.
 const CAP_DISPATCH_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 use crate::bifaci::local_socket::UnixStream;
+use crate::planner::StepToken;
 use tokio::io::{BufReader, BufWriter};
 use tokio::process::Command;
 
@@ -107,14 +108,16 @@ pub struct ProgressMapper {
     parent: CapProgressFn,
     /// When set, every `report` also emits the raw (un-mapped) child value — this
     /// cap's OWN completion fraction — so a per-step consumer sees each section's
-    /// progress. Attached only to the per-cap group mappers; sub-mappers created
-    /// via `sub_mapper` deliberately do NOT inherit it (their child is an intra-cap
-    /// phase fraction, not the cap's own progress).
-    step_sink: Option<CapStepProgressFn>,
-    /// The reporting cap's stable per-step identity, emitted to `step_sink` on every
-    /// `report` so the consumer can attribute the fraction unambiguously. Set together
-    /// with `step_sink` via `with_step_sink`; empty when no step sink is attached.
-    step_token_id: String,
+    /// progress, paired with the reporting cap's stable per-step identity so the
+    /// consumer can attribute the fraction unambiguously. Attached only to the
+    /// per-cap group mappers; sub-mappers created via `sub_mapper` deliberately do
+    /// NOT inherit it (their child is an intra-cap phase fraction, not the cap's own
+    /// progress).
+    ///
+    /// Sink and token live in ONE option because neither is meaningful alone: a sink
+    /// with no step to attribute to has nothing to say, and a token with no sink has
+    /// nowhere to say it.
+    step_sink: Option<(CapStepProgressFn, StepToken)>,
 }
 
 impl ProgressMapper {
@@ -125,16 +128,14 @@ impl ProgressMapper {
             weight,
             parent: Arc::clone(parent),
             step_sink: None,
-            step_token_id: String::new(),
         }
     }
 
     /// Attach a per-step sink that receives this mapper's raw child value (the cap's
     /// own completion fraction) on every `report`, tagged with `token_id` — the
     /// reporting cap step's stable identity.
-    pub fn with_step_sink(mut self, sink: &CapStepProgressFn, token_id: &str) -> Self {
-        self.step_sink = Some(Arc::clone(sink));
-        self.step_token_id = token_id.to_string();
+    pub fn with_step_sink(mut self, sink: &CapStepProgressFn, token_id: &StepToken) -> Self {
+        self.step_sink = Some((Arc::clone(sink), token_id.clone()));
         self
     }
 
@@ -143,8 +144,8 @@ impl ProgressMapper {
         let clamped = child_progress.clamp(0.0, 1.0);
         // Emit the cap's own fraction BEFORE the overall so a consumer that reads a
         // shared "latest step" cell inside the parent callback sees the fresh value.
-        if let Some(sink) = &self.step_sink {
-            sink(clamped, cap_urn, &self.step_token_id);
+        if let Some((sink, token_id)) = &self.step_sink {
+            sink(clamped, cap_urn, token_id);
         }
         let overall = map_progress(clamped, self.base, self.weight);
         (self.parent)(overall, cap_urn, msg);
@@ -175,7 +176,6 @@ impl ProgressMapper {
             weight: sub_weight * self.weight,
             parent: Arc::clone(&self.parent),
             step_sink: None,
-            step_token_id: String::new(),
         }
     }
 }
@@ -192,7 +192,7 @@ pub enum ExecutionError {
     /// An execution failure attributed to the exact immutable strand step.
     #[error("Step {step_token_id} failed: {source}")]
     StepFailed {
-        step_token_id: String,
+        step_token_id: StepToken,
         #[source]
         source: Box<ExecutionError>,
     },
@@ -308,7 +308,7 @@ impl ExecutionError {
         }
     }
 
-    pub fn step_token_id(&self) -> Option<&str> {
+    pub fn step_token_id(&self) -> Option<&StepToken> {
         match self {
             ExecutionError::StepFailed { step_token_id, .. } => Some(step_token_id),
             _ => None,
@@ -324,12 +324,12 @@ impl ExecutionError {
         }
     }
 
-    fn at_step(self, step_token_id: impl Into<String>) -> Self {
+    fn at_step(self, step_token_id: &StepToken) -> Self {
         if matches!(self, ExecutionError::StepFailed { .. }) {
             self
         } else {
             ExecutionError::StepFailed {
-                step_token_id: step_token_id.into(),
+                step_token_id: step_token_id.clone(),
                 source: Box::new(self),
             }
         }
@@ -386,7 +386,7 @@ pub struct EdgeGroup {
     /// Stable per-step identity of this cap invocation, carried from the
     /// originating `StrandStep.token_id`. A group is exactly one cap step, so all
     /// its edges share this identity; the group's `to` node produced it.
-    pub token_id: String,
+    pub token_id: StepToken,
     /// All edges in this group (one or more)
     pub edges: Vec<ResolvedEdge>,
 }
@@ -2606,7 +2606,7 @@ async fn run_group_chain(
             details,
             arg_urn,
         }
-        .at_step(last_group_token_id.clone()),
+        .at_step(&last_group_token_id),
         // An effect-contract violation keeps its typed identity (the audit
         // fired at receipt inside collect) — never flattened into HostError.
         super::stream_io::StreamIoError::EffectContract {
@@ -2622,7 +2622,7 @@ async fn run_group_chain(
             expected,
             actual,
         }
-        .at_step(last_group_token_id.clone()),
+        .at_step(&last_group_token_id),
         other => ExecutionError::HostError(other.to_string()),
     });
 
@@ -2637,12 +2637,12 @@ async fn run_group_chain(
     match send_task.await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
-            first_error.get_or_insert(e.at_step(ordered_groups[0].token_id.clone()));
+            first_error.get_or_insert(e.at_step(&ordered_groups[0].token_id));
         }
         Err(e) => {
             first_error.get_or_insert(
                 ExecutionError::HostError(format!("Input send task panicked: {}", e))
-                    .at_step(ordered_groups[0].token_id.clone()),
+                    .at_step(&ordered_groups[0].token_id),
             );
         }
     }
@@ -2650,12 +2650,12 @@ async fn run_group_chain(
         match handle.await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                first_error.get_or_insert(e.at_step(ordered_groups[i].token_id.clone()));
+                first_error.get_or_insert(e.at_step(&ordered_groups[i].token_id));
             }
             Err(e) => {
                 first_error.get_or_insert(
                     ExecutionError::HostError(format!("Forwarding task {} panicked: {}", i, e))
-                        .at_step(ordered_groups[i].token_id.clone()),
+                        .at_step(&ordered_groups[i].token_id),
                 );
             }
         }
@@ -2994,7 +2994,7 @@ async fn forward_frames(
     max_chunk: usize,
     progress_fn: Option<&CapProgressFn>,
     prev_cap_urn: &str,
-    prev_step_token_id: &str,
+    prev_step_token_id: &StepToken,
     next_in_media: &str,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
@@ -3881,7 +3881,7 @@ mod tests {
         let cap_urn = CapUrn::from_string(urn).expect("test cap URN");
         let cap = Cap::new(cap_urn, "t".to_string(), vec!["t".to_string()]);
         ResolvedEdge {
-            token_id: format!("{}->{}", from, to),
+            token_id: format!("{}->{}", from, to).parse().unwrap(),
             from: from.to_string(),
             to: to.to_string(),
             cap_urn: urn.to_string(),
@@ -4112,7 +4112,7 @@ mod tests {
         });
 
         // This cap occupies [0.5, 0.75] of the overall run (base=0.5, weight=0.25).
-        let mapper = ProgressMapper::new(&parent, 0.5, 0.25).with_step_sink(&sink, "tok-cap-x");
+        let mapper = ProgressMapper::new(&parent, 0.5, 0.25).with_step_sink(&sink, &"tok-cap-x".parse().unwrap());
         mapper.report(0.0, "cap:x", "start");
         mapper.report(0.4, "cap:x", "mid");
         mapper.report(1.0, "cap:x", "end");

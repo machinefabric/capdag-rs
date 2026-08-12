@@ -250,6 +250,8 @@ pub use planner::{
     ShapeCompatibility,
     SourceEntityType,
     StepArgumentRequirements,
+    StepToken,
+    StepTokenError,
     Strand,
     StrandInput,
     StrandShapeAnalysis,

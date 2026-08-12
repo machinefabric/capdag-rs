@@ -1159,7 +1159,7 @@ async fn test1459_live_synthetic_foreach_region_end_to_end() {
         "input",
         "mapper",
         "mapper",
-        "live-e2e-token".to_string(),
+        "live-e2e-token".parse().unwrap(),
     ));
     plan.add_node(MachineNode::output("out", "result", "mapper"));
     plan.add_edge(MachinePlanEdge::direct("input", "fe"));
