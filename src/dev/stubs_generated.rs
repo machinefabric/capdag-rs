@@ -510,7 +510,7 @@ anyhow = "1.0"
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
 # what `dx publish capdag` tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.648.6494" }
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.656.32" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
