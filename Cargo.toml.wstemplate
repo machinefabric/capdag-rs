@@ -72,7 +72,7 @@ capture = ["dep:ffmpeg-bundle", "dep:image"]
 name = "capdag"
 path = "src/bin/capdag.rs"
 # The CLI is a capture-capable host (it resolves device references for
-# machines it runs) — built via `dx`, which passes the feature.
+# machines it runs) — built by the workspace build tool, which passes the feature.
 required-features = ["capture"]
 
 [[test]]

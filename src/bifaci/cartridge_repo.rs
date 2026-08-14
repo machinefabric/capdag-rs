@@ -116,7 +116,7 @@ impl CartridgeChannel {
         } else {
             panic!(
                 "MFR_CARTRIDGE_CHANNEL must be 'release' or 'nightly'; \
-                 build the cartridge with `dx cartridge build --release` or \
+                 build the cartridge with a workspace cartridge release build or \
                  `--nightly` so the env var is set"
             );
         }

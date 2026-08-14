@@ -49,7 +49,7 @@ where
 }
 
 /// Reserved folder name for cartridges with no registry (developer-built
-/// cartridges installed via `dx cartridge --install` without `--registry`).
+/// cartridges installed via a workspace cartridge install without `--registry`).
 /// A real registry authority is never the literal `dev`, so the two namespaces
 /// never overlap.
 pub const DEV_SLUG: &str = "dev";

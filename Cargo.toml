@@ -72,7 +72,7 @@ capture = ["dep:ffmpeg-bundle", "dep:image"]
 name = "capdag"
 path = "src/bin/capdag.rs"
 # The CLI is a capture-capable host (it resolves device references for
-# machines it runs) — built via `dx`, which passes the feature.
+# machines it runs) — built by the workspace build tool, which passes the feature.
 required-features = ["capture"]
 
 [[test]]
@@ -97,4 +97,4 @@ description = "Core cap URN and definition system for MACHFAB plugins"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.672.0"
+version = "1.673.3"

@@ -1,10 +1,10 @@
 # capdag.spec.in — rpm spec for the prebuilt capdag CLI bundle.
 #
-# Rendered by `dx capdag-dist rpm` (@VERSION@ substituted), which passes the
+# Rendered by the workspace rpm dist step (@VERSION@ substituted), which passes the
 # staged payload root via --define "capdag_payload <dir>". The payload already
 # contains the whole bundle under opt/capdag/{capdag,bundled-cartridges}; this spec only
 # packages it and wires the /usr/bin/capdag launcher symlink. There is no compile
-# step here — the binary is built + baked-hash-staged by `dx capdag-bundle`.
+# step here — the binary is built + baked-hash-staged by the workspace bundle step.
 
 # Prebuilt binary: no debuginfo extraction, no auto-generated deps.
 %global debug_package %{nil}

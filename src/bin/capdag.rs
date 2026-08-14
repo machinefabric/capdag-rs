@@ -13,7 +13,7 @@ use std::process;
 use std::sync::Arc;
 
 /// Distribution channel of this `capdag` build. Compile-time constant —
-/// `MFR_CARTRIDGE_CHANNEL` is set by `dx cartridge build --release` /
+/// `MFR_CARTRIDGE_CHANNEL` is set by a workspace cartridge release build /
 /// `--nightly`, which the build wrapper exports for every cargo
 /// invocation in the workspace. A release build of the binary can only
 /// orchestrate release cartridges, and a nightly build only nightly —
@@ -30,8 +30,8 @@ const BAKED_REGISTRY_URL: Option<&str> =
     capdag::registry_url_from_build_env(option_env!("MFR_CARTRIDGE_REGISTRY_URL"));
 
 /// Fabric registry origin (caps / media / aliases — the layer aliases like `disbind-pdf`
-/// live in), baked at build time from the environment `dx capdag-bundle`'s
-/// `select_fabric_target` exports (`https://fabric.capdag.com` for prod,
+/// live in), baked at build time from the environment the workspace bundle
+/// step exports when it selects a fabric target (`https://fabric.capdag.com` for prod,
 /// `https://fabric-staging.capdag.com` for staging). A shipped binary has no such env at
 /// runtime, so `main` seeds the process env from these before any fabric-registry
 /// construction — otherwise every fabric/schema reader would fall back to the prod default
@@ -49,7 +49,7 @@ fn user_cartridge_dir() -> PathBuf {
 }
 
 /// Bundled cartridges shipped beside this CLI binary (the executor's own
-/// `bundled-cartridges/` tree, staged by `dx capdag-bundle` with baked content
+/// `bundled-cartridges/` tree, staged by the workspace bundle step with baked content
 /// hashes). Present only in a packaged build; absent for a bare `cargo run`.
 ///
 /// `current_exe()` is canonicalized so a launcher SYMLINK resolves to the real

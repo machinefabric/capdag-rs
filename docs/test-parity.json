@@ -39323,7 +39323,7 @@
       "number": 1701,
       "mirror": "objc",
       "function": "test1701_missingManifestReturnsNil",
-      "description": "/ TEST1701: A cartridge whose `cartridge.json` has been / deleted (e.g. the operator uninstalled, or the directory / got swept up by a `dx clear --cartridges`) returns nil from / `buildInstalledCartridgeRecord`. There is no layout / fallback \u2014 cartridge.json IS the identity, and a cartridge / without a manifest is considered gone for this RelayNotify / pass. The host stays alive; the discovery scanner picks up / the change on its next scan. / / Regression test for the field crash: /   Bifaci/CartridgeHost.swift:617: Fatal error: /   BUG: healthy installed cartridge directory must be /   hashable at .../pdfcartridge/0.182.450 / Before the fix this code path aborted the whole XPC service.",
+      "description": "/ TEST1701: A cartridge whose `cartridge.json` has been / deleted (e.g. the operator uninstalled, or the directory / got swept up by a a workspace clear of installed cartridges) returns nil from / `buildInstalledCartridgeRecord`. There is no layout / fallback \u2014 cartridge.json IS the identity, and a cartridge / without a manifest is considered gone for this RelayNotify / pass. The host stays alive; the discovery scanner picks up / the change on its next scan. / / Regression test for the field crash: /   Bifaci/CartridgeHost.swift:617: Fatal error: /   BUG: healthy installed cartridge directory must be /   hashable at .../pdfcartridge/0.182.450 / Before the fix this code path aborted the whole XPC service.",
       "location": "Tests/BifaciTests/CartridgeHostInstalledRecordTests.swift:131"
     },
     {

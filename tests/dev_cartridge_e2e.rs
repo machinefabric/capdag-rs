@@ -22,7 +22,7 @@
 //!
 //! It REQUIRES a Python runtime with `capdag`, `cbor2`, and `ops` importable —
 //! the scaffolded cartridge is launched via its `#!/usr/bin/env python3` shebang,
-//! so `python3` on PATH must have them. Under `dx test` the machinefabric conda
+//! so `python3` on PATH must have them. Under a workspace test run the machinefabric conda
 //! env provides all three; the test fails loudly (never silently skips) if they
 //! are missing.
 

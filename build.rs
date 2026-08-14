@@ -4,7 +4,7 @@
 //! (engine, anything that resolves URNs, anything that writes
 //! `cartridge.json`) needs to know which manifest version of the
 //! registry it's tied to. The version is a single workspace-wide value
-//! sourced from `fabric/manifest-version.txt`. The `dx` build pipeline
+//! sourced from `fabric/manifest-version.txt`. The workspace build pipeline
 //! reads that file and exports it as `MFR_FABRIC_MANIFEST_VERSION` for
 //! every `cargo` invocation it shells.
 //!
@@ -14,7 +14,7 @@
 //!
 //!   1. A raw `cargo build` without the env var **fails the build**
 //!      with a descriptive message. There is no implicit default — if
-//!      a developer is building outside `dx`, that's an unsupported
+//!      a developer is building outside the workspace build tool, that's an unsupported
 //!      path and must be opted-into explicitly by exporting the var.
 //!   2. The value is a `pub const u32` known at compile time, so every
 //!      consumer can rely on it in `const` contexts (signatures of
@@ -57,7 +57,7 @@ fn main() {
 /// `capdag --version` reports the published RELEASE version. `version.txt` is the
 /// single source of truth for the shipped version (Cargo.toml's crate `version`
 /// is an unrelated, un-bumped value); read it straight from the crate dir so no
-/// dx env plumbing is required.
+/// workspace env plumbing is required.
 fn bake_capdag_version() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set by cargo");
     let path = Path::new(&manifest_dir).join("version.txt");
@@ -94,7 +94,7 @@ fn bake_registry_version(
         panic!(
             "{env_var} is not set. Every cargo invocation against the MachineFabric \
              workspace must export this variable, sourced from {source_file}. Run \
-             builds and tests through `dx` (which exports it for you) instead of \
+             builds and tests through the workspace build tool (which exports it for you) instead of \
              invoking cargo directly."
         );
     });
@@ -186,7 +186,7 @@ fn enforce_signing_pubkey_pairing() {
                  absent or empty. A product build binds the cartridge registry AND the fabric \
                  registry (caps/media/aliases) together — otherwise the shipped CLI silently \
                  resolves caps and aliases against the prod fabric default even in a staging \
-                 build. Set CDG_FABRIC_REGISTRY_URL (dx's select_fabric_target exports it: \
+                 build. Set CDG_FABRIC_REGISTRY_URL (the workspace build tool exports it when it selects a fabric target: \
                  https://fabric.capdag.com for prod, https://fabric-staging.capdag.com for \
                  staging), or unset the cartridge registry URL for a dev build."
             );

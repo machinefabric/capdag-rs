@@ -11,7 +11,7 @@ permissions:
 
 env:
   # capdag's build.rs and several `env!()` sites require these at COMPILE time.
-  # The `dx` build tool normally exports them; standalone CI must set them.
+  # The workspace build tool normally exports them; standalone CI must set them.
   #   MFR_FABRIC_MANIFEST_VERSION mirrors fabric/manifest-version.txt. Bump it
   #     here when that file changes (it is not in a standalone-checkoutable repo).
   #   MFR_CARTRIDGE_CHANNEL must be "release" or "nightly".

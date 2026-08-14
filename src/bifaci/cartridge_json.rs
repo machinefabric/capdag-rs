@@ -30,9 +30,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CartridgeInstallSource {
-    /// Pulled from a remote cartridge registry (`dx cartridge --install --registry …`).
+    /// Pulled from a remote cartridge registry (a workspace cartridge install from a registry).
     Registry,
-    /// Built locally from the developer's source tree (`dx cartridge --install` with no registry).
+    /// Built locally from the developer's source tree (a workspace cartridge install with no registry).
     Dev,
     /// Shipped pre-installed under the engine's `bundled-cartridges/` tree at app build time.
     Bundle,

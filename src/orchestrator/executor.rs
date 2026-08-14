@@ -1055,7 +1055,7 @@ impl CartridgeManager {
             ExecutionError::CartridgeDownloadFailed(format!(
                 "Cartridge {} v{} for '{}' publishes no signed pure-binary artifact — \
                  refusing installer fallback. Re-publish the version under the signing \
-                 regime (dx cartridge {} --release --publish).",
+                 regime (a workspace cartridge release build, published).",
                 cartridge_id, cartridge_info.version, platform, cartridge_id
             ))
         })?;
