@@ -2398,15 +2398,25 @@ mod tests {
             _stall_tracker: Option<Arc<PipelineProgressTracker>>,
             _persist_sinks: &HashSet<String>,
         ) -> Result<SegmentOutput, ExecutionError> {
-            let coordinate = body_coordinate.expect("this plan only dispatches region bodies");
-            self.body_args.lock().expect("body arg capture lock").push((
-                coordinate.body_index,
-                cap_arguments.get("mapper").cloned().unwrap_or_default(),
-            ));
-            let edge = graph.edges.first().expect("body graph has an edge");
+            if let Some(coordinate) = body_coordinate {
+                self.body_args.lock().expect("body arg capture lock").push((
+                    coordinate.body_index,
+                    cap_arguments.get("mapper").cloned().unwrap_or_default(),
+                ));
+                let edge = graph.edges.first().expect("body graph has an edge");
+                return Ok(SegmentOutput {
+                    node_data: HashMap::from([(edge.to.clone(), vec![b"mapped".to_vec()])]),
+                    node_is_sequence: HashMap::from([(edge.to.clone(), false)]),
+                    writer_results: HashMap::new(),
+                    terminal_meta: HashMap::new(),
+                    node_spool: HashMap::new(),
+                });
+            }
+            // The trunk of a direct live→region plan has NO caps: nothing to
+            // run, nothing produced.
             Ok(SegmentOutput {
-                node_data: HashMap::from([(edge.to.clone(), vec![b"mapped".to_vec()])]),
-                node_is_sequence: HashMap::from([(edge.to.clone(), false)]),
+                node_data: HashMap::new(),
+                node_is_sequence: HashMap::new(),
                 writer_results: HashMap::new(),
                 terminal_meta: HashMap::new(),
                 node_spool: HashMap::new(),
