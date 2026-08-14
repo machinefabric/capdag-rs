@@ -22,8 +22,7 @@ use std::path::{Path, PathBuf};
 /// telemetry / audit / inventory tooling can record install
 /// provenance without growing a parallel data structure.
 ///
-/// New variants may be added freely; the deserializer rejects unknown
-/// values. Exactly ONE value is semantic: `bundle` selects the
+/// Exactly ONE value is semantic: `bundle` selects the
 /// bundled-cartridge integrity path at discovery. Every other value is
 /// provenance telemetry, and the vocabulary GROWS as installers do — so an
 /// unrecognized spelling is preserved verbatim (`Other`) and round-trips,
@@ -45,10 +44,6 @@ pub enum CartridgeInstallSource {
     /// Distinct from `Bundle` (engine-bundled cartridges) and
     /// `Registry` (remote-pulled).
     AppInstaller,
-    /// Built by the workspace's declared cartridge build and installed under
-    /// its registry slug for runtime parity (a local build standing in for
-    /// the registry artifact of the same version).
-    Build,
     /// A provenance spelling this build does not know. Preserved verbatim so
     /// the record round-trips and the UI can still show where the install
     /// came from; carries no semantics.
@@ -64,7 +59,6 @@ impl CartridgeInstallSource {
             CartridgeInstallSource::Dev => "dev",
             CartridgeInstallSource::Bundle => "bundle",
             CartridgeInstallSource::AppInstaller => "app_installer",
-            CartridgeInstallSource::Build => "build",
             CartridgeInstallSource::Other(raw) => raw,
         }
     }
@@ -75,7 +69,6 @@ impl CartridgeInstallSource {
             "dev" => CartridgeInstallSource::Dev,
             "bundle" => CartridgeInstallSource::Bundle,
             "app_installer" => CartridgeInstallSource::AppInstaller,
-            "build" => CartridgeInstallSource::Build,
             _ => CartridgeInstallSource::Other(raw),
         }
     }
@@ -828,10 +821,16 @@ mod tests {
             "fabric_manifest_version": 4
         }"#;
 
-        // The workspace build-install spelling is a named variant.
+        // A drifted installer's spelling is tolerated but NOT blessed: the
+        // protocol's vocabulary is registry/dev/bundle/app_installer, and a
+        // writer's mistake never becomes a named case. "build" parses like
+        // any other unknown — preserved verbatim.
         let built: CartridgeJson =
             serde_json::from_str(&base.replace("VALUE", "build")).expect("build parses");
-        assert_eq!(built.installed_from, Some(CartridgeInstallSource::Build));
+        assert_eq!(
+            built.installed_from,
+            Some(CartridgeInstallSource::Other("build".to_string()))
+        );
 
         // An unknown spelling parses, is preserved verbatim, and round-trips.
         let unknown: CartridgeJson = serde_json::from_str(&base.replace("VALUE", "quantum_courier"))
