@@ -509,8 +509,8 @@ anyhow = "1.0"
 # capdag is resolved from a git TAG, not crates.io: it depends on ffmpeg-bundle,
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
-# what `dx publish capdag` tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.663.8" }
+# what capdag's next release tags instead of drifting until someone notices.
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.667.0" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -521,7 +521,7 @@ tokio = { version = "1.0", features = ["full"] }
                 dest: r#".cargo/config.toml"#,
                 contents: r#"# capdag's build script bakes two versions into the crate and treats both as
 # MANDATORY — a plain `cargo build` without them fails with a message telling
-# you to build through `dx`, which is the MachineFabric workspace's tool and not
+# you to build through a workspace tool, which is MachineFabric's own and not
 # something a cartridge project has. Setting them here is what makes `cargo
 # build` work in a scaffolded project.
 #
@@ -566,7 +566,7 @@ The `capdag` crate's build script bakes two versions into the crate and treats
 both as mandatory: `MFR_FABRIC_MANIFEST_VERSION` (which fabric manifest this
 cartridge is compiled against) and `MFR_CARTRIDGE_REGISTRY_VERSION` (which
 cartridge registry regime). Without them `cargo build` fails with a message
-telling you to build through `dx`, which is the MachineFabric workspace's own
+telling you to build through a workspace tool, which is MachineFabric's own
 tool — not something a cartridge project has.
 
 `.cargo/config.toml` sets them, which is what makes a plain `cargo build` work
@@ -817,8 +817,8 @@ func main() {
 go 1.21
 
 // Stamped from capdag-go's own version.txt, so the required version tracks what
-// `dx publish capdag-go` tags rather than drifting until someone notices.
-require github.com/machinefabric/capdag-go v1.351.6
+// capdag-go's next release tags rather than drifting until someone notices.
+require github.com/machinefabric/capdag-go v1.353.4
 "#,
                 executable: false,
             },
@@ -1074,7 +1074,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.411.3"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.413.5"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.18.132"),
     ],
     targets: [
