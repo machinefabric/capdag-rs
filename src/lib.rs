@@ -279,6 +279,10 @@ pub use orchestrator::{
     // Plan execution — the single ForEach/Collect-aware executor, shared by the
     // reference/CLI runtime and the engine.
     execute_plan, PlanInput,
+    // Mid-run argument state — the dispatch-journaled ledger execute_plan
+    // reads and the engine's UpdateMachineRunArguments RPC writes.
+    AppliedArgumentUpdate, ArgumentUpdate, ArgumentUpdateDisposition, ArgumentUpdateOutcome,
+    RunArgumentError, RunArgumentLedger,
     map_progress,
     parse_machine_to_cap_dag,
     plan_to_resolved_graph,

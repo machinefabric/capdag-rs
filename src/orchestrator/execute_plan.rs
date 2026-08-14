@@ -790,7 +790,7 @@ pub async fn execute_plan(
     runtime: Arc<dyn EngineRuntime>,
     initial_inputs: HashMap<String, PlanInput>,
     initial_is_sequence: HashMap<String, bool>,
-    cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
+    arguments: &crate::orchestrator::run_arguments::RunArgumentLedger,
     progress_fn: Option<&CapProgressFn>,
     step_progress_fn: Option<&CapStepProgressFn>,
     log_fn: Option<&PipelineLogFn>,
@@ -885,13 +885,17 @@ pub async fn execute_plan(
     // Trunk gets the first slice of the progress band; regions share the rest.
     let trunk_weight = if regions.is_empty() { 1.0 } else { 0.15 };
     let trunk_start = Instant::now();
+    // The trunk's caps dispatch NOW: journal them and read their values in one
+    // atomic ledger step, so a mid-run argument update lands entirely before
+    // or entirely after this segment — never between its caps.
+    let trunk_arguments = arguments.snapshot_for_segment(&trunk);
     let trunk_seg = run_subplan(
         &runtime,
         &registry,
         &trunk,
         trunk_roots,
         &persist_sinks,
-        cap_arguments,
+        &trunk_arguments,
         progress_fn,
         step_progress_fn,
         log_fn,
@@ -1039,7 +1043,7 @@ pub async fn execute_plan(
             &persist_sinks,
             region,
             source,
-            cap_arguments,
+            arguments,
             progress_fn,
             step_progress_fn,
             log_fn,
@@ -1137,13 +1141,16 @@ pub async fn execute_plan(
             post_roots.insert(edge.from_node.clone(), (PlanInput::Bytes(bytes), is_seq));
         }
 
+        // Post-region caps dispatch now — same atomic journal-and-read as the
+        // trunk. Everything before this point was editable "unreached DAG".
+        let post_arguments = arguments.snapshot_for_segment(&post_plan);
         let post_seg = run_subplan(
             &runtime,
             &registry,
             &post_plan,
             post_roots,
             &persist_sinks,
-            cap_arguments,
+            &post_arguments,
             progress_fn,
             step_progress_fn,
             log_fn,
@@ -1476,7 +1483,7 @@ async fn run_region_bodies(
     persist_sinks: &HashSet<String>,
     region: &Region,
     mut source: RegionItemSource,
-    cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
+    arguments: &crate::orchestrator::run_arguments::RunArgumentLedger,
     progress_fn: Option<&CapProgressFn>,
     step_progress_fn: Option<&CapStepProgressFn>,
     log_fn: Option<&PipelineLogFn>,
@@ -1643,6 +1650,10 @@ async fn run_region_bodies(
                     None => {
                         drop(permit);
                         source_done = true;
+                        // No further body will dispatch: from here a mid-run
+                        // argument update to these steps is honestly
+                        // "already dispatched", not "applied to nothing".
+                        arguments.exhaust_bodies(body_subplan);
                         // Overruns at a host-held capture edge are counted loss
                         // (12.5 §Overrun) — surface them, never silently.
                         if let Some(handle) = &feed_handle {
@@ -1702,7 +1713,10 @@ async fn run_region_bodies(
                         let body_subplan = body_subplan.clone();
                         let persist_sinks = persist_sinks.clone();
                         let body_input_id = region.body_input_id.clone();
-                        let cap_arguments = cap_arguments.clone();
+                        // This body dispatches NOW: journal it and read its
+                        // values in one atomic ledger step — the dispatch/
+                        // update ordering rule for ForEach bodies.
+                        let cap_arguments = arguments.snapshot_for_body(&body_subplan, i);
                         let body_log_fn = log_fn.cloned();
                         let body_stall_tracker = stall_tracker.clone();
                         let done_tx = done_tx.clone();
@@ -2111,7 +2125,8 @@ mod tests {
             runtime,
             inputs,
             flags,
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&plan, HashMap::new())
+                .expect("empty ledger"),
             None,
             None,
             None,
@@ -2289,7 +2304,8 @@ mod tests {
             runtime,
             inputs,
             flags,
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&plan, HashMap::new())
+                .expect("empty ledger"),
             None,
             None,
             None,
@@ -2507,7 +2523,8 @@ mod tests {
             runtime,
             inputs,
             flags,
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&plan, HashMap::new())
+                .expect("empty ledger"),
             None,
             None,
             None,
@@ -2612,7 +2629,8 @@ mod tests {
             runtime,
             inputs,
             flags,
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&plan, HashMap::new())
+                .expect("empty ledger"),
             None,
             None,
             None,
@@ -2757,7 +2775,8 @@ mod tests {
             runtime,
             inputs,
             flags,
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&plan, HashMap::new())
+                .expect("empty ledger"),
             None,
             None,
             None,
@@ -2922,7 +2941,8 @@ mod tests {
             &HashSet::new(),
             region,
             region_source_from_memory(vec![b"item".to_vec()]),
-            &HashMap::new(),
+            &crate::orchestrator::run_arguments::RunArgumentLedger::new(&body_plan, HashMap::new())
+                .expect("empty ledger"),
             Some(&overall_progress),
             Some(&step_progress),
             None,

@@ -29,6 +29,7 @@ pub mod executor;
 pub mod machine_plan;
 pub mod parser;
 pub mod plan_converter;
+pub mod run_arguments;
 pub mod stream_io;
 pub mod transient;
 pub mod types;
@@ -59,6 +60,11 @@ pub use transient::{
 };
 
 pub use plan_converter::plan_to_resolved_graph;
+
+pub use run_arguments::{
+    AppliedArgumentUpdate, ArgumentUpdate, ArgumentUpdateDisposition, ArgumentUpdateOutcome,
+    RunArgumentError, RunArgumentLedger,
+};
 
 pub use cbor_util::{
     assemble_cbor_array, assemble_cbor_sequence, split_cbor_array, split_cbor_sequence,

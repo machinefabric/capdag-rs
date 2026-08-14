@@ -1192,7 +1192,7 @@ async fn test1459_live_synthetic_foreach_region_end_to_end() {
         runtime,
         inputs,
         flags,
-        &HashMap::new(),
+        &capdag::RunArgumentLedger::new(&plan, HashMap::new()).expect("empty ledger"),
         None,
         None,
         Some(&test_pipeline_log_fn()),

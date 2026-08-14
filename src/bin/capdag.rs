@@ -1193,7 +1193,8 @@ async fn execute_notation(
                 runtime.clone(),
                 initial_inputs,
                 initial_is_sequence,
-                &cap_arguments,
+                &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
+                    .expect("cli argument map names plan steps"),
                 Some(&progress),
                 None,
                 Some(&log_fn),
@@ -1330,7 +1331,8 @@ async fn execute_notation(
                     runtime.clone(),
                     initial_inputs,
                     initial_is_sequence,
-                    &cap_arguments,
+                    &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
+                        .expect("cli argument map names plan steps"),
                     Some(&progress),
                     None,
                     Some(&log_fn),
@@ -2540,7 +2542,8 @@ async fn cmd_cap(args: &[String]) -> ! {
             runtime.clone(),
             initial_inputs,
             initial_is_sequence,
-            &cap_arguments,
+            &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
+                .expect("single-cap argument map names the plan's step"),
             Some(&progress),
             None,
             Some(&log_fn),
