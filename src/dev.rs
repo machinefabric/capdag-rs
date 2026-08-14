@@ -895,6 +895,109 @@ mod tests {
     // vendored from a different commit than the stub repo currently holds —
     // which would ship capdags that disagree about what a cartridge looks like,
     // silently.
+
+    /// A vendored stub file against the canonical bytes.
+    ///
+    /// Byte equality, with ONE allowance: the capdag version the stub pins may
+    /// be OLDER in the vendored copy than in the canonical one. The canonical
+    /// stub is rendered from a template that stamps capdag's current version,
+    /// and the vendored copies are snapshots taken when someone last vendored
+    /// them — so the two disagree from the moment capdag's version moves, which
+    /// is every time it is bumped, and the disagreement says nothing about the
+    /// stub CONTRACT.
+    ///
+    /// An older pin is harmless: it names a release that exists, so a cartridge
+    /// scaffolded from it resolves. A NEWER pin is not, because it would name a
+    /// version this capdag has not reached, so the comparison is an ordering and
+    /// not "ignore the version".
+    ///
+    /// Every other byte still has to match, and a line that differs in anything
+    /// besides that version still fails.
+    fn assert_stub_matches(language: &str, dest: &str, vendored: &str, canonical: &str) {
+        if vendored == canonical {
+            return;
+        }
+        let (vendored_pin, vendored_rest) = split_pin(vendored);
+        let (canonical_pin, canonical_rest) = split_pin(canonical);
+        assert_eq!(
+            vendored_rest, canonical_rest,
+            "{language}: vendored {dest} differs from the canonical bytes in more than the \
+             pinned capdag version — re-vendor the stubs"
+        );
+        let (Some(vendored_pin), Some(canonical_pin)) = (vendored_pin, canonical_pin) else {
+            panic!(
+                "{language}: vendored {dest} differs from the canonical bytes and neither \
+                 carries a version pin to explain it — re-vendor the stubs"
+            );
+        };
+        assert!(
+            vendored_pin <= canonical_pin,
+            "{language}: vendored {dest} pins capdag {} but capdag is {} — a stub may lag a \
+             release, never precede one",
+            join_version(&vendored_pin),
+            join_version(&canonical_pin)
+        );
+    }
+
+    /// Split a stub file into its capdag version pin and everything else.
+    ///
+    /// The pin appears once per stub, in the language's own dependency syntax:
+    /// `tag = "v1.2.3"` (Cargo), `capdag-go v1.2.3` (go.mod), `from: "1.2.3"`
+    /// (SwiftPM). Rather than teach this three grammars, the first
+    /// dotted-triple on a line that mentions capdag IS the pin.
+    fn split_pin(text: &str) -> (Option<Vec<u64>>, String) {
+        let mut pin = None;
+        let mut rest = String::with_capacity(text.len());
+        for line in text.lines() {
+            let mut kept = line.to_string();
+            if pin.is_none() && line.contains("capdag") {
+                if let Some((version, at)) = first_triple(line) {
+                    pin = Some(version);
+                    kept.replace_range(at.clone(), "<pin>");
+                }
+            }
+            rest.push_str(&kept);
+            rest.push('\n');
+        }
+        (pin, rest)
+    }
+
+    /// The first `N.N.N` in a line, with the range it occupies.
+    fn first_triple(line: &str) -> Option<(Vec<u64>, std::ops::Range<usize>)> {
+        let bytes = line.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            if !bytes[index].is_ascii_digit() {
+                index += 1;
+                continue;
+            }
+            let start = index;
+            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+                index += 1;
+            }
+            let candidate = &line[start..index];
+            let parts: Vec<&str> = candidate.split('.').collect();
+            if parts.len() == 3 {
+                if let Ok(numbers) = parts
+                    .iter()
+                    .map(|part| part.parse::<u64>())
+                    .collect::<Result<Vec<u64>, _>>()
+                {
+                    return Some((numbers, start..index));
+                }
+            }
+        }
+        None
+    }
+
+    fn join_version(version: &[u64]) -> String {
+        version
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<String>>()
+            .join(".")
+    }
+
     #[test]
     fn test7160_vendored_stub_contract_matches_the_canonical_source() {
         // Locate the canonical stubs relative to this mirror inside the
@@ -919,7 +1022,7 @@ mod tests {
         assert_eq!(
             contract["contract_version"].as_u64(),
             Some(u64::from(stubs_generated::STUB_CONTRACT_VERSION)),
-            "vendored contract version differs from canonical — re-run dx stubs vendor"
+            "vendored contract version differs from canonical — re-vendor the stubs"
         );
         assert_eq!(
             contract["placeholder"].as_str(),
@@ -931,7 +1034,7 @@ mod tests {
         assert_eq!(
             languages.len(),
             stub_languages().len(),
-            "vendored language count differs from canonical — re-run dx stubs vendor"
+            "vendored language count differs from canonical — re-vendor the stubs"
         );
 
         for vendored in stub_languages() {
@@ -952,11 +1055,7 @@ mod tests {
                     .unwrap_or_else(|e| panic!("reading canonical {source}: {e}"));
                 assert_eq!(declared["dest"].as_str(), Some(got.dest), "{}", vendored.id);
                 assert_eq!(declared["executable"].as_bool(), Some(got.executable), "{}", vendored.id);
-                assert_eq!(
-                    got.contents, want,
-                    "{}: vendored {} differs from the canonical bytes — re-run dx stubs vendor",
-                    vendored.id, got.dest
-                );
+                assert_stub_matches(vendored.id, got.dest, got.contents, &want);
             }
         }
     }
