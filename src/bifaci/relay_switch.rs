@@ -1756,6 +1756,19 @@ impl RelaySwitch {
     ) -> Result<(), RelaySwitchError> {
         let mut available = HashSet::with_capacity(cartridges.len());
         for cartridge in cartridges {
+            // An INCOMPATIBLE install (attachment_error set) is inventory, not
+            // a handler: it was never spawned, so it legitimately has no
+            // runtime stats and nothing to admit. It must not cost the master
+            // its admission — one broken cartridge.json on disk would
+            // otherwise refuse the ENTIRE relay, taking every healthy
+            // cartridge on it down with it (exactly the cascade a surfaced
+            // incompatible exists to prevent). Cap routing already excludes
+            // these records (`cap_admission_target` filters on
+            // `attachment_error.is_none()`), so skipping them here admits
+            // nothing that could be dispatched to.
+            if cartridge.attachment_error.is_some() {
+                continue;
+            }
             let Some(stats) = cartridge.runtime_stats.as_ref() else {
                 return Err(RelaySwitchError::Protocol(format!(
                     "cartridge '{}' on master {} is missing mandatory v4 runtime_stats",
@@ -7862,6 +7875,72 @@ mod tests {
     // counters at all: the crossing is counted as a straggler, named by
     // frame type. A frame for a RID the table never knew stays a no_route
     // DROP (TEST7025).
+    // TEST1515: one INCOMPATIBLE install on a master's roster must not cost
+    // the master its admission. An incompatible record (attachment_error set)
+    // was never spawned, so it legitimately carries no runtime stats — it is
+    // inventory the UI shows, not a handler anything routes to. Before this
+    // rule, a single unparseable cartridge.json on disk refused the ENTIRE
+    // daemon relay ("missing mandatory v4 runtime_stats", retried forever),
+    // taking every healthy cartridge down with it. The mandatory-stats rule
+    // still holds where it means something: an OPERATIONAL record without
+    // stats refuses the master.
+    #[tokio::test]
+    async fn test1515_incompatible_roster_record_does_not_refuse_the_master() {
+        let registry = test_fabric_registry();
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+            .await
+            .expect("empty relay switch must construct");
+
+        let healthy = InstalledCartridgeRecord {
+            registry_url: None,
+            channel: crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
+            id: "healthycart".to_string(),
+            version: "1.0.0".to_string(),
+            sha256: "aa".repeat(32),
+            cap_groups: Vec::new(),
+            attachment_error: None,
+            runtime_stats: Some(CartridgeRuntimeStats {
+                running: true,
+                handler_capacity: 2,
+                ..CartridgeRuntimeStats::not_running()
+            }),
+            lifecycle: CartridgeLifecycle::Operational,
+        };
+        let incompatible = InstalledCartridgeRecord {
+            registry_url: Some("https://cartridges-staging.machinefabric.com/v1/manifest".to_string()),
+            channel: crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
+            id: "brokencart".to_string(),
+            version: "1.2.3".to_string(),
+            sha256: "bb".repeat(32),
+            cap_groups: Vec::new(),
+            attachment_error: Some(CartridgeAttachmentError {
+                kind: CartridgeAttachmentErrorKind::ManifestInvalid,
+                message: "invalid cartridge.json: unknown variant `x`".to_string(),
+                detected_at_unix_seconds: 1_780_000_000,
+            }),
+            runtime_stats: None,
+            lifecycle: CartridgeLifecycle::Discovered,
+        };
+
+        switch
+            .configure_master_admission(0, &[healthy.clone(), incompatible])
+            .expect("an incompatible record is inventory, not an admission failure");
+
+        // The mandatory-stats rule is untouched where it is meaningful: an
+        // operational record with no stats is a real protocol violation.
+        let stats_less_operational = InstalledCartridgeRecord {
+            runtime_stats: None,
+            ..healthy
+        };
+        let err = switch
+            .configure_master_admission(0, &[stats_less_operational])
+            .expect_err("an operational record must carry v4 runtime stats");
+        assert!(
+            err.to_string().contains("runtime_stats"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[tokio::test]
     async fn test8114_straggler_for_terminated_request_is_benign_not_a_drop() {
         let registry = test_fabric_registry();

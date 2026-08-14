@@ -23,23 +23,74 @@ use std::path::{Path, PathBuf};
 /// provenance without growing a parallel data structure.
 ///
 /// New variants may be added freely; the deserializer rejects unknown
-/// values rather than silently coercing them so a corrupted /
-/// future-version installer surfaces immediately. Within the codebase
-/// nothing should branch on the variant — see the field's doc comment
-/// on [`CartridgeJson::installed_from`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// values. Exactly ONE value is semantic: `bundle` selects the
+/// bundled-cartridge integrity path at discovery. Every other value is
+/// provenance telemetry, and the vocabulary GROWS as installers do — so an
+/// unrecognized spelling is preserved verbatim (`Other`) and round-trips,
+/// never failing the cartridge.json parse. A telemetry hint that could
+/// invalidate an otherwise-sound install would make every vocabulary
+/// addition brick older hosts against newer installers' records: that is
+/// the cascade this type exists to prevent, and it is why unknown values
+/// are representable rather than rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CartridgeInstallSource {
     /// Pulled from a remote cartridge registry (a workspace cartridge install from a registry).
     Registry,
     /// Built locally from the developer's source tree (a workspace cartridge install with no registry).
     Dev,
     /// Shipped pre-installed under the engine's `bundled-cartridges/` tree at app build time.
+    /// The ONE semantic value: selects the bundled-integrity check at discovery.
     Bundle,
-    /// Written by the macOS .pkg installer's release path
-    /// (`scripts/commands/release.sh`). Distinct from `Bundle`
-    /// (engine-bundled cartridges) and `Registry` (remote-pulled).
+    /// Written by the macOS .pkg installer's release path.
+    /// Distinct from `Bundle` (engine-bundled cartridges) and
+    /// `Registry` (remote-pulled).
     AppInstaller,
+    /// Built by the workspace's declared cartridge build and installed under
+    /// its registry slug for runtime parity (a local build standing in for
+    /// the registry artifact of the same version).
+    Build,
+    /// A provenance spelling this build does not know. Preserved verbatim so
+    /// the record round-trips and the UI can still show where the install
+    /// came from; carries no semantics.
+    Other(String),
+}
+
+impl CartridgeInstallSource {
+    /// The wire spelling (snake_case for the named variants; `Other`
+    /// verbatim).
+    pub fn as_wire(&self) -> &str {
+        match self {
+            CartridgeInstallSource::Registry => "registry",
+            CartridgeInstallSource::Dev => "dev",
+            CartridgeInstallSource::Bundle => "bundle",
+            CartridgeInstallSource::AppInstaller => "app_installer",
+            CartridgeInstallSource::Build => "build",
+            CartridgeInstallSource::Other(raw) => raw,
+        }
+    }
+
+    fn from_wire(raw: String) -> Self {
+        match raw.as_str() {
+            "registry" => CartridgeInstallSource::Registry,
+            "dev" => CartridgeInstallSource::Dev,
+            "bundle" => CartridgeInstallSource::Bundle,
+            "app_installer" => CartridgeInstallSource::AppInstaller,
+            "build" => CartridgeInstallSource::Build,
+            _ => CartridgeInstallSource::Other(raw),
+        }
+    }
+}
+
+impl Serialize for CartridgeInstallSource {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_wire())
+    }
+}
+
+impl<'de> Deserialize<'de> for CartridgeInstallSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(CartridgeInstallSource::from_wire(String::deserialize(deserializer)?))
+    }
 }
 
 /// Install-context metadata stored in `cartridge.json` inside each cartridge
@@ -756,6 +807,45 @@ mod tests {
         let s2 = serde_json::to_string(&cj_some).unwrap();
         let p2: CartridgeJson = serde_json::from_str(&s2).unwrap();
         assert_eq!(p2.installed_from, Some(CartridgeInstallSource::Bundle));
+    }
+
+    // TEST1514: the provenance vocabulary grows with installers. A workspace
+    // build install parses to its named variant; a spelling this build does
+    // not know parses to `Other`, round-trips VERBATIM, and is not `Bundle`
+    // (the one semantic value) — an unknown telemetry hint can never fail
+    // the cartridge.json parse and take the cartridge (or, through roster
+    // admission, the whole relay) down with it.
+    #[test]
+    fn test1514_install_source_vocabulary_tolerance() {
+        let base = r#"{
+            "name": "candlecartridge",
+            "version": "1.227.800",
+            "channel": "nightly",
+            "registry_url": "https://cartridges-staging.machinefabric.com/v1/manifest",
+            "entry": "candlecartridge",
+            "installed_at": "2026-08-14T22:26:59Z",
+            "installed_from": "VALUE",
+            "fabric_manifest_version": 4
+        }"#;
+
+        // The workspace build-install spelling is a named variant.
+        let built: CartridgeJson =
+            serde_json::from_str(&base.replace("VALUE", "build")).expect("build parses");
+        assert_eq!(built.installed_from, Some(CartridgeInstallSource::Build));
+
+        // An unknown spelling parses, is preserved verbatim, and round-trips.
+        let unknown: CartridgeJson = serde_json::from_str(&base.replace("VALUE", "quantum_courier"))
+            .expect("an unknown provenance spelling must never fail the parse");
+        assert_eq!(
+            unknown.installed_from,
+            Some(CartridgeInstallSource::Other("quantum_courier".to_string()))
+        );
+        assert_ne!(unknown.installed_from, Some(CartridgeInstallSource::Bundle));
+        let rewritten = serde_json::to_string(&unknown).unwrap();
+        assert!(
+            rewritten.contains("\"installed_from\":\"quantum_courier\""),
+            "unknown spellings round-trip verbatim, got: {rewritten}"
+        );
     }
 
     // TEST1245: Reading cartridge metadata fails when the declared entry binary is missing.
