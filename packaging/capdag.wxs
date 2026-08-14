@@ -2,7 +2,7 @@
 <!--
   capdag.wxs — WiX v4/v5 source for the capdag CLI MSI.
 
-  Built by `dx capdag-dist msi` (capdag-dist.ps1) with:
+  Built by the workspace msi dist step (capdag-dist.ps1) with:
       wix build capdag.wxs -arch x64 -d Version=<v> -d PayloadDir=<staged bundle> -o capdag.msi
 
   The MSI installs the WHOLE bundle (capdag.exe + bundled-cartridges\) under
