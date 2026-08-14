@@ -2354,6 +2354,211 @@ mod tests {
         assert_eq!(terminal.items.len(), 3);
     }
 
+    /// Records the ARGUMENTS each body's dispatch delivered, keyed by the
+    /// body index — the observable the mid-run update test splits on.
+    struct ArgRecordingRuntime {
+        registry: Arc<FabricRegistry>,
+        body_args: Arc<std::sync::Mutex<Vec<(usize, Vec<(String, Vec<u8>)>)>>>,
+    }
+
+    #[async_trait]
+    impl EngineRuntime for ArgRecordingRuntime {
+        async fn segment_switch(
+            &self,
+            _graph: &ResolvedGraph,
+        ) -> Result<Arc<crate::bifaci::relay_switch::RelaySwitch>, ExecutionError> {
+            panic!("arg recording runtime overrides run_segment")
+        }
+
+        async fn activity_timeout_secs(
+            &self,
+            _graph: &ResolvedGraph,
+        ) -> Result<u64, ExecutionError> {
+            panic!("arg recording runtime overrides run_segment")
+        }
+
+        fn fabric_registry(&self) -> Arc<FabricRegistry> {
+            self.registry.clone()
+        }
+
+        async fn foreach_partial_failure_policy(&self) -> String {
+            "fail".to_string()
+        }
+
+        async fn run_segment(
+            &self,
+            graph: &ResolvedGraph,
+            _initial_inputs: HashMap<String, PlanInput>,
+            _initial_is_sequence: HashMap<String, bool>,
+            cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
+            _progress_fn: Option<&CapProgressFn>,
+            _step_progress_fn: Option<&CapStepProgressFn>,
+            _log_fn: Option<&PipelineLogFn>,
+            body_coordinate: Option<ForEachBodyCoordinate>,
+            _stall_tracker: Option<Arc<PipelineProgressTracker>>,
+            _persist_sinks: &HashSet<String>,
+        ) -> Result<SegmentOutput, ExecutionError> {
+            let coordinate = body_coordinate.expect("this plan only dispatches region bodies");
+            self.body_args.lock().expect("body arg capture lock").push((
+                coordinate.body_index,
+                cap_arguments.get("mapper").cloned().unwrap_or_default(),
+            ));
+            let edge = graph.edges.first().expect("body graph has an edge");
+            Ok(SegmentOutput {
+                node_data: HashMap::from([(edge.to.clone(), vec![b"mapped".to_vec()])]),
+                node_is_sequence: HashMap::from([(edge.to.clone(), false)]),
+                writer_results: HashMap::new(),
+                terminal_meta: HashMap::new(),
+                node_spool: HashMap::new(),
+            })
+        }
+    }
+
+    // TEST1476: a mid-run argument update through the REAL executor. The
+    // honesty contract under test is the SPLIT: with the engine reporting
+    // `bodies_dispatched_before = k`, every body the executor dispatched with
+    // index < k must have received the OLD value and every body >= k the NEW
+    // one — the report and the deliveries can never disagree, whatever the
+    // race timing. Items arrive over time (synthetic live feed) so the update
+    // genuinely lands mid-run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test1476_mid_run_update_splits_bodies_exactly_as_reported() {
+        let mut plan = MachinePlan::new("mid-run-update");
+        plan.add_node(MachineNode::input_slot(
+            "input",
+            "input",
+            "media:feed-frames",
+            crate::planner::InputCardinality::Sequence,
+        ));
+        plan.add_node(MachineNode::cap(
+            "mapper",
+            "cap:in=\"media:feed-frames\";map;out=\"media:fmt=json;record\"",
+        ));
+        plan.add_node(MachineNode::for_each_token(
+            "fe",
+            "input",
+            "mapper",
+            "mapper",
+            "mid-run-update-token".parse().unwrap(),
+        ));
+        plan.add_node(MachineNode::output("out", "result", "mapper"));
+        plan.add_edge(MachinePlanEdge::direct("input", "fe"));
+        plan.add_edge(MachinePlanEdge::iteration("fe", "mapper"));
+        plan.add_edge(MachinePlanEdge::direct("mapper", "out"));
+
+        let registry = FabricRegistry::new_for_test();
+        registry.add_caps_to_cache(vec![test_cap(
+            "cap:in=\"media:feed-frames\";map;out=\"media:fmt=json;record\"",
+            false,
+        )]);
+        let body_args: Arc<std::sync::Mutex<Vec<(usize, Vec<(String, Vec<u8>)>)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let runtime: Arc<dyn EngineRuntime> = Arc::new(ArgRecordingRuntime {
+            registry: Arc::new(registry),
+            body_args: body_args.clone(),
+        });
+
+        const ARG_URN: &str = "media:enc=utf-8;question";
+        let ledger = Arc::new(
+            crate::orchestrator::run_arguments::RunArgumentLedger::new(
+                &plan,
+                HashMap::from([(
+                    "mapper".to_string(),
+                    vec![(ARG_URN.to_string(), b"old".to_vec())],
+                )]),
+            )
+            .expect("initial values name the plan's step"),
+        );
+
+        // The updater: as soon as the first body has dispatched, apply the new
+        // value — squarely mid-run, while the feed is still delivering.
+        let update_ledger = ledger.clone();
+        let observed = body_args.clone();
+        let updater = tokio::spawn(async move {
+            loop {
+                if !observed.lock().expect("body arg capture lock").is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            update_ledger
+                .apply(&[crate::orchestrator::run_arguments::ArgumentUpdate {
+                    token_id: "mapper".to_string(),
+                    media_urn: ARG_URN.to_string(),
+                    value: b"new".to_vec(),
+                }])
+                .expect("the update batch is valid")
+        });
+
+        let inputs = HashMap::from([(
+            "input".to_string(),
+            PlanInput::LiveReference {
+                reference_urn: "media:live;synthetic".to_string(),
+                selector: br#"{"params":{"items":6,"interval_ms":120,"item_bytes":4}}"#.to_vec(),
+            },
+        )]);
+        let flags = HashMap::from([("input".to_string(), true)]);
+        execute_plan(
+            &plan,
+            runtime,
+            inputs,
+            flags,
+            ledger.as_ref(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("the run completes with the update applied mid-flight");
+
+        let applied = updater.await.expect("updater task");
+        assert_eq!(applied.outcomes.len(), 1);
+        use crate::orchestrator::run_arguments::ArgumentUpdateDisposition;
+        let reported_before = match &applied.outcomes[0].disposition {
+            ArgumentUpdateDisposition::Applied => 0u64,
+            ArgumentUpdateDisposition::AppliedToRemainingBodies { bodies_dispatched } => {
+                *bodies_dispatched
+            }
+            ArgumentUpdateDisposition::AlreadyDispatched => panic!(
+                "the update landed while the feed was still delivering — it cannot have \
+                 missed every body"
+            ),
+        };
+
+        let mut deliveries = body_args.lock().expect("body arg capture lock").clone();
+        deliveries.sort_by_key(|(index, _)| *index);
+        assert_eq!(deliveries.len(), 6, "one dispatch per feed item");
+        for (index, args) in &deliveries {
+            let value = args
+                .iter()
+                .find(|(urn, _)| urn == ARG_URN)
+                .map(|(_, bytes)| bytes.clone())
+                .expect("every body carries the argument");
+            let expected: &[u8] = if (*index as u64) < reported_before { b"old" } else { b"new" };
+            assert_eq!(
+                value, expected,
+                "body {index} must match the engine's report (bodies_dispatched_before = {reported_before})"
+            );
+        }
+        // The update demonstrably reached remaining work: at least one body ran
+        // with the new value, and the first body (which triggered the update)
+        // ran with the old one.
+        assert!(
+            deliveries.iter().any(|(_, args)| args
+                .iter()
+                .any(|(urn, bytes)| urn == ARG_URN && bytes == b"new")),
+            "no body ever received the new value — the executor is not reading the ledger"
+        );
+        assert_eq!(
+            deliveries[0].1.iter().find(|(urn, _)| urn == ARG_URN).map(|(_, b)| b.as_slice()),
+            Some(&b"old"[..]),
+            "the first body dispatched before the update and must keep the old value"
+        );
+    }
+
     /// Trunk returns its region-input node SPOOLED (the unbounded-feed
     /// shape); body calls are recorded so per-item dispatch is provable.
     struct SpooledTrunkRuntime {
