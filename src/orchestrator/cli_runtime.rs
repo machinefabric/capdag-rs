@@ -3,9 +3,9 @@
 //! It hosts cartridges in-process (via [`CartridgeHostRuntime`]) and, exactly like the
 //! engine's daemon-hosted runtime, reuses ONE long-lived [`RelaySwitch`] across every
 //! segment — including every ForEach body. A cap's cartridge process is therefore
-//! spawned once and each body multiplexes onto it, so the cartridge's own
-//! `set_capacity(1)` serializes model loads instead of N bodies each loading a fresh
-//! copy of the model into GPU memory.
+//! spawned once and each body multiplexes onto it, so the cartridge's own declared
+//! concurrency pools (e.g. a capacity-1 "gpu" pool) serialize model loads instead of
+//! N bodies each loading a fresh copy of the model into GPU memory.
 //!
 //! Where the cartridges come from — dev binaries, installed cartridges, or bundled
 //! cartridges — is orthogonal to how they are hosted and called; this runtime resolves

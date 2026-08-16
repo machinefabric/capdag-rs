@@ -18,6 +18,7 @@ pub mod io;
 pub mod live_feed;
 pub mod local_socket;
 pub mod manifest;
+pub mod pools;
 pub mod protocol_trace;
 pub mod relay;
 pub mod relay_switch;

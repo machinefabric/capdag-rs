@@ -4219,37 +4219,321 @@ struct ActiveRequest {
 struct QueuedRequest {
     factory: OpFactory,
     cap_urn: String,
+    /// The registered handler pattern (canonical) serving this request —
+    /// the singleton pool it queues on and the key of its pool chain.
+    pattern: String,
+    /// Global arrival ticket: cross-cap admission is FIFO by this.
+    ticket: u64,
     routing_id: Option<MessageId>,
     request_id: MessageId,
     raw_rx: crossbeam_channel::Receiver<Frame>,
 }
 
-/// Shared handle for dynamic concurrency capacity adjustment.
-///
-/// Cartridges receive this via `Request::capacity_handle()` and can call
-/// `set(n)` at any time to adjust how many concurrent requests the runtime
-/// will dispatch to handlers. For example, ggufcartridge might set capacity
-/// to 1 during model load, then increase it when VRAM allows.
-#[derive(Clone)]
-pub struct CapacityHandle {
-    value: Arc<std::sync::atomic::AtomicUsize>,
+/// The runtime's materialized concurrency pools (see `bifaci::pools`): one
+/// singleton pool per registered handler pattern, every declared shared
+/// pool from the manifest, and `all`. One mutex guards capacities, active
+/// counts and the singleton queues, so an admission decision is atomic
+/// across a cap's whole chain — a request is admitted through EVERY pool in
+/// its chain or queued on its cap's own queue, never half-admitted.
+pub(crate) struct RuntimePools {
+    pools: std::collections::BTreeMap<String, RuntimePool>,
+    /// Registered handler pattern (canonical) → its pool chain in admission
+    /// order: singleton, declared pools containing it, `all`.
+    chains: HashMap<String, Vec<String>>,
+    /// Singleton queues — queues lead to pools. Keyed by registered pattern.
+    queues: std::collections::BTreeMap<String, std::collections::VecDeque<QueuedRequest>>,
+    /// Global FIFO ticket counter: cross-cap admission on a shared-pool
+    /// release is arrival-ordered, never cap-biased.
+    next_ticket: u64,
 }
 
-impl CapacityHandle {
-    fn new(initial: usize) -> Self {
-        Self {
-            value: Arc::new(std::sync::atomic::AtomicUsize::new(initial)),
+struct RuntimePool {
+    declared: u64,
+    configured: u64,
+    /// Cartridge self-report; `None` = static (the normal case). Written
+    /// only through [`PoolHandle::set`].
+    available: Option<u64>,
+    active: u64,
+    /// Member patterns (shared pools and `all`); singletons empty.
+    members: Vec<String>,
+}
+
+impl RuntimePool {
+    fn effective(&self) -> u64 {
+        crate::bifaci::pools::effective_capacity(self.configured, self.available)
+    }
+
+    fn has_room(&self) -> bool {
+        let effective = self.effective();
+        effective == crate::bifaci::pools::CAPACITY_UNLIMITED || self.active < effective
+    }
+}
+
+impl RuntimePools {
+    /// Materialize the pools from the registered handler patterns and the
+    /// manifest's declarations. Hard errors, never coercion: an invalid
+    /// registered pattern, or a declaration cap that matches no registered
+    /// pattern, is a cartridge-author bug named precisely.
+    fn init(
+        handler_patterns: &[String],
+        declarations: &crate::bifaci::pools::PoolDeclarations,
+    ) -> Result<Self, String> {
+        let mut patterns = Vec::with_capacity(handler_patterns.len());
+        for raw in handler_patterns {
+            let urn = CapUrn::from_string(raw)
+                .map_err(|e| format!("registered handler pattern '{raw}' is not a valid cap URN: {e}"))?;
+            let canon = urn.to_string();
+            if patterns.contains(&canon) {
+                return Err(format!("handler pattern '{canon}' is registered twice"));
+            }
+            patterns.push(canon);
+        }
+        let resolve = |declared_cap: &str| -> Result<String, String> {
+            let urn = CapUrn::from_string(declared_cap)
+                .map_err(|e| format!("pool declaration cap '{declared_cap}' is not a valid cap URN: {e}"))?;
+            let canon = urn.to_string();
+            if !patterns.iter().any(|p| p == &canon) {
+                return Err(format!(
+                    "pool declaration references cap '{canon}' but no handler is registered \
+                     under it — pool declarations bind to the caps the runtime actually serves"
+                ));
+            }
+            Ok(canon)
+        };
+
+        let mut pools = std::collections::BTreeMap::new();
+        let mut queues = std::collections::BTreeMap::new();
+        for pattern in &patterns {
+            let declared = declarations
+                .capacities
+                .get(pattern)
+                .copied()
+                .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
+            pools.insert(
+                pattern.clone(),
+                RuntimePool { declared, configured: declared, available: None, active: 0, members: Vec::new() },
+            );
+            queues.insert(pattern.clone(), std::collections::VecDeque::new());
+        }
+        for (name, members) in &declarations.pools {
+            let mut resolved = Vec::with_capacity(members.len());
+            for member in members {
+                resolved.push(resolve(member)?);
+            }
+            let declared = declarations
+                .capacities
+                .get(name)
+                .copied()
+                .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
+            pools.insert(
+                name.clone(),
+                RuntimePool { declared, configured: declared, available: None, active: 0, members: resolved },
+            );
+        }
+        for key in declarations.capacities.keys() {
+            if key != crate::bifaci::pools::POOL_ALL
+                && !pools.contains_key(key)
+                && !CapUrn::from_string(key).map(|u| patterns.contains(&u.to_string())).unwrap_or(false)
+            {
+                return Err(format!(
+                    "declared capacity for '{key}' names neither a registered cap, a declared \
+                     pool, nor '{}'",
+                    crate::bifaci::pools::POOL_ALL
+                ));
+            }
+        }
+        let all_declared = declarations
+            .capacities
+            .get(crate::bifaci::pools::POOL_ALL)
+            .copied()
+            .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
+        pools.insert(
+            crate::bifaci::pools::POOL_ALL.to_string(),
+            RuntimePool {
+                declared: all_declared,
+                configured: all_declared,
+                available: None,
+                active: 0,
+                members: patterns.clone(),
+            },
+        );
+
+        let mut chains = HashMap::new();
+        for pattern in &patterns {
+            let mut chain = vec![pattern.clone()];
+            for (name, pool) in &pools {
+                if name != crate::bifaci::pools::POOL_ALL
+                    && name != pattern
+                    && pool.members.iter().any(|m| m == pattern)
+                {
+                    chain.push(name.clone());
+                }
+            }
+            chain.push(crate::bifaci::pools::POOL_ALL.to_string());
+            chains.insert(pattern.clone(), chain);
+        }
+
+        Ok(Self { pools, chains, queues, next_ticket: 0 })
+    }
+
+    fn chain(&self, pattern: &str) -> &[String] {
+        self.chains
+            .get(pattern)
+            .unwrap_or_else(|| panic!("no pool chain for registered pattern '{pattern}'"))
+    }
+
+    fn chain_has_room(&self, pattern: &str) -> bool {
+        self.chain(pattern)
+            .iter()
+            .all(|pool| self.pools[pool].has_room())
+    }
+
+    /// Admit one dispatch of `pattern` if its whole chain has room.
+    fn try_admit(&mut self, pattern: &str) -> bool {
+        if !self.chain_has_room(pattern) {
+            return false;
+        }
+        for pool in self.chain(pattern).to_vec() {
+            self.pools.get_mut(&pool).expect("chain pool exists").active += 1;
+        }
+        true
+    }
+
+    /// Release one dispatch of `pattern` across its chain.
+    fn release(&mut self, pattern: &str) {
+        for pool in self.chain(pattern).to_vec() {
+            let slot = self.pools.get_mut(&pool).expect("chain pool exists");
+            slot.active = slot
+                .active
+                .checked_sub(1)
+                .unwrap_or_else(|| panic!("pool '{pool}' released below zero active"));
         }
     }
 
-    /// Set the concurrency capacity. 0 means unlimited.
-    pub fn set(&self, n: usize) {
-        self.value.store(n, std::sync::atomic::Ordering::Relaxed);
+    /// Queue a request on its cap's singleton queue, returning its queue
+    /// position (1-based) for the "queued" LOG.
+    fn enqueue(&mut self, mut request: QueuedRequest) -> usize {
+        request.ticket = self.next_ticket;
+        self.next_ticket += 1;
+        let queue = self
+            .queues
+            .get_mut(&request.pattern)
+            .unwrap_or_else(|| panic!("no singleton queue for pattern '{}'", request.pattern));
+        queue.push_back(request);
+        queue.len()
     }
 
-    /// Get the current capacity. 0 means unlimited.
-    pub fn get(&self) -> usize {
-        self.value.load(std::sync::atomic::Ordering::Relaxed)
+    /// Pop-and-admit the oldest queued request whose chain has room —
+    /// arrival-ordered across all caps by the global ticket.
+    fn pop_admissible(&mut self) -> Option<QueuedRequest> {
+        let mut best: Option<(u64, String)> = None;
+        for (pattern, queue) in &self.queues {
+            if let Some(front) = queue.front() {
+                if self.chain_has_room(pattern)
+                    && best.as_ref().map_or(true, |(ticket, _)| front.ticket < *ticket)
+                {
+                    best = Some((front.ticket, pattern.clone()));
+                }
+            }
+        }
+        let (_, pattern) = best?;
+        let request = self
+            .queues
+            .get_mut(&pattern)
+            .expect("queue exists")
+            .pop_front()
+            .expect("front observed above");
+        for pool in self.chain(&pattern).to_vec() {
+            self.pools.get_mut(&pool).expect("chain pool exists").active += 1;
+        }
+        Some(request)
+    }
+
+    /// Apply an operator's desired `configured` values (heartbeat probe).
+    /// The whole batch is validated first — an unknown pool refuses it all.
+    fn apply_desired(
+        &mut self,
+        desired: &crate::bifaci::pools::DesiredCapacities,
+    ) -> Result<(), String> {
+        for name in desired.keys() {
+            if !self.pools.contains_key(name) {
+                return Err(format!("unknown pool '{name}'"));
+            }
+        }
+        for (name, configured) in desired {
+            self.pools.get_mut(name).expect("validated above").configured = *configured;
+        }
+        Ok(())
+    }
+
+    /// Cartridge self-report for one pool (see [`PoolHandle`]).
+    fn set_available(&mut self, pool: &str, available: u64) -> Result<(), String> {
+        let slot = self
+            .pools
+            .get_mut(pool)
+            .ok_or_else(|| format!("unknown pool '{pool}'"))?;
+        slot.available = Some(available);
+        Ok(())
+    }
+
+    /// The full wire-shaped state map. `queued` counts each waiting request
+    /// on its own singleton pool and on every chain pool that currently
+    /// lacks room (its blockers) — so a shared pool's queued figure is the
+    /// number of waiters it is actually holding back.
+    fn snapshot(&self) -> crate::bifaci::pools::PoolStates {
+        let mut states = crate::bifaci::pools::PoolStates::new();
+        for (name, pool) in &self.pools {
+            states.insert(
+                name.clone(),
+                crate::bifaci::pools::PoolState {
+                    declared: pool.declared,
+                    configured: pool.configured,
+                    available: pool.available,
+                    active: pool.active,
+                    queued: 0,
+                    caps: pool.members.clone(),
+                },
+            );
+        }
+        for (pattern, queue) in &self.queues {
+            let waiting = queue.len() as u64;
+            if waiting == 0 {
+                continue;
+            }
+            states.get_mut(pattern).expect("singleton state exists").queued += waiting;
+            for pool in self.chain(pattern) {
+                if pool != pattern && !self.pools[pool].has_room() {
+                    states.get_mut(pool).expect("chain state exists").queued += waiting;
+                }
+            }
+        }
+        states
+    }
+}
+
+/// Shared handle for a pool's cartridge SELF-REPORT (`available` — see
+/// `bifaci::pools`). Obtained from [`CartridgeRuntime::pool_handle`] with a
+/// pool name (a registered cap URN for a single cap, a declared pool name,
+/// or `all`). `set(n)` reports what the cartridge can serve right now from
+/// its OWN state (0 = unlimited); it never touches the operator's
+/// `configured` or the manifest's `declared`. A cartridge that never calls
+/// it is fully static — the normal case.
+#[derive(Clone)]
+pub struct PoolHandle {
+    pools: Arc<Mutex<Option<RuntimePools>>>,
+    name: String,
+}
+
+impl PoolHandle {
+    /// Report the pool's current self-limit. Errors name the defect: an
+    /// unknown pool name, or a call before the runtime materialized its
+    /// pools (`run()` not started).
+    pub fn set(&self, available: u64) -> Result<(), String> {
+        let mut pools = self.pools.lock().expect("runtime pools mutex poisoned");
+        pools
+            .as_mut()
+            .ok_or_else(|| "runtime pools are not materialized yet (before run())".to_string())?
+            .set_available(&self.name, available)
     }
 }
 
@@ -4272,11 +4556,13 @@ impl CapacityHandle {
 /// - Accept new requests while previous ones are still processing
 /// - Handle multiple concurrent cap invocations
 ///
-/// **Concurrency capacity**: Set via `set_capacity(n)` before `run()`. When set,
-/// incoming requests beyond the capacity are queued. The runtime sends LOG frames
-/// with `level="queued"` so the pipeline knows the request is alive but waiting.
-/// When a handler slot opens, the next queued request is dequeued and dispatched.
-/// Default is 0 (unlimited).
+/// **Concurrency pools**: capacity is per POOL (see `bifaci::pools`) — one
+/// queue per registered cap, shared pools declared in the manifest, `all`
+/// over everything. A request beyond a pool's effective capacity queues on
+/// its cap's own queue; the runtime sends LOG frames with `level="queued"`
+/// so the pipeline knows the request is alive but waiting, and admits the
+/// oldest eligible waiter (global FIFO across caps) when any chain pool
+/// frees. Nothing declared = every pool unlimited.
 pub struct CartridgeRuntime {
     /// Registered Op factories by cap URN pattern
     handlers: HashMap<String, OpFactory>,
@@ -4291,9 +4577,11 @@ pub struct CartridgeRuntime {
     /// Negotiated protocol limits
     limits: Limits,
 
-    /// Concurrency capacity: 0 = unlimited, N = max N concurrent handlers.
-    /// Shared via CapacityHandle so handlers can adjust dynamically.
-    capacity: CapacityHandle,
+    /// The materialized concurrency pools (singleton per registered cap,
+    /// declared shared pools, `all`). `None` until `run()` materializes
+    /// them from the handler set + the manifest's declarations; shared via
+    /// [`PoolHandle`] so handlers can self-report `available` dynamically.
+    pools: Arc<Mutex<Option<RuntimePools>>>,
 
     /// Process-wide dropped-frame accounting (L8). Shared with every
     /// ChannelFrameSender and the stats surface. Drops mean something went
@@ -4633,7 +4921,7 @@ impl CartridgeRuntime {
             manifest_data,
             manifest: parsed_manifest,
             limits: Limits::default(),
-            capacity: CapacityHandle::new(0),
+            pools: Arc::new(Mutex::new(None)),
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -4659,7 +4947,7 @@ impl CartridgeRuntime {
             manifest_data,
             manifest: Some(manifest),
             limits: Limits::default(),
-            capacity: CapacityHandle::new(0),
+            pools: Arc::new(Mutex::new(None)),
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -4717,20 +5005,16 @@ impl CartridgeRuntime {
     /// handlers. Queued requests receive a LOG frame with `level="queued"` so the
     /// pipeline's activity timeout pauses for that body.
     ///
-    /// * `0` — unlimited (default)
-    /// * `1` — serial execution (e.g., ggufcartridge with single model loaded)
-    /// * `N` — up to N concurrent handlers
-    pub fn set_capacity(&mut self, n: usize) {
-        self.capacity.set(n);
-    }
 
-    /// Get a clonable handle to the concurrency capacity.
-    ///
-    /// Handlers can use this to adjust capacity dynamically at runtime —
-    /// for example, increasing capacity after freeing VRAM or decreasing it
-    /// under memory pressure.
-    pub fn capacity_handle(&self) -> CapacityHandle {
-        self.capacity.clone()
+    /// A handle for one pool's cartridge SELF-REPORT (`available`). The
+    /// name is a pool name: a registered cap URN, a declared pool name, or
+    /// `all`. Validated at `set` time — an unknown name errors there,
+    /// naming it.
+    pub fn pool_handle(&self, pool: &str) -> PoolHandle {
+        PoolHandle {
+            pools: Arc::clone(&self.pools),
+            name: pool.to_string(),
+        }
     }
 
     /// Register an Op factory for a cap URN.
@@ -4762,14 +5046,22 @@ impl CartridgeRuntime {
     /// 2. More specific candidates (positive distance) - refinements
     /// 3. More generic candidates (negative distance) - fallbacks
     pub fn find_handler(&self, cap_urn: &str) -> Option<OpFactory> {
+        self.find_handler_with_pattern(cap_urn)
+            .map(|(_, handler)| handler)
+    }
+
+    /// Find a handler AND the canonical registered pattern that won the
+    /// dispatch — the pattern is the request's pool identity (its singleton
+    /// queue and the key of its pool chain).
+    pub fn find_handler_with_pattern(&self, cap_urn: &str) -> Option<(String, OpFactory)> {
         let request_urn = match CapUrn::from_string(cap_urn) {
             Ok(u) => u,
             Err(_) => return None,
         };
 
         let request_specificity = request_urn.specificity();
-        // (handler, signed_distance, is_non_negative)
-        let mut best: Option<(OpFactory, isize)> = None;
+        // (canonical pattern, handler, signed_distance)
+        let mut best: Option<(String, OpFactory, isize)> = None;
 
         for (registered_cap_str, handler) in &self.handlers {
             if let Ok(registered_urn) = CapUrn::from_string(registered_cap_str) {
@@ -4780,7 +5072,7 @@ impl CartridgeRuntime {
 
                     let dominated = match &best {
                         None => false,
-                        Some((_, best_dist)) => {
+                        Some((_, _, best_dist)) => {
                             // Current best dominates if:
                             // - best is non-negative and candidate is negative
                             // - OR both same sign and best has smaller abs distance
@@ -4793,13 +5085,17 @@ impl CartridgeRuntime {
                     };
 
                     if !dominated {
-                        best = Some((Arc::clone(handler), signed_distance));
+                        best = Some((
+                            registered_urn.to_string(),
+                            Arc::clone(handler),
+                            signed_distance,
+                        ));
                     }
                 }
             }
         }
 
-        best.map(|(handler, _)| handler)
+        best.map(|(pattern, handler, _)| (pattern, handler))
     }
 
     /// Run the cartridge runtime.
@@ -5503,12 +5799,13 @@ impl CartridgeRuntime {
 
     /// Run in Cartridge CBOR mode - binary frame protocol via stdin/stdout.
     ///
-    /// When `capacity` is set (> 0), incoming requests beyond the active limit
-    /// are queued. A LOG frame with `level="queued"` is sent back immediately
-    /// so the pipeline's per-body activity timeout pauses. When a handler
-    /// finishes and a slot opens, the next queued request is dequeued and its
-    /// handler spawned. Frames for queued requests are buffered in the crossbeam
-    /// channel (created on REQ) until the handler's demux drains them.
+    /// Requests beyond a pool chain's effective capacity queue on their
+    /// cap's own queue. A LOG frame with `level="queued"` is sent back
+    /// immediately so the pipeline's per-body activity timeout pauses; when
+    /// any chain pool frees, the oldest eligible waiter (global FIFO across
+    /// caps) is dequeued and its handler spawned. Frames for queued requests
+    /// are buffered in the crossbeam channel (created on REQ) until the
+    /// handler's demux drains them.
     async fn run_cbor_mode(&self) -> Result<(), RuntimeError> {
         let stdin = tokio::io::stdin();
         let CborStdout {
@@ -5523,11 +5820,31 @@ impl CartridgeRuntime {
         let mut hs_async_writer = tokio::io::BufWriter::new(handshake_stdout);
         let mut hs_frame_writer = FrameWriter::new(&mut hs_async_writer);
 
+        // Materialize the concurrency pools BEFORE the handshake: the HELLO
+        // must carry the full pool-state map, and the map is built from the
+        // registered handler patterns + the manifest's declarations. Errors
+        // here are cartridge-author bugs (an unresolved pool declaration, a
+        // duplicate registration) and fail the process at startup, precisely
+        // named, rather than surfacing as capacity misbehavior later.
+        let initial_pool_states = {
+            let handler_patterns: Vec<String> = self.handlers.keys().cloned().collect();
+            let declarations = self
+                .manifest
+                .as_ref()
+                .map(|m| m.pool_declarations.clone())
+                .unwrap_or_default();
+            let pools = RuntimePools::init(&handler_patterns, &declarations)
+                .map_err(RuntimeError::Serialize)?;
+            let snapshot = pools.snapshot();
+            *self.pools.lock().expect("runtime pools mutex poisoned") = Some(pools);
+            snapshot
+        };
+
         let negotiated_limits = handshake_accept(
             &mut frame_reader,
             &mut hs_frame_writer,
             &self.manifest_data,
-            self.capacity.get(),
+            &initial_pool_states,
         )
         .await?;
         frame_reader.set_limits(negotiated_limits.clone());
@@ -5644,14 +5961,10 @@ impl CartridgeRuntime {
         // close_request releases waiters on terminal/cancel.
         let credit_router = crate::bifaci::credit::CreditRouter::new();
 
-        // Queue for requests waiting for a handler slot.
-        // Each entry holds the crossbeam receiver (the sender side is in active_requests).
-        // When dequeued, the receiver is passed to the spawned handler.
-        let mut request_queue: std::collections::VecDeque<QueuedRequest> =
-            std::collections::VecDeque::new();
-
-        // Number of currently running handlers (decremented when JoinHandles finish).
-        let mut running_handler_count: usize = 0;
+        // The registered pattern serving each running handler — the pool
+        // chain to release when it finishes. (The waiting queues themselves
+        // live inside RuntimePools: queues lead to pools.)
+        let mut handler_patterns: HashMap<MessageId, String> = HashMap::new();
 
         // Notification channel: handlers send their RID when they finish so the main
         // loop can check cancelled state and send deferred ERR CANCELLED if needed.
@@ -5687,10 +6000,18 @@ impl CartridgeRuntime {
         // loop so it can check cancelled state, send deferred ERR if needed, and
         // drain the queue immediately — without waiting for the next frame from stdin.
         loop {
-            // Drain queue: spawn handlers for queued requests that now have capacity.
-            let cap = self.capacity.get();
-            while !request_queue.is_empty() && (cap == 0 || running_handler_count < cap) {
-                let queued = request_queue.pop_front().unwrap();
+            // Drain queues: admit the oldest waiting request (global FIFO
+            // across caps) whose whole pool chain has room, until none is
+            // eligible. Admission and the active-count increments are one
+            // atomic step inside the pools mutex.
+            loop {
+                let queued = {
+                    let mut pools = self.pools.lock().expect("runtime pools mutex poisoned");
+                    match pools.as_mut().expect("pools materialized at startup").pop_admissible() {
+                        Some(q) => q,
+                        None => break,
+                    }
+                };
 
                 // Notify the caller that this request has been dequeued and is
                 // starting. The "dequeued" level is the counterpart to "queued":
@@ -5711,6 +6032,7 @@ impl CartridgeRuntime {
                 let feed_handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>> =
                     Arc::new(Mutex::new(Vec::new()));
                 live_feed_handles_by_rid.insert(handler_rid.clone(), Arc::clone(&feed_handles));
+                handler_patterns.insert(handler_rid.clone(), queued.pattern.clone());
                 let handle = spawn_handler(
                     queued.raw_rx,
                     queued.factory,
@@ -5730,7 +6052,6 @@ impl CartridgeRuntime {
                 );
                 active_handlers.insert(handler_rid.clone(), handle);
                 handler_routing_ids.insert(handler_rid, handler_xid);
-                running_handler_count += 1;
             }
 
             // Select: either a frame arrives from stdin or a handler finishes.
@@ -5740,7 +6061,17 @@ impl CartridgeRuntime {
                 // send deferred ERR if cancelled.
                 Some(rid) = handler_done_rx.recv() => {
                     active_handlers.remove(&rid);
-                    running_handler_count = running_handler_count.saturating_sub(1);
+                    // Release the finished handler's whole pool chain — the
+                    // atomic counterpart of its admission.
+                    let pattern = handler_patterns.remove(&rid).unwrap_or_else(|| {
+                        panic!("finished handler {rid:?} has no recorded pool pattern")
+                    });
+                    self.pools
+                        .lock()
+                        .expect("runtime pools mutex poisoned")
+                        .as_mut()
+                        .expect("pools materialized at startup")
+                        .release(&pattern);
                     credit_router.close_request(&rid, "END");
                     // A finished handler's feeds are over — close any the
                     // provider hasn't observed as ended yet, and forget them.
@@ -5796,8 +6127,8 @@ impl CartridgeRuntime {
                         }
                     };
 
-                    let factory = match self.find_handler(&cap_urn) {
-                        Some(f) => f,
+                    let (pattern, factory) = match self.find_handler_with_pattern(&cap_urn) {
+                        Some(found) => found,
                         None => {
                             // A dispatched cap this binary doesn't handle is a
                             // deployment/manifest mismatch — Environment.
@@ -5837,38 +6168,55 @@ impl CartridgeRuntime {
                     let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
                     active_requests.insert(request_id.clone(), ActiveRequest { raw_tx });
 
-                    let cap = self.capacity.get();
-                    if cap > 0 && running_handler_count >= cap {
-                        // At capacity — queue the request, send "queued" LOG back to caller.
-                        let queue_pos = request_queue.len() + 1;
+                    // Admit through the cap's whole pool chain, or queue on
+                    // the cap's OWN queue — a saturated sibling cap never
+                    // holds this request back except through a pool they
+                    // genuinely share.
+                    let admitted = self
+                        .pools
+                        .lock()
+                        .expect("runtime pools mutex poisoned")
+                        .as_mut()
+                        .expect("pools materialized at startup")
+                        .try_admit(&pattern);
+                    if !admitted {
+                        // Chain full — queue the request, send "queued" LOG back.
+                        let queue_pos = {
+                            let mut pools =
+                                self.pools.lock().expect("runtime pools mutex poisoned");
+                            pools.as_mut().expect("pools materialized at startup").enqueue(
+                                QueuedRequest {
+                                    factory,
+                                    cap_urn,
+                                    pattern: pattern.clone(),
+                                    ticket: 0, // assigned by enqueue
+                                    routing_id: routing_id.clone(),
+                                    request_id: request_id.clone(),
+                                    raw_rx,
+                                },
+                            )
+                        };
                         let mut log_frame = Frame::log(
-                            request_id.clone(),
+                            request_id,
                             "queued",
                             crate::failure::AttributionClass::Internal,
                             &format!(
-                                "Request queued (position {}, {} active)",
-                                queue_pos, running_handler_count
+                                "Request queued (position {} on pool '{}')",
+                                queue_pos, pattern
                             ),
                             None,
                         );
-                        log_frame.routing_id = routing_id.clone();
+                        log_frame.routing_id = routing_id;
                         let _ = output_tx.send(log_frame);
-
-                        request_queue.push_back(QueuedRequest {
-                            factory,
-                            cap_urn,
-                            routing_id,
-                            request_id,
-                            raw_rx,
-                        });
                     } else {
-                        // Under capacity — spawn handler immediately.
+                        // Chain has room — spawn handler immediately.
                         let handler_rid = request_id.clone();
                         let handler_xid = routing_id.clone();
                         let feed_handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>> =
                             Arc::new(Mutex::new(Vec::new()));
                         live_feed_handles_by_rid
                             .insert(handler_rid.clone(), Arc::clone(&feed_handles));
+                        handler_patterns.insert(handler_rid.clone(), pattern);
                         let handle = spawn_handler(
                             raw_rx,
                             factory,
@@ -5888,7 +6236,6 @@ impl CartridgeRuntime {
                         );
                         active_handlers.insert(handler_rid.clone(), handle);
                         handler_routing_ids.insert(handler_rid, handler_xid);
-                        running_handler_count += 1;
                     }
                 }
 
@@ -5979,7 +6326,7 @@ impl CartridgeRuntime {
                                     target: "cartridge_runtime",
                                     rid = ?target_rid,
                                     feeds = handles.len(),
-                                    "[CartridgeRuntime] stop: closed live feeds — the run drains                                      and ends naturally (a second Cancel aborts)"
+                                    "[CartridgeRuntime] stop: closed live feeds — the run drains and ends naturally (a second Cancel aborts)"
                                 );
                                 continue;
                             }
@@ -6062,6 +6409,34 @@ impl CartridgeRuntime {
                 }
 
                 FrameType::Heartbeat => {
+                    // The heartbeat is the capacity CONFIG channel: a probe
+                    // may carry the operator's desired `configured` values.
+                    // The whole batch is validated first — an unknown pool
+                    // refuses it all with an ERR naming it, and the probe
+                    // gets that ERR instead of a reply, so the host's
+                    // awaited apply fails precisely rather than silently.
+                    if let Some(bytes) = frame.desired_capacity_bytes() {
+                        let applied = crate::bifaci::pools::decode_desired(bytes)
+                            .and_then(|desired| {
+                                self.pools
+                                    .lock()
+                                    .expect("runtime pools mutex poisoned")
+                                    .as_mut()
+                                    .expect("pools materialized at startup")
+                                    .apply_desired(&desired)
+                            });
+                        if let Err(reason) = applied {
+                            let err = Frame::err(
+                                frame.id,
+                                "UNKNOWN_POOL",
+                                crate::failure::AttributionClass::Internal,
+                                &format!("desired capacities refused: {reason}"),
+                                None,
+                            );
+                            let _ = output_tx.send(err);
+                            continue;
+                        }
+                    }
                     let mut response = Frame::heartbeat(frame.id);
                     let mut meta = std::collections::BTreeMap::new();
                     if let Some((footprint_mb, rss_mb)) = get_own_memory_mb() {
@@ -6100,13 +6475,21 @@ impl CartridgeRuntime {
                                 .into(),
                         ),
                     );
+                    // The full concurrency-pool state — capacities, active
+                    // and queued per pool — rides every heartbeat reply.
+                    // Mandatory: the host hard-errors on a reply without it.
+                    let pool_snapshot = self
+                        .pools
+                        .lock()
+                        .expect("runtime pools mutex poisoned")
+                        .as_ref()
+                        .expect("pools materialized at startup")
+                        .snapshot();
                     meta.insert(
-                        "handler_capacity".into(),
-                        ciborium::Value::Integer(
-                            u64::try_from(self.capacity.get())
-                                .expect("handler capacity must fit the protocol's uint64 domain")
-                                .into(),
-                        ),
+                        crate::bifaci::pools::META_POOLS.into(),
+                        ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(
+                            &pool_snapshot,
+                        )),
                     );
                     response.meta = Some(meta);
                     let _ = output_tx.send(response);
@@ -6205,6 +6588,223 @@ mod tests {
         }
         assert_eq!(pos, buf.len(), "trailing bytes on the wire");
         frames
+    }
+
+    fn pool_test_request(pattern: &str) -> QueuedRequest {
+        let (_tx, raw_rx) = crossbeam_channel::unbounded();
+        QueuedRequest {
+            factory: Arc::new(|| Box::new(IdentityOp)),
+            cap_urn: pattern.to_string(),
+            pattern: pattern.to_string(),
+            ticket: 0,
+            routing_id: None,
+            request_id: MessageId::new_uuid(),
+            raw_rx,
+        }
+    }
+
+    fn pool_declarations(
+        pools: &[(&str, &[&str])],
+        capacities: &[(&str, u64)],
+    ) -> crate::bifaci::pools::PoolDeclarations {
+        let mut declarations = crate::bifaci::pools::PoolDeclarations::default();
+        for (name, members) in pools {
+            declarations.pools.insert(
+                name.to_string(),
+                members.iter().map(|m| m.to_string()).collect(),
+            );
+        }
+        for (name, capacity) in capacities {
+            declarations.capacities.insert(name.to_string(), *capacity);
+        }
+        declarations
+    }
+
+    const POOL_CAP_A: &str = "cap:pool-a";
+    const POOL_CAP_B: &str = "cap:pool-b";
+
+    // TEST1527: RuntimePools materializes one singleton per registered
+    // pattern, every declared shared pool, and `all` — and a declaration
+    // referencing a cap no handler serves is a hard cartridge-author error,
+    // never a silently ignored name.
+    #[test]
+    fn test1527_runtime_pools_materialization_and_declaration_resolution() {
+        let patterns = vec![POOL_CAP_A.to_string(), POOL_CAP_B.to_string()];
+        let pools = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[("gpu", &[POOL_CAP_A, POOL_CAP_B])], &[("gpu", 1)]),
+        )
+        .expect("valid declarations must materialize");
+        let snapshot = pools.snapshot();
+        assert_eq!(snapshot.len(), 4, "two singletons + gpu + all");
+        assert_eq!(snapshot["gpu"].declared, 1);
+        assert_eq!(snapshot["gpu"].caps.len(), 2);
+        assert_eq!(
+            snapshot[crate::bifaci::pools::POOL_ALL].caps,
+            vec![POOL_CAP_A.to_string(), POOL_CAP_B.to_string()]
+        );
+        assert_eq!(
+            pools.chain(POOL_CAP_A),
+            &[
+                POOL_CAP_A.to_string(),
+                "gpu".to_string(),
+                crate::bifaci::pools::POOL_ALL.to_string()
+            ]
+        );
+
+        let error = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[("gpu", &["cap:ghost"])], &[]),
+        )
+        .expect_err("a declaration cap with no registered handler must refuse");
+        assert!(
+            error.contains("cap:ghost"),
+            "the refusal must name the unresolved cap: {error}"
+        );
+    }
+
+    // TEST1528: singleton queues are ISOLATED — saturating one cap queues
+    // its requests without touching a sibling cap's admission, and a release
+    // admits the queued request.
+    #[test]
+    fn test1528_singleton_queue_isolation() {
+        let patterns = vec![POOL_CAP_A.to_string(), POOL_CAP_B.to_string()];
+        let mut pools = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[], &[(POOL_CAP_A, 1)]),
+        )
+        .expect("valid declarations must materialize");
+
+        assert!(pools.try_admit(POOL_CAP_A), "first dispatch admits");
+        assert!(!pools.try_admit(POOL_CAP_A), "singleton capacity 1 is full");
+        let position = pools.enqueue(pool_test_request(POOL_CAP_A));
+        assert_eq!(position, 1, "queue position is 1-based for the LOG");
+        assert!(
+            pools.try_admit(POOL_CAP_B),
+            "a saturated sibling must not block this cap"
+        );
+        assert!(
+            pools.pop_admissible().is_none(),
+            "nothing is admissible while the singleton is full"
+        );
+        pools.release(POOL_CAP_A);
+        let admitted = pools
+            .pop_admissible()
+            .expect("the release must admit the queued request");
+        assert_eq!(admitted.pattern, POOL_CAP_A);
+    }
+
+    // TEST1529: admission across a shared pool's members on release is
+    // arrival-ordered by the GLOBAL ticket — never cap-biased (e.g. by
+    // alphabetical queue iteration).
+    #[test]
+    fn test1529_shared_pool_release_admits_in_global_arrival_order() {
+        let patterns = vec![POOL_CAP_A.to_string(), POOL_CAP_B.to_string()];
+        let mut pools = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[("gpu", &[POOL_CAP_A, POOL_CAP_B])], &[("gpu", 1)]),
+        )
+        .expect("valid declarations must materialize");
+
+        assert!(pools.try_admit(POOL_CAP_A), "gpu slot taken");
+        // B arrives before A — the global ticket must remember that even
+        // though "cap:pool-a" sorts first.
+        pools.enqueue(pool_test_request(POOL_CAP_B));
+        pools.enqueue(pool_test_request(POOL_CAP_A));
+        pools.release(POOL_CAP_A);
+        let first = pools
+            .pop_admissible()
+            .expect("released gpu slot must admit the oldest waiter");
+        assert_eq!(first.pattern, POOL_CAP_B, "arrival order, not cap order");
+        assert!(
+            pools.pop_admissible().is_none(),
+            "gpu capacity 1 admits exactly one"
+        );
+    }
+
+    // TEST1530: the operator's desired batch applies atomically — one
+    // unknown pool refuses the WHOLE batch (nothing half-applied), a valid
+    // batch rewrites `configured` and admission follows immediately.
+    #[test]
+    fn test1530_apply_desired_is_atomic_and_immediate() {
+        let patterns = vec![POOL_CAP_A.to_string()];
+        let mut pools = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[], &[(POOL_CAP_A, 1)]),
+        )
+        .expect("valid declarations must materialize");
+
+        let mut bad = crate::bifaci::pools::DesiredCapacities::new();
+        bad.insert(POOL_CAP_A.to_string(), 3);
+        bad.insert("ghost".to_string(), 1);
+        let error = pools
+            .apply_desired(&bad)
+            .expect_err("an unknown pool must refuse the batch");
+        assert!(error.contains("ghost"));
+        assert_eq!(
+            pools.snapshot()[POOL_CAP_A].configured,
+            1,
+            "a refused batch must apply NOTHING"
+        );
+
+        let mut good = crate::bifaci::pools::DesiredCapacities::new();
+        good.insert(POOL_CAP_A.to_string(), 2);
+        pools.apply_desired(&good).expect("valid batch applies");
+        assert!(pools.try_admit(POOL_CAP_A));
+        assert!(pools.try_admit(POOL_CAP_A), "raise admits immediately");
+        assert!(!pools.try_admit(POOL_CAP_A), "raised bound still bounds");
+    }
+
+    // TEST1531: `available` is the cartridge's self-report — effective =
+    // min(configured, available) — and the snapshot counts a waiter on its
+    // own singleton AND on every chain pool actually blocking it.
+    #[test]
+    fn test1531_available_self_report_and_snapshot_queued_attribution() {
+        let patterns = vec![POOL_CAP_A.to_string(), POOL_CAP_B.to_string()];
+        let mut pools = RuntimePools::init(
+            &patterns,
+            &pool_declarations(&[("gpu", &[POOL_CAP_A, POOL_CAP_B])], &[("gpu", 2)]),
+        )
+        .expect("valid declarations must materialize");
+
+        // Self-limit gpu to 1 (model loading): effective = min(2, 1) = 1.
+        pools
+            .set_available("gpu", 1)
+            .expect("gpu is a declared pool");
+        assert!(pools.try_admit(POOL_CAP_A));
+        assert!(
+            !pools.try_admit(POOL_CAP_B),
+            "the self-report must bound admission below `configured`"
+        );
+        pools.enqueue(pool_test_request(POOL_CAP_B));
+
+        let snapshot = pools.snapshot();
+        assert_eq!(snapshot["gpu"].available, Some(1));
+        assert_eq!(
+            snapshot[POOL_CAP_B].queued, 1,
+            "a waiter always counts on its own singleton"
+        );
+        assert_eq!(
+            snapshot["gpu"].queued, 1,
+            "the full shared pool is the blocker and must own the queued count"
+        );
+        assert_eq!(
+            snapshot[crate::bifaci::pools::POOL_ALL].queued,
+            0,
+            "an unlimited chain pool blocks nobody"
+        );
+
+        pools
+            .set_available("gpu", 0)
+            .expect("gpu is a declared pool");
+        assert!(
+            pools.try_admit(POOL_CAP_B),
+            "clearing the self-limit (0 = unlimited) restores min(configured, ∞) = 2"
+        );
+        let error = pools
+            .set_available("cap:ghost", 1)
+            .expect_err("self-report on an unknown pool must refuse");
+        assert!(error.contains("cap:ghost"));
     }
 
     // TEST7020: A flow frame reaching the writer after the flow's END has been written is suppressed as a benign counted straggler (never a drop) — END is the last flow frame on the wire.

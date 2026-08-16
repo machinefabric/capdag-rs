@@ -596,8 +596,10 @@ pub struct HandshakeResult {
     /// Cartridge manifest JSON data (from cartridge's HELLO response).
     /// This is REQUIRED - cartridges MUST include their manifest in HELLO.
     pub manifest: Vec<u8>,
-    /// Cartridge handler concurrency (0 means unlimited).
-    pub handler_capacity: usize,
+    /// The cartridge's full concurrency-pool state map (`bifaci::pools`).
+    /// REQUIRED — pools are the protocol's one capacity concept; a HELLO
+    /// without the map fails the handshake.
+    pub pool_states: crate::bifaci::pools::PoolStates,
 }
 
 // =============================================================================
@@ -802,11 +804,15 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             CborError::Handshake("Cartridge HELLO missing required manifest".to_string())
         })?
         .to_vec();
-    let handler_capacity = their_frame.hello_handler_capacity().ok_or_else(|| {
-        CborError::Handshake(
-            "Cartridge HELLO missing required non-negative handler_capacity".to_string(),
-        )
-    })?;
+    let pool_states = {
+        let bytes = their_frame.pool_state_bytes().ok_or_else(|| {
+            CborError::Handshake(
+                "Cartridge HELLO missing required concurrency-pool state map".to_string(),
+            )
+        })?;
+        crate::bifaci::pools::decode_pool_states(bytes)
+            .map_err(|e| CborError::Handshake(format!("Cartridge HELLO pool map: {e}")))?
+    };
 
     // Negotiate minimum of both
     let their_max_frame = their_frame
@@ -836,7 +842,7 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     Ok(HandshakeResult {
         limits,
         manifest,
-        handler_capacity,
+        pool_states,
     })
 }
 
@@ -848,7 +854,7 @@ pub async fn handshake_accept<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
     manifest: &[u8],
-    handler_capacity: usize,
+    pool_states: &crate::bifaci::pools::PoolStates,
 ) -> Result<Limits, CborError> {
     // Read their HELLO first (host initiates)
     let their_frame = reader.read().await?.ok_or_else(|| {
@@ -895,7 +901,7 @@ pub async fn handshake_accept<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     };
 
     // Send our HELLO with manifest
-    let our_hello = Frame::hello_with_manifest(&limits, manifest, handler_capacity);
+    let our_hello = Frame::hello_with_manifest(&limits, manifest, pool_states);
     writer.write(&our_hello).await?;
 
     // Update both reader and writer with negotiated limits
@@ -1248,7 +1254,7 @@ mod tests {
                 initial_credit: DEFAULT_INITIAL_CREDIT,
             },
             manifest,
-            0,
+            &crate::bifaci::pools::PoolStates::new(),
         );
         let bytes = encode_frame(&original).expect("encode should succeed");
         let decoded = decode_frame(&bytes).expect("decode should succeed");
@@ -1870,7 +1876,7 @@ mod tests {
         let cartridge_handle = tokio::spawn(async move {
             let mut reader = FrameReader::new(TokioBufReader::new(cartridge_from_host));
             let mut writer = FrameWriter::new(TokioBufWriter::new(cartridge_to_host));
-            handshake_accept(&mut reader, &mut writer, &manifest_clone, 0)
+            handshake_accept(&mut reader, &mut writer, &manifest_clone, &crate::bifaci::pools::PoolStates::new())
                 .await
                 .unwrap()
         });

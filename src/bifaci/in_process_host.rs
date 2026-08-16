@@ -605,6 +605,7 @@ impl InProcessCartridgeHost {
             }
         }
 
+        let cap_urn_list: Vec<String> = caps.iter().map(|c| c.urn.to_string()).collect();
         let cartridge = InstalledCartridgeRecord {
             registry_url: self.identity.registry_url.clone(),
             channel: self.identity.channel,
@@ -620,8 +621,9 @@ impl InProcessCartridgeHost {
             runtime_stats: Some(crate::bifaci::relay_switch::CartridgeRuntimeStats {
                 running: true,
                 // In-process handlers are task-backed and have no fixed
-                // concurrency ceiling. Protocol v4 represents that as 0.
-                handler_capacity: 0,
+                // concurrency ceiling: every pool is unlimited, at rest at
+                // manifest-build time.
+                pools: Self::pool_states_snapshot(&cap_urn_list, &HashMap::new()),
                 pid: Some(std::process::id()),
                 active_request_count: 0,
                 peer_request_count: 0,
@@ -665,14 +667,15 @@ impl InProcessCartridgeHost {
     /// 1. Equivalent matches (distance 0)
     /// 2. More specific candidates (positive distance) - refinements
     /// 3. More generic candidates (negative distance) - fallbacks
-    fn find_handler_for_cap(cap_table: &CapTable, cap_urn: &str) -> Option<usize> {
+    fn find_handler_for_cap(cap_table: &CapTable, cap_urn: &str) -> Option<(usize, String)> {
         let request_urn = match CapUrn::from_string(cap_urn) {
             Ok(u) => u,
             Err(_) => return None,
         };
 
         let request_specificity = request_urn.specificity();
-        let mut matches: Vec<(usize, isize)> = Vec::new(); // (handler_idx, signed_distance)
+        // (handler_idx, registered cap, signed_distance)
+        let mut matches: Vec<(usize, String, isize)> = Vec::new();
 
         for (registered_cap, handler_idx) in cap_table {
             if let Ok(registered_urn) = CapUrn::from_string(registered_cap) {
@@ -680,7 +683,7 @@ impl InProcessCartridgeHost {
                 if registered_urn.is_dispatchable(&request_urn) {
                     let specificity = registered_urn.specificity();
                     let signed_distance = specificity as isize - request_specificity as isize;
-                    matches.push((*handler_idx, signed_distance));
+                    matches.push((*handler_idx, registered_urn.to_string(), signed_distance));
                 }
             }
         }
@@ -691,8 +694,8 @@ impl InProcessCartridgeHost {
 
         // Ranking: prefer equivalent (0), then more specific (+), then more generic (-)
         matches.sort_by(|a, b| {
-            let (_, dist_a) = a;
-            let (_, dist_b) = b;
+            let (_, _, dist_a) = a;
+            let (_, _, dist_b) = b;
 
             // First: non-negative distances before negative
             match (dist_a >= &0, dist_b >= &0) {
@@ -705,7 +708,49 @@ impl InProcessCartridgeHost {
             }
         });
 
-        matches.first().map(|(idx, _)| *idx)
+        matches
+            .into_iter()
+            .next()
+            .map(|(idx, registered, _)| (idx, registered))
+    }
+
+    /// The host's full pool-state map: one at-rest singleton per advertised
+    /// cap plus the mandatory `all` pool, with live per-cap active counts.
+    /// In-process handlers are task-backed with no fixed concurrency
+    /// ceiling, so every capacity is 0 (unlimited) and nothing ever queues.
+    fn pool_states_snapshot(
+        cap_urns: &[String],
+        serving: &HashMap<MessageId, String>,
+    ) -> crate::bifaci::pools::PoolStates {
+        let mut states = crate::bifaci::pools::PoolStates::new();
+        let mut all_active: u64 = 0;
+        for cap in cap_urns {
+            let active = serving.values().filter(|c| *c == cap).count() as u64;
+            all_active += active;
+            states.insert(
+                cap.clone(),
+                crate::bifaci::pools::PoolState {
+                    declared: 0,
+                    configured: 0,
+                    available: None,
+                    active,
+                    queued: 0,
+                    caps: Vec::new(),
+                },
+            );
+        }
+        states.insert(
+            crate::bifaci::pools::POOL_ALL.to_string(),
+            crate::bifaci::pools::PoolState {
+                declared: 0,
+                configured: 0,
+                available: None,
+                active: all_active,
+                queued: 0,
+                caps: cap_urns.to_vec(),
+            },
+        );
+        states
     }
 
     /// Run the host. Returns when the local connection closes.
@@ -749,6 +794,28 @@ impl InProcessCartridgeHost {
         // Move handlers to Arc for sharing with handler tasks
         let handlers = Arc::new(self.handlers);
         let cap_table = Self::build_cap_table(&handlers);
+
+        // Advertised caps (canonical URNs) — the singleton pool roster.
+        let mut advertised_caps: Vec<String> = vec![CAP_IDENTITY.to_string()];
+        for entry in handlers.iter() {
+            for cap in &entry.caps {
+                let urn = cap.urn.to_string();
+                if !advertised_caps.contains(&urn) {
+                    advertised_caps.push(urn);
+                }
+            }
+        }
+        // Live per-request cap attribution for pool `active` counts:
+        // request_id → registered cap URN, removed when the handler task
+        // completes (or the request is cancelled).
+        let serving: Arc<Mutex<HashMap<MessageId, String>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        // Operator `configured` overlay delivered via heartbeat probes.
+        // The in-process host enforces nothing itself (handlers are
+        // task-backed); reporting the configured values back in the pool
+        // map is what makes the ENGINE's admission enforce them.
+        let mut configured_overlay: crate::bifaci::pools::DesiredCapacities =
+            crate::bifaci::pools::DesiredCapacities::new();
 
         // Active request channels: request_id → input_tx for forwarding frames to handler
         let mut active: HashMap<MessageId, mpsc::UnboundedSender<Frame>> = HashMap::new();
@@ -802,11 +869,14 @@ impl InProcessCartridgeHost {
                     // exact string match, NOT conforms_to.
                     let is_identity = cap_urn == CAP_IDENTITY;
 
-                    let handler: Arc<dyn FrameHandler> = if is_identity {
-                        Arc::clone(&identity_handler)
+                    let (handler, registered_cap): (Arc<dyn FrameHandler>, String) = if is_identity
+                    {
+                        (Arc::clone(&identity_handler), CAP_IDENTITY.to_string())
                     } else {
                         match Self::find_handler_for_cap(&cap_table, &cap_urn) {
-                            Some(idx) => Arc::clone(&handlers[idx].handler),
+                            Some((idx, registered)) => {
+                                (Arc::clone(&handlers[idx].handler), registered)
+                            }
                             None => {
                                 // No registered handler for a dispatched cap
                                 // is a deployment mismatch — Environment.
@@ -841,10 +911,20 @@ impl InProcessCartridgeHost {
                         ResponseWriter::new(rid.clone(), xid.clone(), write_tx.clone(), max_chunk);
                     let cap_urn_owned = cap_urn.clone();
                     let handler_rid = rid.clone();
+                    serving
+                        .lock()
+                        .expect("serving mutex poisoned")
+                        .insert(rid.clone(), registered_cap);
+                    let serving_done = serving.clone();
+                    let done_rid = rid.clone();
                     let handle = tokio::spawn(async move {
                         handler
                             .handle_request(&cap_urn_owned, input_rx, output, peer)
                             .await;
+                        serving_done
+                            .lock()
+                            .expect("serving mutex poisoned")
+                            .remove(&done_rid);
                     });
                     handler_handles.insert(handler_rid, handle);
                 }
@@ -918,6 +998,10 @@ impl InProcessCartridgeHost {
 
                     // Drop active sender → handler's input recv() returns None
                     active.remove(&target_rid);
+                    serving
+                        .lock()
+                        .expect("serving mutex poisoned")
+                        .remove(&target_rid);
 
                     // Abort handler JoinHandle
                     if let Some(handle) = handler_handles.remove(&target_rid) {
@@ -952,10 +1036,60 @@ impl InProcessCartridgeHost {
                 }
 
                 FrameType::Heartbeat => {
+                    // The heartbeat is the capacity CONFIG channel (see
+                    // cartridge_runtime): a probe may carry the operator's
+                    // desired `configured` values. Validate the whole batch
+                    // against the pool roster first — an unknown pool
+                    // refuses it all with an ERR naming it.
+                    if let Some(bytes) = frame.desired_capacity_bytes() {
+                        let desired = match crate::bifaci::pools::decode_desired(bytes) {
+                            Ok(desired) => desired,
+                            Err(reason) => {
+                                let err = Frame::err(
+                                    frame.id,
+                                    "UNKNOWN_POOL",
+                                    crate::failure::AttributionClass::Internal,
+                                    &format!("desired capacities refused: {reason}"),
+                                    None,
+                                );
+                                let _ = write_tx.send(err);
+                                continue;
+                            }
+                        };
+                        if let Some(unknown) = desired.keys().find(|name| {
+                            name.as_str() != crate::bifaci::pools::POOL_ALL
+                                && !advertised_caps.contains(name)
+                        }) {
+                            let err = Frame::err(
+                                frame.id,
+                                "UNKNOWN_POOL",
+                                crate::failure::AttributionClass::Internal,
+                                &format!(
+                                    "desired capacities refused: unknown pool '{unknown}'"
+                                ),
+                                None,
+                            );
+                            let _ = write_tx.send(err);
+                            continue;
+                        }
+                        configured_overlay.extend(desired);
+                    }
+                    let mut states = Self::pool_states_snapshot(
+                        &advertised_caps,
+                        &serving.lock().expect("serving mutex poisoned"),
+                    );
+                    for (name, configured) in &configured_overlay {
+                        states
+                            .get_mut(name)
+                            .expect("overlay pools validated on receipt")
+                            .configured = *configured;
+                    }
                     let mut response = Frame::heartbeat(frame.id.clone());
                     response.meta.get_or_insert_default().insert(
-                        "handler_capacity".to_string(),
-                        ciborium::Value::Integer(0.into()),
+                        crate::bifaci::pools::META_POOLS.to_string(),
+                        ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(
+                            &states,
+                        )),
                     );
                     let _ = write_tx.send(response);
                 }
@@ -1271,7 +1405,16 @@ mod tests {
             .as_ref()
             .unwrap();
         assert!(stats.running);
-        assert_eq!(stats.handler_capacity, 0);
+        // The pool map is the capacity surface: one at-rest unlimited
+        // singleton per advertised cap plus the mandatory `all` pool.
+        let all = stats
+            .pools
+            .get(crate::bifaci::pools::POOL_ALL)
+            .expect("mandatory 'all' pool");
+        assert_eq!(all.configured, 0, "in-process hosts are unlimited");
+        assert_eq!(all.caps.len(), 2, "identity + thumbnail singletons");
+        assert!(stats.pools.contains_key(CAP_IDENTITY));
+        assert_eq!(stats.pools.len(), 3);
     }
 
     // TEST658: InProcessCartridgeHost handles heartbeat by echoing same ID
@@ -1299,12 +1442,18 @@ mod tests {
         let resp = reader.read().await.unwrap().unwrap();
         assert_eq!(resp.frame_type, FrameType::Heartbeat);
         assert_eq!(resp.id, hb_id);
-        assert_eq!(
-            resp.meta
-                .as_ref()
-                .and_then(|meta| meta.get("handler_capacity")),
-            Some(&ciborium::Value::Integer(0.into()))
-        );
+        // The heartbeat reply's mandatory pool map replaces the retired
+        // scalar handler_capacity meta.
+        let states = crate::bifaci::pools::decode_pool_states(
+            resp.pool_state_bytes()
+                .expect("heartbeat reply must carry the pool map"),
+        )
+        .expect("heartbeat pool map must decode");
+        let all = states
+            .get(crate::bifaci::pools::POOL_ALL)
+            .expect("mandatory 'all' pool");
+        assert_eq!(all.configured, 0, "in-process hosts are unlimited");
+        assert_eq!(all.active, 0);
 
         drop(writer);
         drop(reader);

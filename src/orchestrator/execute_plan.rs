@@ -203,9 +203,9 @@ pub trait EngineRuntime: Send + Sync {
     //
     // Every backend reuses ONE long-lived `RelaySwitch` across all segments (including
     // every ForEach body), so a cap's cartridge process is spawned once and each body
-    // multiplexes onto it. That single process's `set_capacity(1)` then serializes the
-    // model loads — which is what stops a ForEach fan-out from loading N model copies
-    // into GPU memory at once. This contract is identical for the engine
+    // multiplexes onto it. That single process's declared concurrency pools (e.g. a
+    // capacity-1 "gpu" pool) then serialize the model loads — which is what stops a
+    // ForEach fan-out from loading N model copies into GPU memory at once. This contract is identical for the engine
     // (`EngineHostRuntime`, daemon-hosted cartridges) and the CLI (`CliRuntime`,
     // in-process dev-bin cartridges); only the hooks below differ.
 

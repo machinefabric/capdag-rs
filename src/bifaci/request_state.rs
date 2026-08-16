@@ -50,8 +50,39 @@ pub struct AdmissionKey {
 /// surfaces promptly instead of hanging the run.
 pub const ADMISSION_UNAVAILABLE_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// One pool of one cartridge install behind one master — the unit permits
+/// are held against (see `bifaci::pools`: a cap is a pool of one, `all` is
+/// the pool of every cap, and a dispatch is admitted through its cap's
+/// whole pool CHAIN).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PoolKey {
+    pub install: AdmissionKey,
+    pub pool: String,
+}
+
 #[derive(Debug, Default)]
-struct AdmissionSlot {
+struct PoolSlot {
+    /// EFFECTIVE capacity (min of configured/available, 0 = unlimited),
+    /// as advertised by the roster.
+    capacity: usize,
+    active: usize,
+    /// FIFO tickets. Populated only on SINGLETON pool keys (a request
+    /// queues on its cap's own pool); shared pools hold no queue — their
+    /// waiters are the union of member singleton queues.
+    queue: VecDeque<u64>,
+}
+
+impl PoolSlot {
+    fn has_room(&self) -> bool {
+        self.capacity == 0 || self.active < self.capacity
+    }
+}
+
+/// Install-level availability. Outages are a PROCESS fact (a respawn, a
+/// roster republish), so they are tracked per install and inherited by
+/// every pool of that install.
+#[derive(Debug, Default)]
+struct InstallState {
     /// `None` while the target is available; `Some(since)` from the moment it
     /// went unavailable. Kept as an instant rather than a bool so the grace
     /// window measures the OUTAGE, not the arrival time of each waiter — a
@@ -59,17 +90,13 @@ struct AdmissionSlot {
     /// `tokio::time::Instant` so the window is on the same clock as the timeout
     /// that waits it out (and so tests can drive it deterministically).
     unavailable_since: Option<tokio::time::Instant>,
-    capacity: usize,
-    active: usize,
-    queue: VecDeque<u64>,
 }
 
-impl AdmissionSlot {
+impl InstallState {
     fn available(&self) -> bool {
         self.unavailable_since.is_none()
     }
 
-    /// Mark unavailable, preserving the start of an outage already in progress.
     fn mark_unavailable(&mut self, now: tokio::time::Instant) {
         self.unavailable_since.get_or_insert(now);
     }
@@ -88,7 +115,8 @@ impl AdmissionSlot {
 
 #[derive(Debug)]
 struct AdmissionInner {
-    slots: HashMap<AdmissionKey, AdmissionSlot>,
+    slots: HashMap<PoolKey, PoolSlot>,
+    installs: HashMap<AdmissionKey, InstallState>,
     /// [`ADMISSION_UNAVAILABLE_GRACE`] in production. Tests shorten it to drive
     /// the expiry path without sleeping through a real minute — the same hook
     /// the Go, Python and ObjC mirrors expose, so the four implementations test
@@ -100,6 +128,7 @@ impl Default for AdmissionInner {
     fn default() -> Self {
         Self {
             slots: HashMap::new(),
+            installs: HashMap::new(),
             grace: ADMISSION_UNAVAILABLE_GRACE,
         }
     }
@@ -114,14 +143,27 @@ pub struct AdmissionController {
 }
 
 impl AdmissionController {
-    pub fn configure(&self, key: AdmissionKey, capacity: usize) {
+    /// Advertise one install's full pool map: EFFECTIVE capacity per pool.
+    /// A configure is the target advertising itself: it ENDS any outage,
+    /// which is what releases waiters queued through a respawn or a roster
+    /// round-trip.
+    pub fn configure_pools(&self, install: AdmissionKey, pools: &[(String, usize)]) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let slot = inner.slots.entry(key).or_default();
-        // A configure is the target advertising itself: it ENDS any outage,
-        // which is what releases waiters queued through a respawn or a roster
-        // round-trip.
-        slot.unavailable_since = None;
-        slot.capacity = capacity;
+        inner
+            .installs
+            .entry(install.clone())
+            .or_default()
+            .unavailable_since = None;
+        for (pool, capacity) in pools {
+            let slot = inner
+                .slots
+                .entry(PoolKey {
+                    install: install.clone(),
+                    pool: pool.clone(),
+                })
+                .or_default();
+            slot.capacity = *capacity;
+        }
         drop(inner);
         self.notify.notify_waiters();
     }
@@ -133,9 +175,9 @@ impl AdmissionController {
     ) {
         let now = tokio::time::Instant::now();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        for (key, slot) in &mut inner.slots {
-            if key.master_idx == master_idx && !available.contains(key) {
-                slot.mark_unavailable(now);
+        for (install, state) in &mut inner.installs {
+            if install.master_idx == master_idx && !available.contains(install) {
+                state.mark_unavailable(now);
             }
         }
         drop(inner);
@@ -145,31 +187,49 @@ impl AdmissionController {
     pub fn disable_master(&self, master_idx: usize) {
         let now = tokio::time::Instant::now();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        for (key, slot) in &mut inner.slots {
-            if key.master_idx == master_idx {
-                slot.mark_unavailable(now);
+        for (install, state) in &mut inner.installs {
+            if install.master_idx == master_idx {
+                state.mark_unavailable(now);
             }
         }
         drop(inner);
         self.notify.notify_waiters();
     }
 
-    /// Take a FIFO admission slot for `key`, waiting for capacity.
+    /// Take a FIFO admission slot across a cap's whole pool CHAIN, waiting
+    /// for capacity. The chain's FIRST key is the cap's singleton pool — the
+    /// queue the ticket waits in; admission requires EVERY chain pool to
+    /// have room, decided in one critical section (no half-admission).
     ///
-    /// An UNAVAILABLE target does not fail the caller immediately. The request
-    /// stays queued for [`ADMISSION_UNAVAILABLE_GRACE`] measured from the start
-    /// of the outage, so a cartridge that is respawning — or that a transient
-    /// registry outage briefly retired — resumes serving its queue instead of
-    /// terminally failing every body waiting on it (17.2: one body's process
-    /// loss must not terminate unrelated queued bodies). Only when the window
-    /// expires does the wait fail, and it fails hard.
-    pub async fn acquire(&self, key: AdmissionKey) -> Result<AdmissionPermit, String> {
+    /// An UNAVAILABLE target (an install-level fact) does not fail the
+    /// caller immediately. The request stays queued for
+    /// [`ADMISSION_UNAVAILABLE_GRACE`] measured from the start of the
+    /// outage, so a cartridge that is respawning — or that a transient
+    /// registry outage briefly retired — resumes serving its queue instead
+    /// of terminally failing every body waiting on it (17.2: one body's
+    /// process loss must not terminate unrelated queued bodies). Only when
+    /// the window expires does the wait fail, and it fails hard.
+    pub async fn acquire(&self, chain: Vec<PoolKey>) -> Result<AdmissionPermit, String> {
+        let head = chain.first().cloned().ok_or_else(|| {
+            "admission chain is empty — a dispatch always has at least its cap's own pool"
+                .to_string()
+        })?;
+        let install = head.install.clone();
         let ticket = self.tickets.fetch_add(1, Ordering::Relaxed);
         {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            let slot = inner.slots.get_mut(&key).ok_or_else(|| {
-                format!("cartridge '{}' has no configured admission target", key.id)
-            })?;
+            for key in &chain {
+                if !inner.slots.contains_key(key) {
+                    return Err(format!(
+                        "cartridge '{}' has no configured admission pool '{}'",
+                        key.install.id, key.pool
+                    ));
+                }
+            }
+            let slot = inner
+                .slots
+                .get_mut(&head)
+                .expect("checked above");
             // Queue even while unavailable: the loop below owns the grace
             // window, so a request arriving mid-outage gets the same treatment
             // as one that was already waiting when the outage began.
@@ -177,7 +237,7 @@ impl AdmissionController {
         }
         let mut waiter = AdmissionWaiter {
             controller: self.clone(),
-            key: key.clone(),
+            key: head.clone(),
             ticket,
             queued: true,
         };
@@ -186,36 +246,71 @@ impl AdmissionController {
             let wait_budget = {
                 let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 let grace = inner.grace;
-                let slot = inner
+                let available = inner
+                    .installs
+                    .get(&install)
+                    .map(|state| state.available())
+                    .unwrap_or(false);
+                let chain_has_room = chain.iter().all(|key| {
+                    inner
+                        .slots
+                        .get(key)
+                        .expect("admission pool disappeared while request was queued")
+                        .has_room()
+                });
+                let is_head = inner
                     .slots
-                    .get_mut(&key)
-                    .expect("admission slot disappeared while request was queued");
-                let has_capacity = slot.capacity == 0 || slot.active < slot.capacity;
-                if slot.available() && has_capacity && slot.queue.front() == Some(&ticket) {
-                    slot.queue.pop_front();
-                    slot.active += 1;
+                    .get(&head)
+                    .expect("admission pool disappeared while request was queued")
+                    .queue
+                    .front()
+                    == Some(&ticket);
+                if available && chain_has_room && is_head {
+                    inner
+                        .slots
+                        .get_mut(&head)
+                        .expect("checked above")
+                        .queue
+                        .pop_front();
+                    for key in &chain {
+                        inner.slots.get_mut(key).expect("checked above").active += 1;
+                    }
                     waiter.queued = false;
                     drop(inner);
                     self.notify.notify_waiters();
                     return Ok(AdmissionPermit {
                         controller: self.clone(),
-                        key: Some(key),
+                        chain: Some(chain),
                     });
                 }
-                match slot.grace_remaining(tokio::time::Instant::now(), grace) {
-                    // Available: wait indefinitely for capacity, as before.
-                    None => None,
+                let install_state = inner.installs.get(&install).map(|state| {
+                    state.grace_remaining(tokio::time::Instant::now(), grace)
+                });
+                match install_state {
+                    // Available (or never seen — treated as an outage that
+                    // just began would hide a real config gap; an install
+                    // with slots but no state is unreachable because
+                    // configure_pools writes both): wait for capacity.
+                    Some(None) => None,
                     // Outage still inside its window: wait, but no longer than
                     // what is left of it.
-                    Some(remaining) if !remaining.is_zero() => Some(remaining),
+                    Some(Some(remaining)) if !remaining.is_zero() => Some(remaining),
                     // Outage outlived the window — the target is gone, not slow.
-                    Some(_) => {
+                    Some(Some(_)) => {
                         drop(inner);
                         return Err(format!(
                             "cartridge '{}' was unavailable for longer than {}s while this request \
                              waited for capacity",
-                            key.id,
+                            install.id,
                             grace.as_secs()
+                        ));
+                    }
+                    None => {
+                        drop(inner);
+                        return Err(format!(
+                            "cartridge '{}' has admission pools but no install state — \
+                             configure_pools was bypassed",
+                            install.id
                         ));
                     }
                 }
@@ -239,7 +334,7 @@ impl AdmissionController {
         inner.grace = grace;
     }
 
-    fn cancel_waiter(&self, key: &AdmissionKey, ticket: u64) {
+    fn cancel_waiter(&self, key: &PoolKey, ticket: u64) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(slot) = inner.slots.get_mut(key) {
             if let Some(position) = slot.queue.iter().position(|queued| *queued == ticket) {
@@ -250,16 +345,18 @@ impl AdmissionController {
         self.notify.notify_waiters();
     }
 
-    fn release(&self, key: &AdmissionKey) {
+    fn release(&self, chain: &[PoolKey]) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let slot = inner
-            .slots
-            .get_mut(key)
-            .expect("admission permit references an unknown cartridge");
-        slot.active = slot
-            .active
-            .checked_sub(1)
-            .expect("admission permit released without an active request");
+        for key in chain {
+            let slot = inner
+                .slots
+                .get_mut(key)
+                .expect("admission permit references an unknown pool");
+            slot.active = slot
+                .active
+                .checked_sub(1)
+                .expect("admission permit released without an active request");
+        }
         drop(inner);
         self.notify.notify_waiters();
     }
@@ -267,7 +364,7 @@ impl AdmissionController {
 
 struct AdmissionWaiter {
     controller: AdmissionController,
-    key: AdmissionKey,
+    key: PoolKey,
     ticket: u64,
     queued: bool,
 }
@@ -282,21 +379,21 @@ impl Drop for AdmissionWaiter {
 
 pub struct AdmissionPermit {
     controller: AdmissionController,
-    key: Option<AdmissionKey>,
+    chain: Option<Vec<PoolKey>>,
 }
 
 impl std::fmt::Debug for AdmissionPermit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdmissionPermit")
-            .field("key", &self.key)
+            .field("chain", &self.chain)
             .finish()
     }
 }
 
 impl Drop for AdmissionPermit {
     fn drop(&mut self) {
-        if let Some(key) = self.key.take() {
-            self.controller.release(&key);
+        if let Some(chain) = self.chain.take() {
+            self.controller.release(&chain);
         }
     }
 }
@@ -795,22 +892,34 @@ mod tests {
         }
     }
 
+    fn pool_key(install: &AdmissionKey, pool: &str) -> PoolKey {
+        PoolKey {
+            install: install.clone(),
+            pool: pool.to_string(),
+        }
+    }
+
+    /// The minimal chain: a cap addressed through its install's `all` pool.
+    fn all_chain(install: &AdmissionKey) -> Vec<PoolKey> {
+        vec![pool_key(install, "all")]
+    }
+
     // TEST7110: admission is strict FIFO and a terminal request releases exactly
     // one capacity slot for the next body.
     #[tokio::test]
     async fn test7110_admission_fifo_releases_one_waiter() {
         let controller = AdmissionController::default();
         let key = admission_key();
-        controller.configure(key.clone(), 1);
-        let first = controller.acquire(key.clone()).await.unwrap();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        let first = controller.acquire(all_chain(&key)).await.unwrap();
 
         let second_controller = controller.clone();
         let second_key = key.clone();
-        let second = tokio::spawn(async move { second_controller.acquire(second_key).await });
+        let second = tokio::spawn(async move { second_controller.acquire(all_chain(&second_key)).await });
         tokio::task::yield_now().await;
         let third_controller = controller.clone();
         let third_key = key.clone();
-        let third = tokio::spawn(async move { third_controller.acquire(third_key).await });
+        let third = tokio::spawn(async move { third_controller.acquire(all_chain(&third_key)).await });
         tokio::task::yield_now().await;
         assert!(!second.is_finished());
         assert!(!third.is_finished());
@@ -836,20 +945,20 @@ mod tests {
     async fn test7111_cancelled_admission_waiter_cannot_block_queue() {
         let controller = AdmissionController::default();
         let key = admission_key();
-        controller.configure(key.clone(), 1);
-        let active = controller.acquire(key.clone()).await.unwrap();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        let active = controller.acquire(all_chain(&key)).await.unwrap();
 
         let cancelled_controller = controller.clone();
         let cancelled_key = key.clone();
         let cancelled =
-            tokio::spawn(async move { cancelled_controller.acquire(cancelled_key).await });
+            tokio::spawn(async move { cancelled_controller.acquire(all_chain(&cancelled_key)).await });
         tokio::task::yield_now().await;
         cancelled.abort();
         let _ = cancelled.await;
 
         let next_controller = controller.clone();
         let next_key = key.clone();
-        let next = tokio::spawn(async move { next_controller.acquire(next_key).await });
+        let next = tokio::spawn(async move { next_controller.acquire(all_chain(&next_key)).await });
         tokio::task::yield_now().await;
         drop(active);
         tokio::time::timeout(std::time::Duration::from_secs(1), next)
@@ -866,16 +975,16 @@ mod tests {
     async fn test7112_capacity_reconfiguration_wakes_existing_waiters() {
         let controller = AdmissionController::default();
         let key = admission_key();
-        controller.configure(key.clone(), 1);
-        let active = controller.acquire(key.clone()).await.unwrap();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        let active = controller.acquire(all_chain(&key)).await.unwrap();
 
         let waiting_controller = controller.clone();
         let waiting_key = key.clone();
-        let waiting = tokio::spawn(async move { waiting_controller.acquire(waiting_key).await });
+        let waiting = tokio::spawn(async move { waiting_controller.acquire(all_chain(&waiting_key)).await });
         tokio::task::yield_now().await;
         assert!(!waiting.is_finished());
 
-        controller.configure(key, 0);
+        controller.configure_pools(key, &[("all".to_string(), 0)]);
         let concurrently_admitted =
             tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
                 .await
@@ -900,12 +1009,12 @@ mod tests {
     async fn test7114_transient_unavailability_does_not_fail_queued_work() {
         let controller = AdmissionController::default();
         let key = admission_key();
-        controller.configure(key.clone(), 1);
-        let active = controller.acquire(key.clone()).await.unwrap();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        let active = controller.acquire(all_chain(&key)).await.unwrap();
 
         let waiting_controller = controller.clone();
         let waiting_key = key.clone();
-        let waiting = tokio::spawn(async move { waiting_controller.acquire(waiting_key).await });
+        let waiting = tokio::spawn(async move { waiting_controller.acquire(all_chain(&waiting_key)).await });
         tokio::task::yield_now().await;
         assert!(!waiting.is_finished());
 
@@ -918,7 +1027,7 @@ mod tests {
         );
 
         // ...and comes back, which is what must release the queue.
-        controller.configure(key.clone(), 1);
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
         drop(active);
         tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
             .await
@@ -938,12 +1047,12 @@ mod tests {
         // through a real minute. Production uses ADMISSION_UNAVAILABLE_GRACE.
         controller.set_grace_for_test(std::time::Duration::from_millis(150));
         let key = admission_key();
-        controller.configure(key.clone(), 1);
-        let active = controller.acquire(key.clone()).await.unwrap();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        let active = controller.acquire(all_chain(&key)).await.unwrap();
 
         let waiting_controller = controller.clone();
         let waiting_key = key.clone();
-        let waiting = tokio::spawn(async move { waiting_controller.acquire(waiting_key).await });
+        let waiting = tokio::spawn(async move { waiting_controller.acquire(all_chain(&waiting_key)).await });
         tokio::task::yield_now().await;
         assert!(!waiting.is_finished());
 
@@ -958,6 +1067,100 @@ mod tests {
             "the failure must name the outage, not a generic routing error: {error}"
         );
         drop(active);
+    }
+
+    // TEST1524: chain admission is ATOMIC — a request is admitted only when
+    // EVERY pool in its chain has room, and holds all of them until release.
+    // A free singleton behind a full shared pool waits; releasing the shared
+    // pool's holder admits it.
+    #[tokio::test]
+    async fn test1524_chain_admission_is_atomic_across_pools() {
+        let controller = AdmissionController::default();
+        let key = admission_key();
+        controller.configure_pools(
+            key.clone(),
+            &[
+                ("cap:a".to_string(), 0),
+                ("cap:b".to_string(), 0),
+                ("gpu".to_string(), 1),
+                ("all".to_string(), 0),
+            ],
+        );
+        let chain_a = vec![
+            pool_key(&key, "cap:a"),
+            pool_key(&key, "gpu"),
+            pool_key(&key, "all"),
+        ];
+        let chain_b = vec![
+            pool_key(&key, "cap:b"),
+            pool_key(&key, "gpu"),
+            pool_key(&key, "all"),
+        ];
+
+        let holder = controller.acquire(chain_a).await.unwrap();
+
+        // cap:b's own singleton is free, but the shared "gpu" pool is full —
+        // the whole chain must wait.
+        let waiting_controller = controller.clone();
+        let waiting =
+            tokio::spawn(async move { waiting_controller.acquire(chain_b).await });
+        tokio::task::yield_now().await;
+        assert!(
+            !waiting.is_finished(),
+            "a full shared pool must block the whole chain"
+        );
+
+        drop(holder);
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+            .await
+            .expect("releasing the shared pool must admit the queued chain")
+            .expect("queued chain task must not fail")
+            .expect("queued chain must acquire all its pools");
+    }
+
+    // TEST1525: pools are ISOLATED — saturating one cap's singleton does not
+    // block a different cap whose chain shares only unlimited pools.
+    #[tokio::test]
+    async fn test1525_disjoint_bounded_pools_admit_independently() {
+        let controller = AdmissionController::default();
+        let key = admission_key();
+        controller.configure_pools(
+            key.clone(),
+            &[
+                ("cap:a".to_string(), 1),
+                ("cap:b".to_string(), 1),
+                ("all".to_string(), 0),
+            ],
+        );
+        let chain_a = vec![pool_key(&key, "cap:a"), pool_key(&key, "all")];
+        let chain_b = vec![pool_key(&key, "cap:b"), pool_key(&key, "all")];
+
+        let _a = controller.acquire(chain_a).await.unwrap();
+        // cap:a is saturated; cap:b must admit immediately.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            controller.acquire(chain_b),
+        )
+        .await
+        .expect("a saturated sibling singleton must not delay this cap")
+        .expect("disjoint chain must acquire immediately");
+    }
+
+    // TEST1526: acquiring a chain naming a pool the install never advertised
+    // fails hard — an unknown pool is a protocol defect, never a free pass.
+    #[tokio::test]
+    async fn test1526_unknown_pool_in_chain_fails_hard() {
+        let controller = AdmissionController::default();
+        let key = admission_key();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 0)]);
+        let error = controller
+            .acquire(vec![pool_key(&key, "cap:ghost"), pool_key(&key, "all")])
+            .await
+            .expect_err("an unadvertised pool must refuse admission");
+        assert!(
+            error.contains("cap:ghost"),
+            "the failure must name the unknown pool: {error}"
+        );
     }
 
     fn key(x: u64, r: u64) -> RequestKey {

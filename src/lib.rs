@@ -120,8 +120,9 @@ pub use standard::*;
 pub use bifaci::cartridge_runtime::{
     find_stream, find_stream_conforming, find_stream_meta, find_stream_str,
     find_stream_str_conforming, require_stream, require_stream_str, AdapterSelectionOp,
-    CapacityHandle, CartridgeRuntime, CliStreamEmitter, DiscardOp, FinalStatus, FrameSender,
+    CartridgeRuntime, CliStreamEmitter, DiscardOp, FinalStatus, FrameSender,
     IdentityOp, InputPackage, InputStream, NoPeerInvoker, OpFactory, OutputStream, PeerCall,
+    PoolHandle,
     PeerInvoker, PeerResponse, PeerResponseItem, ProgressSender, Request, RuntimeError,
     StreamError, StreamMeta, StreamSender, WET_KEY_REQUEST,
 };
@@ -137,8 +138,15 @@ pub use bifaci::io::{
     write_frame, CborError, FrameReader, FrameWriter, HandshakeResult,
 };
 pub use bifaci::manifest::*;
+// Concurrency pools — the one capacity concept (a cap is a pool of one;
+// `all` is the pool of every cap; queues lead to pools).
+pub use bifaci::pools::{
+    chain_from_states, decode_desired, decode_pool_states, effective_capacity, encode_desired,
+    encode_pool_states, DesiredCapacities, PoolDeclarations, PoolState, PoolStates,
+    CAPACITY_UNLIMITED, META_DESIRED_CAPACITIES, META_POOLS, POOL_ALL,
+};
 pub use bifaci::request_state::{
-    FrameDirection, RequestPhase, RequestSnapshot, RequestState, RequestTable,
+    FrameDirection, PoolKey, RequestPhase, RequestSnapshot, RequestState, RequestTable,
     RequestTableSnapshot, RoutingEntry, StreamFlowStats, StreamSnapshot, TerminalKind,
     TerminatedSummary,
 };

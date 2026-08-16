@@ -1821,60 +1821,57 @@ pub async fn run_dag_on_context(
     // invocations before feeding the chain head deadlocks — the first
     // invocation owns the permit but has no input while opening the second
     // waits for that permit before the feed and relay pump exist. That is
-    // the ONLY capacity case that must split: bounded caps in DIFFERENT
-    // permit domains share nothing, and splitting them anyway would
+    // the ONLY capacity case that must split: bounded caps sharing NO
+    // bounded pool contend for nothing, and splitting them anyway would
     // materialise every intermediate — which an UNBOUNDED live pipeline
     // (13.2 §Reference Media) cannot survive (its intermediates must
     // stream; collection refuses unbounded, L16). The permit domain is the
-    // ADMISSION KEY (master + cartridge identity), NOT the master index:
-    // one relay slot can aggregate many cartridge processes (machfab's
-    // external-cartridges RelaySlave), each with independent permits —
-    // comparing master indices there would split every junction and break
-    // live pipelines.
+    // POOL CHAIN (master + cartridge identity + pool), NOT the master
+    // index: one relay slot can aggregate many cartridge processes
+    // (machfab's external-cartridges RelaySlave), each with independent
+    // pools — comparing master indices there would split every junction
+    // and break live pipelines. Two same-cartridge caps in disjoint
+    // bounded pools likewise share no permit and must NOT split.
     let linear_chains = decompose_group_chains(&groups, &group_order);
-    let mut cap_admission: HashMap<String, (crate::bifaci::request_state::AdmissionKey, usize)> =
-        HashMap::new();
-    let mut bounded_groups: HashSet<usize> = HashSet::new();
-    let mut group_domain: Vec<crate::bifaci::request_state::AdmissionKey> =
+    let mut cap_admission: HashMap<
+        String,
+        Vec<(crate::bifaci::request_state::PoolKey, usize)>,
+    > = HashMap::new();
+    let mut group_chain: Vec<Vec<(crate::bifaci::request_state::PoolKey, usize)>> =
         Vec::with_capacity(groups.len());
-    for (group_idx, group) in groups.iter().enumerate() {
-        let (admission_key, capacity) =
-            if let Some(cached) = cap_admission.get(&group.cap_urn) {
-                cached.clone()
-            } else {
-                if ctx
-                    .switch()
-                    .wait_for_cap(&group.cap_urn, CAP_DISPATCH_READY_TIMEOUT)
-                    .await
-                    .is_none()
-                {
-                    return Err(ExecutionError::HostError(format!(
-                        "resolve admission capacity for cap '{}': no master advertised a cap \
-                         dispatchable for this request within {}s",
-                        group.cap_urn,
-                        CAP_DISPATCH_READY_TIMEOUT.as_secs(),
-                    )));
-                }
-                let target = ctx
-                    .switch()
-                    .admission_target_for_cap(&group.cap_urn)
-                    .await
-                    .map_err(|error| {
-                        ExecutionError::HostError(format!(
-                            "resolve admission capacity for cap '{}': {}",
-                            group.cap_urn, error
-                        ))
-                    })?;
-                cap_admission.insert(group.cap_urn.clone(), target.clone());
-                target
-            };
-        group_domain.push(admission_key);
-        if capacity > 0 {
-            bounded_groups.insert(group_idx);
-        }
+    for group in groups.iter() {
+        let admission_chain = if let Some(cached) = cap_admission.get(&group.cap_urn) {
+            cached.clone()
+        } else {
+            if ctx
+                .switch()
+                .wait_for_cap(&group.cap_urn, CAP_DISPATCH_READY_TIMEOUT)
+                .await
+                .is_none()
+            {
+                return Err(ExecutionError::HostError(format!(
+                    "resolve admission capacity for cap '{}': no master advertised a cap \
+                     dispatchable for this request within {}s",
+                    group.cap_urn,
+                    CAP_DISPATCH_READY_TIMEOUT.as_secs(),
+                )));
+            }
+            let target = ctx
+                .switch()
+                .admission_target_for_cap(&group.cap_urn)
+                .await
+                .map_err(|error| {
+                    ExecutionError::HostError(format!(
+                        "resolve admission capacity for cap '{}': {}",
+                        group.cap_urn, error
+                    ))
+                })?;
+            cap_admission.insert(group.cap_urn.clone(), target.clone());
+            target
+        };
+        group_chain.push(admission_chain);
     }
-    let chains =
-        split_chains_at_same_domain_bounded(linear_chains, &group_domain, &bounded_groups);
+    let chains = split_chains_at_shared_bounded_pool(linear_chains, &group_chain);
     let n_chains = chains.len();
 
     // Spool files created for unbounded intermediates this segment; consumed
@@ -2182,32 +2179,34 @@ fn decompose_group_chains(groups: &[EdgeGroup], group_order: &[usize]) -> Vec<Ve
     chains
 }
 
-/// Split linear chains into maximal unlimited-capacity segments and singleton
-/// bounded-capacity groups. A bounded invocation owns a concrete cartridge
-/// process slot from REQ through terminal response, so it must receive its input
-/// and finish before a dependent bounded invocation is acquired.
 /// Split each linear chain at the permit-deadlock boundary: between two
-/// ADJACENT groups whose caps resolve to the SAME admission domain (the
-/// cartridge behind the master — NOT the master index, which can aggregate
-/// many cartridges) when either side is capacity-bounded (opening both
-/// invocations up front would have the second wait on the permit the
-/// first holds while neither has input). Bounded groups in DIFFERENT
-/// domains share no permit and keep streaming in one live chain — the
-/// property unbounded (live-feed) pipelines depend on, since only chain
-/// SINKS are collected/persisted and unbounded intermediates cannot be
-/// materialised (L16).
-fn split_chains_at_same_domain_bounded<K: PartialEq>(
+/// ADJACENT groups whose admission chains share a capacity-BOUNDED pool
+/// (opening both invocations up front would have the second wait on the
+/// pool slot the first holds while neither has input). A bounded
+/// invocation owns a concrete pool slot from REQ through terminal
+/// response, so it must receive its input and finish before a dependent
+/// invocation contending for the same pool is acquired. Groups sharing no
+/// bounded pool — different cartridges, or same-cartridge caps in
+/// disjoint bounded pools — share no permit and keep streaming in one
+/// live chain: the property unbounded (live-feed) pipelines depend on,
+/// since only chain SINKS are collected/persisted and unbounded
+/// intermediates cannot be materialised (L16).
+fn split_chains_at_shared_bounded_pool<K: PartialEq>(
     chains: Vec<Vec<usize>>,
-    group_domain: &[K],
-    bounded_groups: &HashSet<usize>,
+    group_chain: &[Vec<(K, usize)>],
 ) -> Vec<Vec<usize>> {
     let mut split = Vec::new();
     for chain in chains {
         let mut segment: Vec<usize> = Vec::new();
         for group_idx in chain {
             let deadlock_boundary = segment.last().is_some_and(|&prev| {
-                group_domain[prev] == group_domain[group_idx]
-                    && (bounded_groups.contains(&group_idx) || bounded_groups.contains(&prev))
+                group_chain[prev].iter().any(|(pool, prev_capacity)| {
+                    group_chain[group_idx]
+                        .iter()
+                        .any(|(other, capacity)| {
+                            pool == other && (*prev_capacity > 0 || *capacity > 0)
+                        })
+                })
             });
             if deadlock_boundary {
                 split.push(std::mem::take(&mut segment));
@@ -3832,45 +3831,77 @@ pub async fn execute_dag(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet as SplitHashSet;
-
     // TEST1448: chains split ONLY at the permit-deadlock boundary — two
-    // adjacent groups in the SAME admission DOMAIN (the cartridge behind
-    // the master, never the master index: one relay slot can aggregate
-    // many cartridges) with a bounded capacity between them. Bounded caps
-    // in different domains keep streaming in one live chain (the property
+    // adjacent groups whose admission chains SHARE a bounded pool (the
+    // pool behind the cartridge behind the master, never the master
+    // index: one relay slot can aggregate many cartridges). Bounded caps
+    // sharing no pool keep streaming in one live chain (the property
     // unbounded live pipelines depend on: only chain sinks are collected,
     // and unbounded intermediates cannot be materialised, L16).
     #[test]
-    fn test1448_chain_split_only_at_same_domain_bounded_adjacency() {
-        // encode(audiocartridge) → transcribe(candle, bounded) →
-        // generate(candle, bounded): the electron shape — ONE aggregated
-        // master slot, THREE caps, TWO cartridges. The only boundary is
-        // between the two candle caps; encode|transcribe streams.
+    fn test1448_chain_split_only_at_shared_bounded_pool_adjacency() {
+        // encode(audiocartridge) → transcribe(candle) → generate(candle),
+        // both candle caps in the shared bounded "gpu" pool: the electron
+        // shape — ONE aggregated master slot, THREE caps, TWO cartridges.
+        // The only boundary is between the two candle caps;
+        // encode|transcribe streams.
         let chains = vec![vec![0, 1, 2]];
-        let domains = vec!["audiocartridge", "candlecartridge", "candlecartridge"];
-        let bounded: SplitHashSet<usize> = [1, 2].into_iter().collect();
-        let split = super::split_chains_at_same_domain_bounded(chains, &domains, &bounded);
+        let group_chain = vec![
+            vec![("audio/encode", 0), ("audio/all", 0)],
+            vec![("candle/transcribe", 0), ("candle/gpu", 1), ("candle/all", 0)],
+            vec![("candle/generate", 0), ("candle/gpu", 1), ("candle/all", 0)],
+        ];
+        let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
         assert_eq!(
             split,
             vec![vec![0, 1], vec![2]],
-            "split exactly at the same-cartridge bounded junction"
+            "split exactly at the shared bounded-pool junction"
         );
 
-        // Different domains everywhere — ONE live chain, no materialisation.
+        // Different cartridges everywhere — ONE live chain, no
+        // materialisation, even with a bounded singleton in the middle.
         let chains = vec![vec![0, 1, 2]];
-        let domains = vec!["a", "b", "c"];
-        let bounded: SplitHashSet<usize> = [1].into_iter().collect();
-        let split = super::split_chains_at_same_domain_bounded(chains, &domains, &bounded);
+        let group_chain = vec![
+            vec![("a/x", 0), ("a/all", 0)],
+            vec![("b/y", 3), ("b/all", 0)],
+            vec![("c/z", 0), ("c/all", 0)],
+        ];
+        let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
         assert_eq!(split, vec![vec![0, 1, 2]], "different cartridges never split");
 
-        // Same domain but UNBOUNDED capacity on both: no permit to contend —
-        // stays one chain.
+        // Same cartridge but every shared pool UNBOUNDED: no permit to
+        // contend — stays one chain.
         let chains = vec![vec![0, 1]];
-        let domains = vec!["d", "d"];
-        let bounded: SplitHashSet<usize> = SplitHashSet::new();
-        let split = super::split_chains_at_same_domain_bounded(chains, &domains, &bounded);
+        let group_chain = vec![
+            vec![("d/x", 0), ("d/all", 0)],
+            vec![("d/y", 0), ("d/all", 0)],
+        ];
+        let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
         assert_eq!(split, vec![vec![0, 1]], "unbounded same-cartridge streams");
+
+        // Same cartridge, both caps bounded, but in DISJOINT bounded pools
+        // (cpu vs gpu) with `all` unbounded: no shared permit — the pool
+        // refinement over the old whole-cartridge domain. Streams.
+        let chains = vec![vec![0, 1]];
+        let group_chain = vec![
+            vec![("e/x", 1), ("e/cpu", 2), ("e/all", 0)],
+            vec![("e/y", 1), ("e/gpu", 1), ("e/all", 0)],
+        ];
+        let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
+        assert_eq!(
+            split,
+            vec![vec![0, 1]],
+            "disjoint bounded pools on one cartridge stream"
+        );
+
+        // Same cap twice in a row: the bounded SINGLETON is shared — split.
+        let chains = vec![vec![0, 1]];
+        let group_chain = vec![
+            vec![("f/x", 1), ("f/all", 0)],
+            vec![("f/x", 1), ("f/all", 0)],
+        ];
+        let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
+        assert_eq!(split, vec![vec![0], vec![1]], "shared bounded singleton splits");
     }
 
     use super::*;

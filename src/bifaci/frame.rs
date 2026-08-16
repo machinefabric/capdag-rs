@@ -337,10 +337,6 @@ impl Frame {
             "version".to_string(),
             ciborium::Value::Integer((PROTOCOL_VERSION as i64).into()),
         );
-        meta.insert(
-            "handler_capacity".to_string(),
-            ciborium::Value::Integer(0.into()),
-        );
 
         let mut frame = Self::new(FrameType::Hello, MessageId::Uint(0));
         frame.meta = Some(meta);
@@ -350,7 +346,11 @@ impl Frame {
     /// Create a HELLO frame for handshake with manifest (cartridge side).
     /// The manifest is JSON-encoded cartridge metadata including name, version, and caps.
     /// This is the ONLY way for cartridges to communicate their capabilities.
-    pub fn hello_with_manifest(limits: &Limits, manifest: &[u8], handler_capacity: usize) -> Self {
+    pub fn hello_with_manifest(
+        limits: &Limits,
+        manifest: &[u8],
+        pool_states: &crate::bifaci::pools::PoolStates,
+    ) -> Self {
         let mut meta = BTreeMap::new();
         meta.insert(
             "max_frame".to_string(),
@@ -376,13 +376,12 @@ impl Frame {
             "manifest".to_string(),
             ciborium::Value::Bytes(manifest.to_vec()),
         );
+        // The full concurrency-pool state map (JSON bytes — the manifest's
+        // own transport). Mandatory: pools are the protocol's one capacity
+        // concept, and a HELLO without them is a handshake error at the host.
         meta.insert(
-            "handler_capacity".to_string(),
-            ciborium::Value::Integer(
-                u64::try_from(handler_capacity)
-                    .expect("handler capacity must fit the protocol's uint64 domain")
-                    .into(),
-            ),
+            crate::bifaci::pools::META_POOLS.to_string(),
+            ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(pool_states)),
         );
 
         let mut frame = Self::new(FrameType::Hello, MessageId::Uint(0));
@@ -1119,24 +1118,53 @@ impl Frame {
         })
     }
 
-    /// Extract the mandatory handler concurrency capacity from HELLO.
-    /// Zero means unlimited.
-    pub fn hello_handler_capacity(&self) -> Option<usize> {
-        if self.frame_type != FrameType::Hello {
-            return None;
-        }
-        self.meta.as_ref()?.get("handler_capacity").and_then(|v| {
-            if let ciborium::Value::Integer(i) = v {
-                let n: i128 = (*i).into();
-                if n >= 0 && n <= usize::MAX as i128 {
-                    Some(n as usize)
+    /// Extract the JSON-encoded pool-state map (`bifaci::pools`) carried in
+    /// this frame's meta — present on the cartridge's HELLO and on every
+    /// heartbeat reply. `None` when the frame carries no map; decoding is
+    /// the caller's boundary and fails hard there.
+    pub fn pool_state_bytes(&self) -> Option<&[u8]> {
+        self.meta.as_ref().and_then(|m| {
+            m.get(crate::bifaci::pools::META_POOLS).and_then(|v| {
+                if let ciborium::Value::Bytes(bytes) = v {
+                    Some(bytes.as_slice())
                 } else {
                     None
                 }
-            } else {
-                None
-            }
+            })
         })
+    }
+
+    /// Extract the JSON-encoded desired-capacities map from a heartbeat
+    /// PROBE's meta — the host delivering operator `configured` values.
+    pub fn desired_capacity_bytes(&self) -> Option<&[u8]> {
+        if self.frame_type != FrameType::Heartbeat {
+            return None;
+        }
+        self.meta.as_ref().and_then(|m| {
+            m.get(crate::bifaci::pools::META_DESIRED_CAPACITIES).and_then(|v| {
+                if let ciborium::Value::Bytes(bytes) = v {
+                    Some(bytes.as_slice())
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    /// A heartbeat PROBE carrying the operator's desired `configured`
+    /// values (host→cartridge). The plain probe is `Frame::heartbeat`.
+    pub fn heartbeat_with_desired(
+        id: MessageId,
+        desired: &crate::bifaci::pools::DesiredCapacities,
+    ) -> Self {
+        let mut frame = Self::heartbeat(id);
+        let mut meta = BTreeMap::new();
+        meta.insert(
+            crate::bifaci::pools::META_DESIRED_CAPACITIES.to_string(),
+            ciborium::Value::Bytes(crate::bifaci::pools::encode_desired(desired)),
+        );
+        frame.meta = Some(meta);
+        frame
     }
 
     /// Extract max_chunk from HELLO metadata
@@ -1693,7 +1721,14 @@ mod tests {
                 initial_credit: DEFAULT_INITIAL_CREDIT,
             },
             manifest_json.as_bytes(),
-            0,
+            &{
+                let mut pools = crate::bifaci::pools::PoolStates::new();
+                pools.insert(
+                    crate::bifaci::pools::POOL_ALL.to_string(),
+                    crate::bifaci::pools::PoolState::declared(0, vec!["cap:effect=none".to_string()]),
+                );
+                pools
+            },
         );
         assert_eq!(frame.frame_type, FrameType::Hello);
         assert_eq!(frame.hello_max_frame(), Some(1_000_000));
@@ -1702,6 +1737,12 @@ mod tests {
             .hello_manifest()
             .expect("Cartridge HELLO must include manifest");
         assert_eq!(manifest, manifest_json.as_bytes());
+        // The pool map is mandatory HELLO meta and round-trips intact.
+        let pools = crate::bifaci::pools::decode_pool_states(
+            frame.pool_state_bytes().expect("Cartridge HELLO must include the pool map"),
+        )
+        .expect("HELLO pool map decodes");
+        assert_eq!(pools[crate::bifaci::pools::POOL_ALL].declared, 0);
     }
 
     // TEST182: Test Frame::req stores cap URN, payload, and content_type correctly
@@ -2233,7 +2274,7 @@ mod tests {
                 initial_credit: DEFAULT_INITIAL_CREDIT,
             },
             &binary_manifest,
-            0,
+            &crate::bifaci::pools::PoolStates::new(),
         );
         assert_eq!(frame.hello_manifest().unwrap(), &binary_manifest);
     }

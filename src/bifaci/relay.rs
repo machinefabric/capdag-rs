@@ -29,6 +29,11 @@ pub struct RelaySlave<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> {
     local_writer: FrameWriter<W>,
     /// Latest RelayState payload from master
     resource_state: Arc<Mutex<Vec<u8>>>,
+    /// Invoked on every RelayState received from the master, with the raw
+    /// payload — the master→slave CONTROL channel (e.g. the engine
+    /// delivering desired pool capacities; see `bifaci::pools`). The stored
+    /// `resource_state` snapshot is kept regardless.
+    on_relay_state: Option<Arc<dyn Fn(Vec<u8>) + Send + Sync>>,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
@@ -38,7 +43,18 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
             local_reader: FrameReader::new(local_read),
             local_writer: FrameWriter::new(local_write),
             resource_state: Arc::new(Mutex::new(Vec::new())),
+            on_relay_state: None,
         }
+    }
+
+    /// Register a handler invoked with every RelayState payload received
+    /// from the master (the master→slave control channel). Call before
+    /// `run`.
+    pub fn set_relay_state_handler(
+        &mut self,
+        handler: Arc<dyn Fn(Vec<u8>) + Send + Sync>,
+    ) {
+        self.on_relay_state = Some(handler);
     }
 
     /// Get the latest resource state payload received from the master.
@@ -90,6 +106,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
         // Task 1: socket → local (master sends frames to slave's CartridgeHost)
         let err1 = Arc::clone(&first_error);
         let rs1 = Arc::clone(&resource_state);
+        let on_relay_state = self.on_relay_state.clone();
         let t1 = tokio::spawn(async move {
             let mut reorder = ReorderBuffer::new(max_reorder);
             loop {
@@ -97,7 +114,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
                     Ok(Some(frame)) => {
                         if frame.frame_type == FrameType::RelayState {
                             if let Some(payload) = frame.payload {
-                                *rs1.lock().unwrap() = payload;
+                                *rs1.lock().unwrap() = payload.clone();
+                                if let Some(handler) = &on_relay_state {
+                                    handler(payload);
+                                }
                             }
                         } else if frame.frame_type == FrameType::RelayNotify {
                             // RelayNotify from master — ignore

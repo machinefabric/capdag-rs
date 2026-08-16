@@ -171,6 +171,16 @@ pub enum HostCommand {
     /// flipped a held cartridge to Listed). Running cartridges no longer in the
     /// set are killed; survivors keep their live process and stats.
     SyncRoster { cartridges: Vec<RegisteredDirSpec> },
+    /// Deliver operator `configured` values for one cartridge's pools (the
+    /// heartbeat is the config channel — see `bifaci::pools` and
+    /// [`CartridgeHostRuntime::apply_desired_capacities`]). The reply
+    /// reports the validation outcome; delivery to the process rides the
+    /// immediate out-of-cycle probe (or the attach-time probe when cold).
+    ApplyDesiredCapacities {
+        cartridge_id: String,
+        desired: crate::bifaci::pools::DesiredCapacities,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
 }
 
 /// Thread-safe handle for querying cartridge process info and sending commands
@@ -202,6 +212,30 @@ impl CartridgeProcessHandle {
         self.command_tx
             .send(HostCommand::KillCartridge { pid })
             .map_err(|_| ())
+    }
+
+    /// Deliver operator `configured` values for one cartridge's pools (the
+    /// heartbeat is the config channel — see `bifaci::pools`). Resolves
+    /// once the host has VALIDATED and queued/probed the values; the
+    /// refreshed pool map arrives on the next heartbeat reply and surfaces
+    /// through the roster. Errors name the defect: an unknown cartridge or
+    /// pool, or a host whose run loop has exited.
+    pub async fn apply_desired_capacities(
+        &self,
+        cartridge_id: &str,
+        desired: crate::bifaci::pools::DesiredCapacities,
+    ) -> Result<(), String> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(HostCommand::ApplyDesiredCapacities {
+                cartridge_id: cartridge_id.to_string(),
+                desired,
+                reply: reply_tx,
+            })
+            .map_err(|_| "cartridge host run loop has exited".to_string())?;
+        reply_rx
+            .await
+            .map_err(|_| "cartridge host dropped the desired-capacities reply".to_string())?
     }
 }
 
@@ -387,8 +421,14 @@ struct ManagedCartridge {
     /// Monotonic process generation. Reader events carry this value so a late
     /// event from a retired process cannot affect its replacement.
     generation: u64,
-    /// Cartridge-advertised live handler capacity. Zero means unlimited.
-    handler_capacity: usize,
+    /// The cartridge's full concurrency-pool state map (`bifaci::pools`),
+    /// from HELLO and refreshed by every heartbeat reply. Empty until the
+    /// first handshake; mandatory on the wire thereafter.
+    pool_states: crate::bifaci::pools::PoolStates,
+    /// Operator `configured` values queued for delivery on the next
+    /// heartbeat probe (the heartbeat IS the capacity config channel).
+    /// Cleared when the probe carrying them is sent.
+    pending_desired: crate::bifaci::pools::DesiredCapacities,
     /// Reader task handle.
     reader_handle: Option<JoinHandle<()>>,
     /// Writer task handle.
@@ -479,7 +519,8 @@ impl ManagedCartridge {
             installed_identity,
             running: false,
             generation: 0,
-            handler_capacity: 0,
+            pool_states: crate::bifaci::pools::PoolStates::new(),
+            pending_desired: crate::bifaci::pools::DesiredCapacities::new(),
             reader_handle: None,
             writer_handle: None,
             hello_failed: false,
@@ -602,7 +643,8 @@ impl ManagedCartridge {
             installed_identity,
             running: false,
             generation: 0,
-            handler_capacity: 0,
+            pool_states: crate::bifaci::pools::PoolStates::new(),
+            pending_desired: crate::bifaci::pools::DesiredCapacities::new(),
             reader_handle: None,
             writer_handle: None,
             hello_failed,
@@ -625,7 +667,7 @@ impl ManagedCartridge {
     fn new_attached(
         manifest: Vec<u8>,
         limits: Limits,
-        handler_capacity: usize,
+        pool_states: crate::bifaci::pools::PoolStates,
         cap_groups: Vec<crate::bifaci::manifest::CapGroup>,
         installed_identity: Option<InstalledCartridgeRecord>,
     ) -> Self {
@@ -640,7 +682,8 @@ impl ManagedCartridge {
             installed_identity,
             running: true,
             generation: 1,
-            handler_capacity,
+            pool_states,
+            pending_desired: crate::bifaci::pools::DesiredCapacities::new(),
             reader_handle: None,
             writer_handle: None,
             hello_failed: false,
@@ -1338,7 +1381,7 @@ impl CartridgeHostRuntime {
         let mut cartridge = ManagedCartridge::new_attached(
             result.manifest,
             result.limits,
-            result.handler_capacity,
+            result.pool_states.clone(),
             cap_groups,
             installed_identity,
         );
@@ -2021,21 +2064,29 @@ impl CartridgeHostRuntime {
                             self.cartridges[cartridge_idx].protocol_overruns_total =
                                 Some(u64::try_from(*v).unwrap_or(0));
                         }
-                        let capacity = meta
-                            .get("handler_capacity")
+                        // The full pool-state map is MANDATORY on every
+                        // heartbeat reply — pools are the protocol's one
+                        // capacity concept, and a reply without them is a
+                        // protocol error, not a default.
+                        let pool_bytes = meta
+                            .get(crate::bifaci::pools::META_POOLS)
                             .and_then(|value| match value {
-                                ciborium::Value::Integer(value) => {
-                                    usize::try_from(*value).ok()
-                                }
+                                ciborium::Value::Bytes(bytes) => Some(bytes.as_slice()),
                                 _ => None,
                             })
                             .ok_or_else(|| {
                                 AsyncHostError::Protocol(format!(
-                                    "Cartridge {} heartbeat missing required non-negative handler_capacity",
+                                    "Cartridge {} heartbeat missing required concurrency-pool state map",
                                     cartridge_idx
                                 ))
                             })?;
-                        self.cartridges[cartridge_idx].handler_capacity = capacity;
+                        let pool_states = crate::bifaci::pools::decode_pool_states(pool_bytes)
+                            .map_err(|e| {
+                                AsyncHostError::Protocol(format!(
+                                    "Cartridge {cartridge_idx} heartbeat pool map: {e}"
+                                ))
+                            })?;
+                        self.cartridges[cartridge_idx].pool_states = pool_states;
                     }
                     // Stamp the round-trip completion timestamp so the
                     // runtime-stats snapshot can surface heartbeat age to the UI.
@@ -2585,6 +2636,18 @@ impl CartridgeHostRuntime {
             HostCommand::SyncRoster { cartridges } => {
                 self.sync_registered_roster(cartridges, outbound_tx).await?;
             }
+            HostCommand::ApplyDesiredCapacities {
+                cartridge_id,
+                desired,
+                reply,
+            } => {
+                let outcome = self
+                    .apply_desired_capacities(&cartridge_id, &desired)
+                    .map_err(|e| e.to_string());
+                // A dropped receiver means the caller gave up waiting —
+                // the values are already queued/probed; nothing to undo.
+                let _ = reply.send(outcome);
+            }
         }
         Ok(())
     }
@@ -3025,7 +3088,7 @@ impl CartridgeHostRuntime {
         let cartridge = &mut self.cartridges[cartridge_idx];
         cartridge.manifest = handshake_result.manifest;
         cartridge.limits = handshake_result.limits;
-        cartridge.handler_capacity = handshake_result.handler_capacity;
+        cartridge.pool_states = handshake_result.pool_states.clone();
         cartridge.cap_groups = cap_groups;
         cartridge.running = true;
         cartridge.generation = generation;
@@ -3194,10 +3257,20 @@ impl CartridgeHostRuntime {
         }
 
         for cartridge in self.cartridges.iter_mut().filter(|c| c.running) {
-            // Send a new heartbeat probe
+            // Send a new heartbeat probe. Pending operator capacities ride
+            // it (the heartbeat IS the capacity config channel) and are
+            // cleared once carried — the reply's mandatory pool map is the
+            // application's confirmation.
             if let Some(ref writer_tx) = cartridge.writer_tx {
                 let hb_id = MessageId::new_uuid();
-                let hb = Frame::heartbeat(hb_id.clone());
+                let hb = if cartridge.pending_desired.is_empty() {
+                    Frame::heartbeat(hb_id.clone())
+                } else {
+                    let frame =
+                        Frame::heartbeat_with_desired(hb_id.clone(), &cartridge.pending_desired);
+                    cartridge.pending_desired.clear();
+                    frame
+                };
                 if writer_tx.send(hb).is_ok() {
                     cartridge.pending_heartbeats.insert(hb_id, now);
                 }
@@ -3207,6 +3280,67 @@ impl CartridgeHostRuntime {
         // Rebuild after potential cap changes
         self.update_cap_table();
         self.rebuild_capabilities(Some(outbound_tx)); // Send RelayNotify to relay
+        Ok(())
+    }
+
+    /// Deliver the operator's desired `configured` values to one hosted
+    /// cartridge — the heartbeat is the config channel, and the host owns
+    /// its timing, so the values ride an IMMEDIATE out-of-cycle probe
+    /// rather than waiting for the interval. Validated hard against the
+    /// cartridge's last-known pool map: an unknown cartridge or pool name
+    /// is refused with the offender named, and nothing is queued.
+    pub fn apply_desired_capacities(
+        &mut self,
+        cartridge_id: &str,
+        desired: &crate::bifaci::pools::DesiredCapacities,
+    ) -> Result<(), AsyncHostError> {
+        let idx = {
+            let mut matches = self
+                .cartridges
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| {
+                    !c.removed
+                        && c.installed_identity
+                            .as_ref()
+                            .map(|record| record.id == cartridge_id)
+                            .unwrap_or(false)
+                });
+            let (idx, cartridge) = matches.next().ok_or_else(|| {
+                AsyncHostError::Protocol(format!(
+                    "desired capacities address cartridge '{cartridge_id}', which this host does not carry"
+                ))
+            })?;
+            if matches.next().is_some() {
+                return Err(AsyncHostError::Protocol(format!(
+                    "cartridge id '{cartridge_id}' is ambiguous on this host"
+                )));
+            }
+            for pool in desired.keys() {
+                if !cartridge.pool_states.contains_key(pool) {
+                    return Err(AsyncHostError::Protocol(format!(
+                        "desired capacities name pool '{pool}', which cartridge '{cartridge_id}' does not declare"
+                    )));
+                }
+            }
+            idx
+        };
+        let cartridge = &mut self.cartridges[idx];
+        for (pool, configured) in desired {
+            cartridge.pending_desired.insert(pool.clone(), *configured);
+        }
+        // Immediate out-of-cycle probe when the process is up; a cold
+        // cartridge keeps the values queued for the attach-time probe.
+        if cartridge.running {
+            if let Some(ref writer_tx) = cartridge.writer_tx {
+                let hb_id = MessageId::new_uuid();
+                let frame = Frame::heartbeat_with_desired(hb_id.clone(), &cartridge.pending_desired);
+                cartridge.pending_desired.clear();
+                if writer_tx.send(frame).is_ok() {
+                    cartridge.pending_heartbeats.insert(hb_id, Instant::now());
+                }
+            }
+        }
         Ok(())
     }
 
@@ -3261,7 +3395,7 @@ impl CartridgeHostRuntime {
                 let pid = cartridge.process.as_ref().and_then(|c| c.id());
                 let stats = CartridgeRuntimeStats {
                     running: cartridge.running,
-                    handler_capacity: cartridge.handler_capacity as u64,
+                    pools: cartridge.pool_states.clone(),
                     pid,
                     active_request_count: *active_counts.get(&_idx).unwrap_or(&0),
                     peer_request_count: *peer_counts.get(&_idx).unwrap_or(&0),
@@ -3287,7 +3421,7 @@ impl CartridgeHostRuntime {
                                 .last_death_message
                                 .clone()
                                 .unwrap_or_else(|| {
-                                    "HELLO handshake failed (protocol version mismatch or                                      malformed manifest) — rebuild the cartridge against the                                      current protocol"
+                                    "HELLO handshake failed (protocol version mismatch or malformed manifest) — rebuild the cartridge against the current protocol"
                                         .to_string()
                                 }),
                             detected_at_unix_seconds: std::time::SystemTime::now()
@@ -6522,8 +6656,10 @@ mod tests {
             ciborium::Value::Integer(7.into()),
         );
         meta.insert(
-            "handler_capacity".into(),
-            ciborium::Value::Integer(0.into()),
+            crate::bifaci::pools::META_POOLS.into(),
+            ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(
+                &crate::bifaci::pools::PoolStates::new(),
+            )),
         );
         response.meta = Some(meta);
         runtime
@@ -6552,8 +6688,10 @@ mod tests {
         let mut meta = std::collections::BTreeMap::new();
         meta.insert("drops_total".into(), ciborium::Value::Integer(45.into()));
         meta.insert(
-            "handler_capacity".into(),
-            ciborium::Value::Integer(0.into()),
+            crate::bifaci::pools::META_POOLS.into(),
+            ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(
+                &crate::bifaci::pools::PoolStates::new(),
+            )),
         );
         response.meta = Some(meta);
         runtime
@@ -6860,6 +6998,69 @@ mod tests {
     // cannot tear down its replacement. The current generation's heartbeat
     // timeout performs the complete death transition and preserves its typed
     // terminal for the request that process actually owned.
+    // TEST1533: `apply_desired_capacities` is validated HARD against the
+    // cartridge's last-known pool map — an unknown cartridge or pool name is
+    // refused with the offender named and nothing queued — and a cold
+    // cartridge keeps the validated values queued for the attach-time probe.
+    #[tokio::test]
+    async fn test1533_apply_desired_capacities_validation_and_cold_queue() {
+        let mut runtime = CartridgeHostRuntime::new();
+        let mut cartridge = ManagedCartridge::new_registered_binary(
+            PathBuf::from("/nonexistent/test-cartridge"),
+            "test-cartridge".to_string(),
+            "1.0.0".to_string(),
+            crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+            None,
+            cap_groups_from_urns(&["cap:in=\"media:void\";test;out=\"media:void\""]),
+        );
+        cartridge.pool_states = crate::bifaci::pools::PoolStates::from([
+            (
+                "gpu".to_string(),
+                crate::bifaci::pools::PoolState::declared(1, Vec::new()),
+            ),
+            (
+                crate::bifaci::pools::POOL_ALL.to_string(),
+                crate::bifaci::pools::PoolState::declared(0, Vec::new()),
+            ),
+        ]);
+        runtime.cartridges.push(cartridge);
+
+        let mut unknown_cartridge = crate::bifaci::pools::DesiredCapacities::new();
+        unknown_cartridge.insert("gpu".to_string(), 2);
+        let error = runtime
+            .apply_desired_capacities("ghost-cartridge", &unknown_cartridge)
+            .expect_err("an unknown cartridge must refuse");
+        assert!(
+            format!("{error:?}").contains("ghost-cartridge"),
+            "the refusal must name the cartridge: {error:?}"
+        );
+
+        let mut unknown_pool = crate::bifaci::pools::DesiredCapacities::new();
+        unknown_pool.insert("tpu".to_string(), 2);
+        let error = runtime
+            .apply_desired_capacities("test-cartridge", &unknown_pool)
+            .expect_err("an unknown pool must refuse");
+        assert!(
+            format!("{error:?}").contains("tpu"),
+            "the refusal must name the pool: {error:?}"
+        );
+        assert!(
+            runtime.cartridges[0].pending_desired.is_empty(),
+            "a refused batch must queue NOTHING"
+        );
+
+        let mut desired = crate::bifaci::pools::DesiredCapacities::new();
+        desired.insert("gpu".to_string(), 2);
+        runtime
+            .apply_desired_capacities("test-cartridge", &desired)
+            .expect("a valid batch against a cold cartridge must queue");
+        assert_eq!(
+            runtime.cartridges[0].pending_desired.get("gpu"),
+            Some(&2),
+            "a cold cartridge keeps the values queued for the attach-time probe"
+        );
+    }
+
     #[tokio::test]
     async fn test8067_heartbeat_timeout_is_generation_safe() {
         let mut runtime = CartridgeHostRuntime::new();
@@ -6873,7 +7074,10 @@ mod tests {
         );
         cartridge.running = true;
         cartridge.generation = 7;
-        cartridge.handler_capacity = 1;
+        cartridge.pool_states = crate::bifaci::pools::PoolStates::from([(
+            crate::bifaci::pools::POOL_ALL.to_string(),
+            crate::bifaci::pools::PoolState::declared(1, Vec::new()),
+        )]);
         runtime.cartridges.push(cartridge);
 
         let xid = MessageId::Uint(41);

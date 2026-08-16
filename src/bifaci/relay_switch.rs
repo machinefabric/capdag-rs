@@ -290,8 +290,11 @@ pub struct CartridgeAttachmentError {
 pub struct CartridgeRuntimeStats {
     /// Process is currently running and serving requests.
     pub running: bool,
-    /// Maximum concurrent handlers. Zero means unlimited.
-    pub handler_capacity: u64,
+    /// The cartridge's full concurrency-pool state map (`bifaci::pools`):
+    /// declared/configured/available/active/queued per pool — singleton
+    /// pools keyed by cap URN, declared shared pools, and `all`. This IS
+    /// the capacity surface; there is no scalar.
+    pub pools: crate::bifaci::pools::PoolStates,
     /// OS pid of the cartridge process when running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -340,7 +343,7 @@ impl CartridgeRuntimeStats {
     pub fn not_running() -> Self {
         Self {
             running: false,
-            handler_capacity: 0,
+            pools: crate::bifaci::pools::PoolStates::new(),
             pid: None,
             active_request_count: 0,
             peer_request_count: 0,
@@ -1775,16 +1778,6 @@ impl RelaySwitch {
                     cartridge.id, master_idx
                 )));
             };
-            let capacity = if stats.running {
-                usize::try_from(stats.handler_capacity).map_err(|_| {
-                    RelaySwitchError::Protocol(format!(
-                        "cartridge '{}' handler_capacity exceeds this host's address space",
-                        cartridge.id
-                    ))
-                })?
-            } else {
-                1
-            };
             let key = Self::admission_key(master_idx, cartridge);
             // A host may expose several process instances of the same logical
             // install (the interop multi-cartridge topology does this). They
@@ -1792,18 +1785,53 @@ impl RelaySwitch {
             // record, matching host dispatch, rather than letting a later
             // duplicate overwrite its effective capacity.
             if available.insert(key.clone()) {
-                self.admission.configure(key, capacity);
+                self.admission
+                    .configure_pools(key, &Self::pool_capacities(stats, &cartridge.id)?);
             }
         }
         self.admission.reconcile_master(master_idx, &available);
         Ok(())
     }
 
+    /// The EFFECTIVE capacity of every pool a record advertises, as the
+    /// admission slots to configure. A NOT-RUNNING cartridge admits one
+    /// probe request total: `all` is clamped to 1 until the process is up
+    /// and a fresh map has arrived — the canary rule. This is deliberately
+    /// NOT about missing information (declared capacities are known while
+    /// cold); it is failure containment: a binary that dies on spawn eats
+    /// one request, not a declared-width fan-out, and a cold process cannot
+    /// yet self-report the `available` it would declare one heartbeat after
+    /// spawning.
+    fn pool_capacities(
+        stats: &CartridgeRuntimeStats,
+        cartridge_id: &str,
+    ) -> Result<Vec<(String, usize)>, RelaySwitchError> {
+        if stats.pools.is_empty() {
+            return Err(RelaySwitchError::Protocol(format!(
+                "cartridge '{cartridge_id}' advertises no concurrency pools — the pool map is mandatory for operational records"
+            )));
+        }
+        let mut capacities = Vec::with_capacity(stats.pools.len());
+        for (name, state) in &stats.pools {
+            let effective = if !stats.running && name == crate::bifaci::pools::POOL_ALL {
+                1
+            } else {
+                usize::try_from(state.effective()).map_err(|_| {
+                    RelaySwitchError::Protocol(format!(
+                        "cartridge '{cartridge_id}' pool '{name}' capacity exceeds this host's address space"
+                    ))
+                })?
+            };
+            capacities.push((name.clone(), effective));
+        }
+        Ok(capacities)
+    }
+
     async fn cap_admission_target(
         &self,
         master_idx: usize,
         registered_cap: &str,
-    ) -> Result<(AdmissionKey, usize), RelaySwitchError> {
+    ) -> Result<Vec<(crate::bifaci::request_state::PoolKey, usize)>, RelaySwitchError> {
         let cartridges = {
             let masters = self.masters.read().await;
             let master = masters.get(master_idx).ok_or_else(|| {
@@ -1841,17 +1869,59 @@ impl RelaySwitch {
                 cartridge.id, master_idx
             ))
         })?;
-        let capacity = if stats.running {
-            usize::try_from(stats.handler_capacity).map_err(|_| {
+        self.admission
+            .configure_pools(key.clone(), &Self::pool_capacities(stats, &cartridge.id)?);
+        Self::admission_chain(&key, stats, registered_cap, &cartridge.id)
+    }
+
+    /// The cap's pool CHAIN over one record's advertised pool map — each
+    /// admission domain a dispatch of this cap is held against, in order
+    /// (singleton, declared pools, `all`), paired with that pool's effective
+    /// capacity (0 = unlimited). A cap the pool map does not cover is a
+    /// protocol error, never a free pass.
+    fn admission_chain(
+        install: &AdmissionKey,
+        stats: &CartridgeRuntimeStats,
+        registered_cap: &str,
+        cartridge_id: &str,
+    ) -> Result<Vec<(crate::bifaci::request_state::PoolKey, usize)>, RelaySwitchError> {
+        let canonical = crate::urn::cap_urn::CapUrn::from_string(registered_cap)
+            .map_err(|e| {
                 RelaySwitchError::Protocol(format!(
-                    "cartridge '{}' handler_capacity exceeds this host's address space",
-                    cartridge.id
+                    "registered cap '{registered_cap}' is not a valid cap URN: {e}"
                 ))
             })?
-        } else {
-            1
-        };
-        Ok((key, capacity))
+            .to_string();
+        let names = crate::bifaci::pools::chain_from_states(&stats.pools, &canonical);
+        if names.first() != Some(&canonical)
+            || names.last() != Some(&crate::bifaci::pools::POOL_ALL.to_string())
+        {
+            return Err(RelaySwitchError::Protocol(format!(
+                "cartridge '{cartridge_id}' advertises cap '{canonical}' with no pool coverage — its pool map is missing the cap's singleton or the '{}' pool",
+                crate::bifaci::pools::POOL_ALL
+            )));
+        }
+        let mut chain = Vec::with_capacity(names.len());
+        for name in names {
+            let effective = if !stats.running && name == crate::bifaci::pools::POOL_ALL {
+                // The cold-start canary clamp — see `pool_capacities`.
+                1
+            } else {
+                usize::try_from(stats.pools[&name].effective()).map_err(|_| {
+                    RelaySwitchError::Protocol(format!(
+                        "cartridge '{cartridge_id}' pool '{name}' capacity exceeds this host's address space"
+                    ))
+                })?
+            };
+            chain.push((
+                crate::bifaci::request_state::PoolKey {
+                    install: install.clone(),
+                    pool: name,
+                },
+                effective,
+            ));
+        }
+        Ok(chain)
     }
 
     async fn acquire_cap_admission(
@@ -1859,39 +1929,45 @@ impl RelaySwitch {
         master_idx: usize,
         registered_cap: &str,
     ) -> Result<AdmissionPermit, RelaySwitchError> {
-        let (key, capacity) = self
+        let chain = self
             .cap_admission_target(master_idx, registered_cap)
             .await?;
-        self.admission.configure(key.clone(), capacity);
         self.admission
-            .acquire(key)
+            .acquire(chain.into_iter().map(|(key, _)| key).collect())
             .await
             .map_err(RelaySwitchError::CartridgeUnavailable)
     }
 
-    /// Return the authoritative handler capacity for the cartridge selected
-    /// by normal cap dispatch. A positive capacity is an execution boundary:
-    /// callers must not pre-acquire that request as part of a multi-cap live
-    /// pipeline, because the permit represents an actively owned process slot.
-    /// Zero means unlimited and permits live pre-opening.
+    /// Return the authoritative minimum effective capacity across the pool
+    /// chain serving a cap (0 = every pool unlimited). A positive capacity is
+    /// an execution boundary: callers must not pre-acquire that request as
+    /// part of a multi-cap live pipeline, because the permit represents an
+    /// actively owned process slot. Zero means unlimited and permits live
+    /// pre-opening.
     pub async fn admission_capacity_for_cap(
         &self,
         cap_urn: &str,
     ) -> Result<usize, RelaySwitchError> {
-        let (_, capacity) = self.admission_target_for_cap(cap_urn).await?;
-        Ok(capacity)
+        let chain = self.admission_target_for_cap(cap_urn).await?;
+        Ok(chain
+            .into_iter()
+            .map(|(_, capacity)| capacity)
+            .filter(|&capacity| capacity > 0)
+            .min()
+            .unwrap_or(0))
     }
 
-    /// The ADMISSION identity serving a cap: the (master, cartridge) permit
-    /// domain plus its capacity. This — not the master index — is the unit
-    /// permits are held against: one relay slot can aggregate MANY cartridge
-    /// processes (machfab's external-cartridges RelaySlave), each with its
-    /// own independent permit pool. Callers deciding whether two caps
-    /// contend for the same permits must compare THIS key.
+    /// The ADMISSION CHAIN serving a cap — each (master, install, pool)
+    /// permit domain a dispatch is held against, paired with that pool's
+    /// effective capacity (0 = unlimited). One relay slot can aggregate MANY
+    /// cartridge processes (machfab's external-cartridges RelaySlave), each
+    /// with its own independent pools. Callers deciding whether two caps
+    /// contend for the same permits must compare CHAIN MEMBERSHIP: two caps
+    /// contend iff their chains share any pool with capacity > 0.
     pub async fn admission_target_for_cap(
         &self,
         cap_urn: &str,
-    ) -> Result<(AdmissionKey, usize), RelaySwitchError> {
+    ) -> Result<Vec<(crate::bifaci::request_state::PoolKey, usize)>, RelaySwitchError> {
         let (master_idx, registered_cap) = self
             .find_route_for_cap(cap_urn, None)
             .await
@@ -1934,22 +2010,145 @@ impl RelaySwitch {
                 cartridge.id, master_idx
             ))
         })?;
-        let capacity = if stats.running {
-            usize::try_from(stats.handler_capacity).map_err(|_| {
-                RelaySwitchError::Protocol(format!(
-                    "cartridge '{}' handler_capacity exceeds this host's address space",
-                    cartridge.id
-                ))
-            })?
-        } else {
-            1
-        };
+        if !stats.pools.contains_key(crate::bifaci::pools::POOL_ALL) {
+            return Err(RelaySwitchError::Protocol(format!(
+                "cartridge '{}' pool map is missing the mandatory '{}' pool",
+                cartridge.id,
+                crate::bifaci::pools::POOL_ALL
+            )));
+        }
         let key = Self::admission_key(master_idx, &cartridge);
-        self.admission.configure(key.clone(), capacity);
         self.admission
-            .acquire(key)
+            .configure_pools(key.clone(), &Self::pool_capacities(stats, &cartridge.id)?);
+        let chain = vec![crate::bifaci::request_state::PoolKey {
+            install: key,
+            pool: crate::bifaci::pools::POOL_ALL.to_string(),
+        }];
+        self.admission
+            .acquire(chain)
             .await
             .map_err(RelaySwitchError::CartridgeUnavailable)
+    }
+
+    /// The live pool CHAIN serving a cap, with FULL pool states — the
+    /// display shape (run cap-node capacity meters, step inspector chain
+    /// rows): the owning cartridge id plus each chain pool's name and
+    /// state, in admission order. Read-only roster truth; refreshed by
+    /// every heartbeat republish.
+    pub async fn pool_chain_states_for_cap(
+        &self,
+        cap_urn: &str,
+    ) -> Result<(String, Vec<(String, crate::bifaci::pools::PoolState)>), RelaySwitchError> {
+        let (master_idx, registered_cap) = self
+            .find_route_for_cap(cap_urn, None)
+            .await
+            .ok_or_else(|| RelaySwitchError::NoHandler(cap_urn.to_string()))?;
+        let masters = self.masters.read().await;
+        let master = masters.get(master_idx).ok_or_else(|| {
+            RelaySwitchError::Protocol(format!(
+                "selected master index {master_idx} no longer exists"
+            ))
+        })?;
+        let cartridges = master.installed_cartridges.read().await;
+        let record = cartridges
+            .iter()
+            .find(|record| {
+                record.attachment_error.is_none()
+                    && record
+                        .cap_urns()
+                        .iter()
+                        .any(|candidate| candidate == &registered_cap)
+            })
+            .ok_or_else(|| {
+                RelaySwitchError::Protocol(format!(
+                    "master {master_idx} advertises cap '{registered_cap}' without an installed-cartridge owner"
+                ))
+            })?;
+        let stats = record.runtime_stats.as_ref().ok_or_else(|| {
+            RelaySwitchError::Protocol(format!(
+                "cartridge '{}' on master {master_idx} is missing mandatory v4 runtime_stats",
+                record.id
+            ))
+        })?;
+        let canonical = crate::urn::cap_urn::CapUrn::from_string(&registered_cap)
+            .map_err(|e| {
+                RelaySwitchError::Protocol(format!(
+                    "registered cap '{registered_cap}' is not a valid cap URN: {e}"
+                ))
+            })?
+            .to_string();
+        let chain = crate::bifaci::pools::chain_from_states(&stats.pools, &canonical)
+            .into_iter()
+            .map(|name| {
+                let state = stats.pools[&name].clone();
+                (name, state)
+            })
+            .collect();
+        Ok((record.id.clone(), chain))
+    }
+
+    /// Deliver operator `configured` values for one cartridge's pools to
+    /// the master that carries it (the heartbeat is the config channel on
+    /// the far side — see `bifaci::pools`). Validated hard against the
+    /// roster's last-known pool map: an unknown cartridge or pool name is
+    /// refused with the offender named, and nothing is sent. Delivery rides
+    /// a RelayState frame (master→slave control plane); the slave's host
+    /// applies the values and the refreshed pool map returns on the next
+    /// roster republish.
+    pub async fn send_desired_capacities(
+        &self,
+        cartridge_id: &str,
+        desired: &crate::bifaci::pools::DesiredCapacities,
+    ) -> Result<(), RelaySwitchError> {
+        // Resolve the owning master + validate against its advertised map.
+        let masters = self.masters.read().await;
+        let mut target: Option<usize> = None;
+        for (idx, master) in masters.iter().enumerate() {
+            let cartridges = master.installed_cartridges.read().await;
+            let mut matches = cartridges
+                .iter()
+                .filter(|record| record.attachment_error.is_none() && record.id == cartridge_id);
+            if let Some(record) = matches.next() {
+                if target.is_some() {
+                    return Err(RelaySwitchError::Protocol(format!(
+                        "cartridge id '{cartridge_id}' is carried by multiple masters; addressing is ambiguous"
+                    )));
+                }
+                let stats = record.runtime_stats.as_ref().ok_or_else(|| {
+                    RelaySwitchError::Protocol(format!(
+                        "cartridge '{cartridge_id}' on master {idx} is missing mandatory v4 runtime_stats"
+                    ))
+                })?;
+                for pool in desired.keys() {
+                    if !stats.pools.contains_key(pool) {
+                        return Err(RelaySwitchError::Protocol(format!(
+                            "desired capacities name pool '{pool}', which cartridge '{cartridge_id}' does not declare"
+                        )));
+                    }
+                }
+                target = Some(idx);
+            }
+        }
+        let Some(master_idx) = target else {
+            return Err(RelaySwitchError::Protocol(format!(
+                "desired capacities address cartridge '{cartridge_id}', which no master carries"
+            )));
+        };
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "desired_capacities": {
+                "cartridge_id": cartridge_id,
+                "capacities": desired,
+            }
+        }))
+        .expect("desired-capacities RelayState payload is always JSON-encodable");
+        let frame = Frame::relay_state(&payload);
+        let master = &masters[master_idx];
+        let mut writer = master.socket_writer.lock().await;
+        writer.write(&frame).await.map_err(|e| {
+            RelaySwitchError::Protocol(format!(
+                "failed to send desired-capacities RelayState to master {master_idx}: {e}"
+            ))
+        })
     }
 
     /// Register an externally-originated request (engine / execute_cap
@@ -4376,6 +4575,37 @@ mod tests {
         .expect("registry cache revision must make the advertised cap reachable");
     }
 
+    /// Build a roster pools map for test stats: one at-rest singleton per
+    /// cap (canonical URN) plus the mandatory `all` pool at the given
+    /// capacity — the pool-map equivalent of the retired scalar
+    /// handler_capacity.
+    fn test_pool_states_json(
+        cap_urns: &[&str],
+        all_capacity: u64,
+        active: u64,
+    ) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        for urn in cap_urns {
+            let canonical = crate::urn::cap_urn::CapUrn::from_string(urn)
+                .expect("test cap URN must parse")
+                .to_string();
+            map.insert(
+                canonical,
+                serde_json::json!({ "declared": 0, "configured": 0, "active": active, "queued": 0 }),
+            );
+        }
+        map.insert(
+            crate::bifaci::pools::POOL_ALL.to_string(),
+            serde_json::json!({
+                "declared": all_capacity,
+                "configured": all_capacity,
+                "active": active,
+                "queued": 0
+            }),
+        );
+        serde_json::Value::Object(map)
+    }
+
     /// Helper: send RelayNotify with given caps/limits, then handle identity verification.
     /// Returns (FrameReader, FrameWriter) ready for further communication.
     ///
@@ -4425,7 +4655,14 @@ mod tests {
                     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 0,
+                        "pools": test_pool_states_json(
+                            &cap_urns_array
+                                .iter()
+                                .map(|v| v.as_str().expect("cap URN must be a string"))
+                                .collect::<Vec<_>>(),
+                            0,
+                            0,
+                        ),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -4521,7 +4758,7 @@ mod tests {
                     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 1,
+                        "pools": test_pool_states_json(&["cap:effect=none"], 1, 1),
                         "active_request_count": 1,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -4706,7 +4943,14 @@ mod tests {
                     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 0,
+                        "pools": test_pool_states_json(
+                            &cap_urns_array
+                                .iter()
+                                .map(|v| v.as_str().expect("cap URN must be a string"))
+                                .collect::<Vec<_>>(),
+                            0,
+                            0,
+                        ),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -5679,7 +5923,7 @@ mod tests {
                         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 0,
+                        "pools": test_pool_states_json(&["cap:effect=none"], 0, 0),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -5783,7 +6027,7 @@ mod tests {
                         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 0,
+                        "pools": test_pool_states_json(&["cap:effect=none", "cap:in=\"media:void\";test;out=\"media:void\""], 0, 0),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -7470,7 +7714,7 @@ mod tests {
                         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "handler_capacity": 0,
+                        "pools": test_pool_states_json(&["cap:effect=none"], 0, 0),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -7875,7 +8119,49 @@ mod tests {
     // counters at all: the crossing is counted as a straggler, named by
     // frame type. A frame for a RID the table never knew stays a no_route
     // DROP (TEST7025).
-    // TEST1515: one INCOMPATIBLE install on a master's roster must not cost
+// TEST1532: the cold-start canary — a NOT-RUNNING record's `all` pool is
+    // clamped to capacity 1 regardless of what the pool map claims, so the
+    // first dispatch to a cold cartridge is a single canary body and a
+    // spawn-time failure costs one body, not a fleet. Running records keep
+    // their advertised effective capacities, and an EMPTY pool map on an
+    // operational record is a protocol error, never a free pass.
+    #[test]
+    fn test1532_not_running_canary_clamps_all_to_one() {
+        let mut stats = CartridgeRuntimeStats::not_running();
+        stats.pools = crate::bifaci::pools::decode_pool_states(
+            test_pool_states_json(&["cap:effect=none"], 8, 0)
+                .to_string()
+                .as_bytes(),
+        )
+        .expect("test pool map must decode");
+
+        let capacities = RelaySwitch::pool_capacities(&stats, "coldcart")
+            .expect("a populated map must configure");
+        let all = capacities
+            .iter()
+            .find(|(name, _)| name == crate::bifaci::pools::POOL_ALL)
+            .expect("the mandatory 'all' pool");
+        assert_eq!(all.1, 1, "cold start admits exactly one canary body");
+
+        stats.running = true;
+        let capacities = RelaySwitch::pool_capacities(&stats, "warmcart")
+            .expect("a populated map must configure");
+        let all = capacities
+            .iter()
+            .find(|(name, _)| name == crate::bifaci::pools::POOL_ALL)
+            .expect("the mandatory 'all' pool");
+        assert_eq!(all.1, 8, "a running record keeps its advertised capacity");
+
+        stats.pools.clear();
+        let error = RelaySwitch::pool_capacities(&stats, "emptycart")
+            .expect_err("an empty pool map must refuse, never default");
+        assert!(
+            format!("{error}").contains("emptycart"),
+            "the refusal must name the cartridge: {error}"
+        );
+    }
+
+        // TEST1515: one INCOMPATIBLE install on a master's roster must not cost
     // the master its admission. An incompatible record (attachment_error set)
     // was never spawned, so it legitimately carries no runtime stats — it is
     // inventory the UI shows, not a handler anything routes to. Before this
@@ -7901,7 +8187,10 @@ mod tests {
             attachment_error: None,
             runtime_stats: Some(CartridgeRuntimeStats {
                 running: true,
-                handler_capacity: 2,
+                pools: crate::bifaci::pools::decode_pool_states(
+                    test_pool_states_json(&[], 2, 0).to_string().as_bytes(),
+                )
+                .expect("test pool map must decode"),
                 ..CartridgeRuntimeStats::not_running()
             }),
             lifecycle: CartridgeLifecycle::Operational,
@@ -8031,7 +8320,7 @@ mod tests {
         );
         assert_eq!(
             stats.drops.total, 0,
-            "a terminated request's stragglers are benign — never drops, never              routing anomalies: {:?}",
+            "a terminated request's stragglers are benign — never drops, never routing anomalies: {:?}",
             stats.drops
         );
     }

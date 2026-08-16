@@ -81,6 +81,13 @@ pub struct CapManifest {
     /// Human-readable page URL for the cartridge (e.g., repository page, documentation)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_url: Option<String>,
+
+    /// Concurrency pool declarations (see `bifaci::pools`): shared-pool
+    /// memberships plus a capacities map keyed by pool name uniformly — a
+    /// canonical cap URN (singleton pool), a declared pool name, or `all`.
+    /// Nothing declared = every pool unlimited, today's behavior.
+    #[serde(default, skip_serializing_if = "crate::bifaci::pools::PoolDeclarations::is_empty")]
+    pub pool_declarations: crate::bifaci::pools::PoolDeclarations,
 }
 
 impl<'de> Deserialize<'de> for CapManifest {
@@ -113,6 +120,8 @@ impl<'de> Deserialize<'de> for CapManifest {
             author: Option<String>,
             #[serde(default)]
             page_url: Option<String>,
+            #[serde(default)]
+            pool_declarations: crate::bifaci::pools::PoolDeclarations,
         }
         let inner = serde_json::from_value::<CapManifestInner>(value).map_err(D::Error::custom)?;
         Ok(CapManifest {
@@ -124,6 +133,7 @@ impl<'de> Deserialize<'de> for CapManifest {
             cap_groups: inner.cap_groups,
             author: inner.author,
             page_url: inner.page_url,
+            pool_declarations: inner.pool_declarations,
         })
     }
 }
@@ -154,7 +164,29 @@ impl CapManifest {
             cap_groups,
             author: None,
             page_url: None,
+            pool_declarations: crate::bifaci::pools::PoolDeclarations::default(),
         }
+    }
+
+    /// Declare the concurrency pools (see `bifaci::pools`). Validated —
+    /// hard error, never coercion — against the manifest's declared caps,
+    /// and stored canonicalized so every later lookup is by identity.
+    pub fn with_pool_declarations(
+        mut self,
+        declarations: crate::bifaci::pools::PoolDeclarations,
+    ) -> Result<Self, String> {
+        let declared: Vec<crate::urn::cap_urn::CapUrn> =
+            self.all_caps().iter().map(|c| c.urn.clone()).collect();
+        self.pool_declarations = declarations.validated(&declared)?;
+        Ok(self)
+    }
+
+    /// The manifest's declared pool-state map: one singleton pool per cap,
+    /// every declared shared pool, and `all` (see `bifaci::pools`).
+    pub fn declared_pool_states(&self) -> crate::bifaci::pools::PoolStates {
+        let declared: Vec<crate::urn::cap_urn::CapUrn> =
+            self.all_caps().iter().map(|c| c.urn.clone()).collect();
+        self.pool_declarations.declared_states(&declared)
     }
 
     /// Returns all caps from all cap groups.
@@ -194,6 +226,14 @@ impl CapManifest {
                 CAP_IDENTITY
             ));
         }
+        // Pool declarations must resolve against this manifest's caps — a
+        // deserialized manifest carries them unvalidated, and an unresolved
+        // pool would otherwise surface only at first dispatch.
+        let declared: Vec<crate::urn::cap_urn::CapUrn> =
+            self.all_caps().iter().map(|c| c.urn.clone()).collect();
+        self.pool_declarations
+            .validated(&declared)
+            .map_err(|e| format!("invalid pool declarations: {e}"))?;
         Ok(())
     }
 }

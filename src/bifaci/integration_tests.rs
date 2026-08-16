@@ -127,7 +127,7 @@ mod tests {
     ) {
         let mut reader = FrameReader::new(BufReader::new(from_runtime));
         let mut writer = FrameWriter::new(BufWriter::new(to_runtime));
-        let limits = handshake_accept(&mut reader, &mut writer, manifest, 0)
+        let limits = handshake_accept(&mut reader, &mut writer, manifest, &crate::bifaci::pools::PoolStates::new())
             .await
             .unwrap();
         reader.set_limits(limits);
@@ -948,7 +948,7 @@ mod tests {
         let cartridge_handle = tokio::spawn(async move {
             let mut reader = FrameReader::new(BufReader::new(cartridge_read));
             let mut writer = FrameWriter::new(BufWriter::new(cartridge_write));
-            let limits = handshake_accept(&mut reader, &mut writer, &manifest, 0)
+            let limits = handshake_accept(&mut reader, &mut writer, &manifest, &crate::bifaci::pools::PoolStates::new())
                 .await
                 .unwrap();
             assert!(limits.max_frame > 0);
@@ -1157,7 +1157,7 @@ mod tests {
         let cartridge_handle = tokio::spawn(async move {
             let mut reader = FrameReader::new(BufReader::new(cartridge_from_host));
             let mut writer = FrameWriter::new(BufWriter::new(cartridge_to_host));
-            handshake_accept(&mut reader, &mut writer, &manifest, 0)
+            handshake_accept(&mut reader, &mut writer, &manifest, &crate::bifaci::pools::PoolStates::new())
                 .await
                 .unwrap()
         });
