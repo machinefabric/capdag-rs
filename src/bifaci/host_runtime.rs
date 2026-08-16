@@ -7023,6 +7023,20 @@ mod tests {
             None,
             cap_groups_from_urns(&["cap:in=\"media:void\";test;out=\"media:void\""]),
         );
+        // The ctor derives identity by hashing the binary; a nonexistent
+        // path honestly yields none. Desired-capacity addressing is BY
+        // identity, so stamp the record this fixture stands for.
+        cartridge.installed_identity = Some(crate::bifaci::relay_switch::InstalledCartridgeRecord {
+            registry_url: None,
+            channel: crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+            id: "test-cartridge".to_string(),
+            version: "1.0.0".to_string(),
+            sha256: "00".repeat(32),
+            cap_groups: Vec::new(),
+            attachment_error: None,
+            runtime_stats: None,
+            lifecycle: crate::bifaci::relay_switch::CartridgeLifecycle::Operational,
+        });
         cartridge.pool_states = crate::bifaci::pools::PoolStates::from([
             (
                 "gpu".to_string(),
