@@ -96,6 +96,12 @@ impl MediaAdapterRegistry {
     /// If any pair has a `conforms_to` relationship in either direction,
     /// the entire group is rejected — none of its adapters get registered.
     ///
+    /// Exact re-registration is IDEMPOTENT: an adapter URN equivalent to one
+    /// this same `(cartridge_id, group_name)` already registered is neither
+    /// a conflict nor a second row — a cartridge attached through more than
+    /// one hosting route (e.g. app-bundled and system-installed) is still
+    /// one adapter provider, not an ambiguity with itself.
+    ///
     /// On success, all adapter URNs from the group are added atomically.
     pub fn register_cap_group(
         &mut self,
@@ -117,8 +123,38 @@ impl MediaAdapterRegistry {
             })
             .collect();
 
+        // Which new adapters are exact re-registrations by the same owner —
+        // skipped in the conflict scan AND in the final insert, so repeated
+        // attachment of the same cartridge stays a no-op instead of either
+        // refusing (self-conflict) or duplicating rows.
+        let already_registered: Vec<bool> = new_adapters
+            .iter()
+            .map(|(urn, urn_str)| {
+                let dup = self.registered_adapters.iter().any(|existing| {
+                    existing.cartridge_id == cartridge_id
+                        && existing.group_name == group_name
+                        && existing.media_urn.is_equivalent(urn).unwrap_or(false)
+                });
+                if dup {
+                    tracing::warn!(
+                        "Adapter URN '{}' of cap group '{}' is already registered by \
+                         cartridge '{}' — the cartridge is attached through more than \
+                         one hosting route; keeping the first registration and \
+                         skipping this one",
+                        urn_str,
+                        group_name,
+                        cartridge_id,
+                    );
+                }
+                dup
+            })
+            .collect();
+
         // Check each new adapter against all existing registered adapters
-        for (new_urn, new_str) in &new_adapters {
+        for ((new_urn, new_str), is_rereg) in new_adapters.iter().zip(&already_registered) {
+            if *is_rereg {
+                continue;
+            }
             for existing in &self.registered_adapters {
                 let new_conforms_to_existing =
                     new_urn.conforms_to(&existing.media_urn).unwrap_or(false);
@@ -158,8 +194,12 @@ impl MediaAdapterRegistry {
             }
         }
 
-        // No conflicts — register atomically
-        for (urn, urn_str) in new_adapters {
+        // No conflicts — register atomically (re-registered URNs already
+        // have their row).
+        for ((urn, urn_str), is_rereg) in new_adapters.into_iter().zip(already_registered) {
+            if is_rereg {
+                continue;
+            }
             self.registered_adapters.push(RegisteredAdapter {
                 media_urn: urn,
                 urn_string: urn_str.clone(),
@@ -275,6 +315,51 @@ mod tests {
             result.err()
         );
         assert_eq!(registry.registered_adapters.len(), 2);
+    }
+
+    // TEST1478: exact re-registration is idempotent — the SAME cartridge
+    // re-registering the SAME group with the SAME adapter URNs (a cartridge
+    // attached through two hosting routes, e.g. app-bundled AND
+    // system-installed) is a no-op, not a self-conflict and not duplicate
+    // rows. A DIFFERENT cartridge claiming the same URN stays rejected.
+    #[test]
+    fn test1478_exact_reregistration_is_idempotent() {
+        let (fabric_registry, _temp) = create_test_registry();
+        let mut registry = MediaAdapterRegistry::new(fabric_registry);
+
+        let urns = ["media:fmt=json".to_string(), "media:fmt=yaml".to_string()];
+        registry
+            .register_cap_group("text-formats", &urns, "txtcartridge")
+            .unwrap();
+        let result = registry.register_cap_group("text-formats", &urns, "txtcartridge");
+        assert!(
+            result.is_ok(),
+            "re-registering the identical group must be a no-op: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            registry.registered_adapters.len(),
+            2,
+            "re-registration must not duplicate adapter rows"
+        );
+
+        // A partially-new group from the same owner registers only the new URN.
+        let extended = [
+            "media:fmt=json".to_string(),
+            "media:fmt=toml".to_string(),
+        ];
+        registry
+            .register_cap_group("text-formats", &extended, "txtcartridge")
+            .expect("known URNs skip, new URNs register");
+        assert_eq!(registry.registered_adapters.len(), 3);
+
+        // Another cartridge claiming an identical URN is still ambiguity.
+        let result =
+            registry.register_cap_group("text-formats", &["media:fmt=json".to_string()], "other");
+        assert!(
+            result.is_err(),
+            "an identical URN from a DIFFERENT cartridge must stay rejected"
+        );
     }
 
     // TEST1277: Registration of a cap group with an adapter that conforms_to an existing adapter is rejected

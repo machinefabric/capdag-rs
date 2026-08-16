@@ -160,6 +160,18 @@ pub struct ReachableTargetInfo {
     pub path_count: i32,
 }
 
+/// One reachable target plus the CARDINALITY STATES it was reached in.
+/// `reached_scalar` means some route arrives with a single value (the source
+/// was scalar, or a sequence-consuming fold ran along the way);
+/// `reached_sequence` means some route arrives per-item. A target may be
+/// reachable both ways.
+#[derive(Debug, Clone)]
+pub(crate) struct ReachableTargetCardinality {
+    pub(crate) info: ReachableTargetInfo,
+    pub(crate) reached_scalar: bool,
+    pub(crate) reached_sequence: bool,
+}
+
 impl LiveMachinePlanEdge {
     /// Get the title for this edge (for display purposes)
     pub fn title(&self) -> String {
@@ -977,10 +989,27 @@ impl LiveCapFab {
         is_sequence: bool,
         max_depth: usize,
     ) -> Vec<ReachableTargetInfo> {
+        self.get_reachable_targets_with_cardinality(source, is_sequence, max_depth)
+            .into_iter()
+            .map(|reach| reach.info)
+            .collect()
+    }
+
+    /// `get_reachable_targets` keeping the CARDINALITY STATES each target was
+    /// reached in — scalar (a fold consumed the sequence along the way, or
+    /// the source was scalar) vs sequence (per-item). The unified plan engine
+    /// uses the split to tell an honest "combined" single-source target from
+    /// a per-item one.
+    pub(crate) fn get_reachable_targets_with_cardinality(
+        &self,
+        source: &MediaUrn,
+        is_sequence: bool,
+        max_depth: usize,
+    ) -> Vec<ReachableTargetCardinality> {
         // `results` and `visited` are keyed on `MediaUrn`
         // directly — their derived `Hash`/`Eq` go through
         // `TaggedUrn`'s structural tag-set identity.
-        let mut results: HashMap<MediaUrn, ReachableTargetInfo> = HashMap::new();
+        let mut results: HashMap<MediaUrn, ReachableTargetCardinality> = HashMap::new();
         let mut visited: HashSet<(MediaUrn, bool, bool)> = HashSet::new();
         let mut queue: VecDeque<(MediaUrn, bool, bool, usize)> = VecDeque::new();
 
@@ -1005,14 +1034,23 @@ impl LiveCapFab {
                     // cap transitions; structural equality collapses tag-order
                     // equivalent MediaUrns.
                     let entry = results.entry(edge.to_spec.clone()).or_insert_with(|| {
-                        ReachableTargetInfo {
-                            media_def: edge.to_spec.clone(),
-                            display_name: edge.to_spec.to_string(),
-                            min_path_length: new_depth as i32,
-                            path_count: 0,
+                        ReachableTargetCardinality {
+                            info: ReachableTargetInfo {
+                                media_def: edge.to_spec.clone(),
+                                display_name: edge.to_spec.to_string(),
+                                min_path_length: new_depth as i32,
+                                path_count: 0,
+                            },
+                            reached_scalar: false,
+                            reached_sequence: false,
                         }
                     });
-                    entry.path_count += 1;
+                    entry.info.path_count += 1;
+                    if next_is_seq {
+                        entry.reached_sequence = true;
+                    } else {
+                        entry.reached_scalar = true;
+                    }
                 }
 
                 // Continue BFS if not visited at this cardinality state.
@@ -1038,7 +1076,7 @@ impl LiveCapFab {
         // registry — no registry call here.
         let mut targets: Vec<_> = results
             .into_values()
-            .filter(|t| self.bookend_nodes.contains(&t.media_def))
+            .filter(|t| self.bookend_nodes.contains(&t.info.media_def))
             .collect();
 
         // Sort by (min_path_length, display_name).
@@ -1048,9 +1086,10 @@ impl LiveCapFab {
         // the correct semantics — this is user-visible
         // alphabetical sort, not URN equivalence.
         targets.sort_by(|a, b| {
-            a.min_path_length
-                .cmp(&b.min_path_length)
-                .then_with(|| a.display_name.cmp(&b.display_name))
+            a.info
+                .min_path_length
+                .cmp(&b.info.min_path_length)
+                .then_with(|| a.info.display_name.cmp(&b.info.display_name))
         });
 
         targets

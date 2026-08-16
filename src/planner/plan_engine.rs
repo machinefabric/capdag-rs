@@ -1541,15 +1541,21 @@ impl LiveCapFab {
     ) -> Result<Vec<ConvergentTargetInfo>, PlanError> {
         if sources.len() == 1 {
             let s = &sources[0];
+            let is_sequence = s.cardinality.is_sequence();
             return Ok(self
-                .get_reachable_targets(&s.media_urn, s.cardinality.is_sequence(), max_depth)
+                .get_reachable_targets_with_cardinality(&s.media_urn, is_sequence, max_depth)
                 .into_iter()
-                .map(|t| ConvergentTargetInfo {
-                    media_def: t.media_def,
-                    display_name: t.display_name,
-                    min_total_steps: t.min_path_length,
+                .map(|reach| ConvergentTargetInfo {
+                    media_def: reach.info.media_def,
+                    display_name: reach.info.display_name,
+                    min_total_steps: reach.info.min_path_length,
                     apex: None,
-                    convergent: true, // one source: every target is a "combined" result
+                    // Honest fan-in for the degenerate case: a single
+                    // SEQUENCE source "combines" only where some route
+                    // folds it to a scalar result; a target reached only
+                    // per-item is an independent ("convert each") target,
+                    // and a scalar source has nothing to combine at all.
+                    convergent: is_sequence && reach.reached_scalar,
                 })
                 .collect());
         }
@@ -2500,6 +2506,52 @@ mod tests {
                 .is_equivalent(&media("media:enc=utf-8;page"))
                 .unwrap()),
             "internal (non-bookend) media must not be discovered"
+        );
+    }
+
+    // TEST1477 (discover, |S|=1 honest convergence): the degenerate branch
+    // must derive `convergent` from actual fan-in, not declare every target
+    // combined. A single SEQUENCE source marks a target convergent exactly
+    // when some route folds the sequence to a scalar result; a single SCALAR
+    // source has nothing to combine, so nothing is convergent.
+    #[test]
+    fn test1477_discover_single_source_convergence_is_honest() {
+        let (fab, _registry) = fabric();
+
+        // Sequence of pdfs: txt is reached through the concat fold (sequence
+        // → one txt), so it is a genuine "combine all" target.
+        let seq_targets = fab
+            .discover_convergent_targets(
+                &[SourceSpec::sequence(media("media:ext=pdf"))],
+                PlanRequest::DEFAULT_MAX_DEPTH,
+            )
+            .expect("sequence single-source discovery must succeed")
+            .targets;
+        let txt_entry = seq_targets
+            .iter()
+            .find(|t| t.media_def.is_equivalent(&txt()).unwrap())
+            .expect("txt must be discovered for a pdf sequence");
+        assert!(
+            txt_entry.convergent,
+            "a fold-reachable target of a sequence source is convergent"
+        );
+
+        // One scalar pdf: the same targets exist, but there is no sequence
+        // to combine — no target may claim to be a combined result.
+        let scalar_targets = fab
+            .discover_convergent_targets(
+                &[SourceSpec::single(media("media:ext=pdf"))],
+                PlanRequest::DEFAULT_MAX_DEPTH,
+            )
+            .expect("scalar single-source discovery must succeed")
+            .targets;
+        assert!(
+            !scalar_targets.is_empty(),
+            "scalar single-source discovery still finds targets"
+        );
+        assert!(
+            scalar_targets.iter().all(|t| !t.convergent),
+            "a scalar source has nothing to combine — no convergent targets"
         );
     }
 
