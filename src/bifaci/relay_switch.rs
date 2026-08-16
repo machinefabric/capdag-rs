@@ -1807,9 +1807,16 @@ impl RelaySwitch {
         cartridge_id: &str,
     ) -> Result<Vec<(String, usize)>, RelaySwitchError> {
         if stats.pools.is_empty() {
-            return Err(RelaySwitchError::Protocol(format!(
-                "cartridge '{cartridge_id}' advertises no concurrency pools — the pool map is mandatory for operational records"
-            )));
+            if stats.running {
+                return Err(RelaySwitchError::Protocol(format!(
+                    "cartridge '{cartridge_id}' is running but advertises no concurrency pools — the pool map is mandatory once HELLO has completed"
+                )));
+            }
+            // A cold record before its first HELLO legitimately has no pool
+            // map yet (registered-dir cartridges spawn on first dispatch).
+            // Admit through the canary alone: `all` clamped to 1, so the
+            // first body proves the spawn before real capacities exist.
+            return Ok(vec![(crate::bifaci::pools::POOL_ALL.to_string(), 1)]);
         }
         let mut capacities = Vec::with_capacity(stats.pools.len());
         for (name, state) in &stats.pools {
@@ -1885,6 +1892,23 @@ impl RelaySwitch {
         registered_cap: &str,
         cartridge_id: &str,
     ) -> Result<Vec<(crate::bifaci::request_state::PoolKey, usize)>, RelaySwitchError> {
+        if stats.pools.is_empty() {
+            if stats.running {
+                return Err(RelaySwitchError::Protocol(format!(
+                    "cartridge '{cartridge_id}' is running but advertises no concurrency pools — the pool map is mandatory once HELLO has completed"
+                )));
+            }
+            // Cold record before its first HELLO: the whole dispatch is the
+            // canary — one body through the clamped `all` pool, which is
+            // what triggers the spawn and the real pool map.
+            return Ok(vec![(
+                crate::bifaci::request_state::PoolKey {
+                    install: install.clone(),
+                    pool: crate::bifaci::pools::POOL_ALL.to_string(),
+                },
+                1,
+            )]);
+        }
         let canonical = crate::urn::cap_urn::CapUrn::from_string(registered_cap)
             .map_err(|e| {
                 RelaySwitchError::Protocol(format!(
@@ -2010,7 +2034,9 @@ impl RelaySwitch {
                 cartridge.id, master_idx
             ))
         })?;
-        if !stats.pools.contains_key(crate::bifaci::pools::POOL_ALL) {
+        if !stats.pools.contains_key(crate::bifaci::pools::POOL_ALL)
+            && !(stats.pools.is_empty() && !stats.running)
+        {
             return Err(RelaySwitchError::Protocol(format!(
                 "cartridge '{}' pool map is missing the mandatory '{}' pool",
                 cartridge.id,
