@@ -1589,6 +1589,11 @@ mod tests {
             &cap_table,
             "cap:in=\"media:ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
         );
-        assert_eq!(result, Some(1)); // specific handler
+        let (idx, registered) = result.expect("specific handler must match");
+        assert_eq!(idx, 1); // specific handler
+        assert!(
+            registered.contains("ext=pdf"),
+            "the winning registered pattern is the specific one: {registered}"
+        );
     }
 }

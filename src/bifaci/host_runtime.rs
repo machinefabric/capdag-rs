@@ -3868,9 +3868,14 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(from_runtime));
         let mut writer = FrameWriter::new(BufWriter::new(to_runtime));
-        handshake_accept(&mut reader, &mut writer, manifest, 0)
-            .await
-            .unwrap();
+        handshake_accept(
+            &mut reader,
+            &mut writer,
+            manifest,
+            &crate::bifaci::pools::PoolStates::new(),
+        )
+        .await
+        .unwrap();
 
         // Handle identity verification REQ
         let req = reader.read().await.unwrap().expect("expected identity REQ");
@@ -4011,7 +4016,7 @@ mod tests {
         let cartridge = ManagedCartridge::new_attached(
             manifest.as_bytes().to_vec(),
             Limits::default(),
-            0,
+            crate::bifaci::pools::PoolStates::new(),
             Vec::new(),
             Some(record.clone()),
         );
@@ -5642,9 +5647,14 @@ mod tests {
             use crate::bifaci::io::{handshake_accept, FrameReader, FrameWriter};
             let mut reader = FrameReader::new(BufReader::new(p_from_rt));
             let mut writer = FrameWriter::new(BufWriter::new(p_to_rt));
-            handshake_accept(&mut reader, &mut writer, &m, 0)
-                .await
-                .unwrap();
+            handshake_accept(
+                &mut reader,
+                &mut writer,
+                &m,
+                &crate::bifaci::pools::PoolStates::new(),
+            )
+            .await
+            .unwrap();
 
             // Read identity REQ, respond with ERR (broken identity handler)
             let req = reader.read().await.unwrap().expect("expected identity REQ");

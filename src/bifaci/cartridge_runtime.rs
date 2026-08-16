@@ -4247,6 +4247,7 @@ pub(crate) struct RuntimePools {
     next_ticket: u64,
 }
 
+#[derive(Debug)]
 struct RuntimePool {
     declared: u64,
     configured: u64,
@@ -4266,6 +4267,20 @@ impl RuntimePool {
     fn has_room(&self) -> bool {
         let effective = self.effective();
         effective == crate::bifaci::pools::CAPACITY_UNLIMITED || self.active < effective
+    }
+}
+
+impl std::fmt::Debug for RuntimePools {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // QueuedRequest carries an opaque factory; summarize queues by depth.
+        let queue_depths: std::collections::BTreeMap<&String, usize> =
+            self.queues.iter().map(|(k, q)| (k, q.len())).collect();
+        f.debug_struct("RuntimePools")
+            .field("pools", &self.pools)
+            .field("chains", &self.chains)
+            .field("queue_depths", &queue_depths)
+            .field("next_ticket", &self.next_ticket)
+            .finish()
     }
 }
 
@@ -4421,6 +4436,19 @@ impl RuntimePools {
             .unwrap_or_else(|| panic!("no singleton queue for pattern '{}'", request.pattern));
         queue.push_back(request);
         queue.len()
+    }
+
+    /// Remove a queued (not-yet-admitted) request by its request id — the
+    /// Cancel path. A queued request holds no chain slots, so nothing is
+    /// released. Returns the removed request, or `None` when the id is not
+    /// queued (it is running, or unknown).
+    fn remove_queued(&mut self, request_id: &MessageId) -> Option<QueuedRequest> {
+        for queue in self.queues.values_mut() {
+            if let Some(pos) = queue.iter().position(|q| &q.request_id == request_id) {
+                return queue.remove(pos);
+            }
+        }
+        None
     }
 
     /// Pop-and-admit the oldest queued request whose chain has room —
@@ -6333,12 +6361,16 @@ impl CartridgeRuntime {
                         }
                     }
 
-                    // Case 1: Request is in the queue — remove it, send ERR
-                    if let Some(pos) = request_queue
-                        .iter()
-                        .position(|q| q.request_id == target_rid)
-                    {
-                        let queued = request_queue.remove(pos).unwrap();
+                    // Case 1: Request is queued on its singleton pool —
+                    // remove it (it holds no chain slots), send ERR.
+                    let removed = self
+                        .pools
+                        .lock()
+                        .expect("runtime pools mutex poisoned")
+                        .as_mut()
+                        .expect("pools materialized at startup")
+                        .remove_queued(&target_rid);
+                    if let Some(queued) = removed {
                         active_requests.remove(&target_rid);
                         let mut err = Frame::err(
                             target_rid.clone(),

@@ -2229,7 +2229,7 @@ mod tests {
         let (mut cartridge_write, mut cartridge_read) = tokio::io::duplex(64 * 1024);
         {
             let mut w = FrameWriter::new(&mut cartridge_write);
-            let hello = Frame::hello_with_manifest(&cartridge_limits, manifest, 0);
+            let hello = Frame::hello_with_manifest(&cartridge_limits, manifest, &crate::bifaci::pools::PoolStates::new());
             w.write(&hello).await.unwrap();
         }
         drop(cartridge_write);
@@ -2304,7 +2304,7 @@ mod tests {
                 .write(&Frame::hello_with_manifest(
                     &cartridge_limits,
                     V4_TEST_MANIFEST,
-                    0,
+                    &crate::bifaci::pools::PoolStates::new(),
                 ))
                 .await?;
             Ok(Limits {
@@ -2367,7 +2367,7 @@ mod tests {
             let mut reader = FrameReader::new(cart_r);
             let mut writer = FrameWriter::new(cart_w);
             let _host_hello = reader.read().await.unwrap().unwrap();
-            let mut hello = Frame::hello_with_manifest(&Limits::default(), V4_TEST_MANIFEST, 0);
+            let mut hello = Frame::hello_with_manifest(&Limits::default(), V4_TEST_MANIFEST, &crate::bifaci::pools::PoolStates::new());
             hello.version = 2;
             if let Some(meta) = hello.meta.as_mut() {
                 meta.insert("version".to_string(), ciborium::Value::Integer(2.into()));
@@ -2432,7 +2432,7 @@ mod tests {
     ) {
         let mut reader = FrameReader::new(TokioBufReader::new(from_host));
         let mut writer = FrameWriter::new(TokioBufWriter::new(to_host));
-        handshake_accept(&mut reader, &mut writer, manifest, 0)
+        handshake_accept(&mut reader, &mut writer, manifest, &crate::bifaci::pools::PoolStates::new())
             .await
             .unwrap();
 
@@ -2512,7 +2512,7 @@ mod tests {
         let cartridge_handle = tokio::spawn(async move {
             let mut reader = FrameReader::new(TokioBufReader::new(cartridge_from_host));
             let mut writer = FrameWriter::new(TokioBufWriter::new(cartridge_to_host));
-            handshake_accept(&mut reader, &mut writer, &manifest, 0)
+            handshake_accept(&mut reader, &mut writer, &manifest, &crate::bifaci::pools::PoolStates::new())
                 .await
                 .unwrap();
 
@@ -2560,7 +2560,7 @@ mod tests {
         let cartridge_handle = tokio::spawn(async move {
             let mut reader = FrameReader::new(TokioBufReader::new(cartridge_from_host));
             let mut writer = FrameWriter::new(TokioBufWriter::new(cartridge_to_host));
-            handshake_accept(&mut reader, &mut writer, &manifest, 0)
+            handshake_accept(&mut reader, &mut writer, &manifest, &crate::bifaci::pools::PoolStates::new())
                 .await
                 .unwrap();
 
