@@ -164,13 +164,25 @@ pub enum HostCommand {
     /// `shutdown_reason = Some(OomKill)` before killing, so death handling
     /// sends ERR frames with "OOM_KILLED" for all pending requests.
     KillCartridge { pid: u32 },
-    /// Replace the live registered-dir roster with a freshly-discovered set and
-    /// re-publish RelayNotify, so the engine sees added/removed cartridges
-    /// without reconnecting — the equivalent of the macOS XPC service's
-    /// `host.syncDiscoveryOutcomes(...)` after a rescan (e.g. a registry verdict
-    /// flipped a held cartridge to Listed). Running cartridges no longer in the
-    /// set are killed; survivors keep their live process and stats.
-    SyncRoster { cartridges: Vec<RegisteredDirSpec> },
+    /// Replace the live discovery picture — BOTH halves — with a freshly
+    /// discovered one and re-publish RelayNotify, so the engine sees added,
+    /// removed and newly-attachable cartridges without reconnecting. This is
+    /// the equivalent of the macOS XPC service's `host.syncDiscoveryOutcomes(...)`
+    /// after a rescan (e.g. a registry verdict flipped a held cartridge to
+    /// Listed), and it carries the same two kinds in one message for the same
+    /// reason: a rejected install must be able to become an attachable one.
+    ///
+    /// `cartridges` are the attachable specs — running cartridges no longer in
+    /// the set are killed; survivors keep their live process and stats.
+    /// `static_records` REPLACES the rejected-install set that rides every
+    /// advertisement (see [`CartridgeHostRuntime::set_static_inventory_records`]).
+    /// Passing them separately, with only the first refreshed, leaves a stale
+    /// rejection advertised forever over a cartridge that has since become
+    /// attachable — the two halves move together or not at all.
+    SyncRoster {
+        cartridges: Vec<RegisteredDirSpec>,
+        static_records: Vec<InstalledCartridgeRecord>,
+    },
     /// Deliver operator `configured` values for one cartridge's pools (the
     /// heartbeat is the config channel — see `bifaci::pools` and
     /// [`CartridgeHostRuntime::apply_desired_capacities`]). The reply
@@ -198,11 +210,23 @@ impl CartridgeProcessHandle {
         self.snapshot.read().unwrap().clone()
     }
 
-    /// Replace the live registered-dir roster (see [`HostCommand::SyncRoster`]).
+    /// Replace the live discovery picture — attachable specs AND the
+    /// rejected-install records that ride every advertisement (see
+    /// [`HostCommand::SyncRoster`]). Both halves come from one discovery pass,
+    /// so a cartridge that moves between them is corrected rather than
+    /// duplicated.
+    ///
     /// Returns `Err(())` if the host's run loop has exited.
-    pub fn sync_roster(&self, cartridges: Vec<RegisteredDirSpec>) -> Result<(), ()> {
+    pub fn sync_roster(
+        &self,
+        cartridges: Vec<RegisteredDirSpec>,
+        static_records: Vec<InstalledCartridgeRecord>,
+    ) -> Result<(), ()> {
         self.command_tx
-            .send(HostCommand::SyncRoster { cartridges })
+            .send(HostCommand::SyncRoster {
+                cartridges,
+                static_records,
+            })
             .map_err(|_| ())
     }
 
@@ -2633,8 +2657,12 @@ impl CartridgeHostRuntime {
                     );
                 }
             }
-            HostCommand::SyncRoster { cartridges } => {
-                self.sync_registered_roster(cartridges, outbound_tx).await?;
+            HostCommand::SyncRoster {
+                cartridges,
+                static_records,
+            } => {
+                self.sync_registered_roster(cartridges, static_records, outbound_tx)
+                    .await?;
             }
             HostCommand::ApplyDesiredCapacities {
                 cartridge_id,
@@ -2730,6 +2758,7 @@ impl CartridgeHostRuntime {
     async fn sync_registered_roster(
         &mut self,
         desired: Vec<RegisteredDirSpec>,
+        static_records: Vec<InstalledCartridgeRecord>,
         outbound_tx: &mpsc::UnboundedSender<Frame>,
     ) -> Result<(), AsyncHostError> {
         fn identity(
@@ -2851,6 +2880,13 @@ impl CartridgeHostRuntime {
                 &spec.cap_groups,
             );
         }
+
+        // The rejected-install half of the same discovery pass. Replaced
+        // wholesale, exactly like the attachable half above: a cartridge that
+        // was rejected last pass and is attachable now must STOP being
+        // advertised as rejected, or the engine and the UI keep reporting a
+        // failure reason for a cartridge that is serving requests.
+        self.static_inventory_records = static_records;
 
         self.update_cap_table();
         self.rebuild_capabilities(Some(outbound_tx));
@@ -6525,6 +6561,90 @@ mod tests {
         );
     }
 
+    // TEST1950: A roster sync REPLACES both halves of the discovery picture — an install advertised as rejected becomes attachable, with its failure reason gone and its caps routable, and is never advertised twice.
+    #[tokio::test]
+    async fn test1950_sync_roster_clears_a_rejected_install_that_became_attachable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("cartridge.json"),
+            r#"{"name":"heldcart","version":"1.0.0","channel":"release","registry_url":null,"entry":"bin","installed_at":"2026-01-01T00:00:00Z","installed_from":"dev"}"#,
+        )
+        .unwrap();
+        let entry = dir.path().join("bin");
+        std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
+
+        let mut runtime = CartridgeHostRuntime::new();
+
+        // The state a held cartridge is discovered in: no verdict yet, so the
+        // install is rejected and rides the advertisement with its reason.
+        runtime.set_static_inventory_records(vec![InstalledCartridgeRecord {
+            registry_url: None,
+            channel: crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+            id: "heldcart".to_string(),
+            version: "1.0.0".to_string(),
+            sha256: String::new(),
+            cap_groups: Vec::new(),
+            attachment_error: Some(CartridgeAttachmentError {
+                kind: CartridgeAttachmentErrorKind::RegistryUnreachable,
+                message: "registry verdict unavailable".to_string(),
+                detected_at_unix_seconds: 0,
+            }),
+            runtime_stats: None,
+            lifecycle: CartridgeLifecycle::Discovered,
+        }]);
+
+        let records = runtime.build_installed_cartridge_identities();
+        assert_eq!(records.len(), 1, "the held install is advertised");
+        assert_eq!(
+            records[0]
+                .attachment_error
+                .as_ref()
+                .expect("a held install names its reason")
+                .kind,
+            CartridgeAttachmentErrorKind::RegistryUnreachable
+        );
+
+        // The verdict arrives: the same install re-discovers as attachable, so
+        // the sync carries it as a spec and NO LONGER as a rejected record.
+        let (tx, _rx) = mpsc::unbounded_channel::<Frame>();
+        runtime
+            .sync_registered_roster(
+                vec![RegisteredDirSpec {
+                    entry_point: entry.clone(),
+                    version_dir: dir.path().to_path_buf(),
+                    id: "heldcart".to_string(),
+                    channel: crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+                    registry_url: None,
+                    version: "1.0.0".to_string(),
+                    cap_groups: cap_groups_from_urns(&[
+                        "cap:in=\"media:void\";held;out=\"media:void\"",
+                    ]),
+                }],
+                Vec::new(),
+                &tx,
+            )
+            .await
+            .expect("roster sync must succeed");
+
+        let records = runtime.build_installed_cartridge_identities();
+        assert_eq!(
+            records.len(),
+            1,
+            "the install is advertised ONCE — a stale rejected record beside \
+             the live one would report a failure for a cartridge that serves"
+        );
+        assert_eq!(records[0].id, "heldcart");
+        assert!(
+            records[0].attachment_error.is_none(),
+            "the rejection must be gone: it is the reason the operator is told \
+             the cartridge cannot attach, and it no longer holds"
+        );
+        assert!(
+            !records[0].cap_groups.is_empty(),
+            "an attachable install advertises its caps so the engine can route"
+        );
+    }
+
     // TEST7089: A cartridge whose HELLO permanently failed stays IN the inventory advertisement carrying a handshake_failed attachment error and no cap groups — failure is named, never silently absent; a roster-retired cartridge disappears entirely.
     #[tokio::test]
     async fn test7089_hello_failed_stays_in_inventory_with_error() {
@@ -6762,7 +6882,7 @@ mod tests {
             0,
         );
 
-        runtime.sync_registered_roster(vec![], &outbound_tx).await.unwrap();
+        runtime.sync_registered_roster(vec![], Vec::new(), &outbound_tx).await.unwrap();
 
         assert!(
             runtime.cartridges[0].removed && runtime.cartridges[0].hello_failed,
@@ -6816,12 +6936,12 @@ mod tests {
         runtime
             .incoming_rxids
             .insert((MessageId::Uint(1), MessageId::Uint(2)), 0);
-        runtime.sync_registered_roster(vec![], &outbound_tx).await.unwrap();
+        runtime.sync_registered_roster(vec![], Vec::new(), &outbound_tx).await.unwrap();
         assert!(runtime.cartridges[0].retiring_since.is_some());
 
         // The registry answers again and the roster is restored.
         runtime
-            .sync_registered_roster(vec![spec], &outbound_tx)
+            .sync_registered_roster(vec![spec], Vec::new(), &outbound_tx)
             .await
             .unwrap();
 
@@ -6856,7 +6976,7 @@ mod tests {
         let (mut runtime, _dir, _entry) = retire_fixture();
         let (outbound_tx, _outbound_rx) = mpsc::unbounded_channel();
 
-        runtime.sync_registered_roster(vec![], &outbound_tx).await.unwrap();
+        runtime.sync_registered_roster(vec![], Vec::new(), &outbound_tx).await.unwrap();
 
         assert!(runtime.cartridges[0].retiring_since.is_none());
         assert_eq!(
@@ -6923,22 +7043,25 @@ mod tests {
 
             // Add the cartridge live.
             handle
-                .sync_roster(vec![RegisteredDirSpec {
-                    entry_point: entry_clone,
-                    version_dir: dir_path,
-                    id: "latejoiner".to_string(),
-                    channel: crate::bifaci::cartridge_repo::CartridgeChannel::Release,
-                    registry_url: None,
-                    version: "1.0.0".to_string(),
-                    cap_groups: cap_groups_from_urns(&[
-                        "cap:in=\"media:void\";late;out=\"media:void\"",
-                    ]),
-                }])
+                .sync_roster(
+                    vec![RegisteredDirSpec {
+                        entry_point: entry_clone,
+                        version_dir: dir_path,
+                        id: "latejoiner".to_string(),
+                        channel: crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+                        registry_url: None,
+                        version: "1.0.0".to_string(),
+                        cap_groups: cap_groups_from_urns(&[
+                            "cap:in=\"media:void\";late;out=\"media:void\"",
+                        ]),
+                    }],
+                    Vec::new(),
+                )
                 .unwrap();
             let after_add = read_notify_ids(&mut r).await;
 
             // Remove it again (empty roster).
-            handle.sync_roster(vec![]).unwrap();
+            handle.sync_roster(vec![], Vec::new()).unwrap();
             let after_remove = read_notify_ids(&mut r).await;
 
             (initial, after_add, after_remove)
