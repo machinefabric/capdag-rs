@@ -625,7 +625,7 @@ impl Frame {
     /// (whose problem it is — declared at the error's definition site, see
     /// `capdag::AttributionClass`), the human message, and — when the emitter
     /// attributed the failure to ONE argument — the media URN of that
-    /// argument. ERR meta contract (docs/12.2): `code` + `attribution_class` +
+    /// argument. ERR meta contract (`../docs/12.2-frame-protocol.md`): `code` + `attribution_class` +
     /// `message`, all text, plus optional `arg_urn`; the key is ABSENT when
     /// unattributed, never an empty string.
     pub fn err(

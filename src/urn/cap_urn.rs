@@ -1382,7 +1382,7 @@ impl fmt::Display for CapUrn {
 ///
 /// This explicitly avoids flat-string comparison of the
 /// whole canonical form — per the URN rules in
-/// `docs/04-PREDICATES.md`, URNs must never be compared as
+/// `../docs/04-predicates.md`, URNs must never be compared as
 /// opaque strings, only via their structural components.
 ///
 /// `CapUrn::new` / `CapUrn::from_string` guarantee that the

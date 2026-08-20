@@ -383,7 +383,7 @@ impl CartridgeRuntimeStats {
 /// version, sha256)` — five flat strings/enums that ARE totally
 /// ordered. The `cap_groups` field, on the other hand, contains
 /// `Cap` URNs whose semantic order is the triple partial order of
-/// `(in, out, y)` with mixed variance (see `docs/02-FORMAL-FOUNDATIONS.md`).
+/// `(in, out, y)` with mixed variance (see `../docs/02-formal-foundations.md`).
 /// Cap URNs intentionally do NOT implement `Ord`: a totally-ordered
 /// `Ord::cmp` would either flatten the 3D mixed-variance domain (one
 /// of capdag's documented failure modes — §18 of formal foundations)
@@ -8426,4 +8426,3 @@ mod tests {
         );
     }
 }
-

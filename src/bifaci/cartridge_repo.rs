@@ -1089,7 +1089,7 @@ impl CartridgeRepo {
         // "find anything that would match" (get_cartridges_by_cap). Choosing
         // dispatch here would let a cartridge declaring a more-general cap
         // silently stand in for the exact cap the alias named — a surprising,
-        // non-deterministic substitution. See capdag/docs/07-dispatch.md,
+        // non-deterministic substitution. See ../docs/07-dispatch.md,
         // "Resolution vs. dispatch: which predicate?".
         //
         // Equivalence is decided on in/out/effect by the CapUrn parser, NEVER by
@@ -1525,7 +1525,7 @@ impl CartridgeRepoServer {
     /// `is_dispatchable`, the dispatch predicate — "can this declared
     /// candidate cap legally handle the requested pattern?" (input
     /// contravariant, output covariant, tags invariant; see
-    /// capdag/docs/07-dispatch.md). This is deliberately LOOSER than
+    /// ../docs/07-dispatch.md). This is deliberately LOOSER than
     /// the equivalence used to resolve an alias to its exact candidate:
     /// here we enumerate everything capable, not the one exact match.
     /// The `op` tag has no functional role in matching — only the

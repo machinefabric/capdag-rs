@@ -46,7 +46,7 @@ pub mod standard;
 pub mod urn;
 
 // The failure taxonomy — declared at every error's definition site, carried
-// structurally through the ERR frame to the engine (docs/17.2). Defined in
+// structurally through the ERR frame to the engine (`../docs/17.2-error-handling.md`). Defined in
 // the leaf `ops` crate; re-exported here as the cartridge-contract surface.
 pub use ops_rs::failure;
 pub use ops_rs::failure::AttributionClass;
@@ -351,4 +351,3 @@ pub use input_resolver::{
     ResolvedFile, ResolvedInputSet, ValueAdapter, ValueAdapterRegistry, ValueAdapterResult,
     MAX_CONTENT_INSPECTION_BYTES,
 };
-

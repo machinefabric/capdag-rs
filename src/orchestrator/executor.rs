@@ -13,7 +13,7 @@
 //!
 //! Architecture:
 //! ```text
-//!   macino ←→ RelaySwitch ←→ RelaySlave ←→ CartridgeHostRuntime ←→ Cartridge A
+//!   capdag CLI ←→ RelaySwitch ←→ RelaySlave ←→ CartridgeHostRuntime ←→ Cartridge A
 //!                                                             ←→ Cartridge B
 //!                                                             ←→ Cartridge C
 //! ```
@@ -823,7 +823,7 @@ impl CartridgeManager {
         // exact match), the SAME relation the registry path uses in
         // `get_suggestions_for_cap`. Using the looser `is_dispatchable` here
         // would let a dev cartridge declaring a more-general cap short-circuit
-        // the exact cap the alias named. See capdag/docs/07-dispatch.md,
+        // the exact cap the alias named. See ../docs/07-dispatch.md,
         // "Resolution vs. dispatch: which predicate?".
         for (bin_path, manifest) in &self.dev_cartridges {
             for cap in manifest.all_caps() {

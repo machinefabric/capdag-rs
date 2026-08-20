@@ -1,296 +1,108 @@
-# CapDag - Cap Namespace System
+# CapDAG
 
-A capability URN and definition system for cartridge architectures, built on [Tagged URNs](https://github.com/machinefabric/tagged-urn-rs).
+CapDAG is the reference implementation of MachineFabric’s capability-addressed
+planning and execution protocol. It defines capability and media URNs, dispatch,
+machine notation, the bifaci frame protocol, cartridge hosting, orchestration,
+and the `capdag` command-line product.
 
-## Overview
+This repository is public. It documents public protocol and product behavior;
+private MachineFabric release operations and signing-key custody are not part of
+this repository.
 
-CapDAG provides a formal system for defining, matching, and managing capabilities across distributed cartridge systems. It extends Tagged URNs with:
+## Choose documentation by what you need
 
-- **Required direction specifiers** (`in`/`out`) for input/output media types
-- **Media URN validation** for type-safe capability contracts
-- **Capability registries** for candidate discovery and selection
-- **Schema validation** for capability arguments and outputs
+### Learn cartridge development
 
-The system is designed for scenarios where:
-- Multiple candidates can implement the same capability
-- Capability selection should prioritize specificity
-- Runtime capability discovery and validation is required
-- Cross-language compatibility is needed
+[Build and run a cartridge](https://github.com/machinefabric/capdag/blob/main/docs/18.2-getting-started-cartridge-development.md)
+is a guided create, install, run, and edit journey using the canonical starter
+projects.
 
-## Cap URN Format
+### Complete a task
 
-Cap URNs extend Tagged URNs with required direction specifiers:
+- [Develop a cartridge](https://github.com/machinefabric/capdag/blob/main/docs/18.2-getting-started-cartridge-development.md)
+- [Run one capability or a machine](https://github.com/machinefabric/capdag/blob/main/docs/18.1-cli-reference.md)
+- [Contribute capability and media definitions](https://github.com/machinefabric/capdag/blob/main/docs/99-contributing.md)
 
-```
-cap:in="media:void";generate;out="media:object"
-cap:in="media:binary";extract;out="media:object";target=metadata
-```
+### Look up exact behavior
 
-**Direction Specifiers:**
-- `in` - Input media type (what the capability accepts)
-- `out` - Output media type (what the capability produces)
-- Values are Media URNs or wildcard `*`
+- [Specification map and terminology](https://github.com/machinefabric/capdag/blob/main/docs/01-overview.md)
+- [Tagged URN domain](https://github.com/machinefabric/capdag/blob/main/docs/03-tagged-urn-domain.md)
+- [Capability URN structure](https://github.com/machinefabric/capdag/blob/main/docs/06-cap-urn-structure.md)
+- [Dispatch](https://github.com/machinefabric/capdag/blob/main/docs/07-dispatch.md)
+- [Machine notation](https://github.com/machinefabric/capdag/blob/main/docs/09-machine-notation.md)
+- [Bifaci protocol](https://github.com/machinefabric/capdag/blob/main/docs/12.1-architecture.md)
+- [Cartridge runtime](https://github.com/machinefabric/capdag/blob/main/docs/13.1-cartridge-runtime.md)
+- [Planner and execution](https://github.com/machinefabric/capdag/blob/main/docs/15.4-planner.md)
+- [`capdag` CLI](https://github.com/machinefabric/capdag/blob/main/docs/18.1-cli-reference.md)
 
-**Common Tags:**
-- `op` - The operation (e.g., `extract`, `generate`, `convert`)
-- `target` - What the operation targets (e.g., `metadata`, `thumbnail`)
-- `ext` - File extension for format-specific capabilities
+### Understand the design
 
-For base Tagged URN format rules (case handling, quoting, wildcards, etc.), see [Tagged URN RULES.md](https://github.com/machinefabric/tagged-urn-rs/blob/main/docs/RULES.md).
+- [Formal foundations](https://github.com/machinefabric/capdag/blob/main/docs/02-formal-foundations.md)
+- [Specificity and ranking](https://github.com/machinefabric/capdag/blob/main/docs/05-specificity.md)
+- [Relay topology](https://github.com/machinefabric/capdag/blob/main/docs/14.3-relay-topology.md)
+- [Rust and Swift implementation differences](https://github.com/machinefabric/capdag/blob/main/docs/16.5-rust-vs-swift.md)
 
-## Cap Definitions
+## What CapDAG provides
 
-Full capability definitions include metadata, arguments, and output schemas:
+- Parsed tagged, media, and capability URN types with normalization and
+  matching predicates.
+- Manifest-aware fabric resolution for versioned capabilities, media
+  definitions, and aliases.
+- Machine notation parsing, graph resolution, planning, and unified execution.
+- Bifaci v4 framing, multiplexed streams, credit-based flow control, diagnostic
+  attribution, cancellation, and handler-capacity advertisement.
+- Cartridge and host runtimes, relay components, discovery, and integrity
+  verification.
+- The `capdag` CLI for running one capability, planning and running machines,
+  inspecting the fabric, warming the cartridge cache, and scaffolding local
+  cartridge projects.
 
-```rust
-pub struct Cap {
-    pub id: CapUrn,
-    pub version: String,
-    pub description: Option<String>,
-    pub metadata: HashMap<String, String>,
-    pub command: String,
-    pub arguments: CapArguments,
-    pub output: Option<CapOutput>,
-    pub stdin: Option<String>,
-}
-```
+## Language family
 
-**Key Fields:**
-- `id` - The cap URN with direction specifiers
-- `command` - CLI command or method name for execution
-- `arguments` - Required and optional argument definitions with validation
-- `output` - Output schema and type information
-- `stdin` - If present, the media URN that stdin expects (e.g., "media:bytes;ext=pdf"). Absence means cap doesn't accept stdin.
+Rust is the reference implementation. Go, Python, JavaScript, and
+Swift/Objective-C mirrors implement the portions applicable to their role.
+Shared numbered tests use the same number for the same behavior in every mirror
+that implements it. Numbers `0001`–`7999` are shared; `8000` and above are
+implementation-specific.
 
-## Language Implementations
+JavaScript intentionally stops at the planner and notation surface; it does not
+provide a cartridge runtime, host, or relay. This is a defined difference in
+scope, not a parity defect.
 
-### Rust (`capdag`)
+## Use CapDAG as a Rust dependency
 
-```rust
-use capdag::{CapUrn, Cap, CapUrnBuilder};
+CapDAG is resolved from a release tag rather than crates.io. Pin an explicit
+published tag:
 
-// Create cap URN
-let cap = CapUrn::from_string(
-    "cap:in=\"media:binary\";extract;out=\"media:object\";target=metadata"
-)?;
-
-// Build with builder pattern
-let cap = CapUrnBuilder::new()
-    .in_spec("media:binary")
-    .out_spec("media:object")
-    .tag("op", "extract")
-    .tag("target", "metadata")
-    .build()?;
+```toml
+[dependencies]
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v<version>" }
 ```
 
-### Go (`capdag-go`)
+Builds that resolve fabric or cartridge registries require explicit registry
+version and trust inputs. Product and workspace build systems supply those
+inputs; `build.rs` refuses an ambiguous build instead of selecting defaults.
 
-```go
-import "github.com/machfab/capdag-go"
+## Contract summary
 
-// Create cap URN
-cap, err := capdag.NewCapUrnFromString(
-    `cap:in="media:binary";extract;out="media:object"`)
+- URNs are opaque parsed values. Use their predicates; do not split or compare
+  their strings for routing.
+- `in` and `out` are the directional capability coordinates. Other capability
+  tags are descriptive constraints; `effect` defines the output media-identity
+  transformation.
+- `media:` is the top media type and `media:void` is the atomic unit type.
+- File type, serialization format, and character encoding use `ext=`, `fmt=`,
+  and `enc=` respectively.
+- Stream cardinality is carried by `is_sequence`; structural tags such as
+  `list` do not encode cardinality.
+- Abstract capabilities are dispatch umbrellas. They are not runnable graph
+  edges and must narrow to a concrete specialization.
+- Protocol violations and missing registry definitions fail explicitly. There
+  is no compatibility decoder for earlier bifaci wire versions.
 
-// Build with builder pattern
-cap, err = capdag.NewCapUrnBuilder().
-    InSpec("media:binary").
-    OutSpec("media:object").
-    Tag("op", "extract").
-    Build()
-```
-
-### Objective-C (`capdag-objc`)
-
-```objc
-#import "CSCapUrn.h"
-
-// Create cap URN
-NSError *error;
-CSCapUrn *cap = [CSCapUrn fromString:
-    @"cap:in=\"media:binary\";extract;out=\"media:object\""
-    error:&error];
-
-// Build with builder pattern
-CSCapUrnBuilder *builder = [CSCapUrnBuilder builder];
-[builder inSpec:@"media:binary"];
-[builder outSpec:@"media:object"];
-[builder tag:@"op" value:@"extract"];
-CSCapUrn *cap = [builder build:&error];
-```
-
-## Capability Matching
-
-Capabilities match requests based on per-tag value semantics:
-
-| Pattern Value | Meaning | Instance Missing | Instance=v | Instance=x≠v |
-|---------------|---------|------------------|------------|--------------|
-| (missing) | No constraint | OK | OK | OK |
-| `K=?` | No constraint (explicit) | OK | OK | OK |
-| `K=!` | Must-not-have | OK | NO | NO |
-| `K=*` | Must-have, any value | NO | OK | OK |
-| `K=v` | Must-have, exact value | NO | OK | NO |
-
-```rust
-let candidate = CapUrn::from_string(
-    "cap:in=\"media:binary\";extract;out=\"media:object\";ext=pdf")?;
-let request = CapUrn::from_string(
-    "cap:in=\"media:binary\";extract;out=\"media:object\"")?;
-
-// For dispatch/routing, use is_dispatchable
-if candidate.is_dispatchable(&request) {
-    println!("Candidate can dispatch this request");
-}
-```
-
-Specificity uses graded scoring (exact=3, must-have-any=2, must-not-have=1, unspecified=0):
-
-```rust
-let general = CapUrn::from_string("cap:in=*;extract;out=*")?;        // specificity: 3+2+2 = 7
-let specific = CapUrn::from_string(
-    "cap:in=\"media:binary\";extract;out=\"media:object\"")?;        // specificity: 3+3+3 = 9
-
-// specific.specificity() > general.specificity()
-```
-
-## Standard Capabilities
-
-Common capability patterns:
-
-**Document Processing:**
-- `cap:in="media:binary";extract;out="media:object";target=metadata`
-- `cap:in="media:binary";generate;out="media:binary";target=thumbnail`
-
-**AI/ML Inference:**
-- `cap:in="media:text";generate;out="media:object";target=embeddings`
-- `cap:in="media:object";conversation;out="media:object"`
-
-## Integration
-
-### Candidate Registration
-
-```rust
-let cap = CapUrn::from_string("cap:in=...;extract;out=...;ext=pdf")?;
-candidate_registry.register("pdf-candidate", cap);
-
-// Find best candidate
-let caller = candidate_registry.can("cap:in=...;extract;out=...")?;
-let result = caller.call(args).await?;
-```
-
-### CapBlock (Multi-Candidate)
-
-```rust
-let cube = CapBlock::new();
-cube.register_cap_set("candidate-a", caps_a);
-cube.register_cap_set("candidate-b", caps_b);
-
-// Automatically selects best candidate by specificity
-let (candidate, cap) = cube.find_best_match(&request)?;
-```
-
-## Documentation
-
-- [RULES.md](docs/RULES.md) - Cap URN specification (cap-specific rules)
-- [MATCHING.md](docs/MATCHING.md) - Matching semantics
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
-- [MEDIA_DEF_SYSTEM.md](docs/MEDIA_DEF_SYSTEM.md) - Media definition system
-- [PERFORMANCE.md](docs/PERFORMANCE.md) - Cross-language throughput measurements
-- [Tagged URN RULES.md](https://github.com/machinefabric/tagged-urn-rs/blob/main/docs/RULES.md) - Base URN format rules
-
-## Cross-Language Compatibility
-
-This Rust implementation is the reference. Identical implementations exist for:
-- [Go implementation](https://github.com/machinefabric/capdag-go)
-- [JavaScript implementation](https://github.com/machinefabric/capdag-js)
-- [Objective-C implementation](https://github.com/machinefabric/capdag-objc)
-
-All implementations pass the same test cases and follow identical rules.
-
-## Testing
-
-```bash
-cargo test
-```
-
-## Performance
-
-Tests conducted on a MacBook M1 Pro (2021) with 16GB RAM running macOS Tahoe 26.3.1 (a), using the identity cap. Each host language (Rust, Go, Python, Swift) was tested with cartridges implemented in each of the four languages, measuring throughput in streaming MB/s.
-
-### Throughput Matrix (MB/s) — Router: Rust
-
-| host \ cartridge | rust | go | python | swift |
-|---|---:|---:|---:|---:|
-| **rust** | 30.66 | 87.83 | 1.91 | 69.12 |
-| **go** | 48.37 | 92.97 | 1.93 | 73.15 |
-| **python** | -- | -- | -- | -- |
-| **swift** | 45.30 | 103.75 | 2.05 | 76.63 |
-
-### Throughput Matrix (MB/s) — Router: Swift
-
-| host \ cartridge | rust | go | python | swift |
-|---|---:|---:|---:|---:|
-| **rust** | 64.76 | 102.05 | 1.86 | 71.33 |
-| **go** | 58.31 | 92.35 | 1.89 | 62.83 |
-| **python** | -- | -- | -- | -- |
-| **swift** | 78.64 | 89.90 | 1.74 | 70.26 |
-
-### Ranking (fastest to slowest)
-
-| # | router-host-cartridge | MB/s |
-|---:|---|---:|
-| 1 | rust-swift-go | 103.75 |
-| 2 | swift-rust-go | 102.05 |
-| 3 | rust-go-go | 92.97 |
-| 4 | swift-go-go | 92.35 |
-| 5 | swift-swift-go | 89.90 |
-| 6 | rust-rust-go | 87.83 |
-| 7 | swift-swift-rust | 78.64 |
-| 8 | rust-swift-swift | 76.63 |
-| 9 | rust-go-swift | 73.15 |
-| 10 | swift-rust-swift | 71.33 |
-| 11 | swift-swift-swift | 70.26 |
-| 12 | rust-rust-swift | 69.12 |
-| 13 | swift-rust-rust | 64.76 |
-| 14 | swift-go-swift | 62.83 |
-| 15 | swift-go-rust | 58.31 |
-| 16 | rust-go-rust | 48.37 |
-| 17 | rust-swift-rust | 45.30 |
-| 18 | rust-rust-rust | 30.66 |
-| 19 | rust-swift-python | 2.05 |
-| 20 | rust-go-python | 1.93 |
-| 21 | rust-rust-python | 1.91 |
-| 22 | swift-go-python | 1.89 |
-| 23 | swift-rust-python | 1.86 |
-| 24 | swift-swift-python | 1.74 |
-
-```
-  swift-swift-python            █                                                1.74 MB/s
-  swift-rust-python             █                                                1.86 〃
-  swift-go-python               █                                                1.89 〃
-  rust-rust-python              █                                                1.91 〃
-  rust-go-python                █                                                1.93 〃
-  rust-swift-python             █                                                2.05 〃
-  rust-rust-rust                █████████████                                   30.66 〃
-  rust-swift-rust               ████████████████████                            45.30 〃
-  rust-go-rust                  █████████████████████                           48.37 〃
-  swift-go-rust                 █████████████████████████                       58.31 〃
-  swift-go-swift                ███████████████████████████                     62.83 〃
-  swift-rust-rust               ████████████████████████████                    64.76 〃
-  rust-rust-swift               ██████████████████████████████                  69.12 〃
-  swift-swift-swift             ██████████████████████████████                  70.26 〃
-  swift-rust-swift              ███████████████████████████████                 71.33 〃
-  rust-go-swift                 ████████████████████████████████                73.15 〃
-  rust-swift-swift              █████████████████████████████████               76.63 〃
-  swift-swift-rust              ██████████████████████████████████              78.64 〃
-  rust-rust-go                  ██████████████████████████████████████          87.83 〃
-  swift-swift-go                ███████████████████████████████████████         89.90 〃
-  swift-go-go                   ████████████████████████████████████████        92.35 〃
-  rust-go-go                    ████████████████████████████████████████        92.97 〃
-  swift-rust-go                 ████████████████████████████████████████████   102.05 〃
-  rust-swift-go                 █████████████████████████████████████████████  103.75 〃
-```
+The normative details and conformance conditions are in the
+[specification](https://github.com/machinefabric/capdag/blob/main/docs/01-overview.md).
 
 ## License
 
-MIT License
+MIT License.

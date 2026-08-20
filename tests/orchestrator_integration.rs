@@ -421,7 +421,7 @@ fn create_test_fabric_registry() -> Arc<FabricRegistry> {
 }
 
 // =============================================================================
-// Phase 1: Basic macino Functionality with testcartridge
+// Phase 1: Basic capdag CLI Functionality with testcartridge
 // =============================================================================
 
 // TEST919: Parse simple machine notation graph with test-edge1

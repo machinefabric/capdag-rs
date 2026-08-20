@@ -19,7 +19,7 @@
 //! 2. **Structure** - opaque vs record
 //!    - Detected from `record` marker tag
 //!
-//! Both machfab (desktop app) and macino (CLI harness) use this same code.
+//! Both machfab (desktop app) and capdag CLI (CLI harness) use this same code.
 
 use thiserror::Error;
 
