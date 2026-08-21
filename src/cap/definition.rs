@@ -84,7 +84,14 @@ impl ArgSource {
 }
 
 /// Cap argument definition - media_urn is the unique identifier
+///
+/// `deny_unknown_fields`: a definition carrying a key this type does not know
+/// is a fabric NEWER than this capdag — a contract this build cannot honour.
+/// Dropping the key would let a cartridge advertise a contract the fabric
+/// never made (this is how a `streaming` argument once went out as bounded).
+/// It is refused at the parse, with the key named.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CapArg {
     /// Unique media URN for this argument
     pub media_urn: String,
@@ -253,7 +260,11 @@ impl CapArg {
 ///
 /// The `media_urn` field contains a media URN (e.g., "media:object") that
 /// the unified `FabricRegistry` resolves on demand.
+///
+/// `deny_unknown_fields` for the same reason as `CapArg`: an unknown key is a
+/// newer fabric, refused rather than silently narrowed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CapOutput {
     /// Media URN referencing a media definition
     /// e.g., "media:object" or a custom media URN like "media:my-output"
@@ -1808,6 +1819,23 @@ mod tests {
         );
 
         assert_eq!(cap.sequence_shape(), (false, false));
+    }
+
+    // TEST1964: a definition field this capdag does not know is a NEWER
+    // fabric, not noise — parsing refuses it, naming the key, for arguments
+    // and outputs alike. The field being dropped is how a cartridge built on an
+    // older capdag once advertised a `streaming` input as bounded.
+    #[test]
+    fn test1964_unknown_definition_field_is_refused() {
+        let arg = r#"{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"chunking":"adaptive"}"#;
+        let err = serde_json::from_str::<CapArg>(arg).expect_err("unknown arg field must be refused");
+        assert!(err.to_string().contains("chunking"), "{err}");
+        let known = r#"{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"streaming":true}"#;
+        assert!(serde_json::from_str::<CapArg>(known).unwrap().streaming);
+
+        let out = r#"{"media_urn":"media:enc=utf-8","output_description":"x","windowed":true}"#;
+        let err = serde_json::from_str::<CapOutput>(out).expect_err("unknown output field must be refused");
+        assert!(err.to_string().contains("windowed"), "{err}");
     }
 
     // TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire
