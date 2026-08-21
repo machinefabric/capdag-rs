@@ -11,7 +11,7 @@
 //! phase tracking, and a bounded ring of recently-terminated summaries feed the
 //! protocol stats snapshots (L8) without retaining routing state.
 
-use crate::bifaci::frame::{Frame, FrameType, MessageId};
+use crate::bifaci::frame::{CancelReason, Frame, FrameType, MessageId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -594,6 +594,20 @@ pub struct TerminatedSummary {
     pub xid: String,
     pub rid: String,
     pub kind: TerminalKind,
+    /// WHY a `Cancelled` termination happened — the Cancel's attribution, in
+    /// the ERR vocabulary: the terminal code (`CANCELLED` /
+    /// `ABORTED_COLLATERAL` / `ABORTED`, always present for a cancelled kind),
+    /// the class (`user` for an operator's cancel, the originating failure's
+    /// class for collateral, the host's for a host abort; None when the
+    /// cancel was unattributed), and the reason. Never present for any other
+    /// kind. Surfaces read it to say "aborted — step X failed" instead of
+    /// the one word "cancelled".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_class: Option<crate::failure::AttributionClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_reason: Option<String>,
     pub is_peer: bool,
     #[serde(default)]
     pub cap_urn: Option<String>,
@@ -687,7 +701,42 @@ impl RequestTable {
     /// cascades, the external channel for final delivery). After this returns,
     /// zero state for the key remains (L7). Returns None if the key is not
     /// live (already terminated — termination happens exactly once).
+    ///
+    /// `Cancelled` terminations go through [`Self::terminate_cancelled`] —
+    /// a cancellation without a cause is not a state this table represents.
     pub fn terminate(&mut self, key: &RequestKey, kind: TerminalKind) -> Option<RequestState> {
+        assert!(
+            kind != TerminalKind::Cancelled,
+            "RequestTable::terminate: Cancelled terminations carry a cause — use terminate_cancelled"
+        );
+        self.terminate_with(key, kind, None, None, None)
+    }
+
+    /// Terminate a request as cancelled, recording WHY (the Cancel frame's
+    /// attribution) on its summary. An unattributed reason records the
+    /// terminal code `CANCELLED` and no class.
+    pub fn terminate_cancelled(
+        &mut self,
+        key: &RequestKey,
+        reason: &CancelReason,
+    ) -> Option<RequestState> {
+        self.terminate_with(
+            key,
+            TerminalKind::Cancelled,
+            Some(reason.terminal_code().to_string()),
+            reason.class,
+            reason.message.clone(),
+        )
+    }
+
+    fn terminate_with(
+        &mut self,
+        key: &RequestKey,
+        kind: TerminalKind,
+        cancel_code: Option<String>,
+        cancel_class: Option<crate::failure::AttributionClass>,
+        cancel_reason: Option<String>,
+    ) -> Option<RequestState> {
         let state = self.entries.remove(key)?;
         // Only remove the rid index if it points at THIS xid — a re-used RID
         // under another XID (never valid per register, but defensive against
@@ -714,6 +763,9 @@ impl RequestTable {
             xid: key.0.to_string(),
             rid: key.1.to_string(),
             kind,
+            cancel_code,
+            cancel_class,
+            cancel_reason,
             is_peer: state.is_peer,
             cap_urn: state.cap_urn.clone(),
             lifetime_ms: state.created_at.elapsed().as_millis() as u64,
@@ -760,6 +812,13 @@ impl RequestTable {
     pub fn recently_terminated_rid(&self, rid: &MessageId) -> bool {
         let rid = rid.to_string();
         self.recent_terminated.iter().any(|s| s.rid == rid)
+    }
+
+    /// How a recently terminated RID ended (newest summary for the RID), or
+    /// None when the RID is live or unknown within the ring's horizon.
+    pub fn recent_terminal_of_rid(&self, rid: &MessageId) -> Option<&TerminatedSummary> {
+        let rid = rid.to_string();
+        self.recent_terminated.iter().rev().find(|s| s.rid == rid)
     }
 
     /// Record a frame moving through the runtime for this request.
@@ -1482,7 +1541,7 @@ mod tests {
             let checksum = Frame::compute_checksum(&payload);
             let chunk = Frame::chunk(MessageId::Uint(n), "s".to_string(), 0, payload, 0, checksum);
             table.record_frame(&k, FrameDirection::Inbound, &chunk);
-            table.terminate(&k, TerminalKind::Cancelled).unwrap();
+            table.terminate_cancelled(&k, &CancelReason::user(false)).unwrap();
         }
         let snap = table.snapshot();
         assert_eq!(snap.recent_terminated.len(), RECENT_TERMINATED_CAP);
@@ -1493,6 +1552,8 @@ mod tests {
         );
         let last = snap.recent_terminated.last().unwrap();
         assert_eq!(last.kind, TerminalKind::Cancelled);
+        assert_eq!(last.cancel_code.as_deref(), Some("CANCELLED"));
+        assert_eq!(last.cancel_class, Some(crate::failure::AttributionClass::User));
         assert!(last.is_peer);
         assert_eq!(last.frames_in, 1);
         assert_eq!(last.bytes_in, 10);

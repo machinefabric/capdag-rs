@@ -472,6 +472,7 @@ mod tests {
             "media:chunk-size;numeric",
             false,
             false,
+            false,
             vec![ArgSource::CliFlag {
                 cli_flag: "--chunk-size".to_string(),
             }],
@@ -481,6 +482,7 @@ mod tests {
         ));
         cap.add_arg(CapArg::with_full_definition(
             "media:bool;enc=utf-8;timestamps",
+            false,
             false,
             false,
             vec![ArgSource::CliFlag {

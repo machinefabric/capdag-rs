@@ -23,7 +23,16 @@
 //!   15: chunk_count (u64, optional - total chunks in STREAM_END, by source's count)
 //!   16: checksum (u64, optional - FNV-1a hash of payload for CHUNK frames)
 //!   17: is_sequence (bool, optional - true if producer used emit_list_item, false if write)
+//!   18: force_kill (bool, Cancel frames - kill the process instead of cooperating)
+//!   19: credit (u64, Credit frames - flow-control grant in CHUNK units)
+//!   20: unbounded (bool, STREAM_START frames - the stream makes no length promise)
 //! }
+//!
+//! A Cancel frame is attributed like an ERR frame, through `meta`:
+//! `meta.code` / `meta.attribution_class` / `meta.message` say WHY the request
+//! is being cancelled (all optional — an unattributed Cancel still cancels).
+//! A CloseStream frame (14) is the tap-off: close the request's live input
+//! stream(s) and let it drain; it is not a cancel.
 //! ```
 //!
 //! ## Frame Types
@@ -93,11 +102,18 @@ pub enum FrameType {
     /// stream. Non-flow: bypasses seq assignment and reorder buffers, and is
     /// forwarded end-to-end by intermediaries (never originated or absorbed).
     Credit = 13,
+    /// Close a request's live input stream(s) — the tap-off (15.2 §Runs
+    /// Stop). The receiving runtime closes the request's open feed taps; the
+    /// request then drains and ends NATURALLY with END and complete outputs.
+    /// Not a cancel: host-side request state is untouched and nothing is
+    /// aborted. `stream_id` (key 11) names one stream; absent means every
+    /// live feed the request holds.
+    CloseStream = 14,
 }
 
 impl FrameType {
     /// All variants, for counter arrays and snapshot serialization.
-    pub const ALL: [FrameType; 13] = [
+    pub const ALL: [FrameType; 14] = [
         FrameType::Hello,
         FrameType::Req,
         FrameType::Chunk,
@@ -111,6 +127,7 @@ impl FrameType {
         FrameType::RelayState,
         FrameType::Cancel,
         FrameType::Credit,
+        FrameType::CloseStream,
     ];
 
     /// Stable snake_case name (the snapshot contract for mirrors and traces).
@@ -129,6 +146,7 @@ impl FrameType {
             FrameType::RelayState => "relay_state",
             FrameType::Cancel => "cancel",
             FrameType::Credit => "credit",
+            FrameType::CloseStream => "close_stream",
         }
     }
 
@@ -148,6 +166,7 @@ impl FrameType {
             11 => Some(FrameType::RelayState),
             12 => Some(FrameType::Cancel),
             13 => Some(FrameType::Credit),
+            14 => Some(FrameType::CloseStream),
             _ => None,
         }
     }
@@ -284,6 +303,132 @@ pub struct Frame {
     /// Whether the stream makes no length promise (no chunk_count on STREAM_END,
     /// receivers must consume incrementally). Present on STREAM_START frames only.
     pub unbounded: Option<bool>,
+}
+
+/// WHY a request is being cancelled — the attribution a Cancel frame carries
+/// in its `meta`, in the SAME vocabulary as an ERR frame (`code`,
+/// `attribution_class`, `message`; docs/failure-taxonomy.md). Every part is
+/// optional: an unattributed Cancel still cancels. The reason is recorded on
+/// the request's terminal (the switch's terminated ring, the run's flow
+/// states) and becomes the terminal ERR the cancelled request ends with, so
+/// a surface can say "aborted — step X failed" instead of the one word
+/// "cancelled", which is reserved for a cancel attributed to the `user`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CancelReason {
+    /// Whose decision/fault the cancellation is: `user` for an operator's
+    /// cancel, the ORIGINATING failure's class for a collateral teardown,
+    /// `environment`/`resource` for a host's own abort. None = unattributed.
+    pub class: Option<crate::failure::AttributionClass>,
+    /// The terminal code the request ends with (`CANCELLED`,
+    /// `ABORTED_COLLATERAL`, `ABORTED`, …). None = `CANCELLED`.
+    pub code: Option<String>,
+    /// The human reason: the failed step for collateral, the host's reason.
+    pub message: Option<String>,
+    /// Kill the cartridge process instead of cancelling cooperatively.
+    pub force_kill: bool,
+}
+
+/// Terminal code of a cancel attributed to the operator.
+pub const CANCEL_CODE_CANCELLED: &str = "CANCELLED";
+/// Terminal code of a cancel that is collateral of a failure elsewhere in the run.
+pub const CANCEL_CODE_ABORTED_COLLATERAL: &str = "ABORTED_COLLATERAL";
+/// Terminal code of a cancel the host decided on its own.
+pub const CANCEL_CODE_ABORTED: &str = "ABORTED";
+
+impl CancelReason {
+    /// An unattributed cancel: it cancels, and its terminal says only that.
+    pub fn unattributed(force_kill: bool) -> Self {
+        Self { force_kill, ..Self::default() }
+    }
+
+    /// The operator cancelled the run — the one reason that reads "cancelled".
+    pub fn user(force_kill: bool) -> Self {
+        Self {
+            class: Some(crate::failure::AttributionClass::User),
+            code: Some(CANCEL_CODE_CANCELLED.to_string()),
+            message: Some("Cancelled by user".to_string()),
+            force_kill,
+        }
+    }
+
+    /// Another step of the same run failed; the cancel carries THAT failure's
+    /// class and names it.
+    pub fn collateral(class: crate::failure::AttributionClass, detail: impl Into<String>) -> Self {
+        Self {
+            class: Some(class),
+            code: Some(CANCEL_CODE_ABORTED_COLLATERAL.to_string()),
+            message: Some(detail.into()),
+            force_kill: false,
+        }
+    }
+
+    /// The host aborted the run for a reason of its own; `class` is the
+    /// host's attribution of that reason (stale → environment, memory
+    /// pressure → resource).
+    pub fn host(class: crate::failure::AttributionClass, detail: impl Into<String>, force_kill: bool) -> Self {
+        Self {
+            class: Some(class),
+            code: Some(CANCEL_CODE_ABORTED.to_string()),
+            message: Some(detail.into()),
+            force_kill,
+        }
+    }
+
+    /// Whether this reason is the operator's own cancel.
+    pub fn is_user(&self) -> bool {
+        self.class == Some(crate::failure::AttributionClass::User)
+    }
+
+    /// The terminal ERR code a request cancelled under this reason ends with.
+    pub fn terminal_code(&self) -> &str {
+        self.code.as_deref().unwrap_or(CANCEL_CODE_CANCELLED)
+    }
+
+    /// The terminal ERR class: the reason's own, or `internal` when none was
+    /// declared (unclassified means "ours", docs/failure-taxonomy.md).
+    pub fn terminal_class(&self) -> crate::failure::AttributionClass {
+        self.class.unwrap_or(crate::failure::AttributionClass::Internal)
+    }
+
+    /// The terminal ERR message for a request cancelled under this reason.
+    pub fn terminal_message(&self) -> String {
+        match (self.code.as_deref(), self.message.as_deref()) {
+            (None, Some(message)) => format!("Request cancelled: {message}"),
+            (Some(CANCEL_CODE_ABORTED_COLLATERAL), Some(detail)) => {
+                format!("Request aborted as collateral of a failure elsewhere in the run: {detail}")
+            }
+            (Some(CANCEL_CODE_ABORTED_COLLATERAL), None) => {
+                "Request aborted as collateral of a failure elsewhere in the run".to_string()
+            }
+            (Some(CANCEL_CODE_ABORTED), Some(detail)) => format!("Request aborted by the host: {detail}"),
+            (Some(CANCEL_CODE_ABORTED), None) => "Request aborted by the host".to_string(),
+            (Some(CANCEL_CODE_CANCELLED), Some(message)) => message.to_string(),
+            (Some(code), Some(message)) => format!("{code}: {message}"),
+            (Some(code), None) => format!("Request cancelled ({code})"),
+            (None, None) => "Request cancelled".to_string(),
+        }
+    }
+
+    /// The reason a Cancel frame carries (None for a non-Cancel frame). Read
+    /// from `meta` exactly as an ERR's attribution is; a Cancel with no meta
+    /// is an unattributed cancel, never an error.
+    pub fn of_frame(frame: &Frame) -> Option<Self> {
+        if frame.frame_type != FrameType::Cancel {
+            return None;
+        }
+        let text = |key: &str| -> Option<String> {
+            frame.meta.as_ref().and_then(|m| m.get(key)).and_then(|v| match v {
+                ciborium::Value::Text(s) if !s.is_empty() => Some(s.clone()),
+                _ => None,
+            })
+        };
+        Some(Self {
+            class: text("attribution_class").and_then(|t| crate::failure::AttributionClass::from_wire(&t)),
+            code: text("code"),
+            message: text("message"),
+            force_kill: frame.force_kill.unwrap_or(false),
+        })
+    }
 }
 
 impl Frame {
@@ -780,11 +925,46 @@ impl Frame {
     ///
     /// # Arguments
     /// * `target_rid` - The request ID to cancel
-    /// * `force_kill` - If true, force-kill the cartridge process. If false, cooperative cancel.
-    pub fn cancel(target_rid: MessageId, force_kill: bool) -> Self {
+    /// * `reason` - the attribution (`meta.code` / `meta.attribution_class` /
+    ///   `meta.message`, each written only when present) and the force-kill
+    ///   flag. A Cancel built from `CancelReason::unattributed` carries no
+    ///   meta and is still a cancel.
+    pub fn cancel(target_rid: MessageId, reason: &CancelReason) -> Self {
         let mut frame = Self::new(FrameType::Cancel, target_rid);
-        frame.force_kill = Some(force_kill);
+        frame.force_kill = Some(reason.force_kill);
+        let mut meta = BTreeMap::new();
+        if let Some(code) = &reason.code {
+            meta.insert("code".to_string(), ciborium::Value::Text(code.clone()));
+        }
+        if let Some(class) = reason.class {
+            meta.insert(
+                "attribution_class".to_string(),
+                ciborium::Value::Text(class.as_str().to_string()),
+            );
+        }
+        if let Some(message) = &reason.message {
+            meta.insert("message".to_string(), ciborium::Value::Text(message.clone()));
+        }
+        if !meta.is_empty() {
+            frame.meta = Some(meta);
+        }
         frame
+    }
+
+    /// Create a CLOSE_STREAM frame — the tap-off for a request's live input
+    /// (15.2 §Runs Stop). `stream_id` names one stream; None closes every
+    /// live feed the request holds. The request is not cancelled: it drains
+    /// and ends naturally.
+    pub fn close_stream(target_rid: MessageId, stream_id: Option<String>) -> Self {
+        let mut frame = Self::new(FrameType::CloseStream, target_rid);
+        frame.stream_id = stream_id;
+        frame
+    }
+
+    /// The reason this Cancel frame carries (None for a non-Cancel frame).
+    /// Never fails: an unattributed Cancel yields `CancelReason::unattributed`.
+    pub fn cancel_reason(&self) -> Option<CancelReason> {
+        CancelReason::of_frame(self)
     }
 
     /// Create a CREDIT frame granting per-stream flow-control credit to the
@@ -1292,6 +1472,7 @@ impl Frame {
                 | FrameType::RelayState
                 | FrameType::Cancel
                 | FrameType::Credit
+                | FrameType::CloseStream
         )
     }
 }
@@ -1590,6 +1771,7 @@ mod tests {
             FrameType::RelayState,
             FrameType::Cancel,
             FrameType::Credit,
+            FrameType::CloseStream,
         ] {
             let v = t as u8;
             let recovered = FrameType::from_u8(v).expect("should recover frame type");
@@ -1600,9 +1782,10 @@ mod tests {
     // TEST172: Test FrameType::from_u8 returns None for values outside the valid discriminant range
     #[test]
     fn test172_invalid_frame_type() {
+        assert_eq!(FrameType::from_u8(14), Some(FrameType::CloseStream));
         assert!(
-            FrameType::from_u8(14).is_none(),
-            "value 14 is one past Credit"
+            FrameType::from_u8(15).is_none(),
+            "value 15 is one past CloseStream"
         );
         assert!(FrameType::from_u8(100).is_none());
         assert!(FrameType::from_u8(255).is_none());
@@ -2451,9 +2634,14 @@ mod tests {
             Some(FrameType::Credit),
             "13 is Credit (v4)"
         );
+        assert_eq!(
+            FrameType::from_u8(14),
+            Some(FrameType::CloseStream),
+            "14 is CloseStream (the tap-off)"
+        );
         assert!(
-            FrameType::from_u8(14).is_none(),
-            "14 is past the last valid frame type"
+            FrameType::from_u8(15).is_none(),
+            "15 is past the last valid frame type"
         );
         assert!(
             FrameType::from_u8(2).is_none(),

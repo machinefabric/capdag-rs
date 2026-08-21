@@ -236,6 +236,24 @@ pub enum ExecutionError {
         actual: String,
     },
 
+    /// A cap emitted an output STREAM_START whose shape violates its declared
+    /// stream contract (15.2 §Streaming Contracts): an UNBOUNDED stream from
+    /// an output declared `streaming: false`, or a cardinality mode other
+    /// than the declared `is_sequence`. The executor's hop rule and every
+    /// whole-value consumer downstream were built on that declaration, so
+    /// the violation fails hard at receipt — attributed Internal: the
+    /// cartridge broke its own declaration, not a user input problem.
+    #[error(
+        "Cap '{cap_urn}' violated its stream contract: declared is_sequence={declared_is_sequence} streaming={declared_streaming}, emitted is_sequence={emitted_is_sequence} unbounded={emitted_unbounded}"
+    )]
+    StreamContractViolation {
+        cap_urn: String,
+        declared_is_sequence: bool,
+        declared_streaming: bool,
+        emitted_is_sequence: bool,
+        emitted_unbounded: bool,
+    },
+
     #[error("Node {node} has no incoming data")]
     NoIncomingData { node: String },
 
@@ -274,7 +292,8 @@ impl ExecutionError {
             ExecutionError::NoIncomingData { .. }
             | ExecutionError::IoError(_)
             | ExecutionError::HostError(_)
-            | ExecutionError::EffectContractViolation { .. } => AttributionClass::Internal,
+            | ExecutionError::EffectContractViolation { .. }
+            | ExecutionError::StreamContractViolation { .. } => AttributionClass::Internal,
         }
     }
 
@@ -320,6 +339,7 @@ impl ExecutionError {
             ExecutionError::StepFailed { source, .. } => source.failure_cap_urn(),
             ExecutionError::CartridgeExecutionFailed { cap_urn, .. } => Some(cap_urn),
             ExecutionError::EffectContractViolation { cap_urn, .. } => Some(cap_urn),
+            ExecutionError::StreamContractViolation { cap_urn, .. } => Some(cap_urn),
             _ => None,
         }
     }
@@ -1871,7 +1891,37 @@ pub async fn run_dag_on_context(
         };
         group_chain.push(admission_chain);
     }
+    // The declared stream shape of every group's cap (15.2 §Streaming
+    // Contracts): the output contract every receipt point audits against,
+    // and the main input's `streaming` flag the hop rule reads. Resolved
+    // from the fabric definition the plan was built on; a cap the plan names
+    // that the registry cannot produce is a plan/registry inconsistency and
+    // fails here, before anything is dispatched.
+    let mut cap_shapes: HashMap<String, CapStreamShape> = HashMap::new();
+    let mut group_shapes: Vec<CapStreamShape> = Vec::with_capacity(groups.len());
+    for group in groups.iter() {
+        let shape = if let Some(cached) = cap_shapes.get(&group.cap_urn) {
+            *cached
+        } else {
+            let cap = ctx
+                .switch()
+                .fabric_registry()
+                .get_cap(&group.cap_urn)
+                .await
+                .map_err(|e| {
+                    ExecutionError::FabricRegistryError(format!(
+                        "resolve stream contract for cap '{}': {}",
+                        group.cap_urn, e
+                    ))
+                })?;
+            let shape = CapStreamShape::of(&cap);
+            cap_shapes.insert(group.cap_urn.clone(), shape);
+            shape
+        };
+        group_shapes.push(shape);
+    }
     let chains = split_chains_at_shared_bounded_pool(linear_chains, &group_chain);
+    let chains = split_chains_at_streaming_boundary(chains, &group_shapes);
     let n_chains = chains.len();
 
     // Spool files created for unbounded intermediates this segment; consumed
@@ -1928,9 +1978,12 @@ pub async fn run_dag_on_context(
         let progress_base = ci as f32 / n_chains as f32;
         let progress_span = 1.0 / n_chains as f32;
 
+        let chain_shapes: Vec<CapStreamShape> =
+            chain_idxs.iter().map(|&gi| group_shapes[gi]).collect();
         let chain_result = run_group_chain(
             ctx,
             &chain_groups,
+            &chain_shapes,
             cap_arguments,
             progress_fn,
             progress_base,
@@ -2191,6 +2244,58 @@ fn decompose_group_chains(groups: &[EdgeGroup], group_order: &[usize]) -> Vec<Ve
 /// live chain: the property unbounded (live-feed) pipelines depend on,
 /// since only chain SINKS are collected/persisted and unbounded
 /// intermediates cannot be materialised (L16).
+/// The declared stream shape of a cap at its boundary (15.2 §Streaming
+/// Contracts): whether its main input consumes without a length promise, and
+/// the output contract (cardinality + boundedness) its emissions are audited
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CapStreamShape {
+    pub input_streams: bool,
+    pub output: super::stream_io::OutputContract,
+}
+
+impl CapStreamShape {
+    pub fn of(cap: &crate::Cap) -> Self {
+        let (input_streams, _) = cap.streaming_shape();
+        Self {
+            input_streams,
+            output: super::stream_io::OutputContract::of(cap),
+        }
+    }
+}
+
+/// Split chains at every hop where the producer MAY emit without a length
+/// promise and the consumer does not consume without one — the streaming
+/// contract boundary (15.2 §Streaming Contracts). Such a hop is never
+/// pipelined: the producer runs to completion, its output is materialised
+/// (spooled, when it turns out unbounded), and the consumer is fed the bounded
+/// whole once the upstream ends. Forwarding an unbounded stream live into a
+/// whole-value consumer can only end in the consumer's L16 refusal; deciding
+/// it here, from the declarations, is what makes the same machine behave the
+/// same way whatever cartridges happen to serve it.
+fn split_chains_at_streaming_boundary(
+    chains: Vec<Vec<usize>>,
+    shapes: &[CapStreamShape],
+) -> Vec<Vec<usize>> {
+    let mut split = Vec::new();
+    for chain in chains {
+        let mut segment: Vec<usize> = Vec::new();
+        for group_idx in chain {
+            let contract_boundary = segment.last().is_some_and(|&prev| {
+                shapes[prev].output.streaming && !shapes[group_idx].input_streams
+            });
+            if contract_boundary {
+                split.push(std::mem::take(&mut segment));
+            }
+            segment.push(group_idx);
+        }
+        if !segment.is_empty() {
+            split.push(segment);
+        }
+    }
+    split
+}
+
 fn split_chains_at_shared_bounded_pool<K: PartialEq>(
     chains: Vec<Vec<usize>>,
     group_chain: &[Vec<(K, usize)>],
@@ -2265,6 +2370,7 @@ async fn send_upstream_credit(
 async fn run_group_chain(
     ctx: &ExecutionContext,
     chain: &[EdgeGroup],
+    shapes: &[CapStreamShape],
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     progress_fn: Option<&CapProgressFn>,
     progress_base: f32,
@@ -2392,9 +2498,18 @@ async fn run_group_chain(
         }
     });
 
+    // A chain fault channel: the FIRST task of the chain to fail (input send
+    // or an intermediate forward) reports its step and error here, so the
+    // terminal collect does not sit waiting for an END that will never come
+    // while an upstream cap has already failed — the chain is torn down the
+    // moment the originating failure is known (design: teardown before join).
+    let (chain_fault_tx, mut chain_fault_rx) =
+        mpsc::unbounded_channel::<(usize, ExecutionError)>();
+
     // ── Step 3: Feed first group's input CONCURRENTLY (L15) ──
     let send_task = {
         let switch = switch.clone();
+        let fault_tx = chain_fault_tx.clone();
         let first_rid = invocations[0].0.clone();
         let first_group = (*ordered_groups[0]).clone();
         let cap_arguments = cap_arguments.clone();
@@ -2405,7 +2520,7 @@ async fn run_group_chain(
         let node_spool = ctx.node_spool().clone();
         let router = credit_routers[0].clone();
         tokio::spawn(async move {
-            send_group_input(
+            let result = send_group_input(
                 &switch,
                 &first_rid,
                 &first_group,
@@ -2418,17 +2533,26 @@ async fn run_group_chain(
                 max_chunk,
                 Some((&router, initial_credit)),
             )
-            .await
+            .await;
+            // The typed error travels on the fault channel (it is not
+            // Clone); the join handle only says whether the task faulted.
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    let _ = fault_tx.send((0, e));
+                    Err(())
+                }
+            }
         })
     };
 
     // ── Step 4: Spawn forwarding tasks for intermediate groups ──
-    let mut forwarding_handles: Vec<tokio::task::JoinHandle<Result<(), ExecutionError>>> =
-        Vec::new();
+    let mut forwarding_handles: Vec<tokio::task::JoinHandle<Result<(), ()>>> = Vec::new();
     for i in 0..(n - 1) {
         let next_rid = invocations[i + 1].0.clone();
         let next_group = ordered_groups[i + 1];
         let prev_cap_urn = invocations[i].2.clone();
+        let prev_contract = shapes[i].output;
 
         // The downstream cap demuxes input streams by arg URN equivalence
         // (spec 13.2) — every stream the orchestrator sends is labeled with
@@ -2487,8 +2611,10 @@ async fn run_group_chain(
         let router_up = credit_routers[i].clone();
         let router_down = credit_routers[i + 1].clone();
 
+        let fault_tx = chain_fault_tx.clone();
+        let fault_index = i;
         forwarding_handles.push(tokio::spawn(async move {
-            forward_frames(
+            let result = forward_frames(
                 taken_rx,
                 &fwd_switch,
                 prev_rid,
@@ -2500,6 +2626,7 @@ async fn run_group_chain(
                 fwd_max_chunk,
                 pfn.as_ref(),
                 &prev_cap_urn,
+                prev_contract,
                 &fwd_step_token_id,
                 &next_in_media,
                 fwd_log_fn.as_ref(),
@@ -2507,9 +2634,17 @@ async fn run_group_chain(
                 fwd_stall_tracker,
                 activity_timeout_secs,
             )
-            .await
+            .await;
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    let _ = fault_tx.send((fault_index, e));
+                    Err(())
+                }
+            }
         }));
     }
+    drop(chain_fault_tx);
 
     // ── Step 5: Collect last group's output ──
     let last_idx = n - 1;
@@ -2573,10 +2708,14 @@ async fn run_group_chain(
         }
     };
 
-    let collect_result = super::stream_io::collect_terminal_output(
+    // Scoped so the collect future (which holds the spool's `&mut`) is
+    // dropped the moment the race resolves.
+    let collect_result: Result<_, ExecutionError> = {
+    let collect = super::stream_io::collect_terminal_output(
         taken_last_rx,
         last_pfn.as_ref(),
         last_cap_urn,
+        shapes[last_idx].output,
         &last_group_token_id,
         log_fn,
         body_index,
@@ -2587,9 +2726,8 @@ async fn run_group_chain(
             .map(|s| s as &mut dyn super::stream_io::IncrementalWriter),
         activity_timeout_secs,
         Some(&terminal_plumbing),
-    )
-    .await
-    .map_err(|e| match e {
+    );
+    let map_collect_err = |e: super::stream_io::StreamIoError| match e {
         // The terminal cap failure keeps its declared identity
         // (docs/failure-taxonomy.md) — never flattened into HostError.
         super::stream_io::StreamIoError::Terminal {
@@ -2622,61 +2760,134 @@ async fn run_group_chain(
             actual,
         }
         .at_step(&last_group_token_id),
+        super::stream_io::StreamIoError::StreamContract {
+            cap_urn,
+            declared_is_sequence,
+            declared_streaming,
+            emitted_is_sequence,
+            emitted_unbounded,
+        } => ExecutionError::StreamContractViolation {
+            cap_urn,
+            declared_is_sequence,
+            declared_streaming,
+            emitted_is_sequence,
+            emitted_unbounded,
+        }
+        .at_step(&last_group_token_id),
         other => ExecutionError::HostError(other.to_string()),
-    });
+    };
 
-    // ── Step 6: Terminal — release credit waiters (L13), stop pump, join ──
+    // The terminal collect and the chain's fault channel race: whichever
+    // speaks first decides the chain. An upstream failure wins immediately —
+    // the terminal is not awaited for an END that cannot come.
+    let mut collect = std::pin::pin!(collect);
+    let mut faults_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            fault = chain_fault_rx.recv(), if faults_open => match fault {
+                Some((i, e)) => break Err(e.at_step(&ordered_groups[i].token_id)),
+                // Every upstream task finished without fault; the terminal
+                // collect alone decides from here.
+                None => faults_open = false,
+            },
+            collected = &mut collect => break collected.map_err(map_collect_err),
+        }
+    }
+    };
+
+    // ── Step 6: Teardown BEFORE join ──
+    //
+    // On failure the chain is torn down FIRST: every still-live request of
+    // this chain is cancelled as COLLATERAL of the failing step (the cause
+    // names it), live feeds close, credit waiters release. Only then are the
+    // send/forward tasks joined — they end promptly because their requests
+    // are gone, so a live source upstream of a failed cap can never hold the
+    // run in RUNNING. The ORIGINATING error is what this chain returns; the
+    // collateral errors the joined tasks report are consequences, not causes.
+    let teardown = |originating: &ExecutionError| {
+        let detail = format!(
+            "step {} ({}) failed: {}",
+            originating
+                .step_token_id()
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "?".to_string()),
+            originating.failure_cap_urn().unwrap_or("?"),
+            originating.failure_reason()
+        );
+        // The collateral cancel carries the ORIGINATING failure's class: the
+        // cancelled steps are consequences of that failure, attributed to
+        // whatever it was attributed to — never to the user, never "ours"
+        // because a cancel happened.
+        let reason = crate::bifaci::frame::CancelReason::collateral(
+            originating.attribution_class(),
+            detail,
+        );
+        let switch = switch.clone();
+        let rids: Vec<MessageId> = invocations.iter().map(|(rid, _, _)| rid.clone()).collect();
+        async move {
+            for rid in &rids {
+                switch.cancel_request(rid, &reason).await;
+            }
+        }
+    };
+    if let Err(e) = &collect_result {
+        teardown(e).await;
+    }
+
     for ((rid, _, _), router) in invocations.iter().zip(credit_routers.iter()) {
         router.close_request(rid, "terminal");
     }
     pump_stop.store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = pump_handle.await;
 
+    // Join: a task's own error is on the fault channel (drained below, in
+    // fault order); a join failure is a panic, reported as its own error.
     let mut first_error: Option<ExecutionError> = None;
-    match send_task.await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            first_error.get_or_insert(e.at_step(&ordered_groups[0].token_id));
-        }
-        Err(e) => {
+    if let Err(e) = send_task.await {
+        first_error.get_or_insert(
+            ExecutionError::HostError(format!("Input send task panicked: {}", e))
+                .at_step(&ordered_groups[0].token_id),
+        );
+    }
+    for (i, handle) in forwarding_handles.into_iter().enumerate() {
+        if let Err(e) = handle.await {
             first_error.get_or_insert(
-                ExecutionError::HostError(format!("Input send task panicked: {}", e))
-                    .at_step(&ordered_groups[0].token_id),
+                ExecutionError::HostError(format!("Forwarding task {} panicked: {}", i, e))
+                    .at_step(&ordered_groups[i].token_id),
             );
         }
     }
-    for (i, handle) in forwarding_handles.into_iter().enumerate() {
-        match handle.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                first_error.get_or_insert(e.at_step(&ordered_groups[i].token_id));
-            }
-            Err(e) => {
-                first_error.get_or_insert(
-                    ExecutionError::HostError(format!("Forwarding task {} panicked: {}", i, e))
-                        .at_step(&ordered_groups[i].token_id),
-                );
-            }
+    // Every sender is gone once the tasks are joined, so this drains to None.
+    while let Some((i, e)) = chain_fault_rx.recv().await {
+        let e = e.at_step(&ordered_groups[i].token_id);
+        if first_error.is_none() {
+            first_error = Some(e);
+        } else {
+            tracing::debug!(error = %e, "[pipeline] further chain fault after the first");
         }
     }
 
     let (output_bytes, is_sequence, terminal_meta) = match collect_result {
         Ok(ok) => {
             if let Some(err) = first_error {
-                // The chain broke upstream — a terminal END is not trustworthy.
-                // Cancel the chain and fail hard.
-                for (rid, _, _) in &invocations {
-                    switch.cancel_request(rid, false).await;
-                }
+                // The chain broke upstream after the terminal had already
+                // ENDed — a terminal END is not trustworthy. Tear down the
+                // chain as collateral of that failure and fail hard with it.
+                teardown(&err).await;
                 return Err(err);
             }
             ok
         }
         Err(e) => {
-            for (rid, _, _) in &invocations {
-                switch.cancel_request(rid, false).await;
+            if let Some(consequence) = first_error {
+                tracing::debug!(
+                    originating = %e,
+                    consequence = %consequence,
+                    "[pipeline] chain torn down; joined task reported a consequence of the originating failure"
+                );
             }
-            return Err(first_error.unwrap_or(e));
+            return Err(e);
         }
     };
 
@@ -2993,6 +3204,7 @@ async fn forward_frames(
     max_chunk: usize,
     progress_fn: Option<&CapProgressFn>,
     prev_cap_urn: &str,
+    prev_contract: super::stream_io::OutputContract,
     prev_step_token_id: &StepToken,
     next_in_media: &str,
     log_fn: Option<&PipelineLogFn>,
@@ -3016,10 +3228,8 @@ async fn forward_frames(
     // the label to the downstream declared arg URN for demux (spec 13.2),
     // so an unaudited relabel would substitute the plan's belief for the
     // cartridge's claim and mask a lying cap.
-    let effect_audit =
-        super::stream_io::EffectAudit::new(prev_cap_urn).map_err(|e| {
-            ExecutionError::HostError(format!("pipelined forward: {}", e))
-        })?;
+    let effect_audit = super::stream_io::EffectAudit::new(prev_cap_urn, prev_contract)
+        .map_err(|e| ExecutionError::HostError(format!("pipelined forward: {}", e)))?;
 
     let mut stream_id_map: HashMap<String, (String, Arc<CreditGate>, u64)> = HashMap::new();
     let grant_batch = (initial_credit / 2).max(1);
@@ -3052,7 +3262,7 @@ async fn forward_frames(
                         // emission must satisfy the producer cap's declared
                         // effect contract before anything else touches it.
                         effect_audit
-                            .audit(frame.media_urn.as_deref())
+                            .audit_frame(&frame)
                             .map_err(|e| match e {
                                 super::stream_io::StreamIoError::EffectContract {
                                     cap_urn,
@@ -3066,6 +3276,19 @@ async fn forward_frames(
                                     runtime_input,
                                     expected,
                                     actual,
+                                },
+                                super::stream_io::StreamIoError::StreamContract {
+                                    cap_urn,
+                                    declared_is_sequence,
+                                    declared_streaming,
+                                    emitted_is_sequence,
+                                    emitted_unbounded,
+                                } => ExecutionError::StreamContractViolation {
+                                    cap_urn,
+                                    declared_is_sequence,
+                                    declared_streaming,
+                                    emitted_is_sequence,
+                                    emitted_unbounded,
                                 },
                                 other => ExecutionError::HostError(format!(
                                     "pipelined forward: {}",
@@ -3902,6 +4125,47 @@ mod tests {
         ];
         let split = super::split_chains_at_shared_bounded_pool(chains, &group_chain);
         assert_eq!(split, vec![vec![0], vec![1]], "shared bounded singleton splits");
+    }
+
+    // TEST1956: the streaming-boundary split is decided by the DECLARED
+    // contracts alone — the incident shape encode(streaming out) →
+    // transcribe(streaming in, streaming out) → generate(whole-value in)
+    // splits exactly before generate, whatever pool topology serves it; a
+    // streaming producer into a streaming consumer pipelines; a bounded
+    // producer into a whole-value consumer pipelines (there is nothing
+    // unbounded to refuse).
+    #[test]
+    fn test1956_chain_split_at_declared_streaming_boundary() {
+        use crate::orchestrator::stream_io::OutputContract;
+        let shape = |input_streams: bool, out_streaming: bool| super::CapStreamShape {
+            input_streams,
+            output: OutputContract {
+                is_sequence: out_streaming,
+                streaming: out_streaming,
+            },
+        };
+        let shapes = vec![shape(true, true), shape(true, true), shape(false, false)];
+        let split = super::split_chains_at_streaming_boundary(vec![vec![0, 1, 2]], &shapes);
+        assert_eq!(
+            split,
+            vec![vec![0, 1], vec![2]],
+            "split exactly where a streaming producer meets a whole-value consumer"
+        );
+
+        let shapes = vec![shape(false, false), shape(false, false), shape(false, false)];
+        let split = super::split_chains_at_streaming_boundary(vec![vec![0, 1, 2]], &shapes);
+        assert_eq!(split, vec![vec![0, 1, 2]], "bounded hops never split");
+
+        let shapes = vec![shape(true, true), shape(true, true), shape(true, true)];
+        let split = super::split_chains_at_streaming_boundary(vec![vec![0, 1, 2]], &shapes);
+        assert_eq!(split, vec![vec![0, 1, 2]], "streaming into streaming pipelines");
+
+        // A pool split already made upstream is respected: a boundary inside
+        // the second segment splits that segment only.
+        let shapes = vec![shape(false, false), shape(false, true), shape(false, false)];
+        let split =
+            super::split_chains_at_streaming_boundary(vec![vec![0], vec![1, 2]], &shapes);
+        assert_eq!(split, vec![vec![0], vec![1], vec![2]]);
     }
 
     use super::*;

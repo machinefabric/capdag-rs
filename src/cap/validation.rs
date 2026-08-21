@@ -907,6 +907,7 @@ pub const RESERVED_CLI_FLAGS: &[&str] = &["manifest", "--help", "--version", "-v
 /// - RULE10: Reserved cli_flags cannot be used
 /// - RULE11: cli_flag used verbatim as specified (enforced by design)
 /// - RULE12: media_urn is the key, no name field (enforced by CapArg structure)
+/// - RULE14: Only the main input argument may declare streaming=true
 pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
     let cap_urn = cap.urn_string();
     let args = cap.get_args();
@@ -1042,6 +1043,26 @@ pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
                 cap.urn.in_spec()
             ),
         });
+    }
+
+    // RULE14: Only the main input may stream. `streaming: true` declares that an
+    // argument is consumed without a length promise — a feed. Side arguments
+    // (options, model specs, prompts alongside the main input) are values the
+    // runtime demuxes whole; a feed there has no meaning and would let an
+    // unbounded stream reach a collector that must refuse it (L16).
+    for arg in &cap.args {
+        if arg.streaming && !arg.is_main_input(&in_media) {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn: cap_urn.clone(),
+                issue: format!(
+                    "RULE14: Argument '{}' declares streaming=true but is not the main input \
+                     (no stdin source equivalent to in='{}') — only the main input may be \
+                     consumed without a length promise",
+                    arg.media_urn,
+                    cap.urn.in_spec()
+                ),
+            });
+        }
     }
 
     // RULE5: No two args may have same position
@@ -1699,6 +1720,43 @@ mod tests {
             "Non-void-input cap with stdin should pass: {:?}",
             result.err()
         );
+    }
+
+    // TEST1953: RULE14 — `streaming: true` is accepted on the main input (the
+    // stdin arg equivalent to `in=`) and refused on any other argument: a
+    // side option has no wire stream, so it has nothing to consume
+    // incrementally, and the rule keeps the hop rule one-dimensional.
+    #[test]
+    fn test1953_rule14_streaming_only_on_main_input() {
+        let main = CapArg::new(
+            "media:enc=utf-8",
+            true,
+            vec![ArgSource::Stdin {
+                stdin: "media:enc=utf-8".to_string(),
+            }],
+        )
+        .streaming(true);
+        let ok = make_test_cap_with_stdin_args(vec![main.clone()]);
+        assert!(
+            validate_cap_args(&ok).is_ok(),
+            "streaming main input must pass: {:?}",
+            validate_cap_args(&ok).err()
+        );
+        assert_eq!(ok.streaming_shape(), (true, false));
+
+        let side = CapArg::new(
+            MEDIA_INTEGER,
+            false,
+            vec![ArgSource::CliFlag {
+                cli_flag: "--count".to_string(),
+            }],
+        )
+        .streaming(true);
+        let bad = make_test_cap_with_stdin_args(vec![main.streaming(false), side]);
+        let err = validate_cap_args(&bad).expect_err("streaming side option must be refused");
+        let text = err.to_string();
+        assert!(text.contains("RULE14"), "error names RULE14: {text}");
+        assert!(text.contains(MEDIA_INTEGER), "error names the offending arg: {text}");
     }
 
     // TEST590: validate_cap_args accepts cap with only cli_flag sources (no positions)

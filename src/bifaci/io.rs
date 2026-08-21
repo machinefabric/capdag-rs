@@ -1058,6 +1058,7 @@ pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bifaci::frame::CancelReason;
     use tokio::io::BufReader as TokioBufReader;
     use tokio::io::BufWriter as TokioBufWriter;
 
@@ -2750,5 +2751,70 @@ mod tests {
 
         let f3 = reader.read().await.unwrap().unwrap();
         assert_eq!(f3.frame_type, FrameType::End);
+    }
+
+    // TEST1954: a Cancel frame is attributed through `meta` exactly like an
+    // ERR frame — `code` / `attribution_class` / `message` — and every
+    // attributed reason round-trips through the codec; the wire carries the
+    // class token, never a numeric key.
+    #[test]
+    fn test1954_cancel_attribution_roundtrips_in_meta() {
+        use crate::failure::AttributionClass;
+        for reason in [
+            CancelReason::user(true),
+            CancelReason::collateral(AttributionClass::Resource, "step s3 (cap:x) failed: GPU_OUT_OF_MEMORY"),
+            CancelReason::host(AttributionClass::Environment, "stale for 1800 s", false),
+        ] {
+            let frame = Frame::cancel(MessageId::Uint(7), &reason);
+            let bytes = encode_frame(&frame).unwrap();
+            let decoded = decode_frame(&bytes).unwrap();
+            assert_eq!(decoded.frame_type, FrameType::Cancel);
+            assert_eq!(decoded.cancel_reason(), Some(reason.clone()), "{reason:?}");
+            let meta = decoded.meta.as_ref().expect("attributed Cancel carries meta");
+            assert_eq!(
+                meta.get("attribution_class"),
+                Some(&ciborium::Value::Text(reason.class.unwrap().as_str().to_string()))
+            );
+            assert_eq!(meta.get("code"), Some(&ciborium::Value::Text(reason.code.clone().unwrap())));
+        }
+        assert!(CancelReason::user(false).is_user());
+        assert!(!CancelReason::collateral(AttributionClass::Input, "x").is_user());
+    }
+
+    // TEST1955: a Cancel WITHOUT attribution is still a cancel — it encodes
+    // with no meta, decodes as `CancelReason::unattributed`, and its
+    // terminal reads CANCELLED / internal; an unknown class token in meta
+    // degrades to "unattributed class", never to a rejected frame (a cancel
+    // must always act). A CloseStream frame is its own type and is never a
+    // cancel.
+    #[test]
+    fn test1955_unattributed_cancel_still_cancels_and_close_stream_is_not_a_cancel() {
+        use crate::failure::AttributionClass;
+        let bare = Frame::cancel(MessageId::Uint(1), &CancelReason::unattributed(false));
+        assert!(bare.meta.is_none(), "an unattributed Cancel carries no meta");
+        let decoded = decode_frame(&encode_frame(&bare).unwrap()).unwrap();
+        let reason = decoded.cancel_reason().expect("a Cancel always yields a reason");
+        assert_eq!(reason, CancelReason::unattributed(false));
+        assert_eq!(reason.terminal_code(), "CANCELLED");
+        assert_eq!(reason.terminal_class(), AttributionClass::Internal);
+        assert_eq!(reason.terminal_message(), "Request cancelled");
+
+        let mut odd = Frame::new(FrameType::Cancel, MessageId::Uint(2));
+        let mut meta = std::collections::BTreeMap::new();
+        meta.insert("attribution_class".to_string(), ciborium::Value::Text("because".to_string()));
+        meta.insert("message".to_string(), ciborium::Value::Text("operator note".to_string()));
+        odd.meta = Some(meta);
+        let decoded = decode_frame(&encode_frame(&odd).unwrap()).expect("never rejected");
+        let reason = decoded.cancel_reason().unwrap();
+        assert_eq!(reason.class, None);
+        assert_eq!(reason.message.as_deref(), Some("operator note"));
+        assert_eq!(reason.terminal_message(), "Request cancelled: operator note");
+
+        let close = Frame::close_stream(MessageId::Uint(3), Some("mic".to_string()));
+        let decoded = decode_frame(&encode_frame(&close).unwrap()).unwrap();
+        assert_eq!(decoded.frame_type, FrameType::CloseStream);
+        assert_eq!(decoded.stream_id.as_deref(), Some("mic"));
+        assert!(decoded.cancel_reason().is_none());
+        assert!(!decoded.is_flow_frame());
     }
 }

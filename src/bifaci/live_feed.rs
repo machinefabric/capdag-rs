@@ -247,14 +247,29 @@ impl LiveFeedSink {
 }
 
 /// A handle to one open feed, held by the runtime per request so a stop
-/// (non-force Cancel on a feed-bearing request) can close the tap and let
-/// the run drain (15.2 §Runs Stop).
+/// (a CloseStream frame to the feed-bearing request) can close the tap and
+/// let the run drain (15.2 §Runs Stop).
 #[derive(Clone)]
 pub struct LiveFeedHandle {
     shared: Arc<FeedShared>,
+    /// The input stream (bifaci `stream_id`) this feed was resolved for, once
+    /// the runtime has bound it — what a CloseStream naming one stream is
+    /// matched against. None for host-opened taps, which are not wire streams.
+    stream_id: Option<String>,
 }
 
 impl LiveFeedHandle {
+    /// Bind the handle to the input stream it was resolved for.
+    pub fn for_stream(mut self, stream_id: impl Into<String>) -> Self {
+        self.stream_id = Some(stream_id.into());
+        self
+    }
+
+    /// The input stream this feed serves, when bound.
+    pub fn stream_id(&self) -> Option<&str> {
+        self.stream_id.as_deref()
+    }
+
     /// Close the tap: the backend's next `push` returns false, the feeder
     /// drains what was already captured, and the stream ends — the drain
     /// path of a stopped run.
@@ -443,7 +458,113 @@ pub fn bridge_feed(
     Ok(OpenedFeed {
         rx,
         stream_meta,
-        handle: LiveFeedHandle { shared },
+        handle: LiveFeedHandle { shared, stream_id: None },
     })
 }
 
+
+// ---------------------------------------------------------------------------
+// Stop input as a verified request (15.2 §Runs Stop)
+// ---------------------------------------------------------------------------
+
+/// How long a stopped feed-bearing request is given to drain and END before
+/// the stop is reported as not having ended the input.
+pub const STOP_INPUT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// What a stop-input actually did — the verdict a host returns to whoever
+/// asked, in place of "a frame was written".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct StopInputsOutcome {
+    /// Host-opened taps (device feeds the host itself bridged) closed.
+    pub host_taps_closed: u64,
+    /// Feed-bearing requests sent a CloseStream frame (cartridge-resolved
+    /// feeds).
+    pub feed_requests_stopped: u64,
+    /// Of those, how many have drained and ENDED — observed at the switch —
+    /// within the drain timeout. Equal to `feed_requests_stopped` on success.
+    pub feeds_ended: u64,
+}
+
+/// Why a stop-input did not stop the input.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum StopInputsError {
+    /// No host tap and no feed-bearing request is open — there is nothing to
+    /// stop. A precondition failure for the caller, never a success.
+    #[error("no live input is open on this run")]
+    NothingToStop,
+    /// A stopped request did not END within the drain timeout. The stop was
+    /// sent; the evidence that the input ended did not arrive.
+    #[error("live input request {rid} did not end within {timeout_ms} ms of the stop")]
+    FeedDidNotEnd { rid: String, timeout_ms: u64 },
+    /// A stopped request ended, but not with END: the stop was not the
+    /// input ending cleanly.
+    #[error("live input request {rid} ended with {kind} after the stop, not END")]
+    FeedFailed { rid: String, kind: String },
+    /// The switch that carried the request is gone (no host was ever built,
+    /// or it was torn down): the stop cannot be delivered.
+    #[error("no running host carries the live input")]
+    NoHost,
+}
+
+/// Stop the given feed-bearing requests and await the evidence that each has
+/// ended. Host taps are the caller's (already counted in `host_taps_closed`).
+///
+/// Every request is sent its CloseStream first, THEN each is awaited — a
+/// stop is not serialised behind another request's drain. A request the
+/// switch no longer knows (already ended before the stop) counts as stopped
+/// and ended: its input is not open.
+pub async fn stop_feed_requests(
+    switch: &crate::bifaci::relay_switch::RelaySwitch,
+    rids: &[crate::bifaci::frame::MessageId],
+    host_taps_closed: u64,
+    timeout: std::time::Duration,
+) -> Result<StopInputsOutcome, StopInputsError> {
+    if rids.is_empty() && host_taps_closed == 0 {
+        return Err(StopInputsError::NothingToStop);
+    }
+    let mut outcome = StopInputsOutcome {
+        host_taps_closed,
+        feed_requests_stopped: 0,
+        feeds_ended: 0,
+    };
+    let mut awaiting = Vec::with_capacity(rids.len());
+    for rid in rids {
+        if switch.stop_request_feeds(rid).await {
+            outcome.feed_requests_stopped += 1;
+            awaiting.push(rid.clone());
+        } else if let Some(summary) = switch.recent_terminal_of_rid(rid).await {
+            // Ended on its own before the stop reached it: its input is not
+            // open — but only a clean END is a stopped input.
+            if summary.kind != crate::bifaci::request_state::TerminalKind::End {
+                return Err(StopInputsError::FeedFailed {
+                    rid: rid.to_string(),
+                    kind: summary.kind.as_str().to_string(),
+                });
+            }
+            outcome.feed_requests_stopped += 1;
+            outcome.feeds_ended += 1;
+        } else {
+            return Err(StopInputsError::NoHost);
+        }
+    }
+    for rid in awaiting {
+        match switch.await_request_terminal(&rid, timeout).await {
+            Ok(summary) if summary.kind == crate::bifaci::request_state::TerminalKind::End => {
+                outcome.feeds_ended += 1;
+            }
+            Ok(summary) => {
+                return Err(StopInputsError::FeedFailed {
+                    rid: rid.to_string(),
+                    kind: summary.kind.as_str().to_string(),
+                });
+            }
+            Err(()) => {
+                return Err(StopInputsError::FeedDidNotEnd {
+                    rid: rid.to_string(),
+                    timeout_ms: timeout.as_millis() as u64,
+                });
+            }
+        }
+    }
+    Ok(outcome)
+}

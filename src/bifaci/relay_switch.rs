@@ -53,7 +53,7 @@
 //! - Per-master socket writers: Mutex<FrameWriter<...>>
 //! - Each execute_fanin spawns its own pump that cooperatively routes frames
 
-use crate::bifaci::frame::{FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
+use crate::bifaci::frame::{CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
 use crate::bifaci::io::{identity_nonce, CborError, FrameReader, FrameWriter};
 use crate::bifaci::local_socket::{OwnedReadHalf, OwnedWriteHalf, UnixStream};
 use crate::cap::registry::FabricRegistry;
@@ -121,7 +121,7 @@ impl From<std::io::Error> for RelaySwitchError {
 // shared by every routing runtime (L7).
 use crate::bifaci::request_state::{
     AdmissionController, AdmissionKey, AdmissionPermit, FrameDirection, RequestState, RequestTable,
-    RoutingEntry, TerminalKind,
+    RoutingEntry, TerminalKind, TerminatedSummary,
 };
 use crate::bifaci::stats::DropCounters;
 
@@ -2560,40 +2560,93 @@ impl RelaySwitch {
         probe_outcome
     }
 
-    /// Cancel a specific in-flight request by RID.
-    ///
-    /// 1. Looks up RID → XID → routing destination
-    /// 2. Sends Cancel frame to destination master
-    /// 3. Terminates the request (Cancelled) — removing ALL its state (L7)
-    /// 4. Recursively cancels the child peer calls recorded on the entry
-    /// 5. Sends ERR "CANCELLED" to the external response channel if present
-    /// STOP a feed-bearing request's live inputs (15.2 §Runs Stop): send the
-    /// non-force Cancel FRAME to the request's destination WITHOUT touching
+    /// STOP a feed-bearing request's live inputs (15.2 §Runs Stop): send a
+    /// CloseStream FRAME to the request's destination WITHOUT touching
     /// host-side request state. The cartridge runtime closes the request's
     /// open taps and the request then ends NATURALLY — END after the drain —
-    /// so routing, forwarding, collection, and every downstream cap stay
-    /// live and the run completes WITH its outputs. Contrast
-    /// [`Self::cancel_request`], which terminates host state, cascades to
-    /// children, and delivers ERR CANCELLED (the abort path). A request
-    /// that is unknown (already terminated) is a no-op.
-    pub async fn stop_request_feeds(&self, rid: &MessageId) {
+    /// so routing, forwarding, collection, and every downstream cap stay live
+    /// and the run completes WITH its outputs. Not a cancel in any form:
+    /// contrast [`Self::cancel_request`], which terminates host state,
+    /// cascades to children, and delivers a terminal ERR (the abort path).
+    ///
+    /// Returns whether the request was live and the stop was sent to its
+    /// destination. A request that is unknown (already terminated) is not
+    /// stopped, and the caller must not claim that it was.
+    pub async fn stop_request_feeds(&self, rid: &MessageId) -> bool {
         let (xid, destination) = {
             let requests = self.requests.read().await;
             let Some(xid) = requests.xid_for_rid(rid) else {
-                return;
+                return false;
             };
             let key = (xid.clone(), rid.clone());
             let Some(state) = requests.get(&key) else {
-                return;
+                return false;
             };
             (xid, state.routing.destination_master_idx)
         };
-        let mut cancel_frame = Frame::cancel(rid.clone(), false);
-        cancel_frame.routing_id = Some(xid);
-        let _ = self.write_to_master_idx(destination, &mut cancel_frame).await;
+        let mut close_frame = Frame::close_stream(rid.clone(), None);
+        close_frame.routing_id = Some(xid);
+        self.write_to_master_idx(destination, &mut close_frame)
+            .await
+            .is_ok()
     }
 
-    pub async fn cancel_request(&self, rid: &MessageId, force_kill: bool) {
+    /// Whether a RID is live in the request table (registered, not yet
+    /// terminated).
+    pub async fn is_request_live(&self, rid: &MessageId) -> bool {
+        self.requests.read().await.xid_for_rid(rid).is_some()
+    }
+
+    /// How a recently terminated RID ended, or None while it is live or once
+    /// it has aged out of the terminated ring.
+    pub async fn recent_terminal_of_rid(&self, rid: &MessageId) -> Option<TerminatedSummary> {
+        self.requests
+            .read()
+            .await
+            .recent_terminal_of_rid(rid)
+            .cloned()
+    }
+
+    /// Wait for a live request to terminate, polling the request table, and
+    /// return how it ended. `Err(())` when it is still live at the deadline.
+    /// A RID that is neither live nor in the terminated ring is reported as
+    /// not ended — the caller holds a RID the switch never knew, and must not
+    /// claim evidence it does not have.
+    pub async fn await_request_terminal(
+        &self,
+        rid: &MessageId,
+        timeout: std::time::Duration,
+    ) -> Result<TerminatedSummary, ()> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if let Some(summary) = self.recent_terminal_of_rid(rid).await {
+                return Ok(summary);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+
+    /// Cancel a specific in-flight request by RID, for a stated reason.
+    ///
+    /// 1. Terminates the request as cancelled WITH the reason — removing ALL
+    ///    its state (L7) and recording the attribution on its summary
+    /// 2. Sends the Cancel frame (attribution in meta, force_kill) to the
+    ///    destination master
+    /// 3. Recursively cancels the child peer calls recorded on the entry,
+    ///    under the same reason
+    /// 4. Sends the terminal ERR to the external response channel if present,
+    ///    in the reason's own words: `CANCELLED`/`user` for an operator's
+    ///    cancel, `ABORTED_COLLATERAL` with the originating failure's class
+    ///    for collateral, `ABORTED` with the host's class for a host abort —
+    ///    so "cancelled" is never said of an abort.
+    ///
+    /// The reason is optional attribution, never a precondition: an
+    /// unattributed reason cancels all the same (terminal `CANCELLED`).
+    /// Closing a live input without cancelling is [`Self::stop_request_feeds`].
+    pub async fn cancel_request(&self, rid: &MessageId, reason: &CancelReason) {
         // Find XID for this RID
         let xid = {
             let requests = self.requests.read().await;
@@ -2613,31 +2666,31 @@ impl RelaySwitch {
             .requests
             .write()
             .await
-            .terminate(&key, TerminalKind::Cancelled)
+            .terminate_cancelled(&key, reason)
         else {
             return;
         };
 
         // Send Cancel frame to destination
-        let mut cancel_frame = Frame::cancel(rid.clone(), force_kill);
+        let mut cancel_frame = Frame::cancel(rid.clone(), reason);
         cancel_frame.routing_id = Some(xid.clone());
         let _ = self
             .write_to_master_idx(state.routing.destination_master_idx, &mut cancel_frame)
             .await;
 
-        // Recursively cancel children
+        // Recursively cancel children, under the same reason
         for (_child_xid, child_rid) in &state.children {
             // Use Box::pin for recursive async
-            Box::pin(self.cancel_request(child_rid, force_kill)).await;
+            Box::pin(self.cancel_request(child_rid, reason)).await;
         }
 
-        // Send ERR "CANCELLED" to external response channel if present
+        // Send the terminal ERR to external response channel if present
         if let Some(tx) = state.external_channel {
             let mut err_frame = Frame::err(
                 rid.clone(),
-                "CANCELLED",
-                crate::failure::AttributionClass::Internal,
-                "Request cancelled",
+                reason.terminal_code(),
+                reason.terminal_class(),
+                &reason.terminal_message(),
                 None,
             );
             err_frame.routing_id = Some(xid.clone());
@@ -2645,10 +2698,11 @@ impl RelaySwitch {
         }
     }
 
-    /// Cancel all external-origin (engine-initiated) in-flight requests.
+    /// Cancel all external-origin (engine-initiated) in-flight requests, for a
+    /// stated reason.
     ///
     /// Returns the list of cancelled RIDs.
-    pub async fn cancel_all_requests(&self, force_kill: bool) -> Vec<MessageId> {
+    pub async fn cancel_all_requests(&self, reason: &CancelReason) -> Vec<MessageId> {
         // Snapshot all external-origin request RIDs (origin = None)
         let rids: Vec<MessageId> = {
             let requests = self.requests.read().await;
@@ -2660,7 +2714,7 @@ impl RelaySwitch {
         };
 
         for rid in &rids {
-            self.cancel_request(rid, force_kill).await;
+            self.cancel_request(rid, reason).await;
         }
 
         rids
@@ -3303,6 +3357,7 @@ impl RelaySwitch {
             | FrameType::End
             | FrameType::Err
             | FrameType::Cancel
+            | FrameType::CloseStream
             | FrameType::Credit => {
                 // Continuation/control frames from engine: look up XID from
                 // RID if missing, resolve the destination, and RECORD the
@@ -3881,7 +3936,15 @@ impl RelaySwitch {
                                 // (TEST7093). Terminal frames need no cancel:
                                 // the entry is already terminated.
                                 if !is_terminal {
-                                    self.cancel_request(&rid, false).await;
+                                    self.cancel_request(
+                                        &rid,
+                                        &CancelReason::host(
+                                            crate::failure::AttributionClass::Internal,
+                                            "response channel receiver gone: the caller abandoned the request",
+                                            false,
+                                        ),
+                                    )
+                                    .await;
                                 }
                             }
                             Ok(None)
@@ -3948,10 +4011,11 @@ impl RelaySwitch {
                 }
             }
 
-            FrameType::Cancel => {
-                // Cancel from cartridge — route to destination like a continuation frame.
-                // Cartridge is cancelling its own peer call. Unknown RID means
-                // the request already completed: a well-defined no-op.
+            FrameType::Cancel | FrameType::CloseStream => {
+                // Cancel / CloseStream from cartridge — route to destination like a
+                // continuation frame. Cartridge is cancelling (or closing the live
+                // input of) its own peer call. Unknown RID means the request already
+                // completed: a well-defined no-op.
                 let rid = frame.id.clone();
                 let lookup = {
                     let requests = self.requests.read().await;
@@ -8058,7 +8122,7 @@ mod tests {
             requests.link_child(&parent_key, child_key.clone());
         }
 
-        switch.cancel_request(&parent_key.1, false).await;
+        switch.cancel_request(&parent_key.1, &CancelReason::user(false)).await;
 
         // Parent's waiter observes ERR CANCELLED.
         let delivered = prx.recv().await.expect("parent channel gets ERR");
@@ -8078,6 +8142,339 @@ mod tests {
         assert_eq!(cancels.len(), 2, "parent + cascaded child Cancel frames");
         assert!(cancels.contains(&parent_key.1));
         assert!(cancels.contains(&child_key.1));
+    }
+
+    // TEST1958: a cancel carries its ATTRIBUTION end to end — a collateral
+    // cancel delivers ERR ABORTED_COLLATERAL (never CANCELLED) in the
+    // ORIGINATING failure's class, naming the failed step; the Cancel frame
+    // the destination receives carries the same attribution in its meta; the
+    // cascaded child is cancelled under the same reason; and the terminated
+    // ring records code, class and reason.
+    #[tokio::test]
+    async fn test1958_cancel_attribution_reaches_err_frame_and_terminated_ring() {
+        use crate::failure::AttributionClass;
+        let (engine_socket, slave_socket) = UnixStream::pair().expect("socket pair");
+
+        let limits = Limits::default();
+        let caps = serde_json::json!([CAP_IDENTITY]);
+        let slave_task = tokio::spawn(async move {
+            let (mut reader, _writer) =
+                slave_notify_with_identity(slave_socket, &caps, &limits).await;
+            let mut cancels = Vec::new();
+            while cancels.len() < 2 {
+                match reader.read().await {
+                    Ok(Some(f)) if f.frame_type == FrameType::Cancel => cancels.push(f),
+                    Ok(Some(_)) => {}
+                    _ => break,
+                }
+            }
+            cancels
+        });
+
+        let switch = RelaySwitch::new(
+            wrap_with_test_ids(vec![engine_socket]),
+            test_fabric_registry(),
+        )
+        .await
+        .expect("switch with one master must construct");
+
+        let parent_key = (MessageId::Uint(1), MessageId::new_uuid());
+        let child_key = (MessageId::Uint(2), MessageId::new_uuid());
+        let (ptx, mut prx) = mpsc::unbounded_channel();
+        {
+            let mut requests = switch.requests.write().await;
+            requests
+                .register(
+                    parent_key.clone(),
+                    RequestState::new(
+                        RoutingEntry {
+                            source_master_idx: None,
+                            destination_master_idx: 0,
+                        },
+                        None,
+                        Some(ptx),
+                        false,
+                        crate::bifaci::frame::DEFAULT_INITIAL_CREDIT,
+                    ),
+                )
+                .unwrap();
+            requests
+                .register(
+                    child_key.clone(),
+                    RequestState::new(
+                        RoutingEntry {
+                            source_master_idx: Some(0),
+                            destination_master_idx: 0,
+                        },
+                        Some(0),
+                        None,
+                        true,
+                        crate::bifaci::frame::DEFAULT_INITIAL_CREDIT,
+                    ),
+                )
+                .unwrap();
+            requests.link_child(&parent_key, child_key.clone());
+        }
+
+        let reason = CancelReason::collateral(
+            AttributionClass::Resource,
+            "step s2 (cap:gen) failed: GPU_OUT_OF_MEMORY",
+        );
+        switch.cancel_request(&parent_key.1, &reason).await;
+
+        let delivered = prx.recv().await.expect("parent channel gets ERR");
+        assert_eq!(delivered.error_code(), Some("ABORTED_COLLATERAL"));
+        assert_eq!(delivered.attribution_class().unwrap(), AttributionClass::Resource);
+        let message = delivered.error_message().unwrap_or("");
+        assert!(
+            message.contains("step s2 (cap:gen) failed"),
+            "the ERR names the originating failure: {message}"
+        );
+        assert!(!message.to_lowercase().contains("cancelled"), "{message}");
+
+        let stats = switch.protocol_stats().await;
+        assert!(stats.requests.active.is_empty());
+        let parent_rid = parent_key.1.to_string();
+        let child_rid = child_key.1.to_string();
+        for rid in [&parent_rid, &child_rid] {
+            let summary = stats
+                .requests
+                .recent_terminated
+                .iter()
+                .find(|t| &t.rid == rid)
+                .expect("terminated ring holds the request");
+            assert_eq!(summary.kind, TerminalKind::Cancelled);
+            assert_eq!(summary.cancel_code.as_deref(), Some("ABORTED_COLLATERAL"));
+            assert_eq!(summary.cancel_class, Some(AttributionClass::Resource));
+            assert_eq!(summary.cancel_reason.as_deref(), reason.message.as_deref());
+        }
+
+        let cancels = slave_task.await.expect("slave task");
+        assert_eq!(cancels.len(), 2);
+        for frame in &cancels {
+            assert_eq!(frame.cancel_reason(), Some(reason.clone()));
+        }
+    }
+
+    // TEST1959: stop_request_feeds sends a CloseStream frame — not a Cancel
+    // of any kind — and LEAVES the request live (the request ends naturally
+    // after the drain), reports true for a live request and false for an
+    // unknown one; and a request that does terminate afterwards is observable
+    // via await_request_terminal — the evidence a stop verdict is built on.
+    #[tokio::test]
+    async fn test1959_stop_request_feeds_is_a_close_stream_with_evidence() {
+        let (engine_socket, slave_socket) = UnixStream::pair().expect("socket pair");
+
+        let limits = Limits::default();
+        let caps = serde_json::json!([CAP_IDENTITY]);
+        let slave_task = tokio::spawn(async move {
+            let (mut reader, _writer) =
+                slave_notify_with_identity(slave_socket, &caps, &limits).await;
+            loop {
+                match reader.read().await {
+                    Ok(Some(f)) if f.frame_type == FrameType::CloseStream => break Some(f),
+                    Ok(Some(f)) if f.frame_type == FrameType::Cancel => {
+                        panic!("a stop must never be a Cancel frame")
+                    }
+                    Ok(Some(_)) => {}
+                    _ => break None,
+                }
+            }
+        });
+
+        let switch = RelaySwitch::new(
+            wrap_with_test_ids(vec![engine_socket]),
+            test_fabric_registry(),
+        )
+        .await
+        .expect("switch with one master must construct");
+
+        let key = (MessageId::Uint(1), MessageId::new_uuid());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        switch
+            .requests
+            .write()
+            .await
+            .register(
+                key.clone(),
+                RequestState::new(
+                    RoutingEntry {
+                        source_master_idx: None,
+                        destination_master_idx: 0,
+                    },
+                    None,
+                    Some(tx),
+                    false,
+                    crate::bifaci::frame::DEFAULT_INITIAL_CREDIT,
+                ),
+            )
+            .unwrap();
+
+        assert!(
+            !switch.stop_request_feeds(&MessageId::new_uuid()).await,
+            "an unknown request is not stopped"
+        );
+        assert!(switch.stop_request_feeds(&key.1).await, "a live request is stopped");
+        assert!(
+            switch.is_request_live(&key.1).await,
+            "a stop leaves host-side request state live — the request ends naturally"
+        );
+        let frame = slave_task
+            .await
+            .expect("slave task")
+            .expect("destination receives the CloseStream");
+        assert_eq!(frame.frame_type, FrameType::CloseStream);
+        assert_eq!(frame.id, key.1);
+        assert!(frame.stream_id.is_none(), "a run stop closes every live feed of the request");
+
+        // No terminal yet: the await times out rather than inventing one.
+        assert!(switch
+            .await_request_terminal(&key.1, std::time::Duration::from_millis(60))
+            .await
+            .is_err());
+
+        // The request ends naturally (END) — the evidence arrives.
+        switch
+            .requests
+            .write()
+            .await
+            .terminate(&key, TerminalKind::End)
+            .expect("live request terminates once");
+        let summary = switch
+            .await_request_terminal(&key.1, std::time::Duration::from_secs(1))
+            .await
+            .expect("terminal observed");
+        assert_eq!(summary.kind, TerminalKind::End);
+        assert!(summary.cancel_code.is_none());
+    }
+
+    // TEST1960: the stop verdict is built from evidence — nothing open is
+    // NothingToStop (never a success), a stopped request that drains to END
+    // counts as ended, one that ends with ERR is FeedFailed naming the
+    // terminal, and one that never ends is FeedDidNotEnd at the deadline.
+    #[tokio::test]
+    async fn test1960_stop_feed_requests_verdict_from_evidence() {
+        use crate::bifaci::live_feed::{stop_feed_requests, StopInputsError};
+        let (engine_socket, slave_socket) = UnixStream::pair().expect("socket pair");
+        let limits = Limits::default();
+        let caps = serde_json::json!([CAP_IDENTITY]);
+        let _slave = tokio::spawn(async move {
+            let (mut reader, _writer) =
+                slave_notify_with_identity(slave_socket, &caps, &limits).await;
+            while let Ok(Some(_)) = reader.read().await {}
+        });
+        let switch = Arc::new(
+            RelaySwitch::new(
+                wrap_with_test_ids(vec![engine_socket]),
+                test_fabric_registry(),
+            )
+            .await
+            .expect("switch with one master must construct"),
+        );
+
+        assert_eq!(
+            stop_feed_requests(&switch, &[], 0, std::time::Duration::from_millis(50)).await,
+            Err(StopInputsError::NothingToStop)
+        );
+
+        let register = |n: u64| {
+            let key = (MessageId::Uint(n), MessageId::new_uuid());
+            let (tx, rx) = mpsc::unbounded_channel();
+            (key, tx, rx)
+        };
+        let (ends, tx_end, _rx_end) = register(1);
+        let (fails, tx_fail, _rx_fail) = register(2);
+        let (hangs, tx_hang, _rx_hang) = register(3);
+        {
+            let mut requests = switch.requests.write().await;
+            for (key, tx) in [(&ends, tx_end), (&fails, tx_fail), (&hangs, tx_hang)] {
+                requests
+                    .register(
+                        key.clone(),
+                        RequestState::new(
+                            RoutingEntry {
+                                source_master_idx: None,
+                                destination_master_idx: 0,
+                            },
+                            None,
+                            Some(tx),
+                            false,
+                            crate::bifaci::frame::DEFAULT_INITIAL_CREDIT,
+                        ),
+                    )
+                    .unwrap();
+            }
+        }
+
+        // Drive the terminals while the stop awaits them.
+        let driver = {
+            let switch = Arc::clone(&switch);
+            let ends = ends.clone();
+            let fails = fails.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+                let mut requests = switch.requests.write().await;
+                requests.terminate(&ends, TerminalKind::End).unwrap();
+                requests.terminate(&fails, TerminalKind::Err).unwrap();
+            })
+        };
+
+        let verdict = stop_feed_requests(
+            &switch,
+            &[ends.1.clone()],
+            1,
+            std::time::Duration::from_secs(2),
+        )
+        .await
+        .expect("a request that ENDs after the stop is a stopped input");
+        assert_eq!(verdict.host_taps_closed, 1);
+        assert_eq!(verdict.feed_requests_stopped, 1);
+        assert_eq!(verdict.feeds_ended, 1);
+        driver.await.unwrap();
+
+        // Already ended before the stop: counted as stopped and ended.
+        let verdict = stop_feed_requests(
+            &switch,
+            &[ends.1.clone()],
+            0,
+            std::time::Duration::from_millis(50),
+        )
+        .await
+        .expect("an already-ended request's input is not open");
+        assert_eq!((verdict.feed_requests_stopped, verdict.feeds_ended), (1, 1));
+
+        // Ended with ERR: the stop did not end the input cleanly.
+        match stop_feed_requests(
+            &switch,
+            &[fails.1.clone()],
+            0,
+            std::time::Duration::from_millis(50),
+        )
+        .await
+        {
+            Ok(outcome) => panic!("an ERR-terminated request is not a clean stop: {outcome:?}"),
+            Err(StopInputsError::FeedFailed { rid, kind }) => {
+                assert_eq!(rid, fails.1.to_string());
+                assert_eq!(kind, "err");
+            }
+            Err(other) => panic!("expected FeedFailed, got {other:?}"),
+        }
+
+        // Never ends: the deadline names the request.
+        match stop_feed_requests(
+            &switch,
+            &[hangs.1.clone()],
+            0,
+            std::time::Duration::from_millis(80),
+        )
+        .await
+        {
+            Err(StopInputsError::FeedDidNotEnd { rid, timeout_ms }) => {
+                assert_eq!(rid, hangs.1.to_string());
+                assert_eq!(timeout_ms, 80);
+            }
+            other => panic!("expected FeedDidNotEnd, got {other:?}"),
+        }
     }
 
     // TEST7038: Master death terminates every request routed to it with kind master_died, delivering synthetic MASTER_DIED ERRs to waiting channels and leaving zero state.

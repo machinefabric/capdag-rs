@@ -142,13 +142,20 @@ impl CliRuntime {
     }
 
     /// STOP INPUT (15.2 §Runs Stop): close every open live tap — host-opened
-    /// feeds directly, cartridge-resolved feeds via a non-force Cancel on
-    /// their feed-bearing requests — and let the machine DRAIN: in-flight
-    /// items flow through, terminals end, writers finalize, and the run
-    /// completes with its outputs. This is the tap-off control, distinct
-    /// from aborting the machine.
-    pub async fn stop_live_inputs(&self) {
-        {
+    /// feeds directly, cartridge-resolved feeds via a CloseStream frame to
+    /// their feed-bearing requests — then AWAIT the evidence that each
+    /// stopped request drained and ENDED, and return the verdict. The
+    /// machine drains: in-flight items flow through, terminals end, writers
+    /// finalize, and the run completes with its outputs. This is the tap-off
+    /// control, distinct from aborting the machine. Nothing open to stop is
+    /// an error, never a silent success.
+    pub async fn stop_live_inputs(
+        &self,
+    ) -> Result<
+        crate::bifaci::live_feed::StopInputsOutcome,
+        crate::bifaci::live_feed::StopInputsError,
+    > {
+        let host_taps_closed = {
             let mut taps = self
                 .live_inputs
                 .host_taps
@@ -157,8 +164,10 @@ impl CliRuntime {
             for tap in taps.iter() {
                 tap.close();
             }
+            let n = taps.len() as u64;
             taps.clear();
-        }
+            n
+        };
         let rids: Vec<crate::bifaci::frame::MessageId> = {
             let mut rids = self
                 .live_inputs
@@ -167,24 +176,30 @@ impl CliRuntime {
                 .expect("CLI feed-bearing registry mutex poisoned");
             std::mem::take(&mut *rids)
         };
-        if rids.is_empty() {
-            return;
+        if rids.is_empty() && host_taps_closed == 0 {
+            return Err(crate::bifaci::live_feed::StopInputsError::NothingToStop);
         }
         let switch = {
             let host = self.host.lock().await;
             host.ctx.as_ref().map(|ctx| ctx.switch().clone())
         };
         let Some(switch) = switch else {
-            // No host was ever built — nothing is running, nothing to stop.
-            return;
+            if rids.is_empty() {
+                return Ok(crate::bifaci::live_feed::StopInputsOutcome {
+                    host_taps_closed,
+                    feed_requests_stopped: 0,
+                    feeds_ended: 0,
+                });
+            }
+            return Err(crate::bifaci::live_feed::StopInputsError::NoHost);
         };
-        for rid in rids {
-            // Frame-only stop: the cartridge runtime closes the request's
-            // feed taps and the request ends NATURALLY after the drain —
-            // host-side request state stays live so every downstream cap
-            // still receives the drained stream.
-            switch.stop_request_feeds(&rid).await;
-        }
+        crate::bifaci::live_feed::stop_feed_requests(
+            &switch,
+            &rids,
+            host_taps_closed,
+            crate::bifaci::live_feed::STOP_INPUT_DRAIN_TIMEOUT,
+        )
+        .await
     }
 }
 

@@ -25,7 +25,9 @@
 //! - RelayNotify/RelayState: fatal error (cartridges must never send these)
 //! - Everything else: forwarded to relay (pass-through)
 
-use crate::bifaci::frame::{FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
+use crate::bifaci::frame::{
+    CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner,
+};
 use crate::bifaci::io::{handshake, verify_identity, CborError, FrameReader, FrameWriter};
 use crate::bifaci::relay_switch::{
     CartridgeAttachmentError, CartridgeAttachmentErrorKind, CartridgeLifecycle,
@@ -121,7 +123,7 @@ pub struct CartridgeProcessInfo {
 }
 
 /// Why a cartridge was killed. Determines whether pending requests get ERR frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownReason {
     /// App is exiting. No ERR frames — the relay connection is closing anyway
     /// and there are no callers left to notify.
@@ -130,8 +132,11 @@ pub enum ShutdownReason {
     /// Pending requests MUST get ERR frames with code "OOM_KILLED" so callers
     /// can fail fast instead of hanging forever.
     OomKill,
-    /// Request was cancelled. Pending requests get ERR frames with code "CANCELLED".
-    Cancelled,
+    /// A force-kill Cancel ended the process. Pending requests get ERR frames
+    /// in the cancel's own attribution (`CANCELLED`/`user` for an operator's
+    /// cancel, `ABORTED_COLLATERAL` / `ABORTED` with their class otherwise)
+    /// — the kill is never reported as "cancelled" unless a human cancelled.
+    Cancelled(CancelReason),
     /// The host's health probe expired. Pending requests get ERR frames with code
     /// "CARTRIDGE_UNHEALTHY" and the process is fully retired before it may respawn.
     HeartbeatTimeout,
@@ -1978,6 +1983,30 @@ impl CartridgeHostRuntime {
                 }
                 Ok(())
             }
+            FrameType::CloseStream => {
+                // CloseStream from relay — the tap-off (15.2 §Runs Stop).
+                // Forwarded to the cartridge handling the request so it can
+                // close the request's live feed(s); never cascaded (the tap
+                // is on the feed-bearing request alone — its peers drain
+                // naturally), never a kill, and no routing state changes:
+                // the request ends on its own, later, with END.
+                let xid = frame.routing_id.clone().ok_or_else(|| {
+                    AsyncHostError::Protocol("CloseStream frame missing XID".to_string())
+                })?;
+                let key = (xid, frame.id.clone());
+                if let Some(&cartridge_idx) = self.incoming_rxids.get(&key) {
+                    self.touch_incoming_rxid(&key);
+                    let _ = self.send_to_cartridge(cartridge_idx, frame);
+                } else {
+                    tracing::warn!(
+                        target: "host_runtime",
+                        rid = ?key.1,
+                        "[CartridgeHostRuntime] CloseStream for a request this host is not serving — ignoring"
+                    );
+                }
+                Ok(())
+            }
+
             FrameType::Cancel => {
                 // Cancel from relay — route to the cartridge handling this request.
                 let xid = frame.routing_id.clone().ok_or_else(|| {
@@ -1985,7 +2014,12 @@ impl CartridgeHostRuntime {
                 })?;
                 let rid = frame.id.clone();
                 let key = (xid.clone(), rid.clone());
-                let force_kill = frame.force_kill.unwrap_or(false);
+                // The attribution rides in meta like an ERR's; an unattributed
+                // Cancel is still a cancel.
+                let reason = frame
+                    .cancel_reason()
+                    .expect("a Cancel frame always yields a reason");
+                let force_kill = reason.force_kill;
 
                 if let Some(&cartridge_idx) = self.incoming_rxids.get(&key) {
                     // Touch on cancel-route — the cancel itself is
@@ -1996,7 +2030,7 @@ impl CartridgeHostRuntime {
                     if force_kill {
                         // Force kill: set shutdown reason and kill the process
                         self.cartridges[cartridge_idx].shutdown_reason =
-                            Some(ShutdownReason::Cancelled);
+                            Some(ShutdownReason::Cancelled(reason.clone()));
                         if let Some(ref mut child) = self.cartridges[cartridge_idx].process {
                             let _ = child.kill().await;
                         }
@@ -2004,7 +2038,8 @@ impl CartridgeHostRuntime {
                         // Cooperative cancel: forward Cancel frame to the cartridge
                         let _ = self.send_to_cartridge(cartridge_idx, frame);
 
-                        // Also cascade: send Cancel to relay for each peer call spawned by this request.
+                        // Also cascade: send Cancel to relay for each peer call spawned by this request,
+                        // under the same reason.
                         // Clone the peer-rid list out from under the immutable borrow before
                         // calling `touch_*` (which takes `&mut self`); otherwise the borrow
                         // checker rejects the simultaneous shared/mutable use.
@@ -2012,8 +2047,12 @@ impl CartridgeHostRuntime {
                             self.incoming_to_peer_rids.get(&key).cloned();
                         if let Some(peer_rids) = peer_rids_snapshot {
                             self.touch_incoming_to_peer_rids(&key);
+                            let peer_reason = CancelReason {
+                                force_kill: false,
+                                ..reason.clone()
+                            };
                             for peer_rid in peer_rids {
-                                let cancel = Frame::cancel(peer_rid, false);
+                                let cancel = Frame::cancel(peer_rid, &peer_reason);
                                 let _ = outbound_tx.send(cancel);
                             }
                         }
@@ -2304,8 +2343,7 @@ impl CartridgeHostRuntime {
             // The next on-demand spawn will increment `running` again with
             // a fresh process.
             cartridge.restart_count = cartridge.restart_count.saturating_add(1);
-            reason = cartridge.shutdown_reason;
-            cartridge.shutdown_reason = None; // Reset for potential respawn
+            reason = cartridge.shutdown_reason.take();
 
             // Capture stderr content BEFORE killing the process
             let mut captured = String::new();
@@ -2482,7 +2520,7 @@ impl CartridgeHostRuntime {
         // OOM kill is a Resource problem, a cancel stays Internal.
         // Both unexpected deaths and OOM kills send ERR frames for pending work.
         // Only AppExit suppresses ERR frames (relay is closing, no callers left).
-        let err_info: Option<(&str, crate::failure::AttributionClass, String)> = match reason {
+        let err_info: Option<(&str, crate::failure::AttributionClass, String)> = match &reason {
             None => {
                 // Unexpected death — genuine crash mid-flight
                 let exit_suffix = if exit_info.is_empty() {
@@ -2537,14 +2575,17 @@ impl CartridgeHostRuntime {
                     error_message,
                 ))
             }
-            Some(ShutdownReason::Cancelled) => {
-                // Cancel-triggered kill — ERR "CANCELLED" for all pending work
+            Some(ShutdownReason::Cancelled(reason)) => {
+                // Force-kill under a cancel — every pending request ends in
+                // the cancel's OWN attribution, so a collateral or host abort
+                // never reads as a user cancel.
                 Some((
-                    "CANCELLED",
-                    crate::failure::AttributionClass::Internal,
+                    reason.terminal_code(),
+                    reason.terminal_class(),
                     format!(
-                        "Cartridge {} killed by cancel request.",
-                        self.cartridges[cartridge_idx].path.display()
+                        "Cartridge {} killed by a force-kill cancel: {}",
+                        self.cartridges[cartridge_idx].path.display(),
+                        reason.terminal_message()
                     ),
                 ))
             }

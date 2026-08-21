@@ -100,6 +100,23 @@ pub struct CapArg {
     #[serde(default)]
     pub is_sequence: bool,
 
+    /// Whether this argument is consumed WITHOUT a length promise — incrementally,
+    /// item by item or chunk by chunk, as the stream arrives (streaming=true) — or
+    /// only as a complete value (streaming=false, the default).
+    ///
+    /// This is the consumer's capability with respect to boundedness (12.4
+    /// §Unbounded Streams, L16), orthogonal to `is_sequence` (cardinality): a
+    /// scalar input can stream (a transcriber windowing an open-ended wav) and a
+    /// sequence input can fold (a concat that needs every item). It is a
+    /// definition-level property, not a URN property — it changes how the data
+    /// path is delivered, not what the cap produces. The executor forwards an
+    /// unbounded upstream live only into a streaming argument; into a
+    /// non-streaming argument the hop is a split boundary and the consumer is
+    /// fed the bounded whole once the upstream ends (15.2 §Streaming Contracts).
+    /// RULE14: only the main input may stream — side arguments are values.
+    #[serde(default)]
+    pub streaming: bool,
+
     /// How this argument can be provided
     pub sources: Vec<ArgSource>,
 
@@ -117,6 +134,12 @@ pub struct CapArg {
 }
 
 impl CapArg {
+    /// Declare this argument a streaming consumer (see `streaming`).
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
+    }
+
     /// The media URN the runtime demuxes this arg's input stream by: its `Stdin`
     /// source URN if it declares one, otherwise its declared slot media URN. A cap
     /// need not declare any `Stdin` source at all — a producer-fed arg may be
@@ -155,6 +178,7 @@ impl CapArg {
             media_urn: media_urn.into(),
             required,
             is_sequence: false,
+            streaming: false,
             sources,
             arg_description: None,
             default_value: None,
@@ -173,6 +197,7 @@ impl CapArg {
             media_urn: media_urn.into(),
             required,
             is_sequence: false,
+            streaming: false,
             sources,
             arg_description: Some(description.into()),
             default_value: None,
@@ -185,6 +210,7 @@ impl CapArg {
         media_urn: impl Into<String>,
         required: bool,
         is_sequence: bool,
+        streaming: bool,
         sources: Vec<ArgSource>,
         description: Option<String>,
         default: Option<serde_json::Value>,
@@ -194,6 +220,7 @@ impl CapArg {
             media_urn: media_urn.into(),
             required,
             is_sequence,
+            streaming,
             sources,
             arg_description: description,
             default_value: default,
@@ -239,6 +266,16 @@ pub struct CapOutput {
     #[serde(default)]
     pub is_sequence: bool,
 
+    /// Whether this output MAY be emitted without a length promise — an
+    /// unbounded stream (`STREAM_START` `unbounded=true`, 12.4 §Unbounded
+    /// Streams): an open-ended capture, a transcription of one, a generator.
+    /// `false` (the default) is a contract: every stream this output emits is
+    /// bounded, and the executor audits each `STREAM_START` against it at
+    /// receipt (a violation is `internal`, named at the cap). Orthogonal to
+    /// `is_sequence`; a definition-level property, not a URN property.
+    #[serde(default)]
+    pub streaming: bool,
+
     /// Arbitrary metadata as JSON object
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -255,6 +292,7 @@ impl CapOutput {
             media_urn: media_urn.into(),
             output_description: description.into(),
             is_sequence: false,
+            streaming: false,
             metadata: None,
         }
     }
@@ -264,14 +302,22 @@ impl CapOutput {
         media_urn: impl Into<String>,
         description: impl Into<String>,
         is_sequence: bool,
+        streaming: bool,
         metadata: Option<serde_json::Value>,
     ) -> Self {
         Self {
             media_urn: media_urn.into(),
             output_description: description.into(),
             is_sequence,
+            streaming,
             metadata,
         }
+    }
+
+    /// Declare this output a possibly-unbounded emitter (see `streaming`).
+    pub fn streaming(mut self, streaming: bool) -> Self {
+        self.streaming = streaming;
+        self
     }
 
     /// Get the media URN
@@ -752,6 +798,28 @@ impl Cap {
         (input_is_sequence, output_is_sequence)
     }
 
+    /// The main input argument — the one whose `Stdin` source is equivalent
+    /// to the cap URN's `in=` spec. `None` for a void-input or argless cap.
+    pub fn main_input_arg(&self) -> Option<&CapArg> {
+        let in_spec = crate::urn::media_urn::MediaUrn::from_string(self.urn.in_spec()).ok()?;
+        self.args.iter().find(|arg| arg.is_main_input(&in_spec))
+    }
+
+    /// Streaming shape of this cap's primary data path:
+    /// `(input_streams, output_may_be_unbounded)` — the `streaming` flags of the
+    /// main input argument and of the output (15.2 §Streaming Contracts).
+    ///
+    /// THE single definition, read by the executor's hop rule (a streaming
+    /// producer into a non-streaming consumer is a split boundary) and by the
+    /// stream-contract audit (an unbounded STREAM_START from an output declared
+    /// non-streaming is a violation). A void-input or argless cap has a
+    /// non-streaming input: there is nothing to stream into it.
+    pub fn streaming_shape(&self) -> (bool, bool) {
+        let input_streams = self.main_input_arg().map_or(false, |arg| arg.streaming);
+        let output_streams = self.output.as_ref().map_or(false, |o| o.streaming);
+        (input_streams, output_streams)
+    }
+
     /// Whether a data position of cardinality `source_is_sequence` feeding this cap's
     /// primary input requires a ForEach (per-item map) to be inserted before it.
     ///
@@ -1045,6 +1113,7 @@ mod tests {
             media_urn: "media:enc=utf-8".to_string(),
             required: true,
             is_sequence: false,
+            streaming: false,
             sources: vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8".to_string(),
             }],
@@ -1102,6 +1171,7 @@ mod tests {
             media_urn: "media:string".to_string(),
             required: true,
             is_sequence: false,
+            streaming: false,
             sources: vec![
                 ArgSource::CliFlag {
                     cli_flag: "--name".to_string(),
@@ -1332,6 +1402,7 @@ mod tests {
             "media:string",
             true,
             false,
+            false,
             vec![ArgSource::CliFlag {
                 cli_flag: "--name".to_string(),
             }],
@@ -1377,6 +1448,7 @@ mod tests {
         let output2 = CapOutput::with_full_definition(
             "media:fmt=json",
             "JSON output",
+            false,
             false,
             Some(serde_json::json!({"v": 2})),
         );
@@ -1752,6 +1824,7 @@ mod tests {
             media_urn: "media:enc=utf-8;tag".to_string(),
             output_description: "One of 'positive', 'neutral', or 'negative'.".to_string(),
             is_sequence: false,
+            streaming: false,
             metadata: None,
         });
 
@@ -1813,6 +1886,7 @@ mod tests {
             media_urn: "media:enc=utf-8;tag".to_string(),
             output_description: "a tag".to_string(),
             is_sequence: false,
+            streaming: false,
             metadata: None,
         };
         let output_json = serde_json::to_value(&output).expect("output serializes");

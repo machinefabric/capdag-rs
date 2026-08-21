@@ -1501,9 +1501,10 @@ mod tests {
         let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
         cap.args = vec![
             CapArg::with_full_definition(
-                "media:enc=utf-8;file-path",
-                true,
-                false,
+            "media:enc=utf-8;file-path",
+            true,
+            false,
+            false,
                 vec![ArgSource::Stdin {
                     stdin: "media:ext=pdf;doc".to_string(),
                 }],
@@ -1512,9 +1513,10 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-                "media:enc=utf-8;model-spec",
-                true,
-                false,
+            "media:enc=utf-8;model-spec",
+            true,
+            false,
+            false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--model-spec".to_string(),
                 }],
@@ -1523,9 +1525,10 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-                "media:budget;numeric",
-                false,
-                false,
+            "media:budget;numeric",
+            false,
+            false,
+            false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--budget".to_string(),
                 }],
@@ -1534,9 +1537,10 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-                "media:numeric;temperature",
-                false,
-                false,
+            "media:numeric;temperature",
+            false,
+            false,
+            false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--temperature".to_string(),
                 }],
@@ -1682,9 +1686,10 @@ mod tests {
         let mut cap = Cap::new(urn, "Rewrite".to_string(), vec!["rewrite".to_string()]);
         cap.args = vec![
             CapArg::with_full_definition(
-                "media:enc=utf-8;file-path",
-                true,
-                false,
+            "media:enc=utf-8;file-path",
+            true,
+            false,
+            false,
                 vec![ArgSource::Stdin {
                     stdin: "media:ext=txt;text".to_string(),
                 }],
@@ -1693,9 +1698,10 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-                "media:numeric;temperature",
-                false,
-                false,
+            "media:numeric;temperature",
+            false,
+            false,
+            false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--temperature".to_string(),
                 }],

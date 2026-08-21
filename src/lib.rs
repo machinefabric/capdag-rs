@@ -129,7 +129,7 @@ pub use bifaci::cartridge_runtime::{
 pub use bifaci::credit::{CreditClosed, CreditGate, CreditRouter};
 pub use bifaci::decode_chunk_payload;
 pub use bifaci::frame::{
-    CreditDirection, DropReason, FlowKey, Frame, FrameType, Limits, MessageId, ReorderBuffer,
+    CancelReason, CreditDirection, DropReason, FlowKey, Frame, FrameType, Limits, MessageId, ReorderBuffer,
     SeqAssigner, DEFAULT_INITIAL_CREDIT, DEFAULT_MAX_CHUNK, DEFAULT_MAX_FRAME,
     DEFAULT_MAX_REORDER_BUFFER, PROTOCOL_VERSION,
 };
@@ -151,8 +151,9 @@ pub use bifaci::request_state::{
     TerminatedSummary,
 };
 pub use bifaci::live_feed::{
-    LiveFeedHandle, LiveFeedItem, LiveFeedSelector, LiveFeedSink, LiveFeedStop, OpenedFeed,
-    OverrunPolicy, MEDIA_LIVE_FEED, MEDIA_LIVE_SYNTHETIC,
+    stop_feed_requests, LiveFeedHandle, LiveFeedItem, LiveFeedSelector, LiveFeedSink,
+    LiveFeedStop, OpenedFeed, OverrunPolicy, StopInputsError, StopInputsOutcome,
+    MEDIA_LIVE_FEED, MEDIA_LIVE_SYNTHETIC, STOP_INPUT_DRAIN_TIMEOUT,
 };
 pub use capture::MEDIA_FEED_FRAMES;
 pub use bifaci::stats::{

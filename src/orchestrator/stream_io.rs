@@ -82,6 +82,44 @@ pub enum StreamIoError {
         expected: String,
         actual: String,
     },
+
+    /// A cap emitted an output STREAM_START whose shape violates its
+    /// declared stream contract (15.2 §Streaming Contracts): it opened an
+    /// UNBOUNDED stream from an output declared `streaming: false` (every
+    /// stream bounded — the promise the executor's hop rule and every
+    /// whole-value consumer downstream were built on), or it emitted in a
+    /// cardinality mode other than the declared `is_sequence`. Fails hard at
+    /// receipt, attributed Internal: the cartridge broke its own declaration.
+    #[error(
+        "Cap '{cap_urn}' violated its stream contract: declared is_sequence={declared_is_sequence} streaming={declared_streaming}, emitted is_sequence={emitted_is_sequence} unbounded={emitted_unbounded}"
+    )]
+    StreamContract {
+        cap_urn: String,
+        declared_is_sequence: bool,
+        declared_streaming: bool,
+        emitted_is_sequence: bool,
+        emitted_unbounded: bool,
+    },
+}
+
+/// The declared shape of a cap's output stream — `CapOutput::is_sequence`
+/// and `CapOutput::streaming` — carried to the receipt points so every
+/// STREAM_START is audited against the definition the plan was built on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutputContract {
+    pub is_sequence: bool,
+    pub streaming: bool,
+}
+
+impl OutputContract {
+    /// The contract of a cap definition's output. A cap with no output
+    /// (`out=media:void`) has nothing to audit: both flags are false, and an
+    /// emission from it is caught by the effect audit.
+    pub fn of(cap: &crate::Cap) -> Self {
+        let (_, streaming) = cap.streaming_shape();
+        let (_, is_sequence) = cap.sequence_shape();
+        Self { is_sequence, streaming }
+    }
 }
 
 // =============================================================================
@@ -102,13 +140,17 @@ pub struct EffectAudit {
     cap_urn_str: String,
     cap: crate::CapUrn,
     runtime_input: crate::MediaUrn,
+    /// The declared output shape — audited on the same STREAM_START as the
+    /// effect, so a cap lying about boundedness or cardinality fails at the
+    /// same boundary as a cap lying about its output type.
+    contract: OutputContract,
 }
 
 impl EffectAudit {
     /// Build the audit for one cap invocation. Fails when the cap URN does
     /// not parse or its declared `in=` is not a valid media URN — engine-side
     /// inconsistencies that must fail hard, not skip the audit.
-    pub fn new(cap_urn: &str) -> Result<Self, StreamIoError> {
+    pub fn new(cap_urn: &str, contract: OutputContract) -> Result<Self, StreamIoError> {
         let cap = crate::CapUrn::from_string(cap_urn).map_err(|e| {
             StreamIoError::Protocol(format!(
                 "effect audit: cap URN '{}' does not parse: {}",
@@ -125,7 +167,39 @@ impl EffectAudit {
             cap_urn_str: cap_urn.to_string(),
             cap,
             runtime_input,
+            contract,
         })
+    }
+
+    /// The declared output contract this audit enforces.
+    pub fn contract(&self) -> OutputContract {
+        self.contract
+    }
+
+    /// Audit one emitted output STREAM_START frame — its media label against
+    /// the effect contract, its `is_sequence` and `unbounded` flags against
+    /// the declared output shape. Both must hold; the effect is checked first
+    /// (an emission of the wrong TYPE is the graver lie).
+    pub fn audit_frame(&self, frame: &crate::bifaci::frame::Frame) -> Result<(), StreamIoError> {
+        self.audit(frame.media_urn.as_deref())?;
+        // An emission that does not state its cardinality mode is an empty
+        // stream (no items were ever written): it can be neither a lie about
+        // sequence mode nor unbounded in any consequential way — but an
+        // unbounded flag on it is still a contract question.
+        let emitted_is_sequence = frame.is_sequence.unwrap_or(self.contract.is_sequence);
+        let emitted_unbounded = frame.is_unbounded();
+        let sequence_lie = emitted_is_sequence != self.contract.is_sequence;
+        let boundedness_lie = emitted_unbounded && !self.contract.streaming;
+        if sequence_lie || boundedness_lie {
+            return Err(StreamIoError::StreamContract {
+                cap_urn: self.cap_urn_str.clone(),
+                declared_is_sequence: self.contract.is_sequence,
+                declared_streaming: self.contract.streaming,
+                emitted_is_sequence,
+                emitted_unbounded,
+            });
+        }
+        Ok(())
     }
 
     /// Audit one emitted output STREAM_START label. `Ok(())` iff the
@@ -989,7 +1063,7 @@ pub trait FlowObserver: Send + Sync {
 
     /// Record that request `rid` is FEED-BEARING: its input carries a live
     /// reference the receiving cartridge resolved into an open device tap.
-    /// The stop-input control (15.2 §Runs Stop) sends a non-force Cancel to
+    /// The stop-input control (15.2 §Runs Stop) sends a CloseStream frame to
     /// exactly these requests — the runtime closes the taps and the machine
     /// drains — without touching any other in-flight request. Default no-op
     /// for observers that don't wire stop.
@@ -1249,12 +1323,13 @@ impl TerminalOutput {
     pub fn new(
         rx: mpsc::UnboundedReceiver<Frame>,
         cap_urn: &str,
+        contract: OutputContract,
         step_token_id: &StepToken,
         progress_fn: Option<CapProgressFn>,
         log_fn: Option<PipelineLogFn>,
         credit: Option<CreditPlumbing>,
     ) -> Result<Self, StreamIoError> {
-        let effect_audit = EffectAudit::new(cap_urn)?;
+        let effect_audit = EffectAudit::new(cap_urn, contract)?;
         Ok(Self {
             rx,
             cap_urn: cap_urn.to_string(),
@@ -1328,7 +1403,7 @@ impl TerminalOutput {
                     // Effect audit at receipt: the emission must satisfy the
                     // cap's declared effect contract before any of its items
                     // are yielded.
-                    if let Err(e) = self.effect_audit.audit(frame.media_urn.as_deref()) {
+                    if let Err(e) = self.effect_audit.audit_frame(&frame) {
                         self.ended = true;
                         return Some(Err(e));
                     }
@@ -1542,6 +1617,7 @@ pub async fn collect_terminal_output(
     mut rx: mpsc::UnboundedReceiver<Frame>,
     progress_fn: Option<&CapProgressFn>,
     cap_urn: &str,
+    contract: OutputContract,
     step_token_id: &StepToken,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
@@ -1553,7 +1629,7 @@ pub async fn collect_terminal_output(
 ) -> Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError> {
     // The terminal cap's emission is audited against its declared effect
     // contract at receipt — before the payload is collected or persisted.
-    let effect_audit = EffectAudit::new(cap_urn)?;
+    let effect_audit = EffectAudit::new(cap_urn, contract)?;
     let mut response_chunks: Vec<u8> = Vec::new();
     let mut is_sequence: Option<bool> = None;
     // Consumed-chunk accounting for batched grants (L10): the producer's
@@ -1840,10 +1916,11 @@ pub async fn collect_terminal_output(
                     }
                     FrameType::StreamStart => {
                         timer.touch();
-                        // Effect audit at receipt: the emission must satisfy
-                        // the cap's declared effect contract before a single
-                        // byte of it is collected or persisted.
-                        effect_audit.audit(frame.media_urn.as_deref())?;
+                        // Effect + stream-contract audit at receipt: the
+                        // emission must satisfy the cap's declared effect and
+                        // declared shape before a single byte of it is
+                        // collected or persisted.
+                        effect_audit.audit_frame(&frame)?;
                         // An UNBOUNDED stream must be consumed incrementally
                         // (L16): a writer streams it to disk; without one this
                         // buffering collector would be unbounded memory. An
@@ -2073,6 +2150,20 @@ mod tests {
         }
     }
 
+    /// The contract every existing fixture emits under: a scalar, bounded
+    /// output (`stream_start` sends is_sequence=false, no unbounded flag).
+    const SCALAR_CONTRACT: OutputContract = OutputContract {
+        is_sequence: false,
+        streaming: false,
+    };
+    /// The contract of a cap that legitimately emits an UNBOUNDED sequence
+    /// (a live feed consumer, a streaming transcriber): the fixtures that
+    /// announce `stream_start_unbounded(.., Some(true))` declare it.
+    const STREAMING_SEQUENCE_CONTRACT: OutputContract = OutputContract {
+        is_sequence: true,
+        streaming: true,
+    };
+
     fn stream_start(rid: &MessageId) -> Frame {
         Frame::stream_start(
             rid.clone(),
@@ -2119,6 +2210,7 @@ mod tests {
             rx,
             None,
             "cap:echo;effect=none",
+            SCALAR_CONTRACT,
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2148,6 +2240,95 @@ mod tests {
         }
     }
 
+    // TEST1957: the stream-contract audit fires at receipt, on the same
+    // STREAM_START as the effect audit: an UNBOUNDED emission from an output
+    // declared `streaming: false`, and an emission whose cardinality mode
+    // differs from the declared `is_sequence`, each fail the collect with a
+    // typed violation naming both sides; an emission inside the contract
+    // passes. `is_sequence` had never been audited before this.
+    #[tokio::test]
+    async fn test1957_stream_contract_audit_at_receipt() {
+        use crate::bifaci::frame::FrameType;
+        let rid = MessageId::new_uuid();
+        let start_rid = rid.clone();
+        let start = move |is_sequence: bool, unbounded: bool| {
+            let mut frame = Frame::stream_start(
+                start_rid.clone(),
+                "out".to_string(),
+                "media:".to_string(),
+                Some(is_sequence),
+            );
+            if unbounded {
+                frame.unbounded = Some(true);
+            }
+            assert_eq!(frame.frame_type, FrameType::StreamStart);
+            frame
+        };
+        let run = |first: Frame, contract: OutputContract| {
+            let rid = rid.clone();
+            async move {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tx.send(first).unwrap();
+            tx.send(chunk(&rid, b"payload")).unwrap();
+            tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+            drop(tx);
+            collect_terminal_output(
+                rx,
+                None,
+                "cap:echo;effect=none",
+                contract,
+                &"step_test".parse().unwrap(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                5,
+                None,
+            )
+            .await
+            }
+        };
+
+        // Unbounded from a non-streaming output.
+        match run(start(false, true), SCALAR_CONTRACT).await {
+            Err(StreamIoError::StreamContract {
+                cap_urn,
+                declared_is_sequence,
+                declared_streaming,
+                emitted_is_sequence,
+                emitted_unbounded,
+            }) => {
+                assert_eq!(cap_urn, "cap:echo;effect=none");
+                assert!(!declared_is_sequence && !declared_streaming);
+                assert!(!emitted_is_sequence && emitted_unbounded);
+            }
+            other => panic!("expected StreamContract, got: {other:?}"),
+        }
+
+        // Sequence mode from an output declared scalar.
+        match run(start(true, false), SCALAR_CONTRACT).await {
+            Err(StreamIoError::StreamContract {
+                emitted_is_sequence,
+                emitted_unbounded,
+                ..
+            }) => {
+                assert!(emitted_is_sequence && !emitted_unbounded);
+            }
+            other => panic!("expected StreamContract, got: {other:?}"),
+        }
+
+        // Inside the contract: a streaming sequence output emitting a bounded
+        // sequence (a streaming output MAY be unbounded; this emission is
+        // not, so the buffering collector may take it). An unbounded emission
+        // under the same contract passes the audit too and is then refused by
+        // the collector on L16 grounds — a different check, tested by
+        // TEST8135.
+        run(start(true, false), STREAMING_SEQUENCE_CONTRACT)
+            .await
+            .expect("an emission inside the declared contract passes");
+    }
+
     // TEST8125: the incremental terminal consumer audits STREAM_START the
     // same way — a nonconformant emission surfaces as the first item error
     // and the stream yields nothing further.
@@ -2167,7 +2348,7 @@ mod tests {
         drop(tx);
 
         let mut terminal =
-            TerminalOutput::new(rx, "cap:echo;effect=none", &"step_test".parse().unwrap(), None, None, None)
+            TerminalOutput::new(rx, "cap:echo;effect=none", SCALAR_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
                 .expect("cap:echo;effect=none builds a valid effect audit");
         let first = terminal
             .next_item()
@@ -2203,6 +2384,7 @@ mod tests {
             rx,
             None,
             "cap:test",
+            STREAMING_SEQUENCE_CONTRACT,
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2333,6 +2515,7 @@ mod tests {
             rx,
             None,
             "cap:test",
+            STREAMING_SEQUENCE_CONTRACT,
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2368,6 +2551,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
+            SCALAR_CONTRACT,
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2413,6 +2597,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
+            SCALAR_CONTRACT,
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2457,6 +2642,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
+            SCALAR_CONTRACT,
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2503,7 +2689,7 @@ mod tests {
     async fn test7071_terminal_output_yields_before_stream_end() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", STREAMING_SEQUENCE_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         // Announce an unbounded stream and one item — nothing has ended.
@@ -2544,7 +2730,7 @@ mod tests {
     async fn test7077_per_item_meta_incremental() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", SCALAR_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         tx.send(stream_start(&rid)).unwrap();

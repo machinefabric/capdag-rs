@@ -31,7 +31,7 @@ uuid = { version = "1.0", features = ["v4"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
 
 [dependencies.ops-rs]
-version = "1.63.594"
+version = "1.65.635"
 
 [dependencies.reqwest]
 features = ["json"]
@@ -97,4 +97,4 @@ description = "Core cap URN and definition system for MACHFAB plugins"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.687.0"
+version = "1.689.69"

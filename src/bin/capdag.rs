@@ -77,6 +77,48 @@ fn bundled_cartridges_dir_for_exe(exe: &std::path::Path) -> Option<PathBuf> {
         .filter(|dir| dir.is_dir())
 }
 
+/// Ctrl-C is the tap-off control (15.2 §Runs Stop): the FIRST one stops
+/// every live input and prints the engine's VERDICT — how many taps and
+/// feed-bearing requests were stopped and whether their feeds ended — or the
+/// refusal (nothing open to stop, a feed that did not end). The machine
+/// drains, terminals finalize, and outputs are emitted as for any stopped
+/// run. A SECOND Ctrl-C, at any point (including while the first stop is
+/// still awaiting the drain), aborts — a cancel attributed to the `user`.
+fn arm_ctrl_c(cli_runtime: Arc<CliRuntime>) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return; // no signal handler on this platform — nothing to arm
+        }
+        eprintln!("\nStopping input… press Ctrl-C again to abort.");
+        let stop = {
+            let stop_runtime = cli_runtime.clone();
+            tokio::spawn(async move { stop_runtime.stop_live_inputs().await })
+        };
+        tokio::select! {
+            verdict = stop => {
+                match verdict {
+                    Ok(Ok(outcome)) => eprintln!(
+                        "Input stopped: {} host tap(s) closed, {} feed request(s) stopped, {} ended — the run is draining to complete outputs.",
+                        outcome.host_taps_closed,
+                        outcome.feed_requests_stopped,
+                        outcome.feeds_ended
+                    ),
+                    Ok(Err(err)) => eprintln!("Stop input refused: {err}"),
+                    Err(join) => eprintln!("Stop input did not complete: {join}"),
+                }
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    eprintln!("Aborted by user.");
+                    process::exit(130);
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("Aborted by user.");
+                process::exit(130);
+            }
+        }
+    });
+}
+
 /// The stderr progress/log hooks shared by every execution mode.
 fn progress_hooks() -> (CapProgressFn, PipelineLogFn) {
     let progress: CapProgressFn = Arc::new(|p: f32, cap_urn: &str, msg: &str| {
@@ -944,26 +986,7 @@ async fn execute_notation(
     ));
     let runtime: Arc<dyn EngineRuntime> = cli_runtime.clone();
 
-    // Ctrl-C is the tap-off control (15.2 §Runs Stop): the FIRST one closes
-    // every live input — the machine drains, terminals finalize, and outputs
-    // are emitted as for any stopped run. A SECOND Ctrl-C aborts.
-    {
-        let stop_runtime = cli_runtime.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_err() {
-                return; // no signal handler on this platform — nothing to arm
-            }
-            eprintln!(
-                "\nStopping input — live taps closed, machine draining to complete \
-                 outputs. Press Ctrl-C again to abort."
-            );
-            stop_runtime.stop_live_inputs().await;
-            if tokio::signal::ctrl_c().await.is_ok() {
-                eprintln!("Aborted.");
-                process::exit(130);
-            }
-        });
-    }
+    arm_ctrl_c(cli_runtime.clone());
 
     let (progress, log_fn) = progress_hooks();
 
@@ -2468,26 +2491,7 @@ async fn cmd_cap(args: &[String]) -> ! {
     ));
     let runtime: Arc<dyn EngineRuntime> = cli_runtime.clone();
 
-    // Ctrl-C is the tap-off control (15.2 §Runs Stop): the FIRST one closes
-    // every live input — the machine drains, terminals finalize, and outputs
-    // are emitted as for any stopped run. A SECOND Ctrl-C aborts.
-    {
-        let stop_runtime = cli_runtime.clone();
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_err() {
-                return; // no signal handler on this platform — nothing to arm
-            }
-            eprintln!(
-                "\nStopping input — live taps closed, machine draining to complete \
-                 outputs. Press Ctrl-C again to abort."
-            );
-            stop_runtime.stop_live_inputs().await;
-            if tokio::signal::ctrl_c().await.is_ok() {
-                eprintln!("Aborted.");
-                process::exit(130);
-            }
-        });
-    }
+    arm_ctrl_c(cli_runtime.clone());
     let (progress, log_fn) = progress_hooks();
 
     // One run per input (stdin = a single run; a live source = a single run).

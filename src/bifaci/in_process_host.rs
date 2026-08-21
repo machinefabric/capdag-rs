@@ -991,10 +991,26 @@ impl InProcessCartridgeHost {
                     drop(pending);
                 }
 
+                FrameType::CloseStream => {
+                    // An in-process handler holds no live feed taps: a
+                    // CloseStream has nothing to close and never aborts the
+                    // request — it is logged and the request continues.
+                    tracing::warn!(
+                        target: "in_process_host",
+                        rid = ?frame.id,
+                        "[InProcessHost] CloseStream for a request with no live feed — nothing to close, request continues"
+                    );
+                    continue;
+                }
+
                 FrameType::Cancel => {
                     let target_rid = frame.id.clone();
                     let xid = frame.routing_id.clone();
-                    let force_kill = frame.force_kill.unwrap_or(false);
+                    // The attribution rides in meta like an ERR's; an
+                    // unattributed Cancel is still a cancel.
+                    let reason = frame
+                        .cancel_reason()
+                        .expect("a Cancel frame always yields a reason");
 
                     // Drop active sender → handler's input recv() returns None
                     active.remove(&target_rid);
@@ -1018,17 +1034,17 @@ impl InProcessCartridgeHost {
                             .collect();
                         for peer_rid in &peer_rids_to_cancel {
                             pending.remove(peer_rid);
-                            let cancel = Frame::cancel(peer_rid.clone(), force_kill);
+                            let cancel = Frame::cancel(peer_rid.clone(), &reason);
                             let _ = write_tx.send(cancel);
                         }
                     }
 
-                    // Send ERR "CANCELLED"
+                    // Terminal ERR under the cancel's own cause
                     let mut err = Frame::err(
                         target_rid,
-                        "CANCELLED",
-                        crate::failure::AttributionClass::Internal,
-                        "Request cancelled",
+                        reason.terminal_code(),
+                        reason.terminal_class(),
+                        &reason.terminal_message(),
                         None,
                     );
                     err.routing_id = xid;
@@ -1117,6 +1133,7 @@ impl InProcessCartridgeHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bifaci::frame::CancelReason;
     use crate::bifaci::decode_chunk_payload;
     use crate::bifaci::io::{FrameReader, FrameWriter};
     use crate::bifaci::local_socket::UnixStream;
@@ -1263,6 +1280,116 @@ mod tests {
         drop(writer);
         drop(reader);
         host_task.await.unwrap().unwrap();
+    }
+
+    // TEST1961: the in-process host answers a Cancel in the cancel's OWN
+    // attribution — ERR ABORTED/resource for a host abort (message carries
+    // the reason), ERR ABORTED_COLLATERAL with the originating failure's
+    // class for collateral, ERR CANCELLED/user for an operator's cancel, and
+    // ERR CANCELLED/internal for an UNATTRIBUTED cancel, which still
+    // cancels. A CloseStream is a no-op for a handler with no live feed: the
+    // request continues and completes normally with END.
+    #[tokio::test]
+    async fn test1961_cancel_terminal_carries_its_attribution() {
+        use crate::failure::AttributionClass;
+        let cap_urn = "cap:in=\"media:text\";echo;out=\"media:text\"";
+        let run = |control: Frame| async move {
+            let cap = make_test_cap(cap_urn);
+            let handlers = vec![(
+                "echo".to_string(),
+                vec![cap],
+                Arc::new(EchoHandler) as Arc<dyn FrameHandler>,
+            )];
+            let host = InProcessCartridgeHost::new(
+                InProcessHostIdentity::for_test("in-process-test"),
+                handlers,
+            );
+            let (host_sock, test_sock) = UnixStream::pair().unwrap();
+            let (host_read, host_write) = host_sock.into_split();
+            let (test_read, test_write) = test_sock.into_split();
+            let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+            let mut reader = FrameReader::new(BufReader::new(test_read));
+            let mut writer = FrameWriter::new(BufWriter::new(test_write));
+            let notify = reader.read().await.unwrap().unwrap();
+            assert_eq!(notify.frame_type, FrameType::RelayNotify);
+
+            // Open the request and its input stream, but do not END it —
+            // the handler is active when the control frame arrives.
+            let rid = MessageId::new_uuid();
+            let mut req = Frame::req(rid.clone(), cap_urn, vec![], "application/cbor");
+            req.routing_id = Some(MessageId::Uint(1));
+            writer.write(&req).await.unwrap();
+            let ss = Frame::stream_start(
+                rid.clone(),
+                "arg0".to_string(),
+                "media:text".to_string(),
+                None,
+            );
+            writer.write(&ss).await.unwrap();
+
+            let is_close = control.frame_type == FrameType::CloseStream;
+            let mut control = control;
+            control.id = rid.clone();
+            control.routing_id = Some(MessageId::Uint(1));
+            writer.write(&control).await.unwrap();
+
+            let outcome = if is_close {
+                // Finish the request: it was never cancelled.
+                let payload = cbor_bytes_payload(b"still here");
+                let checksum = Frame::compute_checksum(&payload);
+                writer
+                    .write(&Frame::chunk(rid.clone(), "arg0".to_string(), 0, payload, 0, checksum))
+                    .await
+                    .unwrap();
+                writer
+                    .write(&Frame::stream_end(rid.clone(), "arg0".to_string(), 1))
+                    .await
+                    .unwrap();
+                writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+                let mut last = None;
+                loop {
+                    let frame = reader.read().await.unwrap().unwrap();
+                    assert_eq!(frame.id, rid);
+                    assert_ne!(frame.frame_type, FrameType::Err, "a CloseStream never aborts");
+                    let done = frame.frame_type == FrameType::End;
+                    last = Some(frame);
+                    if done {
+                        break;
+                    }
+                }
+                last.unwrap()
+            } else {
+                let frame = reader.read().await.unwrap().unwrap();
+                assert_eq!(frame.id, rid);
+                frame
+            };
+            drop(writer);
+            drop(reader);
+            host_task.await.unwrap().unwrap();
+            outcome
+        };
+        let cancel = |reason: CancelReason| Frame::cancel(MessageId::Uint(0), &reason);
+
+        let err = run(cancel(CancelReason::host(AttributionClass::Resource, "memory pressure relief", false))).await;
+        assert_eq!(err.frame_type, FrameType::Err);
+        assert_eq!(err.error_code(), Some("ABORTED"));
+        assert_eq!(err.attribution_class().unwrap(), AttributionClass::Resource);
+        assert!(err.error_message().unwrap_or("").contains("memory pressure relief"));
+
+        let err = run(cancel(CancelReason::collateral(AttributionClass::Input, "step s1 failed"))).await;
+        assert_eq!(err.error_code(), Some("ABORTED_COLLATERAL"));
+        assert_eq!(err.attribution_class().unwrap(), AttributionClass::Input);
+
+        let err = run(cancel(CancelReason::user(false))).await;
+        assert_eq!(err.error_code(), Some("CANCELLED"));
+        assert_eq!(err.attribution_class().unwrap(), AttributionClass::User);
+
+        let err = run(cancel(CancelReason::unattributed(false))).await;
+        assert_eq!(err.error_code(), Some("CANCELLED"), "an unattributed Cancel still cancels");
+        assert_eq!(err.attribution_class().unwrap(), AttributionClass::Internal);
+
+        let end = run(Frame::close_stream(MessageId::Uint(0), None)).await;
+        assert_eq!(end.frame_type, FrameType::End);
     }
 
     // TEST6749: InProcessCartridgeHost handles identity verification (echo nonce)

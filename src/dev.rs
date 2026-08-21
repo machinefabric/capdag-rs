@@ -913,16 +913,28 @@ mod tests {
     ///
     /// Every other byte still has to match, and a line that differs in anything
     /// besides that version still fails.
+    ///
+    /// And ONE more: HOW the stub reaches capdag is environment, not contract.
+    /// The dependency line of a language manifest (a git tag, a module version,
+    /// a SwiftPM `from:` — or a path, were one ever rendered) and the comment
+    /// lines that explain it are removed by `strip_capdag_dependency_source`
+    /// before comparing, so a render that differs only in how it reaches capdag
+    /// is not a contract difference. The VERSION on that line is still read
+    /// first, and the ordering rule above still applies to it.
     fn assert_stub_matches(language: &str, dest: &str, vendored: &str, canonical: &str) {
         if vendored == canonical {
             return;
         }
+        // The pin is read from the dependency line BEFORE that line is
+        // stripped — the ordering rule below must keep seeing it.
         let (vendored_pin, vendored_rest) = split_pin(vendored);
         let (canonical_pin, canonical_rest) = split_pin(canonical);
+        let vendored_rest = strip_capdag_dependency_source(dest, &vendored_rest);
+        let canonical_rest = strip_capdag_dependency_source(dest, &canonical_rest);
         assert_eq!(
             vendored_rest, canonical_rest,
             "{language}: vendored {dest} differs from the canonical bytes in more than the \
-             pinned capdag version — re-vendor the stubs"
+             capdag dependency source/version — re-vendor the stubs"
         );
         let (Some(vendored_pin), Some(canonical_pin)) = (vendored_pin, canonical_pin) else {
             panic!(
@@ -960,6 +972,47 @@ mod tests {
             rest.push('\n');
         }
         (pin, rest)
+    }
+
+    /// Whether `dest` is a language manifest whose capdag dependency source
+    /// may legitimately differ between renders (path vs tag vs version).
+    fn is_dependency_manifest(dest: &str) -> bool {
+        dest.ends_with("Cargo.toml") || dest.ends_with("go.mod") || dest.ends_with("Package.swift")
+    }
+
+    /// Whether a manifest line is the capdag dependency SOURCE: a path, git
+    /// tag, module version or SwiftPM `from:` naming capdag.
+    fn is_capdag_dependency_source(line: &str) -> bool {
+        let t = line.trim();
+        t.contains("capdag")
+            && (t.contains("path")
+                || t.contains("git =")
+                || t.contains("tag =")
+                || t.contains("url:")
+                || t.contains("from:")
+                || t.starts_with("require ")
+                || t.starts_with("replace "))
+    }
+
+    /// Strip the capdag dependency source from a manifest: the dependency
+    /// line(s) themselves, the comment lines that explain them, and blank
+    /// lines (the templates' conditional blocks differ in spacing). Every
+    /// other file is returned untouched — only manifests have a source to
+    /// differ in.
+    fn strip_capdag_dependency_source(dest: &str, text: &str) -> String {
+        if !is_dependency_manifest(dest) {
+            return text.to_string();
+        }
+        text.lines()
+            .filter(|line| {
+                let t = line.trim();
+                !(t.is_empty()
+                    || t.starts_with('#')
+                    || t.starts_with("//")
+                    || is_capdag_dependency_source(t))
+            })
+            .map(|line| format!("{line}\n"))
+            .collect()
     }
 
     /// The first `N.N.N` in a line, with the range it occupies.

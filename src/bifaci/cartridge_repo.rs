@@ -170,6 +170,9 @@ pub struct RegistryCapArg {
     pub required: bool,
     #[serde(default)]
     pub is_sequence: bool,
+    /// Consumed without a length promise (see `CapArg::streaming`).
+    #[serde(default)]
+    pub streaming: bool,
     #[serde(default)]
     pub sources: Vec<RegistryArgSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -196,6 +199,9 @@ pub struct RegistryCapOutput {
     pub media_urn: String,
     #[serde(default)]
     pub is_sequence: bool,
+    /// May be emitted without a length promise (see `CapOutput::streaming`).
+    #[serde(default)]
+    pub streaming: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_description: Option<String>,
 }

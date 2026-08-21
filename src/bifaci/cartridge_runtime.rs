@@ -37,7 +37,9 @@
 //! }
 //! ```
 
-use crate::bifaci::frame::{FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
+use crate::bifaci::frame::{
+    CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner,
+};
 use crate::bifaci::io::{handshake_accept, CborError, FrameReader, FrameWriter};
 use crate::bifaci::manifest::CapManifest;
 use crate::cap::caller::CapArgumentValue;
@@ -3414,6 +3416,7 @@ impl LiveFeedContext {
     /// selector, or a provider/device failure.
     fn resolve(
         &self,
+        stream_id: &str,
         reference_urn: &str,
         selector_bytes: &[u8],
     ) -> Result<InputStream, StreamError> {
@@ -3494,7 +3497,10 @@ impl LiveFeedContext {
         let opened =
             crate::capture::open(reference_urn, selector, Arc::clone(&self.overruns_total))
                 .map_err(|e| StreamError::Protocol(e.to_string()))?;
-        self.handles.lock().unwrap().push(opened.handle);
+        self.handles
+            .lock()
+            .unwrap()
+            .push(opened.handle.for_stream(stream_id));
         Ok(InputStream {
             media_urn: content_urn,
             stream_meta: opened.stream_meta,
@@ -3795,7 +3801,7 @@ fn demux_multi_stream(
                                 Err(_) => selector_bytes.extend(chunk_payload),
                             }
                         }
-                        match ctx.resolve(&reference_urn, &selector_bytes) {
+                        match ctx.resolve(&stream_id, &reference_urn, &selector_bytes) {
                             Ok(input_stream) => {
                                 if streams_tx.send(Ok(input_stream)).is_err() {
                                     break;
@@ -5981,8 +5987,8 @@ impl CartridgeRuntime {
             Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>,
         > = HashMap::new();
         // Track cancelled requests to prevent duplicate ERR frames
-        let mut cancelled_requests: std::collections::HashSet<MessageId> =
-            std::collections::HashSet::new();
+        let mut cancelled_requests: std::collections::HashMap<MessageId, CancelReason> =
+            std::collections::HashMap::new();
 
         // Routes inbound CREDIT frames to the gates of streams local senders are
         // writing. Gates register when an OutputStream starts a credited stream;
@@ -6108,13 +6114,13 @@ impl CartridgeRuntime {
                             handle.close();
                         }
                     }
-                    if cancelled_requests.remove(&rid) {
+                    if let Some(reason) = cancelled_requests.remove(&rid) {
                         let routing_id = handler_routing_ids.remove(&rid).flatten();
                         let mut err = Frame::err(
                             rid,
-                            "CANCELLED",
-                            crate::failure::AttributionClass::Internal,
-                            "Request cancelled",
+                            reason.terminal_code(),
+                            reason.terminal_class(),
+                            &reason.terminal_message(),
                             None,
                         );
                         err.routing_id = routing_id;
@@ -6329,35 +6335,71 @@ impl CartridgeRuntime {
                     drop(peer);
                 }
 
+                FrameType::CloseStream => {
+                    // The tap-off (15.2 §Runs Stop): close the request's live
+                    // feed taps — the feeds end, the handler drains its input,
+                    // and the request ends NATURALLY with END and complete
+                    // outputs. Nothing is cancelled; host-side request state
+                    // is untouched. A CloseStream for a request holding no
+                    // open feed is a caller's mistake, logged and ignored —
+                    // it never turns into an abort. `stream_id` names one
+                    // feed; absent closes them all.
+                    let target_rid = frame.id.clone();
+                    let closed = live_feed_handles_by_rid
+                        .get(&target_rid)
+                        .map(|handles| {
+                            let handles = handles.lock().unwrap();
+                            let mut n = 0usize;
+                            for handle in handles.iter() {
+                                if frame
+                                    .stream_id
+                                    .as_deref()
+                                    .map_or(true, |id| handle.stream_id() == Some(id))
+                                {
+                                    handle.close();
+                                    n += 1;
+                                }
+                            }
+                            n
+                        })
+                        .unwrap_or(0);
+                    if closed == 0 {
+                        tracing::warn!(
+                            target: "cartridge_runtime",
+                            rid = ?target_rid,
+                            stream_id = ?frame.stream_id,
+                            "[CartridgeRuntime] CloseStream for a request with no matching open live feed — nothing to close, request continues"
+                        );
+                    } else {
+                        tracing::info!(
+                            target: "cartridge_runtime",
+                            rid = ?target_rid,
+                            feeds = closed,
+                            "[CartridgeRuntime] CloseStream: closed live feed(s) — the run drains and ends naturally"
+                        );
+                    }
+                    continue;
+                }
+
                 FrameType::Cancel => {
                     let target_rid = frame.id.clone();
+                    // The attribution rides in meta like an ERR's; a Cancel
+                    // with none is still a cancel (unattributed).
+                    let reason = frame
+                        .cancel_reason()
+                        .expect("a Cancel frame always yields a reason");
 
                     // Skip if already cancelled (prevent duplicate ERR)
-                    if cancelled_requests.contains(&target_rid) {
+                    if cancelled_requests.contains_key(&target_rid) {
                         continue;
                     }
 
-                    // STOP, not cancel (15.2 §Runs Stop): a non-force Cancel
-                    // for a request with OPEN live feeds closes the tap —
-                    // the feeds end, the pipeline drains, and the request
-                    // terminates naturally with complete outputs. The
-                    // handles are forgotten here, so a SECOND Cancel falls
-                    // through to the ordinary cooperative cancel (abort).
-                    if !frame.force_kill.unwrap_or(false) {
-                        if let Some(handles) = live_feed_handles_by_rid.remove(&target_rid) {
-                            let handles = handles.lock().unwrap();
-                            if !handles.is_empty() {
-                                for handle in handles.iter() {
-                                    handle.close();
-                                }
-                                tracing::info!(
-                                    target: "cartridge_runtime",
-                                    rid = ?target_rid,
-                                    feeds = handles.len(),
-                                    "[CartridgeRuntime] stop: closed live feeds — the run drains and ends naturally (a second Cancel aborts)"
-                                );
-                                continue;
-                            }
+                    // Close any live feeds the request holds so a capture
+                    // source does not keep producing for a request that is
+                    // ending with ERR.
+                    if let Some(handles) = live_feed_handles_by_rid.remove(&target_rid) {
+                        for handle in handles.lock().unwrap().iter() {
+                            handle.close();
                         }
                     }
 
@@ -6374,9 +6416,9 @@ impl CartridgeRuntime {
                         active_requests.remove(&target_rid);
                         let mut err = Frame::err(
                             target_rid.clone(),
-                            "CANCELLED",
-                            crate::failure::AttributionClass::Internal,
-                            "Request cancelled while queued",
+                            reason.terminal_code(),
+                            reason.terminal_class(),
+                            &format!("{} (while queued)", reason.terminal_message()),
                             None,
                         );
                         err.routing_id = queued.routing_id;
@@ -6393,11 +6435,11 @@ impl CartridgeRuntime {
                     // stream lifecycle completes (no orphaned streams) and produces
                     // identical wire behavior regardless of implementation language.
                     if active_handlers.contains_key(&target_rid) {
-                        cancelled_requests.insert(target_rid.clone());
+                        cancelled_requests.insert(target_rid.clone(), reason.clone());
                         active_requests.remove(&target_rid);
                         // Release any credit-blocked writers immediately (L13,
                         // L17) — a cancelled producer must not hang on credit.
-                        credit_router.close_request(&target_rid, "CANCELLED");
+                        credit_router.close_request(&target_rid, reason.terminal_code());
 
                         // Cancel peer calls originating from this request
                         let peer_rids_to_cancel: Vec<(MessageId, Option<MessageId>)> = {
@@ -6407,9 +6449,10 @@ impl CartridgeRuntime {
                                 .map(|(rid, pr)| (rid.clone(), pr.origin_routing_id.clone()))
                                 .collect()
                         };
+                        // Peer calls end under the SAME reason — a peer of an
+                        // aborted request is collateral of the same failure.
                         for (peer_rid, _) in &peer_rids_to_cancel {
-                            let cancel =
-                                Frame::cancel(peer_rid.clone(), frame.force_kill.unwrap_or(false));
+                            let cancel = Frame::cancel(peer_rid.clone(), &reason);
                             let _ = output_tx.send(cancel);
                         }
                         {

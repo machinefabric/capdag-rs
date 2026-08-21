@@ -490,6 +490,7 @@ mod tests {
             media_urn: media_urn.to_string(),
             required,
             is_sequence: false,
+            streaming: false,
             sources,
             arg_description: None,
             default_value: default,
@@ -539,6 +540,7 @@ mod tests {
             media_urn: "media:enc=utf-8;summary".to_string(),
             output_description: String::new(),
             is_sequence: false,
+            streaming: false,
             metadata: None,
         });
         cap
