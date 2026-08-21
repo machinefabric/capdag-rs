@@ -511,7 +511,7 @@ anyhow = "1.0"
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
 # what capdag's next release tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.687.0" }
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.689.69" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -817,10 +817,9 @@ func main() {
 
 go 1.21
 
-
 // Stamped from capdag-go's own version.txt, so the required version tracks what
 // capdag-go's next release tags rather than drifting until someone notices.
-require github.com/machinefabric/capdag-go v1.367.15
+require github.com/machinefabric/capdag-go v1.368.19
 "#,
                 executable: false,
             },
@@ -1076,7 +1075,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.428.25"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.429.33"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.19.17"),
     ],
     targets: [
