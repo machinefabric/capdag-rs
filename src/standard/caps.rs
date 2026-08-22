@@ -142,10 +142,10 @@ pub fn lookup_cap_fabric_cap() -> Cap {
             ],
             "Canonical cap URN to look up.".to_string(),
         ));
-    // Optional per-def version under the caller's pinned manifest. The
-    // engine resolves the URN → defver against its manifest before
-    // invoking and passes the result via this stream. Absent ⇒ defver 0
-    // (legacy v0 flat-path lookup).
+    // Optional per-def version. A caller that pins a definition version
+    // names it here; absent, the lookup cartridge resolves the URN's
+    // defver under its own pinned fabric manifest. There is no
+    // unversioned path: 0 is not a version.
     cap.args
         .push(crate::cap::definition::CapArg::with_description(
             MEDIA_FABRIC_DEFVER,
@@ -153,8 +153,7 @@ pub fn lookup_cap_fabric_cap() -> Cap {
             vec![crate::cap::definition::ArgSource::CliFlag {
                 cli_flag: "--defver".to_string(),
             }],
-            "Per-definition version under the caller's manifest snapshot. \
-             Absent ⇒ defver 0 (legacy v0 flat-path lookup)."
+            "Per-definition version under the caller's manifest snapshot, 1 or greater. Absent ⇒ resolved under the fabric manifest the lookup cartridge is pinned to; a URN that manifest does not list is not found."
                 .to_string(),
         ));
     cap.set_output(crate::cap::definition::CapOutput::new(
@@ -196,8 +195,7 @@ pub fn lookup_media_def_fabric_cap() -> Cap {
             vec![crate::cap::definition::ArgSource::CliFlag {
                 cli_flag: "--defver".to_string(),
             }],
-            "Per-definition version under the caller's manifest snapshot. \
-             Absent ⇒ defver 0 (legacy v0 flat-path lookup)."
+            "Per-definition version under the caller's manifest snapshot, 1 or greater. Absent ⇒ resolved under the fabric manifest the lookup cartridge is pinned to; a URN that manifest does not list is not found."
                 .to_string(),
         ));
     cap.set_output(crate::cap::definition::CapOutput::new(
