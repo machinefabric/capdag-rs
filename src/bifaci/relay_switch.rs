@@ -1563,6 +1563,29 @@ impl RelaySwitch {
         self.masters.read().await.len()
     }
 
+    /// Whether `add_master(id, …)` is legitimate RIGHT NOW: no slot
+    /// carries this id, or the slot's socket reader has exited (the
+    /// previous connection is gone and the slot awaits reattachment).
+    ///
+    /// A host that reconnects on every control-plane event must ask
+    /// this BEFORE dialling: `add_master` can only learn the answer
+    /// after consuming a fresh socket, and a socket dialled into a slot
+    /// that is still attached is a duplicate connection the host side
+    /// has to refuse. A slot that is merely UNHEALTHY (identity probe
+    /// pending or failed) with a live reader is still attached: its
+    /// socket is open and will deliver EOF when the host really goes.
+    pub async fn slot_accepts_attach(&self, id: &str) -> bool {
+        let masters = self.masters.read().await;
+        let Some(slot) = masters.iter().find(|m| m.id == id) else {
+            return true;
+        };
+        let reader = slot.reader_handle.lock().await;
+        match reader.as_ref() {
+            None => true,
+            Some(handle) => handle.is_finished(),
+        }
+    }
+
     /// Get the count of healthy masters.
     pub async fn healthy_master_count(&self) -> usize {
         let masters = self.masters.read().await;
@@ -2759,12 +2782,18 @@ impl RelaySwitch {
         // index — preserving the request-table / cap_table
         // entries that were keyed by index.
         //
-        // - Existing slot with same id, currently UNHEALTHY → reattach
-        //   in place at that index.
-        // - Existing slot with same id, currently HEALTHY → caller
-        //   bug; the same master must not be added twice. Surface it
+        // - Existing slot with same id whose previous socket is GONE
+        //   (its reader task has exited on EOF/error) → reattach in
+        //   place at that index.
+        // - Existing slot with same id whose socket is still open →
+        //   caller bug; the same master must not be attached twice.
+        //   This is decided by the reader's liveness, not the health
+        //   flag: a slot with its identity probe pending is unhealthy
+        //   yet attached, and reattaching over it would abort a live
+        //   reader and strand the host on the other end. Surface it
         //   loudly so the wiring mistake is fixed instead of silently
-        //   growing zombie slots.
+        //   growing zombie slots. `slot_accepts_attach` answers the
+        //   same question without consuming a socket.
         // - No existing slot with that id → append a fresh slot at
         //   `masters.len()`. The index is committed atomically at
         //   the bottom of the function once the I/O has succeeded.
@@ -2773,11 +2802,20 @@ impl RelaySwitch {
             let mut found = None;
             for (idx, master) in masters.iter().enumerate() {
                 if master.id == id {
-                    if master.healthy.load(Ordering::SeqCst) {
+                    let attached = match master.reader_handle.lock().await.as_ref() {
+                        None => false,
+                        Some(handle) => !handle.is_finished(),
+                    };
+                    if attached {
+                        let state = if master.healthy.load(Ordering::SeqCst) {
+                            "healthy"
+                        } else {
+                            "attached but unhealthy"
+                        };
                         return Err(RelaySwitchError::Protocol(format!(
-                            "add_master: id '{}' is already attached to a healthy slot at index {} — \
+                            "add_master: id '{}' is already attached to a {} slot at index {} — \
                              cardinality violation (each id may only be attached once at a time)",
-                            id, idx
+                            id, state, idx
                         )));
                     }
                     found = Some(idx);
@@ -4160,6 +4198,24 @@ impl RelaySwitch {
                 .as_secs();
             (was_healthy, cap_count, connected_seconds)
         };
+
+        // The slot is DETACHED from here on, whatever the health flag
+        // said: the connection is declared dead, so its reader is
+        // retired (it has usually exited already — EOF is what brought
+        // us here — but a death declared from a probe failure or a
+        // write error finds it alive) and the slot becomes reattachable
+        // to `add_master` / `slot_accepts_attach`, which decide by the
+        // reader's liveness. This runs BEFORE the already-handled
+        // short-circuit below: an unhealthy-but-attached slot (probe
+        // pending) whose socket then closes must detach too, or the
+        // host could never reconnect to it.
+        {
+            let masters = self.masters.read().await;
+            let retired = masters[master_idx].reader_handle.lock().await.take();
+            if let Some(handle) = retired {
+                handle.abort();
+            }
+        }
 
         if !was_healthy {
             return Ok(()); // Already handled
@@ -6961,6 +7017,114 @@ mod tests {
             "no slot should be created when the duplicate-id check fires"
         );
 
+        drop(switch);
+    }
+
+    /// TEST1965: attachment is decided by the SOCKET, not the health
+    /// flag. A slot whose identity probe is pending is unhealthy yet
+    /// attached — its socket is open — and reattaching over it would
+    /// abort a live reader and strand the host; `slot_accepts_attach`
+    /// says no and `add_master` refuses, so a host that asks first
+    /// never dials a slot it holds. Once the socket is gone (the slave
+    /// dropped it → reader EOF → death handling detached the slot) the
+    /// same id reattaches in place. This is the engine half of the
+    /// 2026-08-22 outage, where a redial on every control-plane event
+    /// hit an attached slot and the host side answered by crashing.
+    #[tokio::test]
+    async fn test1965_attach_decided_by_socket_liveness_not_health() {
+        let initial_caps = serde_json::json!([
+            "cap:effect=none",
+            "cap:in=\"media:void\";trivial;out=\"media:void\"",
+        ]);
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let slave_task = tokio::spawn({
+            let initial_caps = initial_caps.clone();
+            async move {
+                let kept_open =
+                    slave_notify_with_identity(slave_sock, &initial_caps, &Limits::default()).await;
+                // Hold the socket open until released, then drop it.
+                let _ = release_rx.await;
+                drop(kept_open);
+            }
+        });
+        let switch = Arc::new(
+            RelaySwitch::new(
+                vec![("xpc-service".to_string(), engine_sock)],
+                test_fabric_registry(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert!(
+            !switch.slot_accepts_attach("xpc-service").await,
+            "a healthy attached slot must not accept a second attach"
+        );
+        assert!(
+            switch.slot_accepts_attach("never-seen").await,
+            "an id with no slot is always attachable"
+        );
+
+        // Unhealthy but attached: the health flag alone must not open
+        // the slot. (This is the identity-probe-pending state.)
+        switch.masters.read().await[0]
+            .healthy
+            .store(false, Ordering::SeqCst);
+        assert!(
+            !switch.slot_accepts_attach("xpc-service").await,
+            "an unhealthy slot whose socket is still open is still attached"
+        );
+        let (_dummy_a, dummy_b) = UnixStream::pair().unwrap();
+        let err = switch
+            .add_master("xpc-service", dummy_b)
+            .await
+            .expect_err("attaching over an open socket must be refused");
+        assert!(
+            format!("{err}").contains("attached but unhealthy"),
+            "the refusal names the real state: {err}"
+        );
+        switch.masters.read().await[0]
+            .healthy
+            .store(true, Ordering::SeqCst);
+
+        // The slave drops its socket: the reader sees EOF, the pump
+        // declares the master dead, the slot detaches.
+        switch.start_background_pump();
+        let _ = release_tx.send(());
+        slave_task.await.unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !switch.slot_accepts_attach("xpc-service").await {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the slot must detach once its socket is gone"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            !switch.masters.read().await[0]
+                .healthy
+                .load(Ordering::SeqCst),
+            "a detached slot is unhealthy"
+        );
+
+        // Reattach in place.
+        let (engine_sock_2, slave_sock_2) = UnixStream::pair().unwrap();
+        let _slave_task_2 = tokio::spawn({
+            let initial_caps = initial_caps.clone();
+            async move {
+                let _kept_open =
+                    slave_notify_with_identity(slave_sock_2, &initial_caps, &Limits::default())
+                        .await;
+                std::future::pending::<()>().await;
+            }
+        });
+        let idx = switch
+            .add_master("xpc-service", engine_sock_2)
+            .await
+            .expect("a detached slot reattaches");
+        assert_eq!(idx, 0);
+        assert_eq!(switch.masters.read().await.len(), 1);
+        assert!(!switch.slot_accepts_attach("xpc-service").await);
         drop(switch);
     }
 

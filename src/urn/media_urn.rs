@@ -386,9 +386,9 @@ pub const MEDIA_MEDIA_URN: &str = "media:enc=utf-8;media-urn";
 ///
 /// Carried as data alongside a URN when a cap looks up a definition
 /// pinned to a specific manifest snapshot. Value is the UTF-8 string
-/// representation of a non-negative integer. Absent ⇒ defver 0 (legacy
-/// v0 flat-path lookup); present ⇒ the engine has resolved the URN
-/// against its pinned manifest and is asking for that exact defver.
+/// representation of a positive integer. Absent ⇒ the lookup cartridge
+/// resolves the URN under its own pinned fabric manifest; present ⇒ the
+/// caller is asking for that exact defver.
 pub const MEDIA_FABRIC_DEFVER: &str = "media:defver;enc=utf-8";
 
 /// Media URN for the full flattened cap definition published by the registry.
