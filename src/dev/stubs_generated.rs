@@ -207,7 +207,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="0.1.0",
+        version="1.55.333",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -475,7 +475,7 @@ fn build_manifest() -> CapManifest {
 
     CapManifest::new(
         "__CARTRIDGE_NAME__".to_string(),
-        "0.1.0".to_string(),
+        env!("CARGO_PKG_VERSION").to_string(), // the version Cargo.toml declares
         CartridgeChannel::Nightly, // 'Release' or 'Nightly'; nightly for dev.
         None,                      // None => dev cartridge (installed locally).
         "Classify a piece of text as positive, neutral, or negative.".to_string(),
@@ -502,7 +502,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "0.1.0"
+version = "1.55.333"
 edition = "2021"
 
 [dependencies]
@@ -511,7 +511,7 @@ anyhow = "1.0"
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
 # what capdag's next release tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.689.69" }
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.694.12" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -788,7 +788,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"0.1.0",
+		"1.55.333",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -819,7 +819,7 @@ go 1.21
 
 // Stamped from capdag-go's own version.txt, so the required version tracks what
 // capdag-go's next release tags rather than drifting until someone notices.
-require github.com/machinefabric/capdag-go v1.368.19
+require github.com/machinefabric/capdag-go v1.371.52
 "#,
                 executable: false,
             },
@@ -1041,7 +1041,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "0.1.0",
+        version: "1.55.333",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
@@ -1075,7 +1075,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.429.33"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.435.92"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.19.17"),
     ],
     targets: [

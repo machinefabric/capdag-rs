@@ -927,51 +927,70 @@ mod tests {
         }
         // The pin is read from the dependency line BEFORE that line is
         // stripped — the ordering rule below must keep seeing it.
-        let (vendored_pin, vendored_rest) = split_pin(vendored);
-        let (canonical_pin, canonical_rest) = split_pin(canonical);
+        let (vendored_pins, vendored_rest) = split_pin(vendored);
+        let (canonical_pins, canonical_rest) = split_pin(canonical);
         let vendored_rest = strip_capdag_dependency_source(dest, &vendored_rest);
         let canonical_rest = strip_capdag_dependency_source(dest, &canonical_rest);
         assert_eq!(
             vendored_rest, canonical_rest,
             "{language}: vendored {dest} differs from the canonical bytes in more than the \
-             capdag dependency source/version — re-vendor the stubs"
+             capdag dependency source and the stamped version pins — re-vendor the stubs"
         );
-        let (Some(vendored_pin), Some(canonical_pin)) = (vendored_pin, canonical_pin) else {
-            panic!(
-                "{language}: vendored {dest} differs from the canonical bytes and neither \
-                 carries a version pin to explain it — re-vendor the stubs"
-            );
-        };
         assert!(
-            vendored_pin <= canonical_pin,
-            "{language}: vendored {dest} pins capdag {} but capdag is {} — a stub may lag a \
-             release, never precede one",
-            join_version(&vendored_pin),
-            join_version(&canonical_pin)
+            !vendored_pins.is_empty() && vendored_pins.len() == canonical_pins.len(),
+            "{language}: vendored {dest} differs from the canonical bytes and the two sides \
+             do not carry the same version pins to explain it — re-vendor the stubs"
         );
+        for (vendored_pin, canonical_pin) in vendored_pins.iter().zip(canonical_pins.iter()) {
+            assert!(
+                vendored_pin <= canonical_pin,
+                "{language}: vendored {dest} pins {} but the canonical stub is at {} — a stub \
+                 may lag a release, never precede one",
+                join_version(vendored_pin),
+                join_version(canonical_pin)
+            );
+        }
     }
 
-    /// Split a stub file into its capdag version pin and everything else.
-    ///
-    /// The pin appears once per stub, in the language's own dependency syntax:
+    /// A line whose dotted triple is a STAMPED version, not contract: one
+    /// that names capdag (the dependency pin, in any language's syntax —
     /// `tag = "v1.2.3"` (Cargo), `capdag-go v1.2.3` (go.mod), `from: "1.2.3"`
-    /// (SwiftPM). Rather than teach this three grammars, the first
-    /// dotted-triple on a line that mentions capdag IS the pin.
-    fn split_pin(text: &str) -> (Option<Vec<u64>>, String) {
-        let mut pin = None;
+    /// (SwiftPM)), or the stub's own version — a manifest's `version = "…"`
+    /// line, a CapManifest `version: "…"` / `version="…"` argument, or a
+    /// bare positional `"N.N.N",` (the stub repo's release, stamped by the
+    /// templates so a scaffolded cartridge carries an accurate version). All
+    /// move on every release and none says anything about the stub.
+    fn is_pin_line(line: &str) -> bool {
+        if line.contains("capdag") || line.trim().starts_with("version") {
+            return true;
+        }
+        // A bare positional version argument: a quoted dotted triple and
+        // nothing else on the line (the Go stub's manifest constructor).
+        let bare = line.trim().trim_end_matches(',').trim();
+        bare.len() >= 2
+            && bare.starts_with('"')
+            && bare.ends_with('"')
+            && first_triple(bare).is_some_and(|(_, at)| at.start == 1 && at.end == bare.len() - 1)
+    }
+
+    /// Split a stub file into its version pins (in order) and everything
+    /// else. Rather than teach this several grammars, the first dotted-triple
+    /// on every pin line IS a pin.
+    fn split_pin(text: &str) -> (Vec<Vec<u64>>, String) {
+        let mut pins = Vec::new();
         let mut rest = String::with_capacity(text.len());
         for line in text.lines() {
             let mut kept = line.to_string();
-            if pin.is_none() && line.contains("capdag") {
+            if is_pin_line(line) {
                 if let Some((version, at)) = first_triple(line) {
-                    pin = Some(version);
+                    pins.push(version);
                     kept.replace_range(at.clone(), "<pin>");
                 }
             }
             rest.push_str(&kept);
             rest.push('\n');
         }
-        (pin, rest)
+        (pins, rest)
     }
 
     /// Whether `dest` is a language manifest whose capdag dependency source
