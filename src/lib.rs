@@ -281,7 +281,7 @@ pub use orchestrator::{
     assemble_cbor_array,
     assemble_cbor_sequence,
     build_plans_from_notation,
-    // Stream I/O — shared between orchestrator executor and machfab engine
+    // Stream I/O — shared between orchestrator executor and floom-engine engine
     collect_terminal_output,
     decode_terminal_output,
     execute_dag,

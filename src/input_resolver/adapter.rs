@@ -38,7 +38,7 @@ pub struct AdapterResult {
 
 /// Trait for invoking the adapter-selection cap on a specific cartridge.
 ///
-/// The implementation lives on the host side (machfab) where it has access
+/// The implementation lives on the host side (floom-engine) where it has access
 /// to the cartridge process/relay infrastructure. capdag defines the trait;
 /// the host implements it.
 #[async_trait]

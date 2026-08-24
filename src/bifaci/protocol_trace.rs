@@ -1,6 +1,6 @@
 //! Per-segment protocol trace sink for the reference runtime.
 //!
-//! The engine's dev trace (`machfab/src/cap/protocol_trace.rs`) samples a
+//! The engine's dev trace (`floom-engine/src/cap/protocol_trace.rs`) samples a
 //! LONG-LIVED relay switch every 2s and writes transition-deduped JSONL. The
 //! capdag CLI runtime ([`crate::orchestrator::cli_runtime::CliRuntime`]) reuses a
 //! long-lived switch too, but the trace is scoped PER SEGMENT: the shared
@@ -19,7 +19,7 @@
 //!
 //! Lines are deduped by a transition fingerprint that EXCLUDES ever-advancing
 //! clocks (ages/idle/lifetime), so an idle or stalled engine does not spam
-//! identical samples — one line per protocol transition, mirroring machfab's
+//! identical samples — one line per protocol transition, mirroring floom-engine's
 //! `trace_fingerprint`.
 //!
 //! This is diagnostics the user explicitly asked for (a `--trace`/env path):
@@ -79,7 +79,7 @@ pub struct ProtocolTraceSink {
 /// Transition fingerprint: everything the snapshot says that MATTERS, EXCLUDING
 /// the ever-advancing clocks (a request's `age_ms`/`idle_ms`, a termination's
 /// `lifetime_ms`) which change every sample and would defeat dedup. Mirrors
-/// machfab's `machfab/src/cap/protocol_trace.rs::trace_fingerprint` so both
+/// floom-engine's `floom-engine/src/cap/protocol_trace.rs::trace_fingerprint` so both
 /// traces dedup on the same notion of "a protocol transition".
 fn trace_fingerprint(stats: &RelaySwitchProtocolStats) -> String {
     let active: Vec<serde_json::Value> = stats

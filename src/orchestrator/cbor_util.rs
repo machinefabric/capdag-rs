@@ -147,7 +147,7 @@ pub fn assemble_cbor_sequence(items: &[Vec<u8>]) -> Result<Vec<u8>, CborUtilErro
 ///
 /// Contrast [`assemble_cbor_sequence`], which requires each item to ALREADY be a
 /// complete CBOR value (it validates rather than wraps) — the form used when the
-/// caller has itself CBOR-encoded each item (e.g. machfab's file-item interpreter).
+/// caller has itself CBOR-encoded each item (e.g. floom-engine's file-item interpreter).
 ///
 /// # Errors
 /// - `SerializeError` if an item cannot be CBOR-serialized (practically never for

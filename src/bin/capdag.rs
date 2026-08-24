@@ -618,7 +618,7 @@ async fn cmd_dag_viz(args: &[String]) -> ! {
 }
 
 /// Warm the fabric caches from the pinned manifest — the same warm the engine
-/// performs at startup (`machfab/src/app/mod.rs`) and for the same reason: the
+/// performs at startup (`floom-engine/src/app/mod.rs`) and for the same reason: the
 /// full-graph surfaces (planning, abstract-cap narrowing) and extension-based
 /// media detection read the CACHED cap/media/alias sets, and a cap fetch is
 /// atomic with its referenced media defs, so this one pass is what populates
@@ -643,7 +643,7 @@ fn detect_input_media_or_exit(file: &Path, registry: &Arc<FabricRegistry>) -> ca
     // baseline → validation discrimination), not bare extension lookup — the
     // CLI must identify a file exactly the way the desktop clients do. No
     // value adapters are registered: the engine's only one (model-spec
-    // family refinement) lives in machfab's LLM service and refines nothing
+    // family refinement) lives in floom-engine's LLM service and refines nothing
     // outside `media:model-spec`.
     let resolved = match capdag::detect_file_discriminated(
         file,

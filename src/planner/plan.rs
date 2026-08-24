@@ -1255,7 +1255,7 @@ pub struct NodeExecutionResult {
     pub success: bool,
 
     /// Binary output data (if any).
-    /// Used by the standalone executor (capdag). The pipeline executor in machfab
+    /// Used by the standalone executor (capdag). The pipeline executor in floom-engine
     /// writes output incrementally to disk and populates saved_paths instead.
     pub binary_output: Option<Vec<u8>>,
 
@@ -1265,7 +1265,7 @@ pub struct NodeExecutionResult {
     pub binary_items: Option<Vec<Vec<u8>>>,
 
     /// File paths of output already saved to disk by IncrementalWriter.
-    /// Populated by the pipeline executor (machfab). Empty for standalone executor.
+    /// Populated by the pipeline executor (floom-engine). Empty for standalone executor.
     /// For blob: single path. For sequence: one path per item.
     #[serde(default)]
     pub saved_paths: Vec<String>,

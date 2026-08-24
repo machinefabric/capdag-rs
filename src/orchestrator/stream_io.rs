@@ -2,7 +2,7 @@
 //!
 //! These functions handle the bifaci protocol's CBOR transport layer:
 //! sending input streams to cartridges and collecting/decoding their
-//! responses. Used by both the machfab engine (capdag_service) and
+//! responses. Used by both the floom-engine engine (capdag_service) and
 //! the capdag CLI orchestrator executor.
 //!
 //! The key invariant: node data between caps is stored as raw bytes

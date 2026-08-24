@@ -1848,7 +1848,7 @@ pub async fn run_dag_on_context(
     // stream; collection refuses unbounded, L16). The permit domain is the
     // POOL CHAIN (master + cartridge identity + pool), NOT the master
     // index: one relay slot can aggregate many cartridge processes
-    // (machfab's external-cartridges RelaySlave), each with independent
+    // (floom-engine's external-cartridges RelaySlave), each with independent
     // pools — comparing master indices there would split every junction
     // and break live pipelines. Two same-cartridge caps in disjoint
     // bounded pools likewise share no permit and must NOT split.
@@ -3744,9 +3744,9 @@ async fn forward_frames(
 /// Execute a resolved DAG end-to-end.
 ///
 /// `initial_is_sequence` is the per-node sequence-flag map that
-/// mirrors machfab's interpreter contract (see
-/// `machfab::cap::capdag_service::execute_dag` and
-/// `machfab::ops_rs::cap_interpreter::interpreter::resolve_inputs`).
+/// mirrors floom-engine's interpreter contract (see
+/// `floom-engine::cap::capdag_service::execute_dag` and
+/// `floom-engine::ops_rs::cap_interpreter::interpreter::resolve_inputs`).
 /// For every node in `initial_inputs` there MUST be a matching
 /// entry here declaring whether the bytes are a CBOR sequence
 /// (`true` — multiple self-delimiting items, dispatched as
@@ -3919,7 +3919,7 @@ pub async fn execute_dag(
         return Err(ExecutionError::HostError(format!(
             "execute_dag: initial_is_sequence is missing entries for input \
              node(s) {:?}. Every entry in `initial_inputs` requires an \
-             explicit sequence/scalar flag — see machfab's `resolve_inputs` \
+             explicit sequence/scalar flag — see floom-engine's `resolve_inputs` \
              for the canonical population pattern.",
             missing_flags,
         )));

@@ -2007,7 +2007,7 @@ impl RelaySwitch {
     /// The ADMISSION CHAIN serving a cap — each (master, install, pool)
     /// permit domain a dispatch is held against, paired with that pool's
     /// effective capacity (0 = unlimited). One relay slot can aggregate MANY
-    /// cartridge processes (machfab's external-cartridges RelaySlave), each
+    /// cartridge processes (floom-engine's external-cartridges RelaySlave), each
     /// with its own independent pools. Callers deciding whether two caps
     /// contend for the same permits must compare CHAIN MEMBERSHIP: two caps
     /// contend iff their chains share any pool with capacity > 0.
@@ -7541,7 +7541,7 @@ mod tests {
     //
     // Every variant's serde rename MUST match its proto snake_case
     // name byte-for-byte. The proto mapping in
-    // `machfab/src/grpc/service/cartridge_grpc_service.rs` is
+    // `floom-engine/src/grpc/service/cartridge_grpc_service.rs` is
     // exhaustive (no wildcard arm), so a missing variant there
     // would fail to compile — but the JSON wire format is strings
     // and silently accepts new variants. These tests are the only
