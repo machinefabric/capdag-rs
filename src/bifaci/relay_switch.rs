@@ -8700,13 +8700,7 @@ mod tests {
         assert_eq!(summary.rid, key.1.to_string());
     }
 
-    // TEST8114: A flow frame that CROSSED its request's terminal in flight is
-    // a BENIGN straggler — the ordinary teardown race of credit-based flow
-    // control must not pollute the routing-anomaly alarm, nor the drop
-    // counters at all: the crossing is counted as a straggler, named by
-    // frame type. A frame for a RID the table never knew stays a no_route
-    // DROP (TEST7025).
-// TEST1532: the cold-start canary — a NOT-RUNNING record's `all` pool is
+    // TEST1532: the cold-start canary — a NOT-RUNNING record's `all` pool is
     // clamped to capacity 1 regardless of what the pool map claims, so the
     // first dispatch to a cold cartridge is a single canary body and a
     // spawn-time failure costs one body, not a fleet. Running records keep

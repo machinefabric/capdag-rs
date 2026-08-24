@@ -1124,7 +1124,7 @@ async fn test394_peer_invoke_roundtrip() {
 // Host-mediated live capture → ForEach region (13.2 §Reference Media)
 // =============================================================================
 
-// TEST1459: a live source drives a ForEach region END TO END through the
+// TEST11011: a live source drives a ForEach region END TO END through the
 // REAL stack — the CLI runtime hosts the actual testcartridge process on a
 // real relay switch, the HOST opens the built-in `media:live;synthetic`
 // feed itself through the same capture dispatch the hardware backends use,
@@ -1132,7 +1132,7 @@ async fn test394_peer_invoke_roundtrip() {
 // anywhere: real capture bridge, real region driver, real cartridge
 // invocations, real persisted body outputs.
 #[tokio::test]
-async fn test1459_live_synthetic_foreach_region_end_to_end() {
+async fn test11011_live_synthetic_foreach_region_end_to_end() {
     use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput};
     use capdag::planner::{InputCardinality, MachineNode, MachinePlan, MachinePlanEdge};
 

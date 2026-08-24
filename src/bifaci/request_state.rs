@@ -1243,7 +1243,6 @@ mod tests {
         )
     }
 
-    // TEST7087: Protocol stats snapshots serialize with stable field names — the snapshot shape is the mirror contract.
     #[test]
     fn test7092_cap_urn_attribution_survives_lifecycle() {
         // TEST7092: A request registered with its originating REQ's cap URN
@@ -1604,4 +1603,3 @@ mod tests {
         );
     }
 }
-

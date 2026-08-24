@@ -200,9 +200,9 @@ mod tests {
         strs.iter().map(|s| (*s).to_string()).collect()
     }
 
-    // TEST0280: Drops candidate whose owning handler declined
+    // TEST11004: Drops candidate whose owning handler declined
     #[test]
-    fn test0280_drops_candidate_whose_owning_handler_declined() {
+    fn test11004_drops_candidate_whose_owning_handler_declined() {
         // sample.txt is plain prose. modelcartridge owns the
         // `media:enc=utf-8;model-spec` adapter URN, and its content
         // predicate rejected the file. Every model-spec candidate
@@ -224,9 +224,9 @@ mod tests {
         );
     }
 
-    // TEST0281: Keeps candidate when handler returned supertype
+    // TEST11005: Keeps candidate when handler returned supertype
     #[test]
-    fn test0281_keeps_candidate_when_handler_returned_supertype() {
+    fn test11005_keeps_candidate_when_handler_returned_supertype() {
         // sample.txt's content is `hf:openai/whisper-base` —
         // modelcartridge's content predicate accepts it and returns
         // the supertype `media:enc=utf-8;model-spec`. The supertype
@@ -249,9 +249,9 @@ mod tests {
         );
     }
 
-    // TEST0282: Passes candidate through when no cartridge owns its territory
+    // TEST11006: Passes candidate through when no cartridge owns its territory
     #[test]
-    fn test0282_passes_candidate_through_when_no_cartridge_owns_its_territory() {
+    fn test11006_passes_candidate_through_when_no_cartridge_owns_its_territory() {
         // Some other candidate (not a model-spec) is in the
         // validation-survivor set. No cartridge has registered an
         // adapter URN above it, so it survives on the static
@@ -268,9 +268,9 @@ mod tests {
         );
     }
 
-    // TEST0283: Returned supertype does not promote specific candidates
+    // TEST11007: Returned supertype does not promote specific candidates
     #[test]
-    fn test0283_returned_supertype_does_not_promote_specific_candidates() {
+    fn test11007_returned_supertype_does_not_promote_specific_candidates() {
         // Regression guard: with adapter_invoker's filter using
         // `returned.conforms_to(candidate)`, a cartridge returning a
         // generic URN must not silently promote backend-tagged
@@ -286,9 +286,9 @@ mod tests {
         );
     }
 
-    // TEST0284: Returned subtype keeps specific candidate
+    // TEST11008: Returned subtype keeps specific candidate
     #[test]
-    fn test0284_returned_subtype_keeps_specific_candidate() {
+    fn test11008_returned_subtype_keeps_specific_candidate() {
         // The dual case: a cartridge that DOES return a backend-
         // specific URN (e.g. after inspecting model files on disk)
         // must keep the corresponding tag-specific candidate.
@@ -306,9 +306,9 @@ mod tests {
         assert!(surviving.contains(&"media:candle;enc=utf-8;llm;model-spec".to_string()));
     }
 
-    // TEST0285: Empty handler returned with owning adapter drops everything in domain
+    // TEST11009: Empty handler returned with owning adapter drops everything in domain
     #[test]
-    fn test0285_empty_handler_returned_with_owning_adapter_drops_everything_in_domain() {
+    fn test11009_empty_handler_returned_with_owning_adapter_drops_everything_in_domain() {
         // Every adapter that owned the candidate's domain returned
         // empty (declined or errored). The candidate must NOT
         // survive — we have no positive signal for it.
@@ -323,9 +323,9 @@ mod tests {
         );
     }
 
-    // TEST0286: Malformed candidate urn passes through
+    // TEST11010: Malformed candidate urn passes through
     #[test]
-    fn test0286_malformed_candidate_urn_passes_through() {
+    fn test11010_malformed_candidate_urn_passes_through() {
         // The filter is the last line of defence; a malformed URN
         // that survived parsing earlier shouldn't be dropped here on
         // a parse failure. The validation step is the place to drop

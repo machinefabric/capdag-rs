@@ -7168,10 +7168,6 @@ mod tests {
         );
     }
 
-    // TEST8067: A late death notification from a retired process generation
-    // cannot tear down its replacement. The current generation's heartbeat
-    // timeout performs the complete death transition and preserves its typed
-    // terminal for the request that process actually owned.
     // TEST1533: `apply_desired_capacities` is validated HARD against the
     // cartridge's last-known pool map — an unknown cartridge or pool name is
     // refused with the offender named and nothing queued — and a cold
@@ -7416,4 +7412,3 @@ mod tests {
         );
     }
 }
-
