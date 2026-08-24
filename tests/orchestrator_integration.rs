@@ -150,7 +150,7 @@ fn build_combine_cap() -> Cap {
 /// Get the testcartridge source directory.
 ///
 /// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
-/// `machfab-tests` is two levels up. Missing is a hard error here rather than an
+/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
 /// opaque spawn failure later: `Command::current_dir` on an absent directory
 /// reports only `NotFound`, which reads as a missing `cargo`.
 fn testcartridge_dir() -> PathBuf {
@@ -160,7 +160,7 @@ fn testcartridge_dir() -> PathBuf {
         .expect("capdag-rs has a parent (the capdag superrepo)")
         .parent()
         .expect("the capdag superrepo has a parent (the machinefabric workspace)")
-        .join("machfab-tests")
+        .join("mfab-tests")
         .join("testcartridge");
     assert!(
         dir.is_dir(),

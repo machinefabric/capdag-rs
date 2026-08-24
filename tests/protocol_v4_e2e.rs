@@ -25,7 +25,7 @@
 //!   upstream finishes)
 //!
 //! Deferred to the capdag-interop suite (see
-//! machfab-tests/capdag-interop/README.md, "Protocol v4 scenarios"):
+//! mfab-tests/capdag-interop/README.md, "Protocol v4 scenarios"):
 //! - TEST7057 (credit across a relay hop with XID rewriting): the
 //!   orchestrator harness has exactly one slave hop, which every test here
 //!   exercises implicitly; the multi-hop XID-rewrite assertion needs the
@@ -113,7 +113,7 @@ fn capturing_progress_fn(events: &CapturedLogs) -> CapProgressFn {
 
 /// The exact ~1KB chunk `test-stream-n-chunks` emits for index `i`.
 /// Must stay byte-identical to `stream_chunk_payload` in
-/// machfab-tests/testcartridge/src/main.rs.
+/// mfab-tests/testcartridge/src/main.rs.
 fn stream_chunk_payload(i: usize) -> Vec<u8> {
     let mut s = format!("chunk-{:05}:", i);
     while s.len() < 1024 {
@@ -205,7 +205,7 @@ fn create_v4_fabric_registry() -> Arc<FabricRegistry> {
 /// Get the testcartridge source directory.
 ///
 /// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
-/// `machfab-tests` is two levels up. Missing is a hard error here rather than an
+/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
 /// opaque spawn failure later: `Command::current_dir` on an absent directory
 /// reports only `NotFound`, which reads as a missing `cargo`.
 fn testcartridge_dir() -> PathBuf {
@@ -215,7 +215,7 @@ fn testcartridge_dir() -> PathBuf {
         .expect("capdag-rs has a parent (the capdag superrepo)")
         .parent()
         .expect("the capdag superrepo has a parent (the machinefabric workspace)")
-        .join("machfab-tests")
+        .join("mfab-tests")
         .join("testcartridge");
     assert!(
         dir.is_dir(),
