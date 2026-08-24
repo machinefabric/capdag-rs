@@ -405,6 +405,25 @@ impl std::fmt::Display for CapNarrowError {
 
 impl std::error::Error for CapNarrowError {}
 
+/// Whether an error means "somebody else is using this right now".
+///
+/// A shared cache is cleared by several processes at once. One of them
+/// removing a directory another is writing into is answered differently by
+/// each platform — `ENOTEMPTY` or `EBUSY` — and neither says the clear failed.
+fn is_busy(error: &std::io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc_enotempty) if libc_enotempty == ENOTEMPTY || libc_enotempty == EBUSY
+    )
+}
+
+/// `ENOTEMPTY` is 39 on Linux and 66 on macOS; `EBUSY` is 16 on both.
+#[cfg(target_os = "macos")]
+const ENOTEMPTY: i32 = 66;
+#[cfg(not(target_os = "macos"))]
+const ENOTEMPTY: i32 = 39;
+const EBUSY: i32 = 16;
+
 impl FabricRegistry {
     /// Create a new fabric registry pinned at the workspace-baked
     /// `capdag::FABRIC_MANIFEST_VERSION`. Standard entry point — engine
@@ -1944,17 +1963,64 @@ impl FabricRegistry {
         if let Ok(mut g) = self.extension_index.lock() {
             g.clear();
         }
-        if self.cache_dir.exists() {
-            fs::remove_dir_all(&self.cache_dir).map_err(|e| {
-                FabricRegistryError::CacheError(format!("Failed to clear cache directory: {}", e))
+        // The cache is SHARED, and the processes that clear it run at the same
+        // time: a test run starts eight cartridge builds within milliseconds of
+        // each other and every one of them refreshes this directory. Removing
+        // the tree and putting it back is not safe between peers — one process
+        // deleting an ancestor while another is creating into it is how a
+        // build fails with `No such file or directory` on a path it had just
+        // made.
+        //
+        // So the DIRECTORY is never removed, only its contents, and every step
+        // tolerates a peer having done the same thing first. The end state is
+        // the same — an empty cache — and no peer is ever left with the tree
+        // missing underneath it.
+        for sub in ["caps", "media", "aliases", "manifests"] {
+            let directory = self.cache_dir.join(sub);
+            fs::create_dir_all(&directory).map_err(|e| {
+                FabricRegistryError::CacheError(format!(
+                    "Failed to create cache directory {}: {e}",
+                    directory.display()
+                ))
             })?;
-            for sub in ["caps", "media", "aliases", "manifests"] {
-                fs::create_dir_all(self.cache_dir.join(sub)).map_err(|e| {
-                    FabricRegistryError::CacheError(format!(
-                        "Failed to recreate cache directory: {}",
-                        e
-                    ))
-                })?;
+            let entries = match fs::read_dir(&directory) {
+                Ok(entries) => entries,
+                // A peer removed it between the create and the read. It is
+                // empty by any reading, which is what was wanted.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(FabricRegistryError::CacheError(format!(
+                        "Failed to read cache directory {}: {error}",
+                        directory.display()
+                    )))
+                }
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let removed = if path.is_dir() {
+                    fs::remove_dir_all(&path)
+                } else {
+                    fs::remove_file(&path)
+                };
+                match removed {
+                    Ok(()) => {}
+                    // Already gone: a peer clearing the same cache got there
+                    // first, which is the outcome either way.
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    // Refilled underneath us. macOS reports this as
+                    // `Directory not empty` where Linux reports the missing
+                    // path — two faces of the same race, and neither is a
+                    // failure of this clear: the entries now there were put
+                    // there by a peer that has just refreshed them, so they
+                    // are exactly what a refresh was for.
+                    Err(error) if is_busy(&error) => {}
+                    Err(error) => {
+                        return Err(FabricRegistryError::CacheError(format!(
+                            "Failed to remove {}: {error}",
+                            path.display()
+                        )))
+                    }
+                }
             }
         }
         Ok(())
@@ -3899,5 +3965,98 @@ mod parity_port_tests {
             "cap:out=\"media:id;task\";in=\"media:listing-id\";use-grinder",
         );
         assert_eq!(a, b, "equivalent URNs must hash to the same registry key");
+    }
+}
+
+/// Clearing a cache that other processes are clearing at the same time.
+#[cfg(test)]
+mod concurrent_cache_tests {
+    use super::*;
+
+    /// A registry whose cache is a directory of this test's own.
+    fn registry_at(cache_dir: PathBuf) -> FabricRegistry {
+        let mut registry = FabricRegistry::new_for_test();
+        registry.cache_dir = cache_dir;
+        registry
+    }
+
+    #[test]
+    fn test11158_clearing_leaves_the_cache_present_and_empty() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache = dir.path().join("fabric.example.com");
+        let registry = registry_at(cache.clone());
+
+        std::fs::create_dir_all(cache.join("caps")).expect("caps");
+        std::fs::write(cache.join("caps/stale.json"), "{}").expect("stale entry");
+
+        registry.clear_cache().expect("clears");
+
+        assert!(cache.join("caps").is_dir(), "the directory survives");
+        assert!(!cache.join("caps/stale.json").exists(), "its contents do not");
+    }
+
+    #[test]
+    fn test11159_a_cache_that_does_not_exist_yet_is_created() {
+        // The first build on a machine finds nothing here. That is not a
+        // failure to report, and the old code silently did nothing at all.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache = dir.path().join("never-existed");
+        registry_at(cache.clone()).clear_cache().expect("clears");
+        for sub in ["caps", "media", "aliases", "manifests"] {
+            assert!(cache.join(sub).is_dir(), "{sub} exists after clearing");
+        }
+    }
+
+    #[test]
+    fn test11160_several_processes_clearing_at_once_all_succeed() {
+        // The real failure: a test run starts eight cartridge builds within
+        // milliseconds of each other and every one refreshes this same shared
+        // directory. Removing the tree and putting it back races — one peer
+        // deleting an ancestor while another creates into it is exactly the
+        // `No such file or directory` a build died on.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache = dir.path().join("shared.example.com");
+        std::fs::create_dir_all(cache.join("caps")).expect("caps");
+        for n in 0..200 {
+            std::fs::write(cache.join(format!("caps/entry-{n}.json")), "{}").expect("entry");
+        }
+
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let cache = cache.clone();
+                    scope.spawn(move || {
+                        // Each peer clears repeatedly, so they genuinely
+                        // interleave rather than finishing one after another.
+                        let mut errors = Vec::new();
+                        for _ in 0..20 {
+                            if let Err(error) = registry_at(cache.clone()).clear_cache() {
+                                errors.push(error.to_string());
+                            }
+                        }
+                        errors
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().expect("no panic"))
+                .collect()
+        });
+
+        assert!(
+            failures.is_empty(),
+            "clearing must tolerate a peer doing the same thing: {failures:?}"
+        );
+        // The two faces of this race are platform-specific — Linux reports the
+        // missing path, macOS reports `Directory not empty` — and a fix for
+        // one that leaves the other is half a fix.
+        assert!(
+            !failures.iter().any(|f| f.contains("not empty") || f.contains("No such file")),
+            "neither platform's symptom may survive: {failures:?}"
+        );
+        for sub in ["caps", "media", "aliases", "manifests"] {
+            assert!(cache.join(sub).is_dir(), "{sub} is present at the end");
+        }
     }
 }
