@@ -3745,8 +3745,8 @@ async fn forward_frames(
 ///
 /// `initial_is_sequence` is the per-node sequence-flag map that
 /// mirrors floom-engine's interpreter contract (see
-/// `floom-engine::cap::capdag_service::execute_dag` and
-/// `floom-engine::ops_rs::cap_interpreter::interpreter::resolve_inputs`).
+/// `floom_engine::cap::capdag_service::execute_dag` and
+/// `floom_engine::ops_rs::cap_interpreter::interpreter::resolve_inputs`).
 /// For every node in `initial_inputs` there MUST be a matching
 /// entry here declaring whether the bytes are a CBOR sequence
 /// (`true` — multiple self-delimiting items, dispatched as
