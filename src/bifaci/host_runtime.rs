@@ -612,7 +612,7 @@ impl ManagedCartridge {
                         // separate "still inspecting / verifying"
                         // phase to model on this path — the work
                         // already happened. The XPC-cartridge path
-                        // (machfab-mac) is the one that transitions
+                        // (macfloom) is the one that transitions
                         // through `Discovered` → `Inspecting` →
                         // `Verifying` → `Operational` because its
                         // hashing + verifier round-trips are

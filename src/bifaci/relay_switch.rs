@@ -182,7 +182,7 @@ pub enum CartridgeAttachmentErrorKind {
     /// of the system — its caps are not registered with the engine,
     /// and any in-flight request the cartridge process was handling
     /// fails hard. Re-enabling is a UI-driven operator action.
-    /// Enforced at the host level (machfab-mac's XPC service); the
+    /// Enforced at the host level (macfloom's XPC service); the
     /// engine doesn't act on it differently from any other failed
     /// attachment, but preserves the kind so consumers can render the
     /// right reason and offer the right recovery action.
@@ -216,7 +216,7 @@ pub enum CartridgeAttachmentErrorKind {
 }
 
 /// In-progress lifecycle phases that run BEFORE a cartridge becomes
-/// dispatchable. See `machfab-mac/docs/cartridge state machine.md` for
+/// dispatchable. See `macfloom/docs/cartridge state machine.md` for
 /// the canonical state diagram.
 ///
 /// Mutually exclusive with `attachment_error` on
@@ -1642,7 +1642,7 @@ impl RelaySwitch {
     /// **Cap-set non-emptiness is intentionally NOT required.** A
     /// master can be healthy and connected with zero caps while its
     /// cartridges are still inspecting / verifying — see
-    /// `machfab-mac/docs/cartridge state machine.md`. Tying readiness
+    /// `macfloom/docs/cartridge state machine.md`. Tying readiness
     /// to caps would mean the splash screen waits for every cartridge
     /// to clear inspection + verification, which can take many seconds
     /// for large model cartridges + slow registry fetches. Caps
@@ -7497,7 +7497,7 @@ mod tests {
         // engine readiness gate must still fire so the splash screen
         // can unblock — caps register incrementally as cartridges
         // progress to `.operational`. See
-        // `machfab-mac/docs/cartridge state machine.md` and the
+        // `macfloom/docs/cartridge state machine.md` and the
         // `all_masters_ready` doc comment for the rationale. A
         // regression that re-coupled readiness to cap-set
         // non-emptiness would make this test fail (and would hang
@@ -7606,7 +7606,7 @@ mod tests {
 
     /// TEST1721: Wire-format JSON deserializes into the right
     /// variant. This is the engine-receives-from-XPC path: the
-    /// machfab-mac side emits `{"kind":"bad_installation",...}`
+    /// macfloom side emits `{"kind":"bad_installation",...}`
     /// and the engine must resolve it to `BadInstallation`.
     /// Asserts every variant explicitly so a single-variant typo
     /// in the rename map can't hide behind a passing healthy-case.

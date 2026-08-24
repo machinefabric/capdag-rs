@@ -5,7 +5,7 @@
 //! `Incompatible`. This is the single source of truth used by BOTH:
 //!
 //! - the engine, for the bundled `bundled-cartridges/` tree next to its binary, and
-//! - `machfab-daemon`, for the user-installed cartridge tree.
+//! - `unifloom-daemon`, for the user-installed cartridge tree.
 //!
 //! Keeping one implementation guarantees the two hosts accept exactly the same
 //! cartridges and reject the rest with byte-identical verdicts. The host's
