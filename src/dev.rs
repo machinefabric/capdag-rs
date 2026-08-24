@@ -925,31 +925,95 @@ mod tests {
         if vendored == canonical {
             return;
         }
-        // The pin is read from the dependency line BEFORE that line is
-        // stripped — the ordering rule below must keep seeing it.
-        let (vendored_pins, vendored_rest) = split_pin(vendored);
-        let (canonical_pins, canonical_rest) = split_pin(canonical);
-        let vendored_rest = strip_capdag_dependency_source(dest, &vendored_rest);
-        let canonical_rest = strip_capdag_dependency_source(dest, &canonical_rest);
         assert_eq!(
-            vendored_rest, canonical_rest,
-            "{language}: vendored {dest} differs from the canonical bytes in more than the \
-             capdag dependency source and the stamped version pins — re-vendor the stubs"
+            comparable(vendored),
+            comparable(canonical),
+            "{language}: vendored {dest} differs from the canonical stub in more than its \
+             versions and capdag dependency — re-vendor the stubs"
         );
-        assert!(
-            !vendored_pins.is_empty() && vendored_pins.len() == canonical_pins.len(),
-            "{language}: vendored {dest} differs from the canonical bytes and the two sides \
-             do not carry the same version pins to explain it — re-vendor the stubs"
-        );
-        for (vendored_pin, canonical_pin) in vendored_pins.iter().zip(canonical_pins.iter()) {
-            assert!(
-                vendored_pin <= canonical_pin,
-                "{language}: vendored {dest} pins {} but the canonical stub is at {} — a stub \
-                 may lag a release, never precede one",
-                join_version(vendored_pin),
-                join_version(canonical_pin)
-            );
+    }
+
+    /// The stub, with everything that moves on its own removed.
+    ///
+    /// Two things change without the stub changing, and neither says anything
+    /// about whether the stub is the canonical one:
+    ///
+    ///   * the capdag DEPENDENCY — a path while somebody works locally, a git
+    ///     tag or a registry version once published. The same stub, reached
+    ///     two ways, and the two forms are different LINES rather than one
+    ///     line differing in a version.
+    ///   * every stamped VERSION — capdag's, and the stub project's own. Both
+    ///     are written by the templates and move on every release.
+    ///
+    /// Both go, so the comparison is about the stub's CODE. Anything else that
+    /// differs is a real edit, which is what this check exists to find.
+    ///
+    /// Applied to LOGICAL lines: the generated module embeds each stub file —
+    /// manifests included — as a single-line string literal whose newlines are
+    /// the two characters `\n`, and a rule applied only to real lines cannot
+    /// see inside them, which is exactly where the versions live.
+    fn comparable(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for piece in split_logical(text) {
+            if piece == "\n" || piece == "\\n" {
+                out.push_str(piece);
+                continue;
+            }
+            if is_capdag_dependency_source(piece) {
+                continue;
+            }
+            out.push_str(&mask_versions(piece));
         }
+        out
+    }
+
+    /// Split on real newlines and on the escaped ones inside string literals,
+    /// keeping the separators so everything else is rebuilt unchanged.
+    fn split_logical(text: &str) -> Vec<&str> {
+        let mut parts = Vec::new();
+        let bytes = text.as_bytes();
+        let mut start = 0;
+        let mut index = 0;
+        while index < bytes.len() {
+            let escaped = bytes[index] == b'\\' && index + 1 < bytes.len() && bytes[index + 1] == b'n';
+            if bytes[index] == b'\n' || escaped {
+                parts.push(&text[start..index]);
+                let width = if escaped { 2 } else { 1 };
+                parts.push(&text[index..index + width]);
+                index += width;
+                start = index;
+                continue;
+            }
+            index += 1;
+        }
+        parts.push(&text[start..]);
+        parts
+    }
+
+    /// Every `N.N.N` replaced, wherever it sits in the line.
+    fn mask_versions(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let bytes = line.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            if !bytes[index].is_ascii_digit() {
+                out.push(line[index..].chars().next().expect("in bounds"));
+                index += line[index..].chars().next().expect("in bounds").len_utf8();
+                continue;
+            }
+            let start = index;
+            while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'.') {
+                index += 1;
+            }
+            let candidate = &line[start..index];
+            let parts: Vec<&str> = candidate.split('.').collect();
+            if parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+                out.push_str("<version>");
+            } else {
+                out.push_str(candidate);
+            }
+        }
+        out
     }
 
     /// A line whose dotted triple is a STAMPED version, not contract: one
