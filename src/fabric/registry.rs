@@ -2081,12 +2081,20 @@ impl FabricRegistry {
         let mut stack: Vec<PathBuf> = vec![caps_dir.to_path_buf()];
         let mut is_v0_layer = true;
         while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).map_err(|e| {
-                FabricRegistryError::CacheError(format!(
-                    "Failed to read cap cache directory {:?}: {}",
-                    dir, e
-                ))
-            })? {
+            // A directory removed between its parent being listed and it
+            // being opened contributes nothing — the same answer the absent
+            // cache root gives above. See `load_all_cached_aliases`.
+            let listing = match fs::read_dir(&dir) {
+                Ok(listing) => listing,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(FabricRegistryError::CacheError(format!(
+                        "Failed to read cap cache directory {:?}: {}",
+                        dir, e
+                    )))
+                }
+            };
+            for entry in listing {
                 let entry = match entry {
                     Ok(e) => e,
                     Err(e) => {
@@ -2145,12 +2153,20 @@ impl FabricRegistry {
         }
         let mut stack: Vec<PathBuf> = vec![media_dir.to_path_buf()];
         while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).map_err(|e| {
-                FabricRegistryError::CacheError(format!(
-                    "Failed to read media cache directory {:?}: {}",
-                    dir, e
-                ))
-            })? {
+            // A directory removed between its parent being listed and it
+            // being opened contributes nothing — the same answer the absent
+            // cache root gives above. See `load_all_cached_aliases`.
+            let listing = match fs::read_dir(&dir) {
+                Ok(listing) => listing,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(FabricRegistryError::CacheError(format!(
+                        "Failed to read media cache directory {:?}: {}",
+                        dir, e
+                    )))
+                }
+            };
+            for entry in listing {
                 let entry = match entry {
                     Ok(e) => e,
                     Err(e) => {
@@ -2209,12 +2225,32 @@ impl FabricRegistry {
         }
         let mut stack: Vec<PathBuf> = vec![aliases_dir.to_path_buf()];
         while let Some(dir) = stack.pop() {
-            for entry in fs::read_dir(&dir).map_err(|e| {
-                FabricRegistryError::CacheError(format!(
-                    "Failed to read alias cache directory {:?}: {}",
-                    dir, e
-                ))
-            })? {
+            // A directory that is gone by the time it is read contributes no
+            // aliases, which is the same answer an absent cache root gives
+            // above.
+            //
+            // The check at the top is one moment; this loop reads directories
+            // it discovered afterwards. Anything that empties the cache while
+            // a registry is being built — a refresh, a clear, another process
+            // taking a snapshot — removes a `<sha>` directory between its
+            // parent being listed and it being opened. Failing there turns a
+            // cache that is merely emptier than expected into "the fabric
+            // cannot be reached", and a build refuses over a directory nobody
+            // needed.
+            //
+            // Only NotFound. Any other error is a cache that cannot be read
+            // rather than one that is not there, and is still reported.
+            let listing = match fs::read_dir(&dir) {
+                Ok(listing) => listing,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(FabricRegistryError::CacheError(format!(
+                        "Failed to read alias cache directory {:?}: {}",
+                        dir, e
+                    )))
+                }
+            };
+            for entry in listing {
                 let entry = match entry {
                     Ok(e) => e,
                     Err(e) => {
