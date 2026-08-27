@@ -50,7 +50,7 @@ pub const STUB_LANGUAGES: &[StubLanguage] = &[
             StubFile {
                 dest: r#"cartridge.py"#,
                 contents: r#"#!/usr/bin/env python3
-"""__CARTRIDGE_NAME__ — a MachineFabric cartridge (Python), scaffolded by `capdag new`.
+"""__CARTRIDGE_NAME__ — a CapDAG cartridge (Python), scaffolded by `capdag new`.
 
 Reads UTF-8 text on stdin and emits a single tag word: `positive`,
 `neutral`, or `negative`.
@@ -230,7 +230,7 @@ if __name__ == "__main__":
                 dest: r#"README.md"#,
                 contents: r#"# __CARTRIDGE_NAME__
 
-A MachineFabric cartridge scaffolded by `capdag new`. It reads UTF-8 text on
+A CapDAG cartridge scaffolded by `capdag new`. It reads UTF-8 text on
 stdin and emits `positive`, `neutral`, or `negative`.
 
 ## Develop
@@ -293,7 +293,7 @@ cartridge.json
         files: &[
             StubFile {
                 dest: r#"src/main.rs"#,
-                contents: r##"//! __CARTRIDGE_NAME__ — a MachineFabric cartridge (Rust), scaffolded by `capdag new`.
+                contents: r##"//! __CARTRIDGE_NAME__ — a CapDAG cartridge (Rust), scaffolded by `capdag new`.
 //!
 //! Reads UTF-8 text on stdin and emits a single tag word: `positive`,
 //! `neutral`, or `negative`.
@@ -538,7 +538,7 @@ MFR_CARTRIDGE_REGISTRY_VERSION = "1"
                 dest: r#"README.md"#,
                 contents: r#"# __CARTRIDGE_NAME__
 
-A MachineFabric cartridge scaffolded by `capdag new`. It reads UTF-8 text on
+A CapDAG cartridge scaffolded by `capdag new`. It reads UTF-8 text on
 stdin and emits `positive`, `neutral`, or `negative`.
 
 ## Develop
@@ -613,7 +613,7 @@ cartridge.json
         files: &[
             StubFile {
                 dest: r#"cartridge.go"#,
-                contents: r#"// __CARTRIDGE_NAME__ — a MachineFabric cartridge (Go), scaffolded by `capdag new`.
+                contents: r#"// __CARTRIDGE_NAME__ — a CapDAG cartridge (Go), scaffolded by `capdag new`.
 //
 // Reads UTF-8 text on stdin and emits a single tag word: `positive`,
 // `neutral`, or `negative`.
@@ -827,7 +827,7 @@ require github.com/machinefabric/capdag-go v1.372.61
                 dest: r#"README.md"#,
                 contents: r#"# __CARTRIDGE_NAME__
 
-A MachineFabric cartridge scaffolded by `capdag new`. It reads UTF-8 text on
+A CapDAG cartridge scaffolded by `capdag new`. It reads UTF-8 text on
 stdin and emits `positive`, `neutral`, or `negative`.
 
 ## Develop
@@ -892,7 +892,7 @@ cartridge.json
         files: &[
             StubFile {
                 dest: r#"Sources/main.swift"#,
-                contents: r#"// __CARTRIDGE_NAME__ — a MachineFabric cartridge (Swift), scaffolded by `capdag new`.
+                contents: r#"// __CARTRIDGE_NAME__ — a CapDAG cartridge (Swift), scaffolded by `capdag new`.
 //
 // Reads UTF-8 text on stdin and emits a single tag word: `positive`,
 // `neutral`, or `negative`.
@@ -1097,7 +1097,7 @@ let package = Package(
                 dest: r#"README.md"#,
                 contents: r#"# __CARTRIDGE_NAME__
 
-A MachineFabric cartridge scaffolded by `capdag new`. It reads UTF-8 text on
+A CapDAG cartridge scaffolded by `capdag new`. It reads UTF-8 text on
 stdin and emits `positive`, `neutral`, or `negative`.
 
 macOS only — the Swift cartridge runtime (`capdag-objc`) builds against the

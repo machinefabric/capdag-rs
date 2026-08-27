@@ -715,7 +715,7 @@ impl CartridgeRepo {
     pub fn new(cache_ttl_seconds: u64, expected_fabric_url: impl Into<String>) -> Self {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
-            .user_agent("MachineFabricEngine/1.0.0")
+            .user_agent("CapDAG/1.0.0")
             .build()
             .expect("Failed to create HTTP client");
 
