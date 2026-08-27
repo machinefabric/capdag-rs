@@ -431,8 +431,7 @@ async fn main() {
 
     // `--fabric <url>` — point this invocation at a different fabric registry
     // origin, the CLI's equivalent of the registry base URL the desktop apps
-    // hand their engine (`CDG_FABRIC_REGISTRY_URL` in
-    // MachineFabricApp.swift / engine-manager.ts). Staging, a self-hosted
+    // hand their engine via `CDG_FABRIC_REGISTRY_URL`. Staging, a self-hosted
     // fabric, or a local one under development are all reachable without
     // rebuilding: a fabric is an origin, not a build identity.
     //

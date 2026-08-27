@@ -93,8 +93,8 @@ serde_json = "1.0"
 
 [package]
 authors = ["https://github.com/machinefabric"]
-description = "Core cap URN and definition system for FLOOM_ENGINE plugins"
+description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.706.69"
+version = "1.707.76"
