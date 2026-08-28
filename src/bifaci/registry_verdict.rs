@@ -81,6 +81,16 @@ pub enum RegistryVerdictState {
     /// parsing. This build's problem — most often a client older or newer than
     /// the publisher.
     Unverifiable,
+    /// This build bakes no trust anchors, so there is no regime to verify
+    /// against and the manifest was accepted without proof. A development
+    /// build, and only ever that.
+    ///
+    /// It permits attachment — a dev build has to work — and it is a SEPARATE
+    /// state rather than being reported as `Verified`, because "we checked and
+    /// it passed" and "we did not check" are different facts and a consumer
+    /// that cannot tell them apart will one day ship the second believing the
+    /// first.
+    Unenforced,
 }
 
 impl RegistryVerdictState {
@@ -96,6 +106,7 @@ impl RegistryVerdictState {
             Self::Unsigned => "unsigned",
             Self::Untrusted => "untrusted",
             Self::Unverifiable => "unverifiable",
+            Self::Unenforced => "unenforced",
         }
     }
 
@@ -113,6 +124,7 @@ impl RegistryVerdictState {
             "unsigned" => Ok(Self::Unsigned),
             "untrusted" => Ok(Self::Untrusted),
             "unverifiable" => Ok(Self::Unverifiable),
+            "unenforced" => Ok(Self::Unenforced),
             other => Err(RegistryVerdictError::UnknownState(other.to_string())),
         }
     }
@@ -121,7 +133,7 @@ impl RegistryVerdictState {
     /// True for [`Verified`](Self::Verified) alone: every other state, the
     /// hopeful ones included, means the claim is unconfirmed.
     pub fn permits_attachment(self) -> bool {
-        matches!(self, Self::Verified)
+        matches!(self, Self::Verified | Self::Unenforced)
     }
 
     /// Whether this state is a refusal of an answer we DID get, as opposed to
@@ -142,7 +154,7 @@ impl RegistryVerdictState {
 
     /// Every state, in declaration order — for exhaustive tests and for
     /// mirrors' round-trip checks.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Verified,
         Self::Pending,
         Self::Offline,
@@ -152,6 +164,7 @@ impl RegistryVerdictState {
         Self::Unsigned,
         Self::Untrusted,
         Self::Unverifiable,
+        Self::Unenforced,
     ];
 }
 
@@ -213,7 +226,7 @@ impl RegistryVerdictState {
     /// chose would get whatever sentence was nearest.
     pub fn remedy(self) -> RegistryRemedy {
         match self {
-            Self::Verified => RegistryRemedy::None,
+            Self::Verified | Self::Unenforced => RegistryRemedy::None,
             Self::Pending => RegistryRemedy::Wait,
             Self::Offline => RegistryRemedy::ChangeNetworkPolicy,
             Self::Unreachable => RegistryRemedy::CheckNetwork,
@@ -418,6 +431,19 @@ impl RegistryVerdict {
         }
     }
 
+    /// This build bakes no trust anchors: the manifest was accepted without
+    /// proof, and says so rather than claiming it verified.
+    pub fn unenforced(registry_url: impl Into<String>, checked_at_unix_seconds: i64) -> Self {
+        Self {
+            registry_url: registry_url.into(),
+            state: RegistryVerdictState::Unenforced,
+            detail: String::new(),
+            http_status: None,
+            chain_failure: None,
+            checked_at_unix_seconds,
+        }
+    }
+
     /// No verdict yet. Carries no time, because nothing has been checked.
     pub fn pending(registry_url: impl Into<String>) -> Self {
         Self {
@@ -445,7 +471,9 @@ impl RegistryVerdict {
             | RegistryVerdictState::Unreachable
             | RegistryVerdictState::Malformed
             | RegistryVerdictState::Unsigned => {}
-            RegistryVerdictState::Verified | RegistryVerdictState::Pending => {
+            RegistryVerdictState::Verified
+            | RegistryVerdictState::Pending
+            | RegistryVerdictState::Unenforced => {
                 return Err(RegistryVerdictError::VerifiedWithDetail(detail.into()))
             }
             RegistryVerdictState::HttpError => return Err(RegistryVerdictError::MissingHttpStatus),
@@ -513,7 +541,7 @@ impl RegistryVerdict {
             return Err(RegistryVerdictError::MissingRegistryUrl);
         }
         match self.state {
-            RegistryVerdictState::Verified => {
+            RegistryVerdictState::Verified | RegistryVerdictState::Unenforced => {
                 if !self.detail.is_empty() {
                     return Err(RegistryVerdictError::VerifiedWithDetail(self.detail.clone()));
                 }
@@ -684,10 +712,20 @@ mod tests {
         for state in RegistryVerdictState::ALL {
             assert_eq!(
                 state.permits_attachment(),
-                state == RegistryVerdictState::Verified,
+                state == RegistryVerdictState::Verified
+                    || state == RegistryVerdictState::Unenforced,
                 "{state:?}"
             );
         }
+        // A DEV BUILD HAS TO WORK, and it says which of the two it is: "we
+        // checked and it passed" and "we did not check" are different facts,
+        // and a consumer that cannot tell them apart will one day ship the
+        // second believing the first.
+        assert!(RegistryVerdictState::Unenforced.permits_attachment());
+        assert_ne!(RegistryVerdictState::Unenforced, RegistryVerdictState::Verified);
+        assert!(!RegistryVerdictState::Unenforced.is_trust_failure());
+        assert!(!RegistryVerdictState::Unenforced.is_transient());
+        assert_eq!(RegistryVerdictState::Unenforced.remedy(), RegistryRemedy::None);
     }
 
     /// TEST8153: a trust failure never resolves itself, so nothing may present
