@@ -419,6 +419,27 @@ pub struct RegistryVerdict {
 }
 
 impl RegistryVerdict {
+    /// WHETHER TWO VERDICTS SAY THE SAME THING ABOUT THE REGISTRY.
+    ///
+    /// Not `==`. Equality includes `checked_at_unix_seconds`, which is
+    /// provenance about the CHECK and not about the registry — so a consumer
+    /// asking "did this change?" with `==` is told yes on every re-check,
+    /// forever.
+    ///
+    /// Both desktop clients asked exactly that to decide whether to re-run
+    /// cartridge discovery, and both wrote a comment saying they were doing it
+    /// to avoid a feedback loop. The comparison they used could not: discovery
+    /// finished, the verifier re-checked, the identical answer came back with a
+    /// newer timestamp, "the verdicts changed" re-ran discovery, and the engine
+    /// never reached ready. This is the comparison that question wants.
+    pub fn states_the_same_as(&self, other: &Self) -> bool {
+        self.registry_url == other.registry_url
+            && self.state == other.state
+            && self.detail == other.detail
+            && self.http_status == other.http_status
+            && self.chain_failure == other.chain_failure
+    }
+
     /// The registry answered, verified and parsed.
     pub fn verified(registry_url: impl Into<String>, checked_at_unix_seconds: i64) -> Self {
         Self {
@@ -861,6 +882,44 @@ mod tests {
             contradiction.validate(),
             Err(RegistryVerdictError::UnexpectedChainFailure(_))
         ));
+    }
+
+    /// TEST8162: WHEN IS A VERDICT NEWS? Both desktop clients re-verify their
+    /// registries after every discovery round and re-run discovery when the
+    /// verdicts "changed". Change had to mean "the registry said something
+    /// different", and `==` cannot mean that: it includes the moment of the
+    /// check, so the same answer taken a second later is a different value.
+    /// That is the loop that left an engine discovering cartridges forever.
+    #[test]
+    fn test8162_a_verdict_says_the_same_thing_at_a_different_time() {
+        let earlier = RegistryVerdict::verified("https://r.example", 1_756_000_000);
+        let later = RegistryVerdict::verified("https://r.example", 1_756_000_931);
+        assert_ne!(earlier, later, "they are not the same VALUE — one is a later check");
+        assert!(
+            earlier.states_the_same_as(&later),
+            "but they say the same thing about the registry, which is the question a consumer asks"
+        );
+
+        // Everything the registry actually said is news when it differs.
+        let differing = [
+            RegistryVerdict::stated("https://r.example", RegistryVerdictState::Unreachable, "connection timed out", 1_756_000_000).unwrap(),
+            RegistryVerdict::http_error("https://r.example", 503, "the registry answered HTTP 503", 1_756_000_000).unwrap(),
+            RegistryVerdict::chain_failed("https://r.example", ChainFailureReason::ManifestSignatureInvalid, "signature does not verify", 1_756_000_000).unwrap(),
+            RegistryVerdict::verified("https://other.example/manifest", 1_756_000_000),
+        ];
+        for verdict in &differing {
+            assert!(
+                !earlier.states_the_same_as(verdict),
+                "{} is a different statement about the registry",
+                verdict.state.wire_name()
+            );
+        }
+
+        // Two http errors with different statuses are different statements: 404
+        // and 503 are different situations with different remedies.
+        let not_found = RegistryVerdict::http_error("https://r.example", 404, "the registry answered HTTP 404", 1_756_000_000).unwrap();
+        let unavailable = RegistryVerdict::http_error("https://r.example", 503, "the registry answered HTTP 503", 1_756_000_000).unwrap();
+        assert!(!not_found.states_the_same_as(&unavailable));
     }
 
     /// TEST8155: the wire form survives a round trip with its invariants, and a
