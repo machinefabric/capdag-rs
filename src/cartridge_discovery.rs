@@ -638,7 +638,7 @@ mod tests {
 
     // TEST0092: Channel mismatch is bad installation
     #[tokio::test]
-    async fn test0092_channel_mismatch_is_bad_installation() {
+    async fn test0092_channel_mismatch_is_misplaced() {
         let root = tempdir().unwrap();
         // Declares release but lives under nightly/ — host is nightly.
         let json = dev_cartridge_json("release", 1);
