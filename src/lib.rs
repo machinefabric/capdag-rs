@@ -89,6 +89,10 @@ pub use bifaci::binary_signing::{
     signing_environment_from_build_env, split_root_pubkeys, verify_binary_signature,
     ParsedPublicKey, SignatureError,
 };
+pub use bifaci::registry_verdict::{
+    ChainFailureReason, RegistryRemedy, RegistryVerdict, RegistryVerdictError,
+    RegistryVerdictState,
+};
 pub use bifaci::release_cert::{
     unix_now, verify_manifest_envelope, CertificateEntry, ChainError, ManifestSigEnvelope,
     ManifestSignature, RegistryTrust, ReleaseKeyCertificate, RootSignature, VerifiedChain,

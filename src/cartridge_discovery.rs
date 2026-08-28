@@ -303,7 +303,7 @@ async fn scan_channel_root(
                 let kind = match &e {
                     crate::bifaci::cartridge_json::CartridgeJsonError::RegistrySlugMismatch {
                         ..
-                    } => CartridgeAttachmentErrorKind::BadInstallation,
+                    } => CartridgeAttachmentErrorKind::Misplaced,
                     _ => CartridgeAttachmentErrorKind::ManifestInvalid,
                 };
                 error!(dir = %version_dir.display(), slug = %expected_slug, error = %e, "cartridge.json invalid or mis-placed — surfacing as incompatible");
@@ -334,7 +334,7 @@ async fn scan_channel_root(
                 registry_url: cj.registry_url.clone(),
                 version: cj.version.clone(),
                 error: CartridgeAttachmentError {
-                    kind: CartridgeAttachmentErrorKind::BadInstallation,
+                    kind: CartridgeAttachmentErrorKind::Misplaced,
                     message: format!(
                         "Channel mismatch: cartridge declares '{}' but host is pinned to '{}'. Release and nightly artefacts must not mix.",
                         cj.channel, identity.channel
@@ -456,7 +456,7 @@ async fn scan_channel_root(
                         registry_url: cj.registry_url.clone(),
                         version: cj.version.clone(),
                         error: CartridgeAttachmentError {
-                            kind: CartridgeAttachmentErrorKind::BadInstallation,
+                            kind: CartridgeAttachmentErrorKind::Misplaced,
                             message: format!(
                                 "bundled cartridge integrity check failed: {}",
                                 reason
@@ -654,7 +654,7 @@ mod tests {
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
-        expect_incompatible(&out, CartridgeAttachmentErrorKind::BadInstallation);
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
     }
 
     // TEST0094: Fabric manifest mismatch is flagged
@@ -701,7 +701,7 @@ mod tests {
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
-        expect_incompatible(&out, CartridgeAttachmentErrorKind::BadInstallation);
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
     }
 
     // The registry slug for a fixed URL, so tests can place a registry cartridge
@@ -859,7 +859,7 @@ mod tests {
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
-        expect_incompatible(&out, CartridgeAttachmentErrorKind::BadInstallation);
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
     }
 
     // TEST1878: a cartridge marked `installed_from: bundle` with no baked hash in
@@ -889,7 +889,7 @@ mod tests {
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
-        expect_incompatible(&out, CartridgeAttachmentErrorKind::BadInstallation);
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
         if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
             assert!(
                 error.message.contains("bundled cartridge integrity"),

@@ -655,9 +655,21 @@ impl CartridgeManager {
             // This manager's registry is mandatory — a sync failure (network,
             // parse, or SIGNATURE) surfaces here with its real cause instead
             // of a later misleading "cartridge not found".
-            if let Some(err) = self.cartridge_repo.sync_error(&registry_url).await {
+            // A registry this manager depends on must have VERIFIED. Any other
+            // verdict — unreachable, unsigned, a signature this build cannot
+            // read — means the cartridges it lists have unconfirmed
+            // provenance, and the state says which so the operator is not sent
+            // to the wrong remedy.
+            let verdict = self.cartridge_repo.registry_verdict(&registry_url).await;
+            if !verdict.permits_attachment() {
                 return Err(ExecutionError::HostError(format!(
-                    "cartridge registry sync failed for '{registry_url}': {err}"
+                    "cartridge registry '{registry_url}' is {}: {}",
+                    verdict.state.wire_name(),
+                    if verdict.detail.is_empty() {
+                        "no verdict has been reached yet".to_string()
+                    } else {
+                        verdict.detail.clone()
+                    }
                 )));
             }
         }

@@ -174,8 +174,22 @@ pub enum CartridgeAttachmentErrorKind {
     /// `ManifestInvalid` (cartridge.json is itself unreadable or
     /// schema-broken). Hosts grace-period the offending directory and
     /// then delete it; the record is surfaced so the operator sees
-    /// what landed where before it disappears.
-    BadInstallation,
+    /// what landed where before it disappears. Recovery is "reinstall".
+    ///
+    /// This was called `BadInstallation` and meant two unrelated things:
+    /// this one, and "the registry does not list this version" — which is
+    /// now [`NotListed`](Self::NotListed). One kind covering two situations
+    /// with different remedies cannot state either of them.
+    Misplaced,
+    /// The cartridge's registry verified, and does not list this
+    /// (channel, id, version). The registry acknowledges the cartridge's
+    /// provenance claim by NOT acknowledging it: the artefact says it came
+    /// from somewhere that has never heard of it. Distinct from
+    /// [`RegistryUnverified`](Self::RegistryUnverified), where the registry's
+    /// answer could not be obtained or could not be trusted — there we do not
+    /// know, here we do. Recovery is "wait for the publish, or rebuild as a
+    /// dev cartridge".
+    NotListed,
     /// Operator explicitly disabled this cartridge through the host
     /// UI. The cartridge is on disk and would otherwise have attached
     /// cleanly; the host treats it as if the binary were yanked out
@@ -187,20 +201,22 @@ pub enum CartridgeAttachmentErrorKind {
     /// attachment, but preserves the kind so consumers can render the
     /// right reason and offer the right recovery action.
     Disabled,
-    /// The cartridge declares a non-null `registry_url`, but the
-    /// host could not reach that registry to verify the cartridge is
-    /// listed. Distinct from `BadInstallation` (= registry confirmed
-    /// the version is missing) — `RegistryUnreachable` means we
-    /// don't know. Recovery action is "check network + retry"
-    /// rather than "rebuild as dev". The cartridge is held back
-    /// from attaching until verification succeeds; the UI shows the
-    /// actionable reason.
+    /// The cartridge declares a non-null `registry_url` and that registry's
+    /// verdict is not `verified`, so the cartridge's provenance claim is
+    /// unconfirmed and it is held back.
     ///
-    /// Network fetch is performed by the main app (which has
-    /// outbound network entitlement) and pushed to the host as a
-    /// verdict map; the XPC service is sandboxed and cannot fetch
-    /// registries directly.
-    RegistryUnreachable,
+    /// WHY it is unconfirmed belongs to the registry, not to the cartridge:
+    /// a [`RegistryVerdict`](crate::RegistryVerdict) is one fact per registry
+    /// URL, shared by every cartridge from it, and consumers join on
+    /// `registry_url` to state it once. This kind deliberately carries no
+    /// reason of its own — the previous kind did, called itself
+    /// `RegistryUnreachable`, and so reported a signature this build could not
+    /// read as a network outage with "check your connection" as the remedy.
+    ///
+    /// Network fetch is performed by the main app (which has outbound network
+    /// entitlement) and pushed to the host as a verdict map; a sandboxed host
+    /// cannot fetch registries directly.
+    RegistryUnverified,
     /// The cartridge was built against a different fabric registry
     /// manifest version than this engine is pinned to. Both engine
     /// and cartridge bake their fabric manifest version at build
@@ -7576,14 +7592,12 @@ mod tests {
                 "entry_point_missing",
             ),
             (CartridgeAttachmentErrorKind::Quarantined, "quarantined"),
-            (
-                CartridgeAttachmentErrorKind::BadInstallation,
-                "bad_installation",
-            ),
+            (CartridgeAttachmentErrorKind::Misplaced, "misplaced"),
+            (CartridgeAttachmentErrorKind::NotListed, "not_listed"),
             (CartridgeAttachmentErrorKind::Disabled, "disabled"),
             (
-                CartridgeAttachmentErrorKind::RegistryUnreachable,
-                "registry_unreachable",
+                CartridgeAttachmentErrorKind::RegistryUnverified,
+                "registry_unverified",
             ),
             (
                 CartridgeAttachmentErrorKind::FabricManifestVersionMismatch,
@@ -7605,15 +7619,15 @@ mod tests {
     }
 
     /// TEST1721: Wire-format JSON deserializes into the right
-    /// variant. This is the engine-receives-from-XPC path: the
-    /// macfloom side emits `{"kind":"bad_installation",...}`
-    /// and the engine must resolve it to `BadInstallation`.
-    /// Asserts every variant explicitly so a single-variant typo
-    /// in the rename map can't hide behind a passing healthy-case.
+    /// variant. This is the engine-receives-from-a-host path: a host
+    /// emits `{"kind":"misplaced",...}` and the engine must resolve it
+    /// to `Misplaced`. Asserts every variant explicitly so a
+    /// single-variant typo in the rename map can't hide behind a
+    /// passing healthy-case.
     #[test]
     fn test1721_kind_decodes_wire_format_into_expected_variants() {
         use super::CartridgeAttachmentErrorKind;
-        let cases: [(&str, CartridgeAttachmentErrorKind); 10] = [
+        let cases: [(&str, CartridgeAttachmentErrorKind); 11] = [
             ("incompatible", CartridgeAttachmentErrorKind::Incompatible),
             (
                 "manifest_invalid",
@@ -7632,14 +7646,12 @@ mod tests {
                 CartridgeAttachmentErrorKind::EntryPointMissing,
             ),
             ("quarantined", CartridgeAttachmentErrorKind::Quarantined),
-            (
-                "bad_installation",
-                CartridgeAttachmentErrorKind::BadInstallation,
-            ),
+            ("misplaced", CartridgeAttachmentErrorKind::Misplaced),
+            ("not_listed", CartridgeAttachmentErrorKind::NotListed),
             ("disabled", CartridgeAttachmentErrorKind::Disabled),
             (
-                "registry_unreachable",
-                CartridgeAttachmentErrorKind::RegistryUnreachable,
+                "registry_unverified",
+                CartridgeAttachmentErrorKind::RegistryUnverified,
             ),
             (
                 "fabric_manifest_version_mismatch",

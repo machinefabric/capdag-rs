@@ -22,6 +22,7 @@ pub mod pools;
 pub mod protocol_trace;
 pub mod relay;
 pub mod relay_switch;
+pub mod registry_verdict;
 pub mod release_cert;
 pub mod request_state;
 pub mod router;

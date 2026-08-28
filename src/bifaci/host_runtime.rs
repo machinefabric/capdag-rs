@@ -6626,7 +6626,7 @@ mod tests {
             sha256: String::new(),
             cap_groups: Vec::new(),
             attachment_error: Some(CartridgeAttachmentError {
-                kind: CartridgeAttachmentErrorKind::RegistryUnreachable,
+                kind: CartridgeAttachmentErrorKind::RegistryUnverified,
                 message: "registry verdict unavailable".to_string(),
                 detected_at_unix_seconds: 0,
             }),
@@ -6642,7 +6642,7 @@ mod tests {
                 .as_ref()
                 .expect("a held install names its reason")
                 .kind,
-            CartridgeAttachmentErrorKind::RegistryUnreachable
+            CartridgeAttachmentErrorKind::RegistryUnverified
         );
 
         // The verdict arrives: the same install re-discovers as attachable, so

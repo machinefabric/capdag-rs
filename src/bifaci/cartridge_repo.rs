@@ -5,6 +5,8 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
+
+use super::registry_verdict::{ChainFailureReason, RegistryVerdict, RegistryVerdictState};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -23,8 +25,75 @@ pub enum CartridgeRepoError {
     StatusError(u16),
     #[error("Network access blocked: {0}")]
     NetworkBlocked(String),
-    #[error("Manifest signature verification failed: {0}")]
-    ManifestVerificationFailed(String),
+    /// The manifest carries no signature sidecar where one is required. There
+    /// was no chain to check, which is why this is not a chain failure.
+    #[error("Manifest is unsigned: {0}")]
+    ManifestUnsigned(String),
+    /// The signature chain was checked and did not hold. `reason` is the
+    /// closed vocabulary that decides whether the registry is untrusted or
+    /// merely unverifiable by this build — see
+    /// [`RegistryVerdictState::for_chain_failure`].
+    #[error("Manifest signature verification failed: {detail}")]
+    ManifestChainFailed {
+        reason: ChainFailureReason,
+        detail: String,
+    },
+}
+
+impl CartridgeRepoError {
+    /// The verdict this failure represents about the registry it happened on.
+    ///
+    /// EVERY variant maps to exactly one state, decided here rather than by
+    /// each consumer: a registry that could not be reached and a registry
+    /// whose signature this build cannot read are different facts with
+    /// opposite remedies, and the classification must not be re-derived from
+    /// a prose message downstream.
+    pub fn verdict(&self, registry_url: &str, checked_at_unix_seconds: i64) -> RegistryVerdict {
+        let built = match self {
+            Self::HttpError(detail) => RegistryVerdict::stated(
+                registry_url,
+                RegistryVerdictState::Unreachable,
+                detail,
+                checked_at_unix_seconds,
+            ),
+            Self::ParseError(detail) => RegistryVerdict::stated(
+                registry_url,
+                RegistryVerdictState::Malformed,
+                detail,
+                checked_at_unix_seconds,
+            ),
+            Self::StatusError(status) => RegistryVerdict::http_error(
+                registry_url,
+                *status,
+                format!("registry answered HTTP {status}"),
+                checked_at_unix_seconds,
+            ),
+            Self::NetworkBlocked(detail) => RegistryVerdict::stated(
+                registry_url,
+                RegistryVerdictState::Offline,
+                detail,
+                checked_at_unix_seconds,
+            ),
+            Self::ManifestUnsigned(detail) => RegistryVerdict::stated(
+                registry_url,
+                RegistryVerdictState::Unsigned,
+                detail,
+                checked_at_unix_seconds,
+            ),
+            Self::ManifestChainFailed { reason, detail } => RegistryVerdict::chain_failed(
+                registry_url,
+                *reason,
+                detail,
+                checked_at_unix_seconds,
+            ),
+        };
+        // A constructor refusal here means this function built a verdict that
+        // contradicts itself — a bug in this mapping, not in the caller's
+        // input, so it must not be swallowed into a wrong-but-plausible state.
+        built.unwrap_or_else(|e| {
+            panic!("cartridge repo error produced an invalid registry verdict: {e}")
+        })
+    }
 }
 
 pub type Result<T> = std::result::Result<T, CartridgeRepoError>;
@@ -665,7 +734,8 @@ pub struct CartridgeRepo {
     /// registry as mandatory (the CLI's `CartridgeManager::init`) hard-fail
     /// on this instead of discovering it later as a misleading
     /// "cartridge not found".
-    sync_errors: Arc<RwLock<HashMap<String, String>>>,
+    /// One verdict per registry URL — what the last sync concluded about it.
+    registry_verdicts: Arc<RwLock<HashMap<String, RegistryVerdict>>>,
     /// The fabric registry THIS client resolves caps against (its baked
     /// `CDG_FABRIC_REGISTRY_URL`). Every fetched cartridge registry must declare
     /// this same fabric (`CartridgeRepoServer::new` enforces it) so all
@@ -726,7 +796,7 @@ impl CartridgeRepo {
             offline_flag: Arc::new(AtomicBool::new(false)),
             trust: Arc::new(RwLock::new(None)),
             verified_release_keys: Arc::new(RwLock::new(HashMap::new())),
-            sync_errors: Arc::new(RwLock::new(HashMap::new())),
+            registry_verdicts: Arc::new(RwLock::new(HashMap::new())),
             expected_fabric_url: expected_fabric_url.into(),
         }
     }
@@ -743,10 +813,27 @@ impl CartridgeRepo {
         *self.trust.write().await = trust;
     }
 
-    /// The most recent sync failure for a repo URL, if any. Cleared by a
-    /// subsequent successful sync of the same URL.
-    pub async fn sync_error(&self, repo_url: &str) -> Option<String> {
-        self.sync_errors.read().await.get(repo_url).cloned()
+    /// What this repo most recently concluded about a registry.
+    ///
+    /// A registry that has never been synced is [`RegistryVerdictState::Pending`]
+    /// — no verdict yet, which is NOT a failure and must not be rendered as
+    /// one. Every other state carries the reason it was reached.
+    pub async fn registry_verdict(&self, repo_url: &str) -> RegistryVerdict {
+        self.registry_verdicts
+            .read()
+            .await
+            .get(repo_url)
+            .cloned()
+            .unwrap_or_else(|| RegistryVerdict::pending(repo_url))
+    }
+
+    /// Every verdict this repo holds, for consumers that report registries as
+    /// registries — once each, rather than once per cartridge that claims one.
+    pub async fn registry_verdicts(&self) -> Vec<RegistryVerdict> {
+        let mut all: Vec<RegistryVerdict> =
+            self.registry_verdicts.read().await.values().cloned().collect();
+        all.sort_by(|a, b| a.registry_url.cmp(&b.registry_url));
+        all
     }
 
     /// The release keys `(key_id, pubkey_b64)` authorized by the verified
@@ -787,7 +874,7 @@ impl CartridgeRepo {
                 ))
             })?;
         if !response.status().is_success() {
-            return Err(CartridgeRepoError::ManifestVerificationFailed(format!(
+            return Err(CartridgeRepoError::ManifestUnsigned(format!(
                 "manifest signature sidecar missing (HTTP {} from {sidecar_url}) — refusing \
                  to trust an unsigned manifest. The registry must be re-published under the \
                  signing regime.",
@@ -807,10 +894,9 @@ impl CartridgeRepo {
             &trust.environment,
             crate::bifaci::release_cert::unix_now(),
         )
-        .map_err(|e| {
-            CartridgeRepoError::ManifestVerificationFailed(format!(
-                "manifest signature chain verification FAILED for {repo_url}: {e}"
-            ))
+        .map_err(|e| CartridgeRepoError::ManifestChainFailed {
+            reason: e.reason(),
+            detail: format!("manifest signature chain verification FAILED for {repo_url}: {e}"),
         })?;
         Ok(chain.trusted_release_keys)
     }
@@ -1017,39 +1103,39 @@ impl CartridgeRepo {
     /// visible — there is no silent swallowing.
     pub async fn sync_repos(&self, repo_urls: &[String]) {
         for repo_url in repo_urls {
-            match self.fetch_registry(repo_url).await {
+            let now = crate::bifaci::release_cert::unix_now() as i64;
+            // EVERY SYNC ENDS IN A VERDICT — success included. A registry with
+            // no entry at all means "not checked yet"; leaving a stale failure
+            // behind, or recording nothing on success, would make those two
+            // indistinguishable.
+            let verdict = match self.fetch_registry(repo_url).await {
                 Ok(registry) => {
                     let mut caches = self.caches.write().await;
                     match Self::update_cache(&mut caches, repo_url, registry) {
-                        Ok(()) => {
-                            self.sync_errors.write().await.remove(repo_url);
-                        }
+                        Ok(()) => RegistryVerdict::verified(repo_url, now),
                         Err(e) => {
                             tracing::error!(
                                 "Failed to index cartridge repo {} into cache: {}",
                                 repo_url,
                                 e
                             );
-                            self.sync_errors
-                                .write()
-                                .await
-                                .insert(repo_url.clone(), e.to_string());
+                            e.verdict(repo_url, now)
                         }
                     }
                 }
                 Err(e) => {
                     tracing::error!("Failed to sync cartridge repo {}: {}", repo_url, e);
                     // Recorded so callers that treat this registry as
-                    // mandatory (CartridgeManager::init) can hard-fail on
-                    // the REAL cause (e.g. a signature-verification
-                    // failure) instead of a later misleading
-                    // "cartridge not found".
-                    self.sync_errors
-                        .write()
-                        .await
-                        .insert(repo_url.clone(), e.to_string());
+                    // mandatory (CartridgeManager::init) can hard-fail on the
+                    // REAL cause — and so consumers can tell a registry we
+                    // could not reach from one whose answer we refused.
+                    e.verdict(repo_url, now)
                 }
-            }
+            };
+            self.registry_verdicts
+                .write()
+                .await
+                .insert(repo_url.clone(), verdict);
         }
     }
 
@@ -2887,5 +2973,77 @@ mod tests {
         let mut caches = repo.caches.write().await;
         let result = CartridgeRepo::update_cache(&mut caches, "https://x", registry);
         assert!(matches!(result, Err(CartridgeRepoError::ParseError(_))));
+    }
+
+    /// TEST8156: every way a sync can fail lands on the verdict that names it.
+    ///
+    /// This is the classification that was missing when a manifest signature
+    /// this build could not read was reported to operators as a network
+    /// outage, under "check the network connection and try again".
+    #[test]
+    fn test8156_every_repo_failure_classifies_to_its_own_verdict() {
+        const URL: &str = "https://cartridges.example/v1/manifest";
+        let now = 1_700_000_000;
+        let cases: [(CartridgeRepoError, RegistryVerdictState); 6] = [
+            (
+                CartridgeRepoError::HttpError("connection refused".into()),
+                RegistryVerdictState::Unreachable,
+            ),
+            (
+                CartridgeRepoError::ParseError("expected value at line 1".into()),
+                RegistryVerdictState::Malformed,
+            ),
+            (
+                CartridgeRepoError::StatusError(503),
+                RegistryVerdictState::HttpError,
+            ),
+            (
+                CartridgeRepoError::NetworkBlocked("policy".into()),
+                RegistryVerdictState::Offline,
+            ),
+            (
+                CartridgeRepoError::ManifestUnsigned("sidecar missing".into()),
+                RegistryVerdictState::Unsigned,
+            ),
+            (
+                CartridgeRepoError::ManifestChainFailed {
+                    reason: ChainFailureReason::ExpiredCertificate,
+                    detail: "expired".into(),
+                },
+                RegistryVerdictState::Untrusted,
+            ),
+        ];
+        for (error, expected) in cases {
+            let verdict = error.verdict(URL, now);
+            assert_eq!(verdict.state, expected, "{error} must be {expected:?}");
+            assert_eq!(verdict.registry_url, URL);
+            verdict.validate().expect("the mapping builds valid verdicts");
+            assert!(!verdict.permits_attachment());
+        }
+
+        // The one that was misclassified: a format this build cannot read is
+        // OUR limitation. It must never be reported as a network problem, and
+        // never as the registry being untrustworthy.
+        let unreadable = CartridgeRepoError::ManifestChainFailed {
+            reason: ChainFailureReason::UnsupportedEnvelopeFormat,
+            detail: "envelope format 'other/1' is not implemented by this build".into(),
+        };
+        let verdict = unreadable.verdict(URL, now);
+        assert_eq!(verdict.state, RegistryVerdictState::Unverifiable);
+        assert!(verdict.state.is_trust_failure(), "we refused an answer we got");
+        assert!(
+            !verdict.state.is_transient(),
+            "retrying an unreadable format changes nothing"
+        );
+        assert_eq!(
+            verdict.chain_failure,
+            Some(ChainFailureReason::UnsupportedEnvelopeFormat),
+            "the failing check travels with the verdict, not only in prose"
+        );
+
+        // An HTTP failure keeps its status: 404 and 503 are different
+        // situations for whoever has to act on them.
+        let http = CartridgeRepoError::StatusError(404).verdict(URL, now);
+        assert_eq!(http.http_status, Some(404));
     }
 }

@@ -35,6 +35,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use super::binary_signing::{parse_minisign_public_key, raw_verify, SignatureError};
+use super::registry_verdict::ChainFailureReason;
 
 /// Format discriminator for release-key certificates.
 pub const RELEASE_KEY_CERT_FORMAT: &str = "machinefabric-release-key-cert/1";
@@ -149,6 +150,43 @@ pub enum ChainError {
     EmptyCertificateList,
     #[error(transparent)]
     Signature(#[from] SignatureError),
+}
+
+impl ChainError {
+    /// Which chain check failed, as the closed vocabulary every implementation
+    /// classifies through.
+    ///
+    /// A verifier's own error type is free to say as much as it likes in its
+    /// message; the REASON is what decides whether the registry is untrusted
+    /// (we judged it and said no) or unverifiable (we could not judge it at
+    /// all). Leaving that decision to each consumer is how "unsupported
+    /// envelope format" came to be reported as a network outage in one client
+    /// and nothing at all in another.
+    pub fn reason(&self) -> ChainFailureReason {
+        match self {
+            Self::MalformedEnvelope(_) => ChainFailureReason::MalformedEnvelope,
+            Self::UnsupportedEnvelopeFormat(_) => ChainFailureReason::UnsupportedEnvelopeFormat,
+            Self::MalformedCertificate(_) => ChainFailureReason::MalformedCertificate,
+            Self::UnsupportedCertificateFormat(_) => {
+                ChainFailureReason::UnsupportedCertificateFormat
+            }
+            Self::EmptyCertificateList => ChainFailureReason::EmptyCertificateList,
+            Self::InsufficientRootSignatures { .. } => {
+                ChainFailureReason::InsufficientRootSignatures
+            }
+            Self::ExpiredCertificate { .. } => ChainFailureReason::ExpiredCertificate,
+            Self::NotYetValidCertificate { .. } => ChainFailureReason::NotYetValidCertificate,
+            Self::EnvironmentMismatch { .. } => ChainFailureReason::EnvironmentMismatch,
+            Self::KeyIdMismatch { .. } => ChainFailureReason::KeyIdMismatch,
+            Self::NoAuthorizingCertificate { .. } => ChainFailureReason::NoAuthorizingCertificate,
+            // A raw signature failure reaches here only from verifying the
+            // manifest signature itself; the certificate paths wrap theirs in
+            // the variants above.
+            Self::ManifestSignatureInvalid(_) | Self::Signature(_) => {
+                ChainFailureReason::ManifestSignatureInvalid
+            }
+        }
+    }
 }
 
 /// The outcome of a successful chain verification: the set of release keys (as
