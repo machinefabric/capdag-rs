@@ -1,6 +1,6 @@
 # Test catalogue — capdag/capdag-rs
 
-Generated from the catalogue table by `sdx catalog export`. Edit the tests, not this file.
+Generated from the test catalogue. Edit the tests, not this file.
 
 1405 tests: 1403 numbered, 2 unnumbered.
 
