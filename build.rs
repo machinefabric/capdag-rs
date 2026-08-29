@@ -49,7 +49,6 @@ fn main() {
     );
 
     bake_capdag_version();
-    generate_bundled_cartridge_hashes(&out_dir);
     enforce_signing_pubkey_pairing();
 }
 
@@ -221,11 +220,54 @@ fn enforce_signing_pubkey_pairing() {
     }
     if let Some(label) = &environment {
         let label = label.trim();
-        if label != "prod" && label != "staging" {
-            panic!("MFR_SIGNING_ENVIRONMENT must be 'prod' or 'staging', got {label:?}.");
+        if label != "prod" && label != "staging" && label != DEV_ENVIRONMENT {
+            panic!(
+                "MFR_SIGNING_ENVIRONMENT must be 'prod', 'staging' or '{DEV_ENVIRONMENT}', \
+                 got {label:?}."
+            );
+        }
+        // ── The one-environment guard ────────────────────────────────────────
+        //
+        // A build bakes exactly one environment's roots, and this is what makes
+        // the `dev` environment safe to have at all.
+        //
+        // The dev signing keys live on developer machines and in CI, because
+        // that is the whole point of them — a local build has to be able to
+        // sign its own bundled cartridges. They are harmless because nothing
+        // released trusts them: a prod build bakes prod roots, and a
+        // dev-signed bundle fails its chain there.
+        //
+        // That containment is one mistake deep. A build that baked BOTH would
+        // turn a laptop-resident key into a production forgery key, and the
+        // mistake would be invisible — everything would verify, which is
+        // exactly what it must not do. So the environment label decides the
+        // roots, there is no way to bake a second set, and a published build
+        // may never carry the dev label.
+        if label == DEV_ENVIRONMENT {
+            let published = env::var("MFR_PUBLISHED_BUILD")
+                .ok()
+                .filter(|v| !v.trim().is_empty() && v.trim() != "0");
+            if let Some(marker) = published {
+                panic!(
+                    "MFR_SIGNING_ENVIRONMENT is '{DEV_ENVIRONMENT}' and this build is marked \
+                     published (MFR_PUBLISHED_BUILD={marker:?}). The dev signing keys live on \
+                     developer machines and in CI; a released build that trusted them would \
+                     accept anything any of those machines signed. Build with \
+                     MFR_SIGNING_ENVIRONMENT=prod or staging."
+                );
+            }
         }
     }
 }
+
+/// The signing environment a local or CI build uses.
+///
+/// A real environment, with its own roots and its own certificate, rather than
+/// a switch that turns verification off. That is what lets one rule — "a
+/// bundled cartridge is proven by this build's signed bundle manifest" — hold
+/// on every build of every platform, instead of holding only where a release
+/// key was available.
+pub(crate) const DEV_ENVIRONMENT: &str = "dev";
 
 /// Structural validation of a base64 minisign public key: 56 base64 chars
 /// decoding to 42 bytes whose first two are the `Ed` signature-algorithm tag.
@@ -263,83 +305,4 @@ fn validate_minisign_pubkey(key: &str) {
     if &bytes[0..2] != b"Ed" {
         fail("does not carry the ed25519 'Ed' algorithm tag");
     }
-}
-
-/// Bake the expected content hashes of the build's BUNDLED cartridges
-/// (datacartridge / fetchcartridge / modelcartridge — shipped inside the
-/// engine/daemon/capdag-CLI binary) into a compile-time constant the discovery
-/// path verifies against. Same mechanism as `MFR_FABRIC_MANIFEST_VERSION`: the
-/// build pipeline computes the hashes (after building the cartridge binaries,
-/// before compiling this crate's consumers) and exports them in
-/// `MFR_BUNDLED_CARTRIDGE_HASHES` as a JSON object `{ "<name>": { "<version>":
-/// "<sha256>" } }`.
-///
-/// ABSENT var ⇒ empty set (a build with no bundled cartridges — e.g. plain
-/// `cargo test` of capdag — is valid). MALFORMED var ⇒ hard build failure (a
-/// pipeline that sets it must set it correctly; a silent empty set would
-/// disable integrity checking without anyone noticing).
-fn generate_bundled_cartridge_hashes(out_dir: &str) {
-    println!("cargo:rerun-if-env-changed=MFR_BUNDLED_CARTRIDGE_HASHES");
-
-    let entries: Vec<(String, String, String)> = match env::var("MFR_BUNDLED_CARTRIDGE_HASHES") {
-        Err(_) => Vec::new(),
-        Ok(raw) if raw.trim().is_empty() => Vec::new(),
-        Ok(raw) => parse_bundled_cartridge_hashes(&raw),
-    };
-
-    let mut body = String::from(
-        "/// Expected content hashes of this build's bundled cartridges, baked from\n\
-         /// `MFR_BUNDLED_CARTRIDGE_HASHES` at build time. `(name, version, sha256)`.\n\
-         /// Empty when no cartridges were bundled. Discovery verifies any cartridge\n\
-         /// marked `installed_from: bundle` against this set.\n\
-         pub const BUNDLED_CARTRIDGE_HASHES: &[(&str, &str, &str)] = &[\n",
-    );
-    for (name, version, sha256) in &entries {
-        // Values are validated below to be hex/identifier-safe, but emit via
-        // escaped string literals regardless so codegen can never break.
-        body.push_str(&format!("    ({:?}, {:?}, {:?}),\n", name, version, sha256));
-    }
-    body.push_str("];\n");
-
-    let dest = Path::new(out_dir).join("bundled_cartridge_hashes.rs");
-    std::fs::write(&dest, body)
-        .unwrap_or_else(|e| panic!("failed to write {}: {}", dest.display(), e));
-}
-
-/// Parse `{ "<name>": { "<version>": "<sha256>" } }` into a flat, sorted
-/// `(name, version, sha256)` list. Minimal hand-rolled validation (no serde
-/// dep in build.rs): every leaf must be a 64-char lowercase hex string. Any
-/// structural or value error panics the build.
-fn parse_bundled_cartridge_hashes(raw: &str) -> Vec<(String, String, String)> {
-    let value: serde_json::Value = serde_json::from_str(raw).unwrap_or_else(|e| {
-        panic!("MFR_BUNDLED_CARTRIDGE_HASHES is not valid JSON: {e}");
-    });
-    let obj = value.as_object().unwrap_or_else(|| {
-        panic!("MFR_BUNDLED_CARTRIDGE_HASHES must be a JSON object {{name: {{version: sha256}}}}");
-    });
-    let mut out: Vec<(String, String, String)> = Vec::new();
-    for (name, versions) in obj {
-        let versions = versions.as_object().unwrap_or_else(|| {
-            panic!("MFR_BUNDLED_CARTRIDGE_HASHES['{name}'] must be an object {{version: sha256}}");
-        });
-        for (version, sha) in versions {
-            let sha = sha.as_str().unwrap_or_else(|| {
-                panic!(
-                    "MFR_BUNDLED_CARTRIDGE_HASHES['{name}']['{version}'] must be a string sha256"
-                );
-            });
-            let is_hex64 = sha.len() == 64
-                && sha
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-            if !is_hex64 {
-                panic!(
-                    "MFR_BUNDLED_CARTRIDGE_HASHES['{name}']['{version}'] must be a 64-char lowercase hex sha256, got {sha:?}"
-                );
-            }
-            out.push((name.clone(), version.clone(), sha.to_string()));
-        }
-    }
-    out.sort();
-    out
 }

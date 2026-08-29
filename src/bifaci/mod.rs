@@ -6,6 +6,7 @@
 //! - **Cartridge × N** (`cartridge_runtime`): (CartridgeRuntime + handler × N)
 
 pub mod binary_signing;
+pub mod bundle_manifest;
 pub mod cartridge_json;
 pub mod cartridge_repo;
 pub mod cartridge_runtime;

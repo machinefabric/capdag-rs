@@ -504,6 +504,23 @@ async fn main() {
         }
     }
 
+    // `bundle-manifest` — write the manifest a build ships beside its bundled
+    // cartridges, listing every one it staged with the hash of its directory.
+    //
+    // Here rather than in the build tooling for the reason `hash-cartridge-dir`
+    // is: the hash and the shape are capdag's, and the runtime that verifies
+    // them is capdag's. A build script that assembled this document itself
+    // would be a second implementation of the format, and the day the two
+    // disagreed the symptom would be a cartridge refused for no visible
+    // reason.
+    //
+    // It does NOT sign. Signing needs a release key, which capdag has no
+    // business holding — the build signs the file this writes with the
+    // workspace's own signer, exactly as it signs a published manifest.
+    if args[1] == "bundle-manifest" {
+        process::exit(cmd_bundle_manifest(&args));
+    }
+
     // ── Dispatch ───────────────────────────────────────────────────────────
     // Reserved subcommands, then: a `.machine` first token is a usage error
     // pointing at `run` (no silent dispatch), an option-like token is a usage
@@ -684,6 +701,147 @@ fn detect_input_media_or_exit(file: &Path, registry: &Arc<FabricRegistry>) -> ca
 }
 
 /// `capdag run <machine-file> [inputs…]` — execute a .machine pipeline.
+/// `capdag bundle-manifest --root <dir> --environment <env>` — record what this
+/// build ships.
+///
+/// Walks the bundled-cartridges tree the build just staged, hashes each
+/// cartridge's version directory, and writes `bundle.json` at the root. The
+/// build then signs that file; the runtime verifies the signature and holds
+/// every `installed_from: bundle` cartridge to what the manifest recorded.
+///
+/// Refuses to write a manifest listing nothing. A build that staged no
+/// cartridges and wrote an empty manifest would produce a bundle that verifies
+/// perfectly and hosts nothing, which is the failure this exists to make
+/// impossible to ship quietly.
+fn cmd_bundle_manifest(args: &[String]) -> i32 {
+    let flag = |name: &str| -> Option<String> {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|at| args.get(at + 1))
+            .cloned()
+    };
+    let (Some(root), Some(environment)) = (flag("--root"), flag("--environment")) else {
+        eprintln!(
+            "Usage: {} bundle-manifest --root <bundled-cartridges-dir> --environment <env>",
+            args[0]
+        );
+        return 2;
+    };
+    let root = std::path::PathBuf::from(&root);
+    if !root.is_dir() {
+        eprintln!("bundle-manifest: no such directory: {}", root.display());
+        return 1;
+    }
+
+    // Every staged cartridge, found the way discovery finds them: the layout is
+    // the contract, and walking it differently here is how a manifest comes to
+    // describe a tree the runtime reads another way.
+    let mut staged: std::collections::BTreeMap<(String, String, String), std::path::PathBuf> =
+        std::collections::BTreeMap::new();
+    if let Err(e) = collect_staged_cartridges(&root, &mut staged) {
+        eprintln!("bundle-manifest: {e}");
+        return 1;
+    }
+    if staged.is_empty() {
+        eprintln!(
+            "bundle-manifest: {} holds no staged cartridges. A manifest listing nothing \
+             would describe a bundle that verifies and hosts nothing.",
+            root.display()
+        );
+        return 1;
+    }
+
+    let manifest = match capdag::bundle_manifest_for(&environment, &staged) {
+        Ok(manifest) => manifest,
+        Err(e) => {
+            eprintln!("bundle-manifest: {e}");
+            return 1;
+        }
+    };
+    let bytes = match manifest.to_bytes() {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("bundle-manifest: could not serialize the manifest: {e}");
+            return 1;
+        }
+    };
+    let (path, sig_path) = capdag::bundle_manifest_paths(&root);
+    if let Err(e) = std::fs::write(&path, &bytes) {
+        eprintln!("bundle-manifest: writing {}: {e}", path.display());
+        return 1;
+    }
+    // A signature from a previous build describes bytes that no longer exist.
+    // Left in place it would be found, fail verification, and read as tamper.
+    let _ = std::fs::remove_file(&sig_path);
+
+    eprintln!(
+        "wrote {} — {} cartridge(s), environment {environment}",
+        path.display(),
+        manifest.cartridges.len()
+    );
+    for one in &manifest.cartridges {
+        eprintln!("  {} {} [{}] {}", one.name, one.version, one.channel, one.sha256);
+    }
+    eprintln!("next: sign it, and put the envelope at {}", sig_path.display());
+    // The path alone on stdout, so the build can capture what to sign.
+    println!("{}", path.display());
+    0
+}
+
+/// Every `{slug}/v{n}/{channel}/{name}/{version}/` directory under a staged
+/// bundled-cartridges root, keyed by what the manifest records.
+fn collect_staged_cartridges(
+    root: &std::path::Path,
+    found: &mut std::collections::BTreeMap<(String, String, String), std::path::PathBuf>,
+) -> Result<(), String> {
+    let dirs = |at: &std::path::Path| -> Result<Vec<std::path::PathBuf>, String> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(at).map_err(|e| format!("read_dir({}): {e}", at.display()))? {
+            let entry = entry.map_err(|e| format!("read_dir({}): {e}", at.display()))?;
+            if entry.path().is_dir() {
+                out.push(entry.path());
+            }
+        }
+        out.sort();
+        Ok(out)
+    };
+
+    for slug in dirs(root)? {
+        for version_level in dirs(&slug)? {
+            for channel in dirs(&version_level)? {
+                let channel_name = channel
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                for name_dir in dirs(&channel)? {
+                    let name = name_dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    for version_dir in dirs(&name_dir)? {
+                        let version = version_dir
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        // The directory has to BE a cartridge. A stray folder
+                        // recorded as one would put an entry in the manifest
+                        // that discovery never looks for, and the manifest
+                        // would stop being a statement about what ships.
+                        if !version_dir.join("cartridge.json").is_file() {
+                            continue;
+                        }
+                        found.insert(
+                            (name.clone(), version, channel_name.clone()),
+                            version_dir,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn cmd_run(args: &[String]) -> ! {
     // Parse arguments
     let mut dev_binaries = Vec::new();

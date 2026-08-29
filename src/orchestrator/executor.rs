@@ -3809,21 +3809,31 @@ pub(crate) type HostableCartridge = (
 
 /// Discover the host's BUNDLED cartridges (shipped beside the executor, e.g. the capdag
 /// CLI's own `bundled-cartridges/` tree) as hostable cartridges. Uses the shared
-/// `discover_cartridges`, so they pass the same identity + bundled-hash integrity checks
-/// the engine applies. Each `Incompatible` entry is logged and skipped (discovery
-/// already surfaced the reason). An absent directory yields an empty list. Shared by
-/// [`execute_dag`] and the CLI runtime.
+/// `discover_cartridges`, so they pass the same identity checks the engine applies and
+/// are held to the same signed bundle manifest. Each `Incompatible` entry is logged and
+/// skipped (discovery already surfaced the reason). An absent directory yields an empty
+/// list. Shared by [`execute_dag`] and the CLI runtime.
+///
+/// The bundle's proof is established HERE, once, from the roots this build bakes: a
+/// build that trusts no roots can host no bundled cartridge, and every refusal names
+/// the same reason rather than each cartridge discovering it separately.
 pub(crate) async fn discover_bundled_cartridges(
     bundled_cartridges_dir: &std::path::Path,
     channel: crate::bifaci::cartridge_repo::CartridgeChannel,
     registry_url: Option<&str>,
     fabric_manifest_version: u32,
 ) -> Result<Vec<HostableCartridge>, ExecutionError> {
+    let trust = crate::bifaci::release_cert::RegistryTrust::from_build_constants();
     let identity = crate::cartridge_discovery::DiscoveryIdentity {
         channel,
         registry_url: registry_url.map(str::to_string),
         fabric_manifest_version,
         cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
+        bundle: crate::bifaci::bundle_manifest::BundleProof::load(
+            bundled_cartridges_dir,
+            trust.as_ref(),
+            crate::bifaci::release_cert::unix_now(),
+        ),
     };
     let mut out = Vec::new();
     for discovered in

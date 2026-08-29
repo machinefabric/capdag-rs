@@ -42,6 +42,16 @@ pub struct DiscoveryIdentity {
     /// cartridges live under `{slug}/v{cartridge_registry_version}/{channel}/…`
     /// — pinned like the channel, so a v1 host never scans a v2 cartridge tree.
     pub cartridge_registry_version: u32,
+    /// What proves the bundled cartridges under the root being scanned.
+    ///
+    /// Carried rather than looked up, because verification is one act per
+    /// discovery and because the caller is the only thing that knows what this
+    /// root IS. A build's own `bundled-cartridges/` tree carries
+    /// [`BundleProof::load`]'s answer; the operator's installed-cartridges
+    /// directory carries [`BundleProof::none`], so a cartridge claiming to be
+    /// bundled while sitting there is refused for exactly that reason instead
+    /// of being hosted because nobody asked.
+    pub bundle: crate::bifaci::bundle_manifest::BundleProof,
 }
 
 impl DiscoveryIdentity {
@@ -166,7 +176,8 @@ pub async fn discover_cartridges(
     // installed cartridge (under its registry's slug), the reserved `dev/` slot
     // (unpublished user cartridges, null registry_url), and the engine's bundled
     // cartridges (under the build's registry slug, `installed_from: "bundle"`,
-    // integrity-checked by baked hash) all coexist and load together. The
+    // proven against this build's signed bundle manifest) all coexist and load
+    // together. The
     // channel folder IS still pinned to the host's channel — release and nightly
     // artefacts never mix. Registry-listing validation (is this version listed
     // upstream?) is the verdict layer's job, applied after discovery.
@@ -180,7 +191,12 @@ pub async fn discover_cartridges(
         let slug_dir = slug_entry.path();
         if !slug_dir.is_dir() {
             let file_name = slug_dir.file_name().unwrap_or_default().to_string_lossy();
-            if file_name != ".DS_Store" {
+            // The bundle manifest and its signature live here by design; a
+            // warning about them on every startup would train an operator to
+            // ignore the one that means something.
+            if file_name != ".DS_Store"
+                && !crate::bifaci::bundle_manifest::is_manifest_file(&file_name)
+            {
                 error!(path = %slug_dir.display(), "Unmanaged file in cartridges root — only registry-slug / dev directories belong here");
             }
             continue;
@@ -415,57 +431,38 @@ async fn scan_channel_root(
 
         // Bundled-cartridge integrity. A cartridge marked `installed_from: bundle`
         // is shipped INSIDE this build (the engine/daemon/capdag-CLI's own
-        // bundled-cartridges/ tree), not user-installed, and has no upstream registry to
-        // verify against — so it needs its own integrity proof. The mechanism is
-        // platform-split by necessity:
+        // bundled-cartridges/ tree), not user-installed, and has no upstream
+        // registry to verify against — so it needs its own integrity proof.
         //
-        // - macOS: the OS code-signature IS the guard. Every bundled cartridge
-        //   binary is signed (hardened runtime, secure timestamp, launch
-        //   constraints) and the whole .app is notarized; a tampered binary
-        //   fails Gatekeeper before the engine ever runs. A content hash would
-        //   also be re-broken by Apple's (re)signing of the .app, so macOS does
-        //   NOT bake or verify hashes. We log that we are trusting the signature
-        //   — an explicit, visible rule, not a silent skip.
-        // - Linux/Windows: binaries are unsigned, so the integrity proof is a
-        //   content hash baked into the engine at build time
-        //   (BUNDLED_CARTRIDGE_HASHES, codegen'd by build.rs from
-        //   MFR_BUNDLED_CARTRIDGE_HASHES). The on-disk directory must hash to the
-        //   baked value; a mismatch or an entry absent from the baked set means
-        //   the shipped cartridge was tampered with or the build failed to record
-        //   it — surfaced incompatible + logged, never hosted. This is additive
-        //   to the slug/channel/scheme/fabric-version checks above.
+        // ONE mechanism, on every platform: the build's signed bundle manifest,
+        // verified against the roots this build bakes, by the same chain
+        // verifier a registry manifest goes through. The proof was established
+        // once when this discovery started (see `BundleProof`); here it is
+        // applied to the cartridge in hand.
+        //
+        // This used to be platform-split, and macOS had no check of ours at
+        // all — the manifest is produced at the END of a build, after every
+        // platform signing step, which is what removed the ordering problem
+        // that split existed for. Apple's signature still matters, and it is
+        // what stops the operating system warning a user; it is not what
+        // decides whether code runs here.
         if cj.installed_from == Some(crate::bifaci::cartridge_json::CartridgeInstallSource::Bundle)
         {
-            #[cfg(target_os = "macos")]
-            {
-                tracing::info!(
-                    cartridge = %version_dir.display(), name = %cj.name, version = %cj.version,
-                    "bundled cartridge integrity on macOS is the OS code-signature (notarized .app); baked-hash verification is intentionally skipped"
-                );
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                if let Err(reason) =
-                    verify_bundled_cartridge_hash(&cj.name, &cj.version, version_dir)
-                {
-                    error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %reason, "bundled cartridge hash verification failed — surfacing as incompatible");
-                    discovered.push(DiscoveredCartridge::Incompatible {
-                        version_dir: version_dir.clone(),
-                        id: cj.name.clone(),
-                        channel: cj.channel,
-                        registry_url: cj.registry_url.clone(),
-                        version: cj.version.clone(),
-                        error: CartridgeAttachmentError {
-                            kind: CartridgeAttachmentErrorKind::Misplaced,
-                            message: format!(
-                                "bundled cartridge integrity check failed: {}",
-                                reason
-                            ),
-                            detected_at_unix_seconds: detected_at,
-                        },
-                    });
-                    continue;
-                }
+            if let Err(reason) = identity.bundle.check(&cj.name, &cj.version, version_dir) {
+                error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %reason, "bundled cartridge is not proven by this build's signed bundle manifest — surfacing as incompatible");
+                discovered.push(DiscoveredCartridge::Incompatible {
+                    version_dir: version_dir.clone(),
+                    id: cj.name.clone(),
+                    channel: cj.channel,
+                    registry_url: cj.registry_url.clone(),
+                    version: cj.version.clone(),
+                    error: CartridgeAttachmentError {
+                        kind: CartridgeAttachmentErrorKind::Misplaced,
+                        message: format!("bundled cartridge integrity check failed: {reason}"),
+                        detected_at_unix_seconds: detected_at,
+                    },
+                });
+                continue;
             }
         }
 
@@ -503,50 +500,6 @@ async fn scan_channel_root(
     Ok(())
 }
 
-/// Verify a bundled cartridge's on-disk content against the hash baked into this
-/// binary at build time. `Ok(())` when the directory hashes to the expected
-/// value for `(name, version)`; `Err(reason)` when the pair is absent from the
-/// baked set or the hash differs (tamper / corruption / unrecorded build).
-///
-/// Non-macOS only: macOS bundled-cartridge integrity is the OS code-signature
-/// (see the discovery call site), so the engine there neither bakes nor checks
-/// these hashes.
-#[cfg(not(target_os = "macos"))]
-fn verify_bundled_cartridge_hash(
-    name: &str,
-    version: &str,
-    version_dir: &Path,
-) -> Result<(), String> {
-    let expected = bundled_cartridge_expected_hash(name, version).ok_or_else(|| {
-        format!(
-            "no baked hash for bundled cartridge {name} {version} — this build did not record it (MFR_BUNDLED_CARTRIDGE_HASHES)"
-        )
-    })?;
-    let actual = crate::bifaci::cartridge_json::hash_cartridge_directory(version_dir)
-        .map_err(|e| format!("failed to hash bundled cartridge directory: {e}"))?;
-    if actual == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "content hash mismatch — baked {expected}, on-disk {actual}; the shipped cartridge differs from what this build was compiled to ship"
-        ))
-    }
-}
-
-/// Look up the baked expected directory hash for a bundled cartridge, or `None`
-/// if `(name, version)` was not recorded at build time. Backed by the
-/// `BUNDLED_CARTRIDGE_HASHES` const codegen'd by `build.rs` from
-/// `MFR_BUNDLED_CARTRIDGE_HASHES` (empty when no cartridges were bundled).
-///
-/// Non-macOS only (see `verify_bundled_cartridge_hash`).
-#[cfg(not(target_os = "macos"))]
-fn bundled_cartridge_expected_hash(name: &str, version: &str) -> Option<&'static str> {
-    crate::BUNDLED_CARTRIDGE_HASHES
-        .iter()
-        .find(|(n, v, _)| *n == name && *v == version)
-        .map(|(_, _, h)| *h)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,6 +513,29 @@ mod tests {
             registry_url: None,
             fabric_manifest_version: 1,
             cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
+            // A root that ships no bundle. Every test below that is not ABOUT
+            // the bundle scans a tree nothing built, so a cartridge claiming to
+            // be bundled there is in the wrong place — which is what this says.
+            bundle: crate::bifaci::bundle_manifest::BundleProof::none(
+                "this directory is not a build's bundle",
+            ),
+        }
+    }
+
+    /// An identity whose bundled cartridges are proven by `manifest`.
+    ///
+    /// The manifest is built in memory rather than signed, because what is
+    /// under test here is what discovery DOES with a proof. That the proof is
+    /// only ever obtained by verifying a real signature is
+    /// `bundle_manifest`'s own tests' business, against a real committed chain
+    /// — splitting it that way is what keeps either half from being tested
+    /// against a stub of the other.
+    fn bundled_identity(
+        manifest: crate::bifaci::bundle_manifest::BundleManifest,
+    ) -> DiscoveryIdentity {
+        DiscoveryIdentity {
+            bundle: crate::bifaci::bundle_manifest::BundleProof::Verified(Box::new(manifest)),
+            ..nightly_dev_identity()
         }
     }
 
@@ -731,10 +707,8 @@ mod tests {
         let rslug = registry_slug_for(url);
         // Host baked for a DIFFERENT registry than the on-disk registry cartridge.
         let host = DiscoveryIdentity {
-            channel: CartridgeChannel::Nightly,
             registry_url: Some("https://other.example.com/manifest".to_string()),
-            fabric_manifest_version: 1,
-            cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
+            ..nightly_dev_identity()
         };
         install_fixture(
             root.path(),
@@ -862,30 +836,39 @@ mod tests {
         expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
     }
 
-    // TEST1878: a cartridge marked `installed_from: bundle` with no baked hash in
-    // BUNDLED_CARTRIDGE_HASHES (the const is empty under plain `cargo test`) is
-    // rejected as BadInstallation — the bundled-integrity gate fires before the
-    // probe. Proves the verify is wired into discovery; a real bundle build bakes
-    // the hash so the matching directory passes. Non-macOS only: on macOS the
-    // baked-hash path is intentionally absent (OS code-signature is the guard),
-    // so a bundled cartridge is accepted there and would instead end at the probe.
-    #[cfg(not(target_os = "macos"))]
+    /// The `cartridge.json` of a bundled cartridge in the dev slot.
+    ///
+    /// Placement is self-consistent (null registry → dev slug), so it passes
+    /// every earlier check and reaches the bundled-integrity gate, which is
+    /// what these tests are about.
+    fn bundled_cartridge_json() -> &'static str {
+        r#"{"name":"cart","version":"1.0.0","channel":"nightly","registry_url":null,"entry":"cart","installed_at":"2024-01-01T00:00:00Z","installed_from":"bundle","fabric_manifest_version":1}"#
+    }
+
+    // TEST1878: a bundled cartridge in a root that proves nothing is refused —
+    // on every platform.
+    //
+    // This is the check macOS did not have. The old rule was platform-split:
+    // Linux and Windows verified a baked content hash and macOS verified
+    // nothing of ours, trusting Gatekeeper instead. So this test was
+    // `#[cfg(not(target_os = "macos"))]` — it asserted that the guard existed
+    // on two platforms out of three. It is unconditional now because the guard
+    // is.
     #[tokio::test]
-    async fn test1878_bundled_cartridge_without_baked_hash_is_rejected() {
+    async fn test1878_a_bundled_cartridge_is_refused_where_nothing_proves_it() {
         let root = tempdir().unwrap();
-        // Dev slug (null registry) but installed_from=bundle — placement is
-        // self-consistent (null→dev), so it passes read_from_dir and reaches the
-        // bundled-hash gate, which has no baked entry → BadInstallation.
-        let json = r#"{"name":"cart","version":"1.0.0","channel":"nightly","registry_url":null,"entry":"cart","installed_at":"2024-01-01T00:00:00Z","installed_from":"bundle","fabric_manifest_version":1}"#;
         install_fixture(
             root.path(),
             "dev",
             "nightly",
             "cart",
             "1.0.0",
-            Some(json),
+            Some(bundled_cartridge_json()),
             "cart",
         );
+        // `nightly_dev_identity` carries `BundleProof::none` — a root nothing
+        // built, which is what the operator's installed-cartridges directory
+        // is. A cartridge claiming to be bundled there is in the wrong place.
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
@@ -894,6 +877,80 @@ mod tests {
             assert!(
                 error.message.contains("bundled cartridge integrity"),
                 "message should name the bundled-integrity failure: {}",
+                error.message
+            );
+        }
+    }
+
+    // TEST1928: a bundled cartridge the manifest records passes, and one it
+    // records differently does not.
+    //
+    // The other half of TEST1878, and the one that proves the gate is a real
+    // check rather than a refusal of everything: the same tree, the same
+    // cartridge, and the only difference is what the build recorded about it.
+    // A gate that always said no would pass TEST1878 alone.
+    #[tokio::test]
+    async fn test1928_a_bundled_cartridge_passes_exactly_when_the_manifest_records_it() {
+        use crate::bifaci::bundle_manifest::{BundleManifest, BundledCartridge};
+
+        let root = tempdir().unwrap();
+        install_fixture(
+            root.path(),
+            "dev",
+            "nightly",
+            "cart",
+            "1.0.0",
+            Some(bundled_cartridge_json()),
+            "cart",
+        );
+        let version_dir = root
+            .path()
+            .join("dev")
+            .join(format!("v{}", crate::CARTRIDGE_REGISTRY_VERSION))
+            .join("nightly")
+            .join("cart")
+            .join("1.0.0");
+        let recorded =
+            crate::bifaci::cartridge_json::hash_cartridge_directory(&version_dir).unwrap();
+
+        let listed = |sha256: String| {
+            bundled_identity(BundleManifest::new(
+                "dev",
+                vec![BundledCartridge {
+                    name: "cart".to_string(),
+                    version: "1.0.0".to_string(),
+                    channel: "nightly".to_string(),
+                    sha256,
+                }],
+            ))
+        };
+
+        // Recorded as it is on disk: it gets past the gate. It still ends at
+        // the HELLO probe, because the fixture's "entry point" is not a
+        // cartridge — what matters is that the failure is no longer the
+        // integrity one.
+        let out = discover_cartridges(root.path(), &listed(recorded.clone()))
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 1);
+        if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
+            assert!(
+                !error.message.contains("bundled cartridge integrity"),
+                "a cartridge the manifest records must get past the integrity gate: {}",
+                error.message
+            );
+        }
+
+        // Recorded as something else — the cartridge was changed after the
+        // build recorded it.
+        let out = discover_cartridges(root.path(), &listed("f".repeat(64)))
+            .await
+            .unwrap();
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
+        if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
+            assert!(
+                error.message.contains("bundled cartridge integrity"),
+                "a cartridge that differs from the manifest must be refused: {}",
                 error.message
             );
         }

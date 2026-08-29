@@ -29,7 +29,6 @@
 //! 6. Relay-specific: RelayNotify (slave→master) and RelayState (master→slave)
 
 pub mod bifaci;
-pub mod bundled_cartridge_hashes;
 pub mod cap;
 pub mod capture;
 pub mod cartridge_discovery;
@@ -77,13 +76,17 @@ pub use fabric::alias::{
 pub use fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef};
 
 // Build-time-baked fabric manifest version (see capdag/build.rs).
-pub use bundled_cartridge_hashes::BUNDLED_CARTRIDGE_HASHES;
 pub use cartridge_registry_version::CARTRIDGE_REGISTRY_VERSION;
 pub use fabric_manifest_version::FABRIC_MANIFEST_VERSION;
 
 // Cartridge binary + manifest signing (minisign / ed25519): runtime
 // verification of registry-downloaded pure-binary artifacts and signed
 // manifests against the baked root public keys.
+pub use bifaci::bundle_manifest::{
+    manifest_for as bundle_manifest_for, manifest_paths as bundle_manifest_paths, BundleError,
+    BundleManifest, BundleProof, BundledCartridge, BUNDLE_MANIFEST_FILE, BUNDLE_MANIFEST_FORMAT,
+    BUNDLE_MANIFEST_SIG_FILE,
+};
 pub use bifaci::binary_signing::{
     parse_minisign_public_key, raw_verify, root_pubkeys_from_build_env,
     signing_environment_from_build_env, split_root_pubkeys, verify_binary_signature,
