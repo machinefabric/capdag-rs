@@ -4,9 +4,9 @@
 //!
 //! The LOADER is tested against a real committed chain — a certificate two
 //! roots signed and a release key's signature over the exact manifest bytes,
-//! produced by `sdx gen-test-fixtures`. capdag holds no signing code, so a
-//! test that built its own signature would be testing a signature it also
-//! invented.
+//! generated once and checked in under `tests/fixtures/`. capdag holds no
+//! signing code, so a test that built its own signature would be testing a
+//! signature it also invented.
 //!
 //! The CHECK is tested against a directory the test lays down and hashes
 //! itself. It needs no signature — holding a directory to a recorded hash is
