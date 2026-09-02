@@ -115,9 +115,10 @@ fn unix_seconds_now() -> i64 {
 pub async fn probe_cartridge_cap_groups(path: &Path) -> anyhow::Result<Vec<CapGroup>> {
     use crate::{handshake, FrameReader, FrameWriter};
     use tokio::io::{BufReader, BufWriter};
-    use tokio::process::Command;
 
-    let mut child = Command::new(path)
+    // Through the launcher, because a dev cartridge's entry may be a script
+    // and Windows cannot execute one. See `bifaci::launch`.
+    let mut child = crate::bifaci::launch::tokio_command(path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())

@@ -2961,7 +2961,9 @@ impl CartridgeHostRuntime {
             )));
         }
 
-        let mut child = match tokio::process::Command::new(&cartridge.path)
+        // Through the launcher: a dev cartridge's entry may be a script, and
+        // a published one is a binary. See `bifaci::launch`.
+        let mut child = match crate::bifaci::launch::tokio_command(&cartridge.path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped()) // Capture stderr for crash diagnostics

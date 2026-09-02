@@ -25,7 +25,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
 use crate::bifaci::cartridge_slug::DEV_SLUG;
@@ -209,6 +208,26 @@ pub fn stub_entry(language: &stubs_generated::StubLanguage, name: &str) -> Strin
     render(language.entry, name)
 }
 
+/// The same entry, as it is spelled ON DISK for this platform.
+///
+/// The declaration is one string for every platform — it is vendored into four
+/// mirrors and must not carry one platform's spelling — so the platform's part
+/// of the answer is added here. An entry with an extension already has one and
+/// is left alone; an entry with none is a compiled binary and gains the
+/// platform's suffix.
+///
+/// A scaffolded Rust cartridge declares `target/release/<name>` and Cargo
+/// writes `target/release/<name>.exe`, so looking for the declared spelling
+/// found nothing on Windows: a project that had built perfectly reported that
+/// it had no entry at all.
+pub fn stub_entry_file(language: &stubs_generated::StubLanguage, name: &str) -> String {
+    let entry = stub_entry(language, name);
+    if Path::new(&entry).extension().is_some() {
+        return entry;
+    }
+    format!("{entry}{}", crate::bifaci::launch::executable_suffix())
+}
+
 /// Scaffold a new cartridge project named `name` under `parent_dir`, in
 /// `language`. Returns the created project directory.
 ///
@@ -263,8 +282,16 @@ fn make_executable(path: &Path) -> Result<(), DevError> {
 
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) -> Result<(), DevError> {
-    // On Windows the host launches the entry through its file association /
-    // launcher; there is no executable bit to set.
+    // NTFS has no executable bit, so there is nothing to set.
+    //
+    // It used to say the host launches the entry "through its file association
+    // / launcher". It does not, and nothing ever did: `CreateProcess` consults
+    // no association, so a `.py` entry was refused with `%1 is not a valid
+    // Win32 application` — a comment asserting the opposite of what the
+    // platform does, above the code that relied on it.
+    //
+    // What makes the entry launchable is `bifaci::launch`, which resolves the
+    // interpreter the shebang would have named.
     Ok(())
 }
 
@@ -276,14 +303,15 @@ fn make_executable(_path: &Path) -> Result<(), DevError> {
 /// `CapManifest` JSON. Every cartridge (any language) prints the same wire
 /// shape, so a Python cartridge's output deserializes into the Rust type.
 pub fn read_entry_manifest(entry: &Path) -> Result<CapManifest, DevError> {
-    let output =
-        Command::new(entry)
-            .arg("manifest")
-            .output()
-            .map_err(|e| DevError::ManifestSpawn {
-                entry: entry.to_path_buf(),
-                source: e.to_string(),
-            })?;
+    // Through the launcher: a scaffolded Python cartridge is a `.py`, and
+    // Windows cannot execute one. See `bifaci::launch`.
+    let output = crate::bifaci::launch::command(entry)
+        .arg("manifest")
+        .output()
+        .map_err(|e| DevError::ManifestSpawn {
+            entry: entry.to_path_buf(),
+            source: e.to_string(),
+        })?;
     if !output.status.success() {
         return Err(DevError::ManifestFailed {
             entry: entry.to_path_buf(),
@@ -332,7 +360,7 @@ pub fn project_entry(project_dir: &Path) -> Result<PathBuf, DevError> {
     let name = project_name(project_dir)?;
     let found: Vec<PathBuf> = stub_languages()
         .iter()
-        .map(|l| project_dir.join(stub_entry(l, name)))
+        .map(|l| project_dir.join(stub_entry_file(l, name)))
         .filter(|p| p.is_file())
         .collect();
     match found.len() {
@@ -755,13 +783,22 @@ mod tests {
         );
     }
 
-    /// Write a stub cartridge entry (a bash script) that prints a canned
-    /// `CapManifest` JSON on `manifest`. Lets us exercise the capdag-side
-    /// staging/parsing/resolution without any language runtime.
+    /// Write a stub cartridge entry that prints a canned `CapManifest` JSON on
+    /// `manifest`. Lets us exercise the capdag-side staging/parsing/resolution
+    /// without any cartridge runtime.
     ///
     /// It is written at the PYTHON entry because that is the one language whose
-    /// entry is a source file with no build step, so a bash script standing in
-    /// for it is discovered by exactly the same path a real project would be.
+    /// entry is a source file with no build step, so a stand-in is discovered
+    /// by exactly the same path a real project would be.
+    ///
+    /// A PYTHON stand-in, not a bash one. It used to be a bash script named
+    /// `cartridge.py`, which worked because the shebang decided what ran it —
+    /// and the shebang is precisely the mechanism that does not exist on
+    /// Windows, where the entry is refused with `%1 is not a valid Win32
+    /// application`. [`crate::bifaci::launch`] resolves the interpreter from
+    /// the extension now, so a file claiming to be Python is run as Python
+    /// everywhere, and a stand-in that lied about its language would be
+    /// testing a path no real cartridge takes.
     #[cfg(unix)]
     fn write_stub_entry(dir: &Path, name: &str, alias: &str, urn: &str) -> PathBuf {
         // The cap URN quotes its media specs; escape those quotes for JSON.
@@ -769,7 +806,18 @@ mod tests {
         let manifest = format!(
             r#"{{"name":"{name}","version":"0.1.0","channel":"nightly","registry_url":null,"description":"stub","cap_groups":[{{"name":"default","caps":[{{"urn":"cap:effect=none","title":"Identity","aliases":["identity"]}},{{"urn":"{urn_json}","title":"{name}","aliases":["{alias}"]}}]}}]}}"#
         );
-        let script = format!("#!/usr/bin/env bash\nif [ \"$1\" = manifest ]; then\n  cat <<'EOF'\n{manifest}\nEOF\nfi\n");
+        // The manifest as a Python string literal. It is JSON, so the only
+        // characters needing escapes are the quote and the backslash, and
+        // escaping both is what makes this a literal rather than a heredoc
+        // that the shell would have owned.
+        let quoted = manifest.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            "#!/usr/bin/env python3\n\
+             import sys\n\
+             MANIFEST = \"{quoted}\"\n\
+             if len(sys.argv) > 1 and sys.argv[1] == \"manifest\":\n    \
+             sys.stdout.write(MANIFEST)\n"
+        );
         let python = stub_language("python").expect("the contract must cover python");
         let dir_name = dir
             .file_name()

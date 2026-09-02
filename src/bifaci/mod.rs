@@ -16,6 +16,7 @@ pub mod frame;
 pub mod host_runtime;
 pub mod in_process_host;
 pub mod io;
+pub mod launch;
 pub mod live_feed;
 pub mod local_socket;
 pub mod manifest;
