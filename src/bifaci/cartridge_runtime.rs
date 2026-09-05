@@ -8155,16 +8155,31 @@ mod tests {
             let _ = stream.recv().await;
         });
 
-        // The flushed grant must arrive even though 8 < batch(16).
-        let grant = tokio::time::timeout(std::time::Duration::from_secs(2), grant_rx.recv())
-            .await
-            .expect("pending grants must flush before blocking (L10 corollary)")
-            .expect("grant frame");
-        assert_eq!(grant.frame_type, FrameType::Credit);
+        // Grants must arrive even though 8 < batch(16), and must add up to
+        // everything consumed — the sender is stalled on exactly that credit.
+        //
+        // Summed, not asserted on the first frame. `recv` flushes whenever
+        // `try_recv` finds the channel EMPTY, and the demux fills it
+        // asynchronously: a consumer that drains faster than the demux refills
+        // hits that point part way through, flushes what it has, and carries
+        // on. Reading the first grant as the whole answer therefore failed
+        // with `left: Some(6), right: Some(8)` whenever the two tasks
+        // interleaved that way — a real scheduling order, not a defect.
+        //
+        // What L10 promises is that the credit is not WITHHELD: every item
+        // consumed is granted before the receiver blocks. That is the sum.
+        let mut granted = 0u64;
+        while granted < 8 {
+            let grant = tokio::time::timeout(std::time::Duration::from_secs(2), grant_rx.recv())
+                .await
+                .expect("pending grants must flush before blocking (L10 corollary)")
+                .expect("grant frame");
+            assert_eq!(grant.frame_type, FrameType::Credit);
+            granted += grant.credit_count().expect("a credit frame counts credit");
+        }
         assert_eq!(
-            grant.credit_count(),
-            Some(8),
-            "the full pending consumption is granted on flush"
+            granted, 8,
+            "the full pending consumption is granted before blocking"
         );
 
         consumer.abort();
