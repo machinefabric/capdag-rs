@@ -505,7 +505,6 @@ async fn scan_channel_root(
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
     fn nightly_dev_identity() -> DiscoveryIdentity {
@@ -565,7 +564,16 @@ mod tests {
             fs::write(dir.join("cartridge.json"), json).unwrap();
             let entry_path = dir.join(entry);
             fs::write(&entry_path, b"#!/bin/sh\nexit 0\n").unwrap();
-            fs::set_permissions(&entry_path, fs::Permissions::from_mode(0o755)).unwrap();
+            // The execute bit is POSIX's, and `std::os::unix` does not exist on
+            // Windows — a module-level `use` of it failed the whole crate's
+            // test build there with `cannot find 'unix' in 'os'`, so a guest
+            // could not compile capdag at all. Gated the way the sibling case
+            // at the bottom of this file already gates it.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&entry_path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
     }
 
