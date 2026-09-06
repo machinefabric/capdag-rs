@@ -1,0 +1,8 @@
+Canonicalize the value below as a {{ entity_type }}.
+
+{% if locale %}Locale: {{ locale }}
+
+{% endif %}Value:
+{{ content }}
+
+Produce the single canonical form: dates as RFC 3339 (YYYY-MM-DD, or full timestamp when time is present), companies as registered name without decorative spacing, people as "Given Family", addresses as one comma-separated line, phone numbers as E.164, units as the SI quantity with unit symbol. Preserve every piece of identifying information — canonicalization reformats, it never drops. If the value cannot be read as a {{ entity_type }} at all, set "canonical" to the empty string and confidence to 0.0 with the reason naming what is wrong. Respond in the specified JSON format.

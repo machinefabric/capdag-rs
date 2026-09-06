@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "score": { "type": "integer", "minimum": {{ scale_min }}, "maximum": {{ scale_max }} },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["score", "confidence", "reason"],
+  "additionalProperties": false
+}

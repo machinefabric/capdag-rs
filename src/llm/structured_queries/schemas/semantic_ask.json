@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "answer": { "type": "string", "maxLength": 4000 },
+    "quotes": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string", "maxLength": 500 }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["answer", "quotes", "confidence", "reason"],
+  "additionalProperties": false
+}

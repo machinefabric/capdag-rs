@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "same": { "type": "boolean" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["same", "confidence", "reason"],
+  "additionalProperties": false
+}

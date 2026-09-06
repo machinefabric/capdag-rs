@@ -1,0 +1,110 @@
+[
+  {
+    "name": "make_decision",
+    "description": "Answer boolean question with 0/1 responses",
+    "prompt_file": "prompts/make_decision.tera",
+    "schema_file": "schemas/make_decision.json",
+    "metadata": {
+      "category": "binary_qa"
+    }
+  },
+  {
+    "name": "make_multiple_decisions",
+    "description": "Answer boolean questions with 0/1 responses",
+    "prompt_file": "prompts/make_multiple_decisions.tera",
+    "schema_file": "schemas/make_multiple_decisions.tera",
+    "metadata": {
+      "category": "binary_qa"
+    }
+  },
+  {
+    "name": "dynamic_choice",
+    "description": "Make a choice within a dynamic range with confidence scoring",
+    "prompt_file": "prompts/dynamic_choice.tera",
+    "schema_file": "schemas/dynamic_choice.tera",
+    "metadata": {
+      "category": "dynamic_qa"
+    }
+  },
+  {
+    "name": "semantic_same",
+    "description": "Judge whether two items refer to the same thing, with confidence and rationale",
+    "prompt_file": "prompts/semantic_same.tera",
+    "schema_file": "schemas/semantic_same.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_classify",
+    "description": "Classify an item into one of N allowed labels, with confidence and rationale",
+    "prompt_file": "prompts/semantic_classify.tera",
+    "schema_file": "schemas/semantic_classify.tera",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_score",
+    "description": "Score an item against a rubric on an integer scale, with confidence and rationale",
+    "prompt_file": "prompts/semantic_score.tera",
+    "schema_file": "schemas/semantic_score.tera",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_verify",
+    "description": "Check an artifact against requirements and report violations with severity",
+    "prompt_file": "prompts/semantic_verify.tera",
+    "schema_file": "schemas/semantic_verify.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_route",
+    "description": "Pick which target's contract covers an item, with confidence and rationale",
+    "prompt_file": "prompts/semantic_route.tera",
+    "schema_file": "schemas/semantic_route.tera",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_normalize",
+    "description": "Canonicalize a real-world entity value, with confidence and rationale",
+    "prompt_file": "prompts/semantic_normalize.tera",
+    "schema_file": "schemas/semantic_normalize.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_summarize",
+    "description": "Purpose-driven summary with confidence and a note on what was dropped",
+    "prompt_file": "prompts/semantic_summarize.tera",
+    "schema_file": "schemas/semantic_summarize.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_ask",
+    "description": "Answer a question over content with verbatim supporting quotes",
+    "prompt_file": "prompts/semantic_ask.tera",
+    "schema_file": "schemas/semantic_ask.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  },
+  {
+    "name": "semantic_explain",
+    "description": "Root-cause hypothesis over opaque data with verbatim evidence and next checks",
+    "prompt_file": "prompts/semantic_explain.tera",
+    "schema_file": "schemas/semantic_explain.json",
+    "metadata": {
+      "category": "semantic_judgment"
+    }
+  }
+]

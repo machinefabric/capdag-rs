@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "target": { "type": "string", "enum": {{ targets_json }} },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["target", "confidence", "reason"],
+  "additionalProperties": false
+}

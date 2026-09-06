@@ -1,0 +1,10 @@
+Summarize the content below for a specific purpose.
+
+Purpose (what the reader will do with the summary): {{ purpose }}
+
+{% if budget_words %}Length budget: at most {{ budget_words }} words.
+
+{% endif %}Content:
+{{ content }}
+
+Keep exactly the detail that serves the purpose and drop everything that does not — a purpose-driven summary is judged by whether the reader can act on it, not by coverage. Respond in the specified JSON format: "summary" is the summary text, "confidence" is your confidence between 0.0 and 1.0 that nothing purpose-relevant was lost, and "reason" is one short sentence naming what was deliberately dropped.

@@ -1,0 +1,10 @@
+Classify the item below into exactly one of the allowed labels.
+
+{% if context %}Classification context (what the labels mean here): {{ context }}
+
+{% endif %}Allowed labels: {{ labels_display }}
+
+Item:
+{{ content }}
+
+Pick the single best-fitting label from the allowed set — you cannot invent a new label. Respond in the specified JSON format: "label" is the chosen label, "confidence" is your confidence between 0.0 and 1.0, and "reason" is one short sentence naming the decisive evidence.

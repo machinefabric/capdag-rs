@@ -1,0 +1,22 @@
+{
+	"type": "object",
+	"properties": {
+		"res": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {
+					"res": { "type": "integer", "enum": [0, 1] },
+					"confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+					"reason": { "type": "string", "maxLength": 300 }
+				},
+				"required": ["res", "confidence", "reason"],
+				"additionalProperties": false
+			},
+			"minItems": {{ expected_length }},
+			"maxItems": {{ expected_length }}
+		}
+	},
+	"required": ["res"],
+	"additionalProperties": false
+}

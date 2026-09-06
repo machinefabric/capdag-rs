@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "choice": {
+      "type": "integer",
+      "minimum": {{ min_value }},
+      "maximum": {{ max_value }}
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "reasoning": {
+      "type": "string"
+    }
+  },
+  "required": ["choice", "confidence"],
+  "additionalProperties": false
+}

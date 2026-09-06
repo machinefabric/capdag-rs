@@ -1,0 +1,9 @@
+Check the artifact below against each requirement.
+
+Requirements:
+{{ requirements }}
+
+Artifact:
+{{ content }}
+
+For every requirement the artifact violates, report one violation: quote the requirement, cite the decisive evidence from the artifact (or state that the required element is absent), and rate its severity as "low", "medium", or "high". "pass" is true only when there are zero violations. Respond in the specified JSON format; "confidence" is your confidence in the overall verdict between 0.0 and 1.0, and "reason" is one short sentence summarizing the verdict.

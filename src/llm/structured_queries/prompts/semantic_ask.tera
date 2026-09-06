@@ -1,0 +1,8 @@
+Answer the question using ONLY the content below.
+
+Question: {{ question }}
+
+Content:
+{{ content }}
+
+Every answer must rest on evidence: fill "quotes" with 1-5 VERBATIM excerpts from the content (copied exactly, character for character) that support the answer. An answer that cannot quote its support does not exist — if the content does not answer the question, say exactly that in "answer", leave "quotes" empty, and set confidence to 0.0. Respond in the specified JSON format; "reason" is one short sentence on how the quotes support the answer.

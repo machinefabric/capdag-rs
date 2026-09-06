@@ -1,0 +1,8 @@
+Based on the following content, make a choice between {{ min_value }} and {{ max_value }} that best answers the question.
+
+Content:
+{{ content }}
+
+Question: {{ question }}
+
+Choose a number between {{ min_value }} and {{ max_value }} (inclusive) that best represents your answer. Also provide a confidence score between 0.0 and 1.0 indicating how certain you are about your choice.

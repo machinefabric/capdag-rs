@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "pass": { "type": "boolean" },
+    "violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": { "type": "string", "maxLength": 500 },
+          "evidence": { "type": "string", "maxLength": 500 },
+          "severity": { "type": "string", "enum": ["low", "medium", "high"] }
+        },
+        "required": ["requirement", "evidence", "severity"],
+        "additionalProperties": false
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["pass", "violations", "confidence", "reason"],
+  "additionalProperties": false
+}

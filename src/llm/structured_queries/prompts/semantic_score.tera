@@ -1,0 +1,11 @@
+Score the item below against the rubric.
+
+Rubric:
+{{ rubric }}
+
+Scale: an integer from {{ scale_min }} (worst) to {{ scale_max }} (best).
+
+Item:
+{{ content }}
+
+Judge strictly against the rubric — not against general quality. Respond in the specified JSON format: "score" is the integer score on the scale, "confidence" is your confidence between 0.0 and 1.0, and "reason" is one short sentence naming the rubric criteria that decided the score.

@@ -1,0 +1,8 @@
+Explain the opaque data below with respect to a goal.
+
+Goal: {{ goal }}
+
+Data:
+{{ content }}
+
+Form the most likely hypothesis that serves the goal. Every hypothesis must point at its evidence: fill "evidence" with 1-5 VERBATIM excerpts from the data (copied exactly, character for character) that support it — an explanation that cannot point at its evidence is a guess and must carry proportionally low confidence. Fill "next_checks" with up to 3 concrete checks that would confirm or refute the hypothesis. Respond in the specified JSON format; "reason" is one short sentence on why this hypothesis beats the alternatives.

@@ -1,0 +1,8 @@
+Based on the following content, answer the boolean 0/1 question in the specified JSON format.
+
+Context:
+{{ content }}
+
+Question: {{ question }}
+
+Answer with "res" as 0 or 1, "confidence" as your confidence between 0.0 and 1.0, and "reason" as one short sentence naming the decisive evidence — following the exact schema provided.

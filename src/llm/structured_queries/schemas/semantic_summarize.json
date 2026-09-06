@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string", "maxLength": 6000 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reason": { "type": "string", "maxLength": 300 }
+  },
+  "required": ["summary", "confidence", "reason"],
+  "additionalProperties": false
+}
