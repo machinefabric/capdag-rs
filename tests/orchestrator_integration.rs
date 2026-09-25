@@ -275,43 +275,38 @@ fn build_testcartridge() {
 /// directory (`$CARGO_BUILD_DIR/testcartridge`) but runs the
 /// orchestrator integration tests with `CARGO_TARGET_DIR` pointing at
 /// capdag's own target dir. Both build phases must agree on which
-/// `target` directory holds the testcartridge binary, so we resolve
-/// it from the workspace layout rather than the inherited env.
+/// `target` directory holds the testcartridge binary, so it is resolved
+/// from the build root the runner names, not from the inherited
+/// `CARGO_TARGET_DIR`.
 fn testcartridge_target_dir() -> PathBuf {
     if let Ok(dir) = env::var("CAPDAG_TESTCARTRIDGE_TARGET_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    if let Ok(build_dir) = env::var("CARGO_BUILD_DIR") {
-        if !build_dir.is_empty() {
-            return PathBuf::from(build_dir).join("testcartridge");
-        }
+    // Told, never worked out. This derived `<workspace>/build/cargo` when
+    // nothing said otherwise — the layout before build output moved under the
+    // workspace's disposable build root — so it built outside that root on
+    // every machine.
+    // The workspace's test runner names the root for every child it starts,
+    // as CARGO_BUILD_DIR.
+    match env::var("CARGO_BUILD_DIR") {
+        Ok(build_dir) if !build_dir.is_empty() => PathBuf::from(build_dir).join("testcartridge"),
+        _ => panic!(
+            "CARGO_BUILD_DIR is not set, so there is nowhere declared to build the \
+             testcartridge; run this suite through the workspace test runner, which sets it"
+        ),
     }
-    // No runner env: derive the SAME location from the workspace layout. There
-    // is deliberately no in-tree fallback — build output belongs under
-    // machinefabric/build, and a `target/` beside the source both violates that
-    // and hides the missing variable behind a second 600 MB copy.
-    workspace_root()
-        .join("build")
-        .join("cargo")
-        .join("testcartridge")
-}
-
-/// The machinefabric workspace root: the crate is `machinefabric/capdag/capdag-rs`.
-fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("capdag-rs has a parent (the capdag superrepo)")
-        .parent()
-        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
-        .to_path_buf()
 }
 
 /// Get path to testcartridge binary, building if necessary.
 fn testcartridge_bin() -> PathBuf {
     let target_dir = testcartridge_target_dir();
-    let bin_path = target_dir.join("release").join("testcartridge");
+    // With the platform's executable suffix: on Windows the build writes
+    // `testcartridge.exe`, and a path without it is never there.
+    let bin_path = target_dir
+        .join("release")
+        .join(format!("testcartridge{}", std::env::consts::EXE_SUFFIX));
 
     let needs_build = if !bin_path.exists() {
         eprintln!(

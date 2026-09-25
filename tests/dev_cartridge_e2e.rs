@@ -95,7 +95,12 @@ fn spawn_mock_fabric() -> String {
 
 /// True if `python3` on PATH can import the cartridge runtime dependencies.
 fn python_runtime_available(pythonpath: &str) -> bool {
-    Command::new("python3")
+    // The interpreter the runtime will actually start the cartridge with, asked
+    // of the runtime. This named `python3`, which a Windows install does not
+    // have — it ships `python.exe` — so the check failed there while the
+    // launcher, which knows that, would have run the cartridge perfectly well.
+    let (interpreter, _) = capdag::bifaci::launch::launcher(Path::new("cartridge.py"));
+    Command::new(interpreter)
         .args(["-c", "import capdag, cbor2, tagged_urn; from ops import Op"])
         .env("PYTHONPATH", pythonpath)
         .stdout(Stdio::null())
@@ -107,7 +112,7 @@ fn python_runtime_available(pythonpath: &str) -> bool {
 
 /// Run the capdag binary with `args` (and optional piped stdin), returning
 /// `(trimmed stdout, success, stderr)`. PATH is inherited so the cartridge's
-/// shebang resolves to the same `python3` the runtime check used.
+/// launcher resolves the same interpreter the runtime check used.
 fn run_capdag(
     home: &Path,
     fabric: &str,

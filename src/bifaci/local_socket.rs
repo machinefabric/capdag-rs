@@ -59,11 +59,13 @@ mod windows {
         tx: mpsc::Sender<WriteCommand>,
         pending_write: Option<oneshot::Receiver<io::Result<usize>>>,
         pending_flush: Option<oneshot::Receiver<io::Result<()>>>,
+        pending_shutdown: Option<oneshot::Receiver<io::Result<()>>>,
     }
 
     enum WriteCommand {
         Write(Vec<u8>, oneshot::Sender<io::Result<usize>>),
         Flush(oneshot::Sender<io::Result<()>>),
+        Shutdown(oneshot::Sender<io::Result<()>>),
     }
 
     impl UnixStream {
@@ -118,6 +120,7 @@ mod windows {
                     tx: write_tx,
                     pending_write: None,
                     pending_flush: None,
+                    pending_shutdown: None,
                 },
             }
         }
@@ -192,6 +195,21 @@ mod windows {
         }
     }
 
+    /// The write direction's thread, and the one place it ends.
+    ///
+    /// The peer sees end-of-file when the write direction is SHUT DOWN, as on
+    /// Unix, where tokio's `OwnedWriteHalf` does it on drop and on
+    /// `poll_shutdown`. Here the read direction runs on a thread of its own
+    /// holding a clone of the socket, blocked in `read`, so dropping the write
+    /// half closed nothing: the socket stayed open, the peer never read EOF,
+    /// and anything waiting for the other side to go away waited for ever. On
+    /// Windows a cartridge that exited was never noticed —
+    /// `test417_route_req_to_correct_cartridge` hung until the suite was killed
+    /// and `test1255_app_exit_suppresses_err_frames` failed.
+    ///
+    /// So the thread shuts the direction down when asked and when its channel
+    /// closes — that is, when the half is dropped — after every write queued
+    /// before it has gone out.
     fn write_loop(mut socket: Socket, rx: mpsc::Receiver<WriteCommand>) {
         for command in rx {
             match command {
@@ -203,8 +221,17 @@ mod windows {
                     let result = socket.flush();
                     let _ = ack.send(result);
                 }
+                WriteCommand::Shutdown(ack) => {
+                    let result = socket.shutdown(std::net::Shutdown::Write);
+                    let _ = ack.send(result);
+                    return;
+                }
             }
         }
+        // Dropped without a shutdown. As tokio's drop does, and for the same
+        // reason: nobody is left to hear that a peer which already went away
+        // cannot be told.
+        let _ = socket.shutdown(std::net::Shutdown::Write);
     }
 
     impl AsyncRead for OwnedReadHalf {
@@ -313,8 +340,28 @@ mod windows {
             }
         }
 
-        fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            self.poll_flush(cx)
+        fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            if self.pending_shutdown.is_none() {
+                let (tx, rx) = oneshot::channel();
+                self.tx.send(WriteCommand::Shutdown(tx)).map_err(|_| {
+                    io::Error::new(io::ErrorKind::BrokenPipe, "AF_UNIX writer closed")
+                })?;
+                self.pending_shutdown = Some(rx);
+            }
+
+            let rx = self.pending_shutdown.as_mut().expect("pending shutdown set");
+            match Pin::new(rx).poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(result) => {
+                    self.pending_shutdown = None;
+                    Poll::Ready(result.unwrap_or_else(|_| {
+                        Err(io::Error::new(
+                            io::ErrorKind::BrokenPipe,
+                            "AF_UNIX writer thread stopped",
+                        ))
+                    }))
+                }
+            }
         }
     }
 
@@ -380,5 +427,44 @@ mod tests {
             .await
             .expect("read right-to-left bytes");
         assert_eq!(&left_buf, b"right-to-left");
+    }
+
+    /// TEST12147: the peer reads end-of-file when a write half is dropped or
+    /// shut down, with its read half still alive.
+    ///
+    /// Unix gets this from tokio. The Windows stream split the socket across
+    /// two threads holding two handles, so dropping the write half closed
+    /// nothing and the peer's read never ended: a cartridge that exited was
+    /// never noticed, `test417_route_req_to_correct_cartridge` hung until the
+    /// suite was killed, and `test1255_app_exit_suppresses_err_frames` failed.
+    /// Bounded, so a regression fails here rather than hanging the suite.
+    #[tokio::test]
+    async fn test12147_the_peer_reads_eof_when_a_write_half_goes() {
+        let bound = std::time::Duration::from_secs(10);
+
+        // Dropped, with the read half of the same stream still held.
+        let (left, right) = UnixStream::pair().expect("create AF_UNIX stream pair");
+        let (_left_read, mut left_write) = left.into_split();
+        let (mut right_read, _right_write) = right.into_split();
+        left_write.write_all(b"last").await.expect("write");
+        drop(left_write);
+        let mut got = Vec::new();
+        tokio::time::timeout(bound, right_read.read_to_end(&mut got))
+            .await
+            .expect("the peer never read end-of-file after the write half was dropped")
+            .expect("read to end");
+        assert_eq!(got, b"last", "what was written before the drop must arrive first");
+
+        // Shut down, with the write half still held.
+        let (left, right) = UnixStream::pair().expect("create AF_UNIX stream pair");
+        let (_left_read, mut left_write) = left.into_split();
+        let (mut right_read, _right_write) = right.into_split();
+        left_write.shutdown().await.expect("shutdown");
+        let mut got = Vec::new();
+        tokio::time::timeout(bound, right_read.read_to_end(&mut got))
+            .await
+            .expect("the peer never read end-of-file after the write half was shut down")
+            .expect("read to end");
+        assert!(got.is_empty());
     }
 }
