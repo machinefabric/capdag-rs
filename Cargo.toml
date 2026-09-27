@@ -49,16 +49,12 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-# MFR_LOCAL_LIBS was set when this was rendered: the working copy in this
-# workspace rather than a published release. Re-render without it before
-# committing or releasing — a path resolves on this machine only.
-path = "../../tagged-urn/tagged-urn-rs"
+version = "=1.51.204"
 
 # The runtime the code generated from ../formal runs on (see ../lungo.toml). The
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
-# MFR_LOCAL_LIBS: the working copy, as above.
-path = "../../lungo/crates/lungo"
+version = "=0.27.1270"
 
 [dependencies.tokio]
 features = ["full"]
@@ -113,4 +109,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.803.156"
+version = "1.804.159"
