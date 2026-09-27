@@ -1,6 +1,4 @@
 [dependencies]
-# The runtime the code generated from ../formal runs on (see lungo.toml).
-lungo = "=0.27.1270"
 anyhow = "1.0"
 async-trait = "0.1"
 atty = "0.2"
@@ -51,7 +49,24 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-version = "1.51.204"
+{%- if env.MFR_LOCAL_LIBS %}
+# MFR_LOCAL_LIBS was set when this was rendered: the working copy in this
+# workspace rather than a published release. Re-render without it before
+# committing or releasing — a path resolves on this machine only.
+path = "{{ projects.tagged_urn_rs.path_from_here }}"
+{%- else %}
+version = "={{ projects.tagged_urn_rs.latest_remote_version }}"
+{%- endif %}
+
+# The runtime the code generated from ../formal runs on (see ../lungo.toml). The
+# generated code is lungo's of the same version, so the runtime is pinned exactly.
+[dependencies.lungo]
+{%- if env.MFR_LOCAL_LIBS %}
+# MFR_LOCAL_LIBS: the working copy, as above.
+path = "{{ projects.lungo.path_from_here }}/crates/lungo"
+{%- else %}
+version = "={{ projects.lungo.latest_remote_version }}"
+{%- endif %}
 
 [dependencies.tokio]
 features = ["full"]
