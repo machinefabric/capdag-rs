@@ -12,6 +12,12 @@
     "renamed": false
   },
   {
+    "lean_name": "TaggedUrn.Constraint",
+    "kind": "type",
+    "rust_path": "_root_::tagged_urn::Constraint",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Exec.accepts",
     "kind": "function",
     "rust_path": "exec::accepts",
@@ -57,6 +63,12 @@
     "lean_name": "CapDAG.Exec.specificity",
     "kind": "function",
     "rust_path": "exec::specificity",
+    "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Exec.make",
+    "kind": "function",
+    "rust_path": "_root_::tagged_urn::exec::make",
     "renamed": false
   },
   {
@@ -112,6 +124,66 @@
     "kind": "field",
     "rust_path": "exec::WfCap.effect",
     "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.missing",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::Missing",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.unconstrained",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::Unconstrained",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.optionalNot",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::OptionalNot",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.optionalNot.value",
+    "kind": "field",
+    "rust_path": "_root_::tagged_urn::Constraint::OptionalNot.value",
+    "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.present",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::Present",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.presentNot",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::PresentNot",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.presentNot.value",
+    "kind": "field",
+    "rust_path": "_root_::tagged_urn::Constraint::PresentNot.value",
+    "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.exact",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::Exact",
+    "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.exact.value",
+    "kind": "field",
+    "rust_path": "_root_::tagged_urn::Constraint::Exact.value",
+    "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.absent",
+    "kind": "constructor",
+    "rust_path": "_root_::tagged_urn::Constraint::Absent",
+    "renamed": true
   },
   {
     "lean_name": "TaggedUrn.Exec.Wf",

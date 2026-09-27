@@ -49,6 +49,41 @@ pub(crate) unsafe extern "C" fn l_List_ddecidableBAll_d__redArg(mut x_1: Obj, mu
     }
 }
 
+// Lean: List.instDecidablePairwise._redArg
+// Compiled from: List.instDecidablePairwise
+// Source: <lean>/Init/Data/List/Basic.lean:1389:1
+pub(crate) unsafe extern "C" fn l_List_dinstDecidablePairwise_d__redArg(x_1: Obj, x_2: Obj) -> u8 {
+    match rt::lean_obj_tag(x_2) {
+        0 => {
+            rt::lean_dec_ref(x_1);
+            let x_3: u8 = 1u8;
+            return x_3;
+        }
+        _ => {
+            let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+            rt::lean_inc(x_4);
+            let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+            rt::lean_inc_n(x_5, 2);
+            rt::lean_dec_ref(x_2);
+            rt::lean_inc_ref(x_1);
+            let x_6: u8 = l_List_dinstDecidablePairwise_d__redArg(x_1, x_5);
+            match x_6 {
+                0 => {
+                    rt::lean_dec(x_5);
+                    rt::lean_dec(x_4);
+                    rt::lean_dec_ref(x_1);
+                    return x_6;
+                }
+                _ => {
+                    let x_7: Obj = rt::lean_apply_1(x_1, x_4);
+                    let x_8: u8 = l_List_ddecidableBAll_d__redArg(x_7, x_5);
+                    return x_8;
+                }
+            }
+        }
+    }
+}
+
 // Lean: List.range
 // Source: <lean>/Init/Data/List/Basic.lean:2092:1
 pub(crate) unsafe extern "C" fn l_List_drange(x_1: Obj) -> Obj {

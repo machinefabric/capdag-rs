@@ -62,8 +62,50 @@ pub(crate) unsafe extern "C" fn l_List_dall_d__at___dTaggedUrn_dmergeTags_dspec_
     }
 }
 
+// Lean: TaggedUrn.instDecidableSorted
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:29:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableSorted(x_1: Obj) -> u8 {
+    let x_2: Obj = l_TaggedUrn_dinstDecidableSorted_d__closed__0();
+    let x_3: u8 = l_List_dinstDecidablePairwise_d__redArg(x_2, x_1);
+    return x_3;
+}
+
+// Lean: TaggedUrn.instDecidableSorted._closed_0
+// Compiled from: TaggedUrn.instDecidableSorted
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:29:1
+static C_l_TaggedUrn_dinstDecidableSorted_d__closed__0: rt::LazyObj = rt::LazyObj::new();
+unsafe fn l_TaggedUrn_dinstDecidableSorted_d__closed__0__init() -> Obj {
+    let x_1: Obj = rt::lean_alloc_closure(l_TaggedUrn_dinstDecidableSorted_d__lam__0_d__boxed as *const (), 2, 0);
+    return x_1;
+}
+#[inline]
+pub(crate) unsafe fn l_TaggedUrn_dinstDecidableSorted_d__closed__0() -> Obj {
+    C_l_TaggedUrn_dinstDecidableSorted_d__closed__0.get(l_TaggedUrn_dinstDecidableSorted_d__closed__0__init)
+}
+
+// Lean: TaggedUrn.instDecidableSorted._lam_0
+// Compiled from: TaggedUrn.instDecidableSorted
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:29:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableSorted_d__lam__0(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+    let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+    let x_5: u8 = l_String_ddecidableLT(x_3, x_4);
+    return x_5;
+}
+
+// Lean: TaggedUrn.instDecidableSorted._lam_0._boxed
+// Compiled from: TaggedUrn.instDecidableSorted
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:29:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableSorted_d__lam__0_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_TaggedUrn_dinstDecidableSorted_d__lam__0(x_1, x_2);
+    rt::lean_dec_ref(x_2);
+    rt::lean_dec_ref(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
+}
+
 // Lean: TaggedUrn.mergeTags
-// Source: ../formal/../../../tagged-urn/formal/TaggedUrn/Sorted.lean:81:1
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:81:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dmergeTags(mut x_1: Obj, mut x_2: Obj) -> u8 {
     'tail: loop {
         match rt::lean_obj_tag(x_1) {
