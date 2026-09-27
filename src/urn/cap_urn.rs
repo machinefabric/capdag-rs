@@ -127,7 +127,7 @@ impl fmt::Display for CapKind {
 /// - `cap:in="media:binary";generate;out="media:binary";target=thumbnail`
 /// - `cap:dimensions;in=media:void;out=media:integer`
 /// - `cap:in="media:string";out="media:object";key="Value With Spaces"`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub struct CapUrn {
     /// Input media URN - required (use media:void for caps with no input)
     in_urn: String,
@@ -138,19 +138,96 @@ pub struct CapUrn {
     effect: String,
     /// Additional tags that define this cap, stored in sorted order for canonical representation
     /// Note: 'in', 'out', and 'effect' are NOT stored here.
-    pub tags: BTreeMap<String, String>,
+    tags: BTreeMap<String, String>,
+    /// The same cap on the proved model's side: its three URN handles and its
+    /// effect. Dispatch, acceptance, equivalence and specificity are asked of
+    /// this, through code generated from `../formal`. Built once, when the cap
+    /// is ([`CapUrn::assemble`]); the fields are private so that it can never
+    /// describe a different cap from the one beside it.
+    formal: crate::formal::exec::WfCap,
 }
 
-// Per-tag truth-table specificity scoring is owned by the
-// tagged_urn crate (the same scorer applies uniformly to media-URN
-// tags, cap-tag y-axis, and any other Tagged URN dimension). We
-// re-use the canonical implementation rather than duplicate it; any
-// drift here would be a wire-level inconsistency.
-use tagged_urn::score_tag_value;
+impl fmt::Debug for CapUrn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CapUrn")
+            .field("in_urn", &self.in_urn)
+            .field("out_urn", &self.out_urn)
+            .field("effect", &self.effect)
+            .field("tags", &self.tags)
+            .finish()
+    }
+}
+
+impl PartialEq for CapUrn {
+    fn eq(&self, other: &Self) -> bool {
+        self.in_urn == other.in_urn
+            && self.out_urn == other.out_urn
+            && self.effect == other.effect
+            && self.tags == other.tags
+    }
+}
+
+impl Eq for CapUrn {}
+
+impl std::hash::Hash for CapUrn {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.in_urn.hash(state);
+        self.out_urn.hash(state);
+        self.effect.hash(state);
+        self.tags.hash(state);
+    }
+}
+
 
 impl CapUrn {
     /// The required prefix for all cap URNs
     pub const PREFIX: &'static str = "cap";
+
+    /// The one way a `CapUrn` is made: the fields, the model's handles built
+    /// from exactly them, and the admissibility check — so no constructor or
+    /// edit can produce a cap whose handles describe something else.
+    fn assemble(
+        in_urn: String,
+        out_urn: String,
+        effect: String,
+        tags: BTreeMap<String, String>,
+    ) -> Result<Self, CapUrnError> {
+        let media = |spec: &str, what: fn(String) -> CapUrnError| {
+            MediaUrn::from_string(spec)
+                .map(|m| m.inner().formal().clone())
+                .map_err(|e| what(format!("Invalid media URN '{}': {}", spec, e)))
+        };
+        let formal = crate::formal::exec::WfCap {
+            input: media(&in_urn, CapUrnError::InvalidInSpec)?,
+            output: media(&out_urn, CapUrnError::InvalidOutSpec)?,
+            other: TaggedUrn::new(Self::PREFIX.to_string(), tags.clone()).formal().clone(),
+            effect: match effect.as_str() {
+                "declared" => crate::formal::Effect::Declared,
+                "none" => crate::formal::Effect::None,
+                "patch" => crate::formal::Effect::Patch,
+                "?" => crate::formal::Effect::Unspecified,
+                other => {
+                    return Err(CapUrnError::InvalidTagFormat(format!(
+                        "effect '{}' is not declared, none, patch or ?",
+                        other
+                    )))
+                }
+            },
+        };
+        let candidate = Self { in_urn, out_urn, effect, tags, formal };
+        candidate.validate_admissible()?;
+        Ok(candidate)
+    }
+
+    /// The non-structural tags (the y axis), in key order.
+    pub fn tags(&self) -> &BTreeMap<String, String> {
+        &self.tags
+    }
+
+    /// The model's view of this cap, for generated code.
+    pub fn formal(&self) -> &crate::formal::exec::WfCap {
+        &self.formal
+    }
 
     fn validate_non_structural_tags(tags: &BTreeMap<String, String>) -> Result<(), CapUrnError> {
         let mut builder = TaggedUrnBuilder::new(Self::PREFIX);
@@ -214,14 +291,7 @@ impl CapUrn {
             .map(|(k, v)| (k.to_lowercase(), v))
             .collect();
         Self::validate_non_structural_tags(&normalized_tags)?;
-        let candidate = Self {
-            in_urn: in_urn_normalized,
-            out_urn: out_urn_normalized,
-            effect: effect_normalized,
-            tags: normalized_tags,
-        };
-        candidate.validate_admissible()?;
-        Ok(candidate)
+        Self::assemble(in_urn_normalized, out_urn_normalized, effect_normalized, normalized_tags)
     }
 
     /// Create a cap URN from a tag map.
@@ -269,7 +339,7 @@ impl CapUrn {
         let tagged = TaggedUrn::from_string(s).map_err(CapUrnError::from_tagged_urn_error)?;
 
         // Verify cap prefix
-        if tagged.prefix != Self::PREFIX {
+        if tagged.prefix() != Self::PREFIX {
             return Err(CapUrnError::MissingCapPrefix);
         }
 
@@ -277,7 +347,7 @@ impl CapUrn {
         // Missing tag or tag=* → "media:" (the wildcard)
         let in_urn_raw = Self::process_direction_tag(&tagged, "in")?;
         let out_urn_raw = Self::process_direction_tag(&tagged, "out")?;
-        let effect = Self::normalize_effect_value(tagged.tags.get("effect").map(|s| s.as_str()))?;
+        let effect = Self::normalize_effect_value(tagged.tags().get("effect").map(|s| s.as_str()))?;
 
         // Parse and normalize media URNs to canonical form.
         // This ensures consistent tag ordering (e.g., "record;enc=utf-8" vs "enc=utf-8;record").
@@ -309,20 +379,14 @@ impl CapUrn {
 
         // Collect remaining tags (excluding in/out)
         let tags: BTreeMap<String, String> = tagged
-            .tags
+            .tags()
+            .clone()
             .into_iter()
             .filter(|(k, _)| k != "in" && k != "out" && k != "effect")
             .collect();
         Self::validate_non_structural_tags(&tags)?;
 
-        let candidate = Self {
-            in_urn,
-            out_urn,
-            effect,
-            tags,
-        };
-        candidate.validate_admissible()?;
-        Ok(candidate)
+        Self::assemble(in_urn, out_urn, effect, tags)
     }
 
     /// Process a direction tag (in or out) with wildcard expansion
@@ -332,7 +396,7 @@ impl CapUrn {
     /// - tag= (empty) → error
     /// - tag=value → value (validated later)
     fn process_direction_tag(tagged: &TaggedUrn, tag_name: &str) -> Result<String, CapUrnError> {
-        match tagged.tags.get(tag_name) {
+        match tagged.tags().get(tag_name) {
             Some(value) => {
                 if value == "*" {
                     // Replace * with media: wildcard
@@ -625,7 +689,7 @@ impl CapUrn {
     /// Reserved structural coordinates (`in`, `out`, `effect`) are not part of
     /// the y-axis and must be changed through dedicated accessors.
     /// Returns error if value is empty (use "*" for wildcard).
-    pub fn with_tag(mut self, key: String, value: String) -> Result<Self, CapUrnError> {
+    pub fn with_tag(self, key: String, value: String) -> Result<Self, CapUrnError> {
         if value.is_empty() {
             return Err(CapUrnError::EmptyValue(key));
         }
@@ -636,39 +700,33 @@ impl CapUrn {
                 key_lower
             )));
         }
-        self.tags.insert(key_lower, value);
-        Self::validate_non_structural_tags(&self.tags)?;
-        self.validate_admissible()?;
-        Ok(self)
+        let mut tags = self.tags;
+        tags.insert(key_lower, value);
+        Self::validate_non_structural_tags(&tags)?;
+        Self::assemble(self.in_urn, self.out_urn, self.effect, tags)
     }
 
     /// Create a new cap URN with a different input spec
-    pub fn with_in_spec(mut self, in_urn: String) -> Self {
-        self.in_urn = in_urn;
-        self.validate_admissible()
-            .expect("CapUrn::with_in_spec produced an illegal cap declaration");
-        self
+    pub fn with_in_spec(self, in_urn: String) -> Self {
+        Self::assemble(in_urn, self.out_urn, self.effect, self.tags)
+            .expect("CapUrn::with_in_spec produced an illegal cap declaration")
     }
 
     /// Create a new cap URN with a different output spec
-    pub fn with_out_spec(mut self, out_urn: String) -> Self {
-        self.out_urn = out_urn;
-        self.validate_admissible()
-            .expect("CapUrn::with_out_spec produced an illegal cap declaration");
-        self
+    pub fn with_out_spec(self, out_urn: String) -> Self {
+        Self::assemble(self.in_urn, out_urn, self.effect, self.tags)
+            .expect("CapUrn::with_out_spec produced an illegal cap declaration")
     }
 
     /// Create a new cap URN with a different effect coordinate.
-    pub fn with_effect(mut self, effect: CapEffect) -> Self {
-        self.effect = effect.as_str().to_string();
-        self.validate_admissible()
-            .expect("CapUrn::with_effect produced an illegal cap declaration");
-        self
+    pub fn with_effect(self, effect: CapEffect) -> Self {
+        Self::assemble(self.in_urn, self.out_urn, effect.as_str().to_string(), self.tags)
+            .expect("CapUrn::with_effect produced an illegal cap declaration")
     }
 
     /// Remove a non-structural tag.
     /// Key is normalized to lowercase for case-insensitive removal.
-    pub fn without_tag(mut self, key: &str) -> Self {
+    pub fn without_tag(self, key: &str) -> Self {
         let key_lower = key.to_lowercase();
         if key_lower == "in" || key_lower == "out" || key_lower == "effect" {
             panic!(
@@ -676,87 +734,22 @@ impl CapUrn {
                 key_lower
             );
         }
-        self.tags.remove(&key_lower);
-        self.validate_admissible()
-            .expect("CapUrn::without_tag produced an illegal cap declaration");
-        self
+        let mut tags = self.tags;
+        tags.remove(&key_lower);
+        Self::assemble(self.in_urn, self.out_urn, self.effect, tags)
+            .expect("CapUrn::without_tag produced an illegal cap declaration")
     }
 
-    /// Check if this cap (pattern/handler) accepts the given request (instance).
+    /// Whether this cap, as a PATTERN, accepts `request` as an instance: the
+    /// request's input refines this cap's, this cap's output refines the
+    /// request's, the effect matches (this cap's `?effect` matching any), and
+    /// the request's cap-tags refine this cap's.
     ///
-    /// Direction specs use semantic TaggedUrn matching via MediaUrn:
-    /// - Input: `cap_in.accepts(request_in)` — does request's data satisfy cap's input requirement?
-    /// - Output: `request_out.accepts(cap_out)` — does cap's output satisfy what request expects?
-    ///
-    /// For other tags: cap satisfies request's tag constraints.
-    /// Missing cap tags are wildcards (cap accepts any value for that tag).
+    /// Decided by the proved model (`CapDAG.Exec.accepts`). Note the cap-tag
+    /// axis runs opposite to [`is_dispatchable`](Self::is_dispatchable)'s:
+    /// this is the pattern relation, dispatch is the routing one.
     pub fn accepts(&self, request: &CapUrn) -> bool {
-        // Input direction: self.in_urn is pattern, request.in_urn is instance
-        // "media:" on the PATTERN side means "I accept any input" — skip check.
-        // "media:" on the INSTANCE side is just the least specific — still check.
-        if self.in_urn != "media:" {
-            let cap_in = MediaUrn::from_string(&self.in_urn).unwrap_or_else(|e| {
-                panic!(
-                    "CU2: cap in_spec '{}' is not a valid MediaUrn: {}",
-                    self.in_urn, e
-                )
-            });
-            let request_in = MediaUrn::from_string(&request.in_urn).unwrap_or_else(|e| {
-                panic!(
-                    "CU2: request in_spec '{}' is not a valid MediaUrn: {}",
-                    request.in_urn, e
-                )
-            });
-            if !cap_in
-                .accepts(&request_in)
-                .expect("CU2: media URN prefix mismatch in direction spec matching")
-            {
-                return false;
-            }
-        }
-
-        // Output direction: self.out_urn is pattern, request.out_urn is instance
-        // "media:" on the PATTERN side means "I accept any output" — skip check.
-        // "media:" on the INSTANCE side is just the least specific — still check.
-        if self.out_urn != "media:" {
-            let cap_out = MediaUrn::from_string(&self.out_urn).unwrap_or_else(|e| {
-                panic!(
-                    "CU2: cap out_spec '{}' is not a valid MediaUrn: {}",
-                    self.out_urn, e
-                )
-            });
-            let request_out = MediaUrn::from_string(&request.out_urn).unwrap_or_else(|e| {
-                panic!(
-                    "CU2: request out_spec '{}' is not a valid MediaUrn: {}",
-                    request.out_urn, e
-                )
-            });
-            if !cap_out
-                .conforms_to(&request_out)
-                .expect("CU2: media URN prefix mismatch in direction spec matching")
-            {
-                return false;
-            }
-        }
-
-        if self.effect != "?" && self.effect != request.effect {
-            return false;
-        }
-
-        // Y-axis: every tag's per-key match runs through the six-form
-        // truth table (TaggedUrn::values_match). Walk the union of
-        // all keys appearing on either side so missing-on-pattern
-        // and missing-on-instance cells both get evaluated.
-        let all_keys: std::collections::HashSet<&String> =
-            self.tags.keys().chain(request.tags.keys()).collect();
-        for key in all_keys {
-            let patt = self.tags.get(key).map(|s| s.as_str());
-            let inst = request.tags.get(key).map(|s| s.as_str());
-            if !TaggedUrn::values_match(inst, patt) {
-                return false;
-            }
-        }
-        true
+        crate::formal::exec::accepts(self.formal.clone(), request.formal.clone())
     }
 
     /// Check if this request conforms to (can be handled by) the given cap.
@@ -783,7 +776,7 @@ impl CapUrn {
     /// Use this for routing when you want to find any handler that could
     /// potentially satisfy a request, regardless of which is more specific.
     pub fn is_comparable(&self, other: &CapUrn) -> bool {
-        self.accepts(other) || other.accepts(self)
+        crate::formal::exec::comparable(self.formal.clone(), other.formal.clone())
     }
 
     /// Check if two cap URNs are equivalent in the order-theoretic sense.
@@ -793,149 +786,28 @@ impl CapUrn {
     ///
     /// Use this for exact matching where you need URNs to be interchangeable.
     pub fn is_equivalent(&self, other: &CapUrn) -> bool {
-        self.accepts(other) && other.accepts(self)
+        crate::formal::exec::equivalent(self.formal.clone(), other.formal.clone())
     }
 
-    /// Check if this candidate can dispatch (handle) the given request.
+    /// Whether this candidate can serve `request` — the PRIMARY predicate for
+    /// routing and dispatch.
     ///
-    /// This is the PRIMARY predicate for routing/dispatch decisions.
+    /// Decided by the proved model (`CapDAG.Exec.dispatch`, which
+    /// `dispatch_decides` shows is exactly `CapDAG.dispatch`): every axis is a
+    /// type. The request's input refines the candidate's (a candidate may
+    /// accept more), the candidate's output refines the request's (it must
+    /// produce at least what is needed), the effect matches unless the request
+    /// says `?effect`, and the candidate's cap-tags refine the request's (it
+    /// satisfies every tag the request states, and may add more).
     ///
-    /// A candidate is dispatchable for a request iff:
-    /// 1. Input axis: candidate can handle request's input (candidate.in same or more specific)
-    /// 2. Output axis: candidate meets request's output needs (candidate.out same or more specific)
-    /// 3. Cap-tags: candidate satisfies all explicit request tags, may add more
+    /// `media:` on a request's input is a type — "may send anything" — so only
+    /// a candidate that accepts anything serves it. That is what makes dispatch
+    /// compose (`dispatch_trans`): a candidate that serves what another serves
+    /// serves everything that one does.
     ///
-    /// Key insight: This is NOT symmetric. `candidate.is_dispatchable(&request)` may be true
-    /// while `request.is_dispatchable(&candidate)` is false.
-    ///
-    /// # Arguments
-    /// * `request` - The request URN (partial specification, may have wildcards)
-    ///
-    /// # Returns
-    /// * `true` if this candidate can legally handle the request
-    /// * `false` if there's a contradiction or incompatibility
+    /// Not symmetric: `a.is_dispatchable(&b)` says nothing about the reverse.
     pub fn is_dispatchable(&self, request: &CapUrn) -> bool {
-        // Axis 1: Input - candidate must handle at least what request specifies
-        if !self.input_dispatchable(request) {
-            return false;
-        }
-
-        // Axis 2: Output - candidate must produce at least what request needs
-        if !self.output_dispatchable(request) {
-            return false;
-        }
-
-        if !self.effect_dispatchable(request) {
-            return false;
-        }
-
-        // Axis 3: Cap-tags - candidate must satisfy explicit request constraints
-        if !self.cap_tags_dispatchable(request) {
-            return false;
-        }
-
-        true
-    }
-
-    /// Check if candidate's input is dispatchable for request's input.
-    ///
-    /// Input is CONTRAVARIANT: candidate with looser input constraint can handle
-    /// request with stricter input. `media:` is the identity (top) and means
-    /// "unconstrained" — vacuously true on either side.
-    ///
-    /// - Request `in=media:` (unconstrained) + any candidate -> YES (no constraint)
-    /// - Candidate `in=media:` (accepts any) + Request `in=media:ext=pdf` -> YES (candidate accepts any)
-    /// - Both specific -> request input must conform to candidate's accepted input
-    fn input_dispatchable(&self, request: &CapUrn) -> bool {
-        // Request wildcard: any candidate input is fine (request doesn't constrain what it sends)
-        if request.in_urn == "media:" {
-            return true;
-        }
-
-        // Candidate wildcard: candidate accepts any input, including request's specific input
-        if self.in_urn == "media:" {
-            return true;
-        }
-
-        // Both specific: request input must conform to candidate's input requirement
-        // (request sends something the candidate can handle)
-        let req_in = match MediaUrn::from_string(&request.in_urn) {
-            Ok(u) => u,
-            Err(_) => return false,
-        };
-        let prov_in = match MediaUrn::from_string(&self.in_urn) {
-            Ok(u) => u,
-            Err(_) => return false,
-        };
-
-        // Request input conforms to candidate input = request sends what candidate can handle
-        req_in.conforms_to(&prov_in).unwrap_or(false)
-    }
-
-    /// Check if candidate's output is dispatchable for request's output.
-    ///
-    /// Rules:
-    /// - Request wildcard (media:): any candidate output is acceptable
-    /// - Otherwise: candidate output must conform to (be same or more specific than) request output
-    fn output_dispatchable(&self, request: &CapUrn) -> bool {
-        // Request wildcard: any candidate output is fine
-        if request.out_urn == "media:" {
-            return true;
-        }
-
-        // Candidate wildcard: cannot guarantee specific output request needs
-        // This is asymmetric with input! Generic output doesn't satisfy specific requirement.
-        if self.out_urn == "media:" {
-            return false;
-        }
-
-        // Both specific: candidate output must conform to request output
-        // (candidate can be same or more specific - providing more is OK)
-        let req_out = match MediaUrn::from_string(&request.out_urn) {
-            Ok(u) => u,
-            Err(_) => return false,
-        };
-        let prov_out = match MediaUrn::from_string(&self.out_urn) {
-            Ok(u) => u,
-            Err(_) => return false,
-        };
-
-        // Candidate output conforms to request output = candidate guarantees at least what request needs
-        prov_out.conforms_to(&req_out).unwrap_or(false)
-    }
-
-    /// Check if candidate's effect satisfies request's requested effect.
-    ///
-    /// Omitted `effect` means `declared`, not unconstrained. Unconstrained
-    /// matching must be requested explicitly via `?effect` / `effect=*`.
-    fn effect_dispatchable(&self, request: &CapUrn) -> bool {
-        request.effect == "?" || self.effect == request.effect
-    }
-
-    /// Check if candidate's cap-tags are dispatchable for request's cap-tags.
-    ///
-    /// Rules:
-    /// - Every explicit request tag must be satisfied by candidate
-    /// - Candidate may have extra tags (refinement is OK)
-    /// - Wildcard (*) in request means any value acceptable
-    /// - Wildcard (*) in candidate means candidate can handle any value
-    fn cap_tags_dispatchable(&self, request: &CapUrn) -> bool {
-        // Every per-key match runs through the six-form truth table
-        // (TaggedUrn::values_match). For dispatch, the request is the
-        // pattern (declares constraints the candidate must satisfy)
-        // and the candidate is the instance. Walk the union of keys
-        // so absent-on-candidate cells against present-on-request
-        // patterns are evaluated correctly.
-        let all_keys: std::collections::HashSet<&String> =
-            self.tags.keys().chain(request.tags.keys()).collect();
-        for key in all_keys {
-            let patt = request.tags.get(key).map(|s| s.as_str());
-            let inst = self.tags.get(key).map(|s| s.as_str());
-            if !TaggedUrn::values_match(inst, patt) {
-                return false;
-            }
-        }
-        true
+        crate::formal::exec::dispatch(self.formal.clone(), request.formal.clone())
     }
 
     /// Apply this cap URN to a concrete runtime input media URN.
@@ -1112,24 +984,9 @@ impl CapUrn {
     /// URN — both fields are validated at construction time, so this
     /// only fires on internally inconsistent state.
     pub fn specificity(&self) -> usize {
-        let in_media = MediaUrn::from_string(&self.in_urn).unwrap_or_else(|e| {
-            panic!(
-                "CU2: in_spec '{}' is not a valid MediaUrn: {}",
-                self.in_urn, e
-            )
-        });
-        let out_media = MediaUrn::from_string(&self.out_urn).unwrap_or_else(|e| {
-            panic!(
-                "CU2: out_spec '{}' is not a valid MediaUrn: {}",
-                self.out_urn, e
-            )
-        });
-
-        let in_score = in_media.inner().specificity();
-        let out_score = out_media.inner().specificity();
-        let y_score: usize = self.tags.values().map(|v| score_tag_value(v)).sum();
-
-        Self::WEIGHT_OUT * out_score + Self::WEIGHT_IN * in_score + y_score
+        crate::formal::exec::specificity(self.formal.clone())
+            .to_u64()
+            .expect("a cap's specificity fits in u64") as usize
     }
 
     /// Per-axis weights for cap-URN specificity. Two orders of
@@ -1148,27 +1005,22 @@ impl CapUrn {
 
     /// Create a wildcard version by replacing specific values with wildcards
     /// For 'in' or 'out', sets the corresponding direction spec to wildcard
-    pub fn with_wildcard_tag(mut self, key: &str) -> Self {
+    pub fn with_wildcard_tag(self, key: &str) -> Self {
         let key_lower = key.to_lowercase();
+        let (mut in_urn, mut out_urn, mut effect, mut tags) =
+            (self.in_urn, self.out_urn, self.effect, self.tags);
         match key_lower.as_str() {
-            "in" => {
-                self.in_urn = MEDIA_IDENTITY.to_string();
-            }
-            "out" => {
-                self.out_urn = MEDIA_IDENTITY.to_string();
-            }
-            "effect" => {
-                self.effect = "?".to_string();
-            }
+            "in" => in_urn = MEDIA_IDENTITY.to_string(),
+            "out" => out_urn = MEDIA_IDENTITY.to_string(),
+            "effect" => effect = "?".to_string(),
             _ => {
-                if self.tags.contains_key(&key_lower) {
-                    self.tags.insert(key_lower, "*".to_string());
+                if tags.contains_key(&key_lower) {
+                    tags.insert(key_lower, "*".to_string());
                 }
             }
         }
-        self.validate_admissible()
-            .expect("CapUrn::with_wildcard_tag produced an illegal cap declaration");
-        self
+        Self::assemble(in_urn, out_urn, effect, tags)
+            .expect("CapUrn::with_wildcard_tag produced an illegal cap declaration")
     }
 
     /// Create a subset cap with only specified tags
@@ -1185,16 +1037,8 @@ impl CapUrn {
                 tags.insert(key_lower, value.clone());
             }
         }
-        let subset = Self {
-            in_urn: self.in_urn.clone(),
-            out_urn: self.out_urn.clone(),
-            effect: self.effect.clone(),
-            tags,
-        };
-        subset
-            .validate_admissible()
-            .expect("CapUrn::subset produced an illegal cap declaration");
-        subset
+        Self::assemble(self.in_urn.clone(), self.out_urn.clone(), self.effect.clone(), tags)
+            .expect("CapUrn::subset produced an illegal cap declaration")
     }
 
     /// Merge with another cap (other takes precedence for conflicts)
@@ -1204,16 +1048,8 @@ impl CapUrn {
         for (key, value) in &other.tags {
             tags.insert(key.clone(), value.clone());
         }
-        let merged = Self {
-            in_urn: other.in_urn.clone(),
-            out_urn: other.out_urn.clone(),
-            effect: other.effect.clone(),
-            tags,
-        };
-        merged
-            .validate_admissible()
-            .expect("CapUrn::merge produced an illegal cap declaration");
-        merged
+        Self::assemble(other.in_urn.clone(), other.out_urn.clone(), other.effect.clone(), tags)
+            .expect("CapUrn::merge produced an illegal cap declaration")
     }
 
     pub fn canonical(cap_urn: &str) -> Result<String, CapUrnError> {
@@ -2393,16 +2229,18 @@ mod tests {
         );
     }
 
-    // TEST043: Matching semantics - request wildcard matches specific cap value
+    // TEST043: A request saying "some ext" is not a pdf
+    //
+    // `ext` promises presence, not a value, so a pattern requiring ext=pdf does
+    // not accept it; reading it as "whatever the pattern wants" made `ext` and
+    // `ext=pdf` equivalent (../formal, Legacy.marker_equivalent_to_exact). The
+    // other way holds: "some ext" accepts a pdf.
     #[test]
     fn test043_matching_semantics_test4_request_has_wildcard() {
-        // Test 4: Request has wildcard
         let cap = CapUrn::from_string(&test_urn("generate;ext=pdf")).unwrap();
         let request = CapUrn::from_string(&test_urn("generate;ext=*")).unwrap();
-        assert!(
-            cap.accepts(&request),
-            "Test 4: Request wildcard should match"
-        );
+        assert!(!cap.accepts(&request), "a pdf pattern does not accept \"some ext\"");
+        assert!(request.accepts(&cap), "\"some ext\" accepts a pdf");
     }
 
     // TEST044: Matching semantics - cap wildcard matches specific request value
@@ -2468,7 +2306,13 @@ mod tests {
         );
     }
 
-    // TEST048: Matching semantics - wildcard direction matches anything
+    // TEST048: A handler whose output is `media:` promises no particular output
+    //
+    // A generic INPUT accepts any request input; a generic OUTPUT guarantees
+    // nothing, so it does not satisfy a request that needs a record — the same
+    // rule dispatch applies. Skipping the output axis for a `media:` handler
+    // made acceptance non-transitive (../formal,
+    // Legacy.accepts_skipping_top_output_not_transitive).
     #[test]
     fn test048_matching_semantics_test8_wildcard_direction_matches_anything() {
         let cap = CapUrn::from_string("cap:generate").unwrap();
@@ -2478,8 +2322,14 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            cap.accepts(&request),
-            "Test 8: Generic declared directions should accept a more specific matching request"
+            !cap.accepts(&request),
+            "a media:-output handler does not promise the record the request needs"
+        );
+        let any_output_request =
+            CapUrn::from_string("cap:ext=pdf;in=media:string;generate").unwrap();
+        assert!(
+            cap.accepts(&any_output_request),
+            "a generic handler accepts a more specific request that asks for no particular output"
         );
     }
 
@@ -2722,19 +2572,36 @@ fn test647_wildcard_009_invalid_out_spec_fails() {
     assert!(matches!(err, CapUrnError::InvalidOutSpec(_)));
 }
 
-// TEST648: Wildcard in/out match specific caps
+// TEST648: A generic handler accepts a more specific request only where it
+// promises enough
+//
+// `cap:raw` takes any input and promises no particular output. It accepts a
+// request that sends something specific; it does not accept one that needs
+// `media:text` out, since a `media:` output guarantees nothing (the rule
+// dispatch applies). Skipping the output axis for a `media:` handler made
+// acceptance non-transitive (../formal,
+// Legacy.accepts_skipping_top_output_not_transitive).
 #[test]
 fn test648_wildcard_010_wildcard_accepts_specific() {
     let wildcard = CapUrn::from_string("cap:raw").unwrap();
-    let specific = CapUrn::from_string("cap:out=media:text;raw").unwrap();
+    let specific_out = CapUrn::from_string("cap:out=media:text;raw").unwrap();
+    let specific_in = CapUrn::from_string("cap:in=media:text;raw").unwrap();
 
     assert!(
-        wildcard.accepts(&specific),
-        "Wildcard should accept specific cap"
+        !wildcard.accepts(&specific_out),
+        "a media:-output handler does not promise text out"
     );
     assert!(
-        specific.conforms_to(&wildcard),
-        "Specific should conform to wildcard"
+        specific_out.accepts(&wildcard),
+        "a handler producing text satisfies a request that asks for no particular output"
+    );
+    assert!(
+        wildcard.accepts(&specific_in),
+        "a handler taking any input accepts a request that sends text"
+    );
+    assert!(
+        specific_in.conforms_to(&wildcard),
+        "the text-sending request conforms to the generic handler"
     );
 }
 
@@ -3213,19 +3080,28 @@ mod tier_tests {
         assert!(candidate.is_dispatchable(&request));
     }
 
-    // TEST825: is_dispatchable — request with unconstrained input dispatches to specific candidate
-    // media: on the request input axis means "unconstrained" — vacuously true
+    // TEST825: a request that may send anything is served only by a candidate
+    // that accepts anything
+    //
+    // `media:` on a request's input is a type — "any A" — not a wildcard that
+    // switches the axis off. Read as "don't care", a PDF-only candidate served
+    // it, and dispatch stopped composing: the PDF-only cap served that request,
+    // which served an image request, which the PDF-only cap did not
+    // (../formal, Legacy.wildcard_input_not_transitive).
     #[test]
     fn test825_dispatch_request_unconstrained_input() {
-        let candidate =
+        let pdf_only =
             CapUrn::from_string(r#"cap:analyze;in="media:ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
+        let accepts_anything =
+            CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf-8;record""#).unwrap();
         let request =
             CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf-8;record""#).unwrap();
         assert!(
-            candidate.is_dispatchable(&request),
-            "Request in=media: is unconstrained — axis is vacuously true"
+            !pdf_only.is_dispatchable(&request),
+            "a PDF-only candidate cannot take whatever the request may send"
         );
+        assert!(accepts_anything.is_dispatchable(&request));
     }
 
     // TEST826: is_dispatchable — candidate output must satisfy request output (covariance)
@@ -3811,12 +3687,15 @@ mod tier_tests {
         // labels are spaced so a leading `!` is not interpreted as
         // an inner doc comment.
         let expected: [[bool; 7]; 7] = [
+            // Each form means the set of states it allows, on either side; an
+            // instance is accepted when its set lies inside the pattern's
+            // (tagged-urn formal, `tagMatch_iff_allows`).
             //          miss   ?x    x?=v   x      x!=v   x=v    !x
             /* miss */
-            [true, true, true, false, false, false, true],
-            /* ?x   */ [true, true, true, true, true, true, true],
-            /* x?=v */ [true, true, true, false, false, false, true],
-            /* x    */ [true, true, true, true, true, true, false],
+            [true, true, false, false, false, false, false],
+            /* ?x   */ [true, true, false, false, false, false, false],
+            /* x?=v */ [true, true, true, false, false, false, false],
+            /* x    */ [true, true, false, true, false, false, false],
             /* x!=v */ [true, true, true, true, true, false, false],
             /* x=v  */ [true, true, false, true, false, true, false],
             /* !x   */ [true, true, true, false, false, false, true],

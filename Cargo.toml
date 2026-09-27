@@ -1,4 +1,6 @@
 [dependencies]
+# The runtime the code generated from ../formal runs on (see lungo.toml).
+lungo = "=0.27.1270"
 anyhow = "1.0"
 async-trait = "0.1"
 atty = "0.2"
@@ -49,7 +51,7 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-version = "1.49.155"
+version = "1.51.204"
 
 [dependencies.tokio]
 features = ["full"]
@@ -104,4 +106,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.801.94"
+version = "1.802.96"

@@ -1,0 +1,122 @@
+[
+  {
+    "lean_name": "CapDAG.Effect",
+    "kind": "type",
+    "rust_path": "Effect",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap",
+    "kind": "type",
+    "rust_path": "exec::WfCap",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.accepts",
+    "kind": "function",
+    "rust_path": "exec::accepts",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.comparable",
+    "kind": "function",
+    "rust_path": "exec::comparable",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.dispatch",
+    "kind": "function",
+    "rust_path": "exec::dispatch",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.effectOk",
+    "kind": "function",
+    "rust_path": "exec::effect_ok",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.equivalent",
+    "kind": "function",
+    "rust_path": "exec::equivalent",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.rankingKey",
+    "kind": "function",
+    "rust_path": "exec::ranking_key",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.select",
+    "kind": "function",
+    "rust_path": "exec::select",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.specificity",
+    "kind": "function",
+    "rust_path": "exec::specificity",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Effect.unspecified",
+    "kind": "constructor",
+    "rust_path": "Effect::Unspecified",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Effect.declared",
+    "kind": "constructor",
+    "rust_path": "Effect::Declared",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Effect.none",
+    "kind": "constructor",
+    "rust_path": "Effect::None",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Effect.patch",
+    "kind": "constructor",
+    "rust_path": "Effect::Patch",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap.mk",
+    "kind": "constructor",
+    "rust_path": "exec::WfCap",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap.input",
+    "kind": "field",
+    "rust_path": "exec::WfCap.input",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap.output",
+    "kind": "field",
+    "rust_path": "exec::WfCap.output",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap.other",
+    "kind": "field",
+    "rust_path": "exec::WfCap.other",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfCap.effect",
+    "kind": "field",
+    "rust_path": "exec::WfCap.effect",
+    "renamed": false
+  },
+  {
+    "lean_name": "TaggedUrn.Exec.Wf",
+    "kind": "extern type",
+    "rust_path": "::tagged_urn::FormalUrn",
+    "renamed": true
+  }
+]

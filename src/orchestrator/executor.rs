@@ -64,7 +64,6 @@ const CAP_DISPATCH_READY_TIMEOUT: std::time::Duration = std::time::Duration::fro
 use crate::bifaci::local_socket::UnixStream;
 use crate::planner::StepToken;
 use tokio::io::{BufReader, BufWriter};
-use tokio::process::Command;
 
 /// Callback for reporting per-cap progress.
 /// Parameters: (progress 0.0–1.0, cap URN string, human-readable message)
@@ -704,7 +703,12 @@ impl CartridgeManager {
     }
 
     async fn discover_manifest(&self, bin_path: &Path) -> Result<CapManifest, ExecutionError> {
-        let mut child = Command::new(bin_path)
+        // Through the launcher, like every other start of a cartridge: a dev
+        // cartridge's entry may be a script, and Windows cannot execute one —
+        // this was the one start that still named the entry as the program,
+        // and a Python dev cartridge failed here with "%1 is not a valid Win32
+        // application". See `bifaci::launch`.
+        let mut child = crate::bifaci::launch::tokio_command(bin_path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()

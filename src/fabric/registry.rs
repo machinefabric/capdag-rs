@@ -417,12 +417,43 @@ fn is_busy(error: &std::io::Error) -> bool {
     )
 }
 
-/// `ENOTEMPTY` is 39 on Linux and 66 on macOS; `EBUSY` is 16 on both.
+/// `ENOTEMPTY` is 39 on Linux and 66 on macOS; `EBUSY` is 16 on both. These
+/// are raw OS numbers, so Windows needs its own: there 39 is "the disk is
+/// full" and the race below went unrecognised — `ERROR_DIR_NOT_EMPTY` (145)
+/// and `ERROR_SHARING_VIOLATION` (32, a peer holding an entry open to
+/// refresh it) are the same two faces.
 #[cfg(target_os = "macos")]
 const ENOTEMPTY: i32 = 66;
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(unix, not(target_os = "macos")))]
 const ENOTEMPTY: i32 = 39;
+#[cfg(unix)]
 const EBUSY: i32 = 16;
+#[cfg(windows)]
+const ENOTEMPTY: i32 = 145;
+#[cfg(windows)]
+const EBUSY: i32 = 32;
+
+/// Whether a removal refused with "access denied" was a PEER deleting the
+/// same entry.
+///
+/// Windows answers every open of a file that is being deleted — a second
+/// delete included — with `ERROR_ACCESS_DENIED` until the deleting process's
+/// last handle closes; Unix reports the same race as "not found". Access
+/// denied is also what a genuine permission problem says, so the entry is
+/// asked for afterwards: gone within a short bound means a peer took it,
+/// still there means it really cannot be removed and that is reported.
+fn deleted_by_a_peer(path: &Path, error: &std::io::Error) -> bool {
+    if !cfg!(windows) || error.kind() != std::io::ErrorKind::PermissionDenied {
+        return false;
+    }
+    for _ in 0..50 {
+        if fs::symlink_metadata(path).is_err() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    false
+}
 
 impl FabricRegistry {
     /// Create a new fabric registry pinned at the workspace-baked
@@ -2014,6 +2045,7 @@ impl FabricRegistry {
                     // there by a peer that has just refreshed them, so they
                     // are exactly what a refresh was for.
                     Err(error) if is_busy(&error) => {}
+                    Err(error) if deleted_by_a_peer(&path, &error) => {}
                     Err(error) => {
                         return Err(FabricRegistryError::CacheError(format!(
                             "Failed to remove {}: {error}",

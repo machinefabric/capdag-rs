@@ -1,0 +1,26 @@
+{
+  "build_key": "02cc80e924270a2bad4a4577aff0372ed4910bbcafe89abff6fcc9cbd0caed4a",
+  "lean_version": "4.34.1",
+  "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
+  "bir_version": 3,
+  "adapter_version": 1,
+  "lungo_version": "0.27.1270",
+  "runtime_abi": 1,
+  "worker_identity": "8cd88a3808c27bbbb3dd4d9d8d3ad7759eae143388cb71fa58dd8e9f9187387e",
+  "input_digests": {
+    "../../../tagged-urn/formal/TaggedUrn.lean": "51c451ad004b38af0d8212ffdfa8098e8e3de3831ad4850052301fac4963ed34",
+    "../../../tagged-urn/formal/TaggedUrn/Constraint.lean": "3cb5e897ae54194e4aa4723c780a1f89dac0c690214380466189354824757cce",
+    "../../../tagged-urn/formal/TaggedUrn/Exec.lean": "70a0fd49506097586de6dcbf7cb4f3df60d2ee66356004eacc46b5610f0b719d",
+    "../../../tagged-urn/formal/TaggedUrn/Sorted.lean": "d87ebb8b1c51c1355e1f36f58227d21c6c7e213e8dcccc3679736b921cd98a46",
+    "../../../tagged-urn/formal/TaggedUrn/Urn.lean": "f1d82390b05b93b96a46dddcf70033199035902036a77402ed232febd2af8559",
+    "../../../tagged-urn/formal/lakefile.toml": "339b574de2949b141e2fcd301464c4144dc3de55e179f91a30e4c2ac1898c0d1",
+    "CapDAG/Cap.lean": "37bef3ba3b14bc95b1b0bb0805c1575cd30c62ab381afc4ad06e84f281456e2e",
+    "CapDAG/Exec.lean": "7efefb0814c077c6f78ded67fc6fb70808938c52bba7ff8ae556ed2cbb988aed",
+    "CapDAG/Ranking.lean": "acf4c69f7466afd0c55e2e4c8369441c1a716b40af1bed4515620763382a085b",
+    "lake-manifest.json": "ea2ed5b7f5d211fd02164ec9f8020f22ca1e6c898e8ebfae8d8dcd2d43a7bca6",
+    "lakefile.lean": "ce835d8fc3c27922fb019d5516679a1a2a64e177cc19debc788e5823a4a7e24c",
+    "lean-toolchain": "7fc3c9ca176374a841abdad2bb4fa8c3c57363d50b728a512b513374610ae696"
+  },
+  "project": "../formal",
+  "link_directives": []
+}

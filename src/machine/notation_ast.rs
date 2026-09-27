@@ -1358,7 +1358,7 @@ fn push_cap_urn_properties(md: &mut String, cap_urn: &CapUrn) {
     // stable and reader-friendly. These are the non-
     // direction cap tags (the `CapUrn` parser strips `in` /
     // `out` out of `tags` and into separate fields).
-    for (key, value) in &cap_urn.tags {
+    for (key, value) in cap_urn.tags() {
         md.push_str(&format!("| {} | `{}` |\n", key, value));
     }
 }

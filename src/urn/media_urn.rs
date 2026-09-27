@@ -430,15 +430,15 @@ impl MediaUrn {
     ///   and admits no refinements. Reasons or labels belong on
     ///   the cap URN's non-directional tags or in cap args.
     pub fn new(urn: TaggedUrn) -> Result<Self, MediaUrnError> {
-        if urn.prefix != Self::PREFIX {
+        if urn.prefix() != Self::PREFIX {
             return Err(MediaUrnError::InvalidPrefix {
                 expected: Self::PREFIX.to_string(),
-                actual: urn.prefix.clone(),
+                actual: urn.prefix().to_string(),
             });
         }
-        if urn.tags.contains_key("void") && urn.tags.len() > 1 {
+        if urn.tags().contains_key("void") && urn.tags().len() > 1 {
             let extra_tags: Vec<String> = urn
-                .tags
+                .tags()
                 .keys()
                 .filter(|k| k.as_str() != "void")
                 .cloned()
@@ -528,10 +528,7 @@ impl MediaUrn {
     pub fn least_upper_bound(urns: &[MediaUrn]) -> MediaUrn {
         if urns.is_empty() {
             return MediaUrn::from_string("media:").unwrap_or_else(|_| {
-                MediaUrn(TaggedUrn {
-                    prefix: "media".to_string(),
-                    tags: std::collections::BTreeMap::new(),
-                })
+                MediaUrn(TaggedUrn::new("media".to_string(), std::collections::BTreeMap::new()))
             });
         }
         if urns.len() == 1 {
@@ -545,11 +542,11 @@ impl MediaUrn {
         let is_plain = |v: &str| !v.starts_with('?') && !v.starts_with('!');
 
         // Start with the first URN's tags; fold each subsequent URN in.
-        let mut common_tags = urns[0].0.tags.clone();
+        let mut common_tags = urns[0].0.tags().clone();
         for urn in &urns[1..] {
             let mut folded = std::collections::BTreeMap::new();
             for (key, value) in &common_tags {
-                match urn.0.tags.get(key) {
+                match urn.0.tags().get(key) {
                     Some(other) if other == value => {
                         folded.insert(key.clone(), value.clone());
                     }
@@ -564,10 +561,7 @@ impl MediaUrn {
             common_tags = folded;
         }
 
-        MediaUrn(TaggedUrn {
-            prefix: "media".to_string(),
-            tags: common_tags,
-        })
+        MediaUrn(TaggedUrn::new("media".to_string(), common_tags))
     }
 
     /// Serialize just the tags portion (without "media:" prefix)
@@ -616,7 +610,8 @@ impl MediaUrn {
 
     /// Get the specificity of this media URN
     ///
-    /// Specificity is the count of non-wildcard tags.
+    /// The sum of each tag's graded score (?x=0, x?=v=1, x=2, x!=v=3,
+    /// x=v=4, !x=5), as the tagged URN scores it.
     pub fn specificity(&self) -> usize {
         self.0.specificity()
     }
@@ -668,7 +663,7 @@ impl MediaUrn {
     /// Check if a marker tag (tag with wildcard/no value) is present.
     /// A marker tag is stored as key="*" in the tagged URN.
     pub fn has_marker_tag(&self, tag_name: &str) -> bool {
-        self.0.tags.get(tag_name).map_or(false, |v| v == "*")
+        self.0.tags().get(tag_name).map_or(false, |v| v == "*")
     }
 
     /// Check if this value's content format is JSON.
@@ -731,7 +726,7 @@ impl MediaUrn {
     /// meaningful data on that side. It is NOT "invalid" or "absent".
     pub fn is_void(&self) -> bool {
         // Check for "void" marker tag
-        self.0.tags.contains_key("void")
+        self.0.tags().contains_key("void")
     }
 
     /// Check if this is the **top** media URN — the universal
@@ -741,7 +736,7 @@ impl MediaUrn {
     /// which is the unit value (no data); a top-typed slot is `A` for
     /// any `A`, a void-typed slot is `()`.
     pub fn is_top(&self) -> bool {
-        self.0.tags.is_empty()
+        self.0.tags().is_empty()
     }
 
     /// Check if this represents a file path type.

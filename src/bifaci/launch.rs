@@ -184,4 +184,45 @@ mod tests {
             "the entry must precede its own arguments: {argv:?}"
         );
     }
+
+    /// TEST12165: nothing starts a process except through here.
+    ///
+    /// Starting a cartridge happened in four places, each writing its own
+    /// `Command::new(entry)`. Three were routed through this module; the
+    /// orchestrator's manifest discovery was not, and a Python dev cartridge
+    /// failed there on Windows with "%1 is not a valid Win32 application" while
+    /// every other start of it worked. A fifth would be missed the same way, so
+    /// the source is read for one.
+    #[test]
+    fn test12165_every_process_start_goes_through_the_launcher() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut found = Vec::new();
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("reading src") {
+                let path = entry.expect("an entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs")
+                    || path.ends_with("launch.rs")
+                {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("reading a source file");
+                for (number, line) in text.lines().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    if code.contains("Command::new(") {
+                        found.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "a process is started outside bifaci::launch, so a script entry \
+             cannot run there on Windows: {found:?}"
+        );
+    }
 }
