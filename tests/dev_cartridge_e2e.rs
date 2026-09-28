@@ -47,19 +47,6 @@ fn capdag_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Put the in-repo Python mirror on PYTHONPATH so the scaffolded cartridge
-/// imports the LIVE `capdag` source.
-///
-/// It must be named explicitly: `run_capdag` overrides HOME, which takes the
-/// user site-packages directory (and any editable install living there) out of
-/// the child's sys.path. `tagged_urn`, `ops` and `cbor2` are NOT listed — each
-/// lives in its own repository now and is consumed as a published package
-/// (`tagged-urn`, `opsx-py`) from the interpreter's real site-packages, so a
-/// missing install fails loudly.
-fn pythonpath() -> String {
-    capdag_root().join("capdag-py/src").display().to_string()
-}
-
 /// Spawn a mock fabric HTTP server on an ephemeral port that returns an empty
 /// manifest for every request. Returns the base URL. The listener thread is
 /// detached and lives for the rest of the process.
@@ -93,8 +80,16 @@ fn spawn_mock_fabric() -> String {
     format!("http://{addr}")
 }
 
-/// True if `python3` on PATH can import the cartridge runtime dependencies.
-fn python_runtime_available(pythonpath: &str) -> bool {
+/// True if the interpreter the runtime starts a cartridge with can import the
+/// cartridge's dependencies.
+///
+/// All of them from that interpreter's own site-packages, and nothing from a
+/// source tree: capdag-py compiles the program generated from capdag's proved
+/// model when it is installed, so its `src/` cannot be imported by path. The
+/// workspace's `requirements.txt` installs capdag-py and tagged-urn-py editable,
+/// which builds that program and keeps imports reading the LIVE source. An
+/// inherited PYTHONPATH is removed so it cannot shadow the installation.
+fn python_runtime_available() -> bool {
     // The interpreter the runtime will actually start the cartridge with, asked
     // of the runtime. This named `python3`, which a Windows install does not
     // have — it ships `python.exe` — so the check failed there while the
@@ -102,7 +97,7 @@ fn python_runtime_available(pythonpath: &str) -> bool {
     let (interpreter, _) = capdag::bifaci::launch::launcher(Path::new("cartridge.py"));
     Command::new(interpreter)
         .args(["-c", "import capdag, cbor2, tagged_urn; from ops import Op"])
-        .env("PYTHONPATH", pythonpath)
+        .env_remove("PYTHONPATH")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -116,14 +111,13 @@ fn python_runtime_available(pythonpath: &str) -> bool {
 fn run_capdag(
     home: &Path,
     fabric: &str,
-    pythonpath: &str,
     args: &[&str],
     stdin: Option<&str>,
 ) -> (String, bool, String) {
     let mut cmd = Command::new(CAPDAG_BIN);
     cmd.args(args)
         .env("HOME", home)
-        .env("PYTHONPATH", pythonpath)
+        .env_remove("PYTHONPATH")
         .env("CDG_FABRIC_REGISTRY_URL", fabric)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -155,12 +149,11 @@ fn run_capdag(
 // observe the changed behavior.
 #[test]
 fn test8110_dev_cartridge_create_install_run_update() {
-    let pp = pythonpath();
     assert!(
-        python_runtime_available(&pp),
-        "this e2e requires a Python runtime with capdag + cbor2 + ops importable. \
-         `ops` comes from the published `opsx-py` package: pip install opsx-py. \
-         PYTHONPATH={pp}"
+        python_runtime_available(),
+        "this e2e requires the interpreter the runtime launches cartridges with to have \
+         capdag, tagged-urn, cbor2 and ops installed: install the workspace's \
+         requirements.txt with it (`python -m pip install -r requirements.txt`)"
     );
     let fabric = spawn_mock_fabric();
 
@@ -190,7 +183,6 @@ fn test8110_dev_cartridge_create_install_run_update() {
     let (proj_out, ok, err) = run_capdag(
         &home,
         &fabric,
-        &pp,
         &["new", name, "--python", "-o", projects.to_str().unwrap()],
         None,
     );
@@ -205,7 +197,6 @@ fn test8110_dev_cartridge_create_install_run_update() {
     let (_, ok, err) = run_capdag(
         &home,
         &fabric,
-        &pp,
         &["dev-install", proj.to_str().unwrap()],
         None,
     );
@@ -214,20 +205,19 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // 3. Run the custom cap through the capdag host — it is NOT in the fabric,
     //    so this exercises the local-manifest dev path end to end, including the
     //    peer call out to the classifier.
-    let (out, ok, err) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("I love this good great"));
+    let (out, ok, err) = run_capdag(&home, &fabric, &run_tagger, Some("I love this good great"));
     assert!(ok, "run failed: {err}");
     assert_eq!(out, "positive", "positive input; stderr:\n{err}");
 
     let (out, _, err) = run_capdag(
         &home,
         &fabric,
-        &pp,
         &run_tagger,
         Some("awful terrible bad hate"),
     );
     assert_eq!(out, "negative", "negative input; stderr:\n{err}");
 
-    let (out, _, _) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("the sky is blue"));
+    let (out, _, _) = run_capdag(&home, &fabric, &run_tagger, Some("the sky is blue"));
     assert_eq!(out, "neutral", "neutral input before the edit");
 
     // 4. Edit the cartridge — shout the label instead of returning it plain —
@@ -249,14 +239,13 @@ fn test8110_dev_cartridge_create_install_run_update() {
     let (_, ok, err) = run_capdag(
         &home,
         &fabric,
-        &pp,
         &["dev-install", proj.to_str().unwrap()],
         None,
     );
     assert!(ok, "update `dev-install` failed: {err}");
 
     // 5. The same input now renders differently — the update took effect.
-    let (out, _, err) = run_capdag(&home, &fabric, &pp, &run_tagger, Some("the sky is blue"));
+    let (out, _, err) = run_capdag(&home, &fabric, &run_tagger, Some("the sky is blue"));
     assert_eq!(
         out, "NEUTRAL",
         "update did not take effect; stderr:\n{err}"
