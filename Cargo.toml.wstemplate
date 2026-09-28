@@ -65,7 +65,7 @@ version = "={{ projects.tagged_urn_rs.latest_remote_version }}"
 # MFR_LOCAL_LIBS: the working copy, as above.
 path = "{{ projects.lungo_rs.path_from_here }}/crates/lungo"
 {%- else %}
-version = "={{ projects.lungo.version }}"
+version = "={{ projects.lungo_rs.latest_remote_version }}"
 {%- endif %}
 
 [dependencies.tokio]
