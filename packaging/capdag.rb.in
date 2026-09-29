@@ -21,10 +21,11 @@ class Capdag < Formula
   end
 
   def install
-    # The archive extracts to @{bundle_dir}/{@{package},bundled-cartridges}. Install the whole
-    # bundle into libexec and expose only a symlink on PATH — @{package} resolves its
+    # The archive extracts to @{bundle_dir}/{@{package},bundled-cartridges}, and Homebrew runs
+    # this from inside that single top-level directory: what is here is the bundle. Install
+    # the whole of it into libexec and expose only a symlink on PATH — @{package} resolves its
     # bundled-cartridges/ tree relative to the symlink's canonicalized real path.
-    libexec.install Dir["@{bundle_dir}/*"]
+    libexec.install Dir["*"]
     bin.install_symlink libexec/"@{package}"
   end
 
