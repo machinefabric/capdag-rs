@@ -6,9 +6,11 @@
 # packages it and wires the /usr/bin/capdag launcher symlink. There is no compile
 # step here — the binary is built + baked-hash-staged by the workspace bundle step.
 
-# Prebuilt binary: no debuginfo extraction, no auto-generated deps.
+# Prebuilt binary: no debuginfo extraction, no auto-generated deps, and none of rpm's
+# post-install processing. That processing strips every binary in the payload, and the
+# bundled cartridges are verified by their baked hashes: a stripped one is refused.
 %global debug_package %{nil}
-%global __brp_check_rpaths %{nil}
+%global __os_install_post %{nil}
 AutoReqProv: no
 
 Name:           capdag
