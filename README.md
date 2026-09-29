@@ -13,34 +13,34 @@ this repository.
 
 ### Learn cartridge development
 
-[Build and run a cartridge](https://github.com/machinefabric/capdag/blob/main/docs/18.2-getting-started-cartridge-development.md)
+[Build and run a cartridge](https://capdag.com/docs/18.2-getting-started-cartridge-development/)
 is a guided create, install, run, and edit journey using the canonical starter
 projects.
 
 ### Complete a task
 
-- [Develop a cartridge](https://github.com/machinefabric/capdag/blob/main/docs/18.2-getting-started-cartridge-development.md)
-- [Run one capability or a machine](https://github.com/machinefabric/capdag/blob/main/docs/18.1-cli-reference.md)
-- [Contribute capability and media definitions](https://github.com/machinefabric/capdag/blob/main/docs/99-contributing.md)
+- [Develop a cartridge](https://capdag.com/docs/18.2-getting-started-cartridge-development/)
+- [Run one capability or a machine](https://capdag.com/docs/18.1-cli-reference/)
+- [Contribute capability and media definitions](https://capdag.com/docs/99-contributing/)
 
 ### Look up exact behavior
 
-- [Specification map and terminology](https://github.com/machinefabric/capdag/blob/main/docs/01-overview.md)
-- [Tagged URN domain](https://github.com/machinefabric/capdag/blob/main/docs/03-tagged-urn-domain.md)
-- [Capability URN structure](https://github.com/machinefabric/capdag/blob/main/docs/06-cap-urn-structure.md)
-- [Dispatch](https://github.com/machinefabric/capdag/blob/main/docs/07-dispatch.md)
-- [Machine notation](https://github.com/machinefabric/capdag/blob/main/docs/09-machine-notation.md)
-- [Bifaci protocol](https://github.com/machinefabric/capdag/blob/main/docs/12.1-architecture.md)
-- [Cartridge runtime](https://github.com/machinefabric/capdag/blob/main/docs/13.1-cartridge-runtime.md)
-- [Planner and execution](https://github.com/machinefabric/capdag/blob/main/docs/15.4-planner.md)
-- [`capdag` CLI](https://github.com/machinefabric/capdag/blob/main/docs/18.1-cli-reference.md)
+- [Specification map and terminology](https://capdag.com/docs/01-overview/)
+- [Tagged URN domain](https://capdag.com/docs/03-tagged-urn-domain/)
+- [Capability URN structure](https://capdag.com/docs/06-cap-urn-structure/)
+- [Dispatch](https://capdag.com/docs/07-dispatch/)
+- [Machine notation](https://capdag.com/docs/09-machine-notation/)
+- [Bifaci protocol](https://capdag.com/docs/12.1-architecture/)
+- [Cartridge runtime](https://capdag.com/docs/13.1-cartridge-runtime/)
+- [Planner and execution](https://capdag.com/docs/15.4-planner/)
+- [`capdag` CLI](https://capdag.com/docs/18.1-cli-reference/)
 
 ### Understand the design
 
-- [Formal foundations](https://github.com/machinefabric/capdag/blob/main/docs/02-formal-foundations.md)
-- [Specificity and ranking](https://github.com/machinefabric/capdag/blob/main/docs/05-specificity.md)
-- [Relay topology](https://github.com/machinefabric/capdag/blob/main/docs/14.3-relay-topology.md)
-- [Rust and Swift implementation differences](https://github.com/machinefabric/capdag/blob/main/docs/16.5-rust-vs-swift.md)
+- [Formal foundations](https://capdag.com/docs/02-formal-foundations/)
+- [Specificity and ranking](https://capdag.com/docs/05-specificity/)
+- [Relay topology](https://capdag.com/docs/14.3-relay-topology/)
+- [Rust and Swift implementation differences](https://capdag.com/docs/16.5-rust-vs-swift/)
 
 ## What CapDAG provides
 
@@ -101,7 +101,7 @@ inputs; `build.rs` refuses an ambiguous build instead of selecting defaults.
   is no compatibility decoder for earlier bifaci wire versions.
 
 The normative details and conformance conditions are in the
-[specification](https://github.com/machinefabric/capdag/blob/main/docs/01-overview.md).
+[specification](https://capdag.com/docs/01-overview/).
 
 ## License
 
