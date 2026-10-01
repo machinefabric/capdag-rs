@@ -1,10 +1,10 @@
 {
-  "build_key": "5b42d82884861902a113e62fead6c9ab4633a667b5b573daab72e5f6c058aa57",
+  "build_key": "40d2b984da82263bd7046977cd065b46386d2e87cd3c8191a9c10ac5a4d1aed6",
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
   "adapter_version": 1,
-  "lungo_version": "1.77.3244",
+  "lungo_version": "1.78.3254",
   "runtime_abi": 1,
   "worker_identity": "0587064dd2f5b65f8d77fefae9b7a41737221883cc74030f7cd7469534700252",
   "input_digests": {
@@ -24,9 +24,9 @@
   "project": "formal",
   "link_directives": [],
   "output_digests": {
-    "capdagFormal.rs": "f7560f52b971bdefb9c98c6d8adf7f6d87eb47ed1d5e0f8be0ab0a5aaf2b0e29",
+    "capdagFormal.rs": "169a55b36dde4bb6d0fafe8791839e800adb32f2d02c63e5552779c6d8baba2a",
     "externs.json": "e050c78f5ca839991ed9f0419539bf271acbd9bfbd76afd6a58c73f333591fb9",
-    "manifest.json": "a86e404d35c77f5793ed5f9aa007274b0c607e91baad27efdba1be57719b2e08",
+    "manifest.json": "b063aa8fc7b61f7933415df4922d95666e0aa7026cf0bb90803e417d4235bdec",
     "modules/CapDAG-Cap.rs": "81a7c12d5a4867e69e503a53f5eff03ac097840d05332ee9e98d7927a5485236",
     "modules/CapDAG-Exec.rs": "911c335886ae820b008bc49a2f028ee5d51173708117b5538de01703757c59ac",
     "modules/CapDAG-Ranking.rs": "6398c7987c22e50e6bf8d7993c0af6d918a7bc915b3637198ba759b3e2b7ec3b",
