@@ -237,6 +237,7 @@ fn build_testcartridge() {
     eprintln!("[TestcartridgeTest]   Target dir: {:?}", target_dir);
     eprintln!("[TestcartridgeTest]   Running: cargo build --release");
 
+    support::resolve_this_capdag(&cart_dir, &target_dir, "TestcartridgeTest");
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")

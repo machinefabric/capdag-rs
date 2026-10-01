@@ -14,6 +14,12 @@ use std::path::Path;
 ///
 /// So a capdag taken from a git source is patched to this crate. A manifest
 /// that already names a path has nothing to patch.
+///
+/// The patch alone is not enough where the cartridge has been built before:
+/// its `Cargo.lock` holds the released capdag, and cargo keeps a locked entry
+/// over a patch it has not resolved — it built the released one again and said
+/// only `patch … was not used in the crate graph`. [`resolve_this_capdag`]
+/// moves that one entry first.
 pub fn against_this_capdag(cartridge_dir: &Path) -> Vec<String> {
     let manifest_path = cartridge_dir.join("Cargo.toml");
     let manifest = std::fs::read_to_string(&manifest_path)
@@ -25,6 +31,32 @@ pub fn against_this_capdag(cartridge_dir: &Path) -> Vec<String> {
         "--config".to_string(),
         format!("patch.'{source}'.capdag.path='{}'", env!("CARGO_MANIFEST_DIR")),
     ]
+}
+
+/// Resolve the cartridge's `capdag` to this crate before it is built: `cargo
+/// update capdag` under the same patch, which moves that one lock entry and
+/// leaves every other dependency where the lock has it. Nothing is run for a
+/// manifest that names a path. `tag` prefixes what is printed.
+pub fn resolve_this_capdag(cartridge_dir: &Path, target_dir: &Path, tag: &str) {
+    let patch = against_this_capdag(cartridge_dir);
+    if patch.is_empty() {
+        return;
+    }
+    let output = std::process::Command::new("cargo")
+        .args(["update", "capdag"])
+        .args(&patch)
+        .env("CARGO_TARGET_DIR", target_dir)
+        .current_dir(cartridge_dir)
+        .output()
+        .expect("Failed to run cargo update for the test cartridge");
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        eprintln!("[{tag}]   {line}");
+    }
+    assert!(
+        output.status.success(),
+        "could not resolve the test cartridge against the capdag under test (exit code: {:?})",
+        output.status.code()
+    );
 }
 
 /// The git URL a manifest takes `capdag` from, if it takes it from one.

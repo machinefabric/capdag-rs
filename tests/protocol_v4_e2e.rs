@@ -287,6 +287,7 @@ fn build_testcartridge() {
     eprintln!("[V4E2ETest]   Directory: {:?}", cart_dir);
     eprintln!("[V4E2ETest]   Target dir: {:?}", target_dir);
 
+    support::resolve_this_capdag(&cart_dir, &target_dir, "V4E2ETest");
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
