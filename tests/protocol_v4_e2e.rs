@@ -44,6 +44,8 @@
 //!   incremental `TerminalOutput` consumer / interop harness. The
 //!   `test-unbounded-ticker` cap this needs is registered in testcartridge.
 
+mod support;
+
 use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
 use capdag::orchestrator::{
     execute_dag, parse_machine_to_cap_dag, CapProgressFn, CartridgeManager, ExecutionContext,
@@ -288,6 +290,7 @@ fn build_testcartridge() {
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
+        .args(support::against_this_capdag(&cart_dir))
         .env("CARGO_TARGET_DIR", &target_dir)
         .current_dir(&cart_dir)
         .output()

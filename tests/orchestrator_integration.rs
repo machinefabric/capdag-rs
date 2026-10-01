@@ -9,6 +9,8 @@
 //! testcartridge provides simple, predictable test caps without heavy dependencies
 //! The testcartridge binary will be auto-built if missing or outdated
 
+mod support;
+
 use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
 use capdag::orchestrator::{
     execute_dag, parse_machine_to_cap_dag, NodeData, ParseOrchestrationError,
@@ -238,6 +240,7 @@ fn build_testcartridge() {
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
+        .args(support::against_this_capdag(&cart_dir))
         .env("CARGO_TARGET_DIR", &target_dir)
         .current_dir(&cart_dir)
         .output()
