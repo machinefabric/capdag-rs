@@ -63,6 +63,7 @@ pub use ops_rs::failure;
 pub use ops_rs::failure::AttributionClass;
 
 // URN types
+pub use urn::cap_query::*;
 pub use urn::cap_urn::*;
 pub use urn::media_urn::*;
 

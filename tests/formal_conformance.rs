@@ -1,13 +1,16 @@
-//! TEST12166: matching, specificity, dispatch and acceptance are the proved model's.
+//! TEST12166: every answer about media and caps is the proved model's.
 //!
 //! The decisions are generated from `../formal`, so this does not test the
 //! rules — those are proved — but everything around them: the media and cap
-//! URN parsers, the stored-value encoding, and how a `CapUrn` hands itself to
-//! the generated code. Every row of `../formal/conformance.json` (written by
-//! the model, `lake exe conformance`) is parsed here and must get the model's
-//! verdict. The same table runs in every mirror.
+//! URN parsers, the stored-value encoding, and how a `CapUrn` or a `CapQuery`
+//! hands itself to the generated code. Every row of `../formal/conformance.json`
+//! (written by the model, `lake exe conformance`) is parsed here and must get
+//! the model's verdict: between media, the guarantee, the possibility and the
+//! complete reading; between caps, serving, could-serve and the grade of a
+//! request, fitting a pattern, being the same cap, and flowing into one
+//! another. The same table runs in every mirror.
 
-use capdag::{CapUrn, MediaUrn};
+use capdag::{CapQuery, CapUrn, MatchGrade, MediaUrn};
 
 #[test]
 fn test12166_the_implementation_is_the_proved_model() {
@@ -26,6 +29,15 @@ fn test12166_the_implementation_is_the_proved_model() {
         if got != r["refines"].as_bool().unwrap() {
             wrong.push(format!("{a} ⪯ {b}: model {}, got {got}", r["refines"]));
         }
+        for (name, got) in [
+            ("meets", a.meets(&b).unwrap()),
+            ("satisfies", a.satisfies(&b).unwrap()),
+            ("may_satisfy", a.may_satisfy(&b).unwrap()),
+        ] {
+            if got != r[name].as_bool().unwrap() {
+                wrong.push(format!("{a} {name} {b}: model {}, got {got}", r[name]));
+            }
+        }
     }
     let scores = table["scores"].as_array().unwrap();
     for r in scores {
@@ -39,17 +51,34 @@ fn test12166_the_implementation_is_the_proved_model() {
     for r in dispatch {
         let c = CapUrn::from_string(&text(&r["candidate"])).unwrap();
         let q = CapUrn::from_string(&text(&r["request"])).unwrap();
-        let got = c.is_dispatchable(&q);
-        if got != r["dispatch"].as_bool().unwrap() {
-            wrong.push(format!("{c} serves {q}: model {}, got {got}", r["dispatch"]));
+        let request = CapQuery::from_request(&q);
+        let grade = match request.grade(&c) {
+            MatchGrade::Exact => "exact",
+            MatchGrade::Guaranteed => "guaranteed",
+            MatchGrade::Possible => "possible",
+            MatchGrade::None => "none",
+        };
+        if grade != r["grade"].as_str().unwrap() {
+            wrong.push(format!("grade of {c} for {q}: model {}, got {grade}", r["grade"]));
         }
-        let got = c.accepts(&q);
-        if got != r["accepts"].as_bool().unwrap() {
-            wrong.push(format!("{c} accepts {q}: model {}, got {got}", r["accepts"]));
+        for (name, got) in [
+            ("dispatch", c.is_dispatchable(&q)),
+            ("dispatch", request.admits(&c)),
+            ("may_dispatch", c.may_dispatch(&q)),
+            ("may_dispatch", request.may_admit(&c)),
+            ("accepts", c.accepts(&q)),
+            ("accepts", CapQuery::from_pattern(&c).admits(&q)),
+            ("accepts", q.conforms_to(&c)),
+            ("equivalent", c.is_equivalent(&q)),
+            ("flows", c.flows_into(&q)),
+        ] {
+            if got != r[name].as_bool().unwrap() {
+                wrong.push(format!("{name}: {c} / {q}: model {}, got {got}", r[name]));
+            }
         }
     }
     assert!(
-        refines.len() > 4000 && dispatch.len() > 20000,
+        refines.len() > 4000 && dispatch.len() > 30000,
         "the table is the full one"
     );
     assert!(

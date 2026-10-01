@@ -23,6 +23,92 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_dmake(x_1: Obj, x_2: Obj) -> O
     }
 }
 
+// Lean: TaggedUrn.Exec.meets
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:66:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_dmeets(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+    rt::lean_inc_ref(x_3);
+    let x_4: Obj = rt::lean_ctor_get(x_1, 1);
+    rt::lean_inc(x_4);
+    rt::lean_dec_ref(x_1);
+    let x_5: Obj = rt::lean_ctor_get(x_2, 0);
+    rt::lean_inc_ref(x_5);
+    let x_6: Obj = rt::lean_ctor_get(x_2, 1);
+    rt::lean_inc(x_6);
+    rt::lean_dec_ref(x_2);
+    let x_7: u8 = l_String_ddecEq(x_3, x_5);
+    rt::lean_dec_ref(x_5);
+    rt::lean_dec_ref(x_3);
+    match x_7 {
+        0 => {
+            rt::lean_dec(x_6);
+            rt::lean_dec(x_4);
+            return x_7;
+        }
+        _ => {
+            let x_8: Obj = l_TaggedUrn_dExec_dmeets_d__closed__0();
+            let x_9: u8 = l_TaggedUrn_dmergeWith(x_8, x_4, x_6);
+            return x_9;
+        }
+    }
+}
+
+// Lean: TaggedUrn.Exec.meets._closed_0
+// Compiled from: TaggedUrn.Exec.meets
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:66:1
+static C_l_TaggedUrn_dExec_dmeets_d__closed__0: rt::LazyObj = rt::LazyObj::new();
+unsafe fn l_TaggedUrn_dExec_dmeets_d__closed__0__init() -> Obj {
+    let x_1: Obj = rt::lean_alloc_closure(l_TaggedUrn_dtagMeets_d__boxed as *const (), 2, 0);
+    return x_1;
+}
+#[inline]
+pub(crate) unsafe fn l_TaggedUrn_dExec_dmeets_d__closed__0() -> Obj {
+    C_l_TaggedUrn_dExec_dmeets_d__closed__0.get(l_TaggedUrn_dExec_dmeets_d__closed__0__init)
+}
+
+// Lean: TaggedUrn.Exec.meetsClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:89:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_dmeetsClosed(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+    rt::lean_inc_ref(x_3);
+    let x_4: Obj = rt::lean_ctor_get(x_1, 1);
+    rt::lean_inc(x_4);
+    rt::lean_dec_ref(x_1);
+    let x_5: Obj = rt::lean_ctor_get(x_2, 0);
+    rt::lean_inc_ref(x_5);
+    let x_6: Obj = rt::lean_ctor_get(x_2, 1);
+    rt::lean_inc(x_6);
+    rt::lean_dec_ref(x_2);
+    let x_7: u8 = l_String_ddecEq(x_3, x_5);
+    rt::lean_dec_ref(x_5);
+    rt::lean_dec_ref(x_3);
+    match x_7 {
+        0 => {
+            rt::lean_dec(x_6);
+            rt::lean_dec(x_4);
+            return x_7;
+        }
+        _ => {
+            let x_8: Obj = l_TaggedUrn_dExec_dmeetsClosed_d__closed__0();
+            let x_9: u8 = l_TaggedUrn_dmergeWith(x_8, x_4, x_6);
+            return x_9;
+        }
+    }
+}
+
+// Lean: TaggedUrn.Exec.meetsClosed._closed_0
+// Compiled from: TaggedUrn.Exec.meetsClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:89:1
+static C_l_TaggedUrn_dExec_dmeetsClosed_d__closed__0: rt::LazyObj = rt::LazyObj::new();
+unsafe fn l_TaggedUrn_dExec_dmeetsClosed_d__closed__0__init() -> Obj {
+    let x_1: Obj = rt::lean_alloc_closure(l_TaggedUrn_dtagMeetsClosed_d__boxed as *const (), 2, 0);
+    return x_1;
+}
+#[inline]
+pub(crate) unsafe fn l_TaggedUrn_dExec_dmeetsClosed_d__closed__0() -> Obj {
+    C_l_TaggedUrn_dExec_dmeetsClosed_d__closed__0.get(l_TaggedUrn_dExec_dmeetsClosed_d__closed__0__init)
+}
+
 // Lean: TaggedUrn.Exec.refines
 // Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:38:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_drefines(x_1: Obj, x_2: Obj) -> u8 {
@@ -40,5 +126,48 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_drefines(x_1: Obj, x_2: Obj) -
             return x_8;
         }
     }
+}
+
+// Lean: TaggedUrn.Exec.refinesClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:79:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dExec_drefinesClosed(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+    rt::lean_inc_ref(x_3);
+    let x_4: Obj = rt::lean_ctor_get(x_1, 1);
+    rt::lean_inc(x_4);
+    rt::lean_dec_ref(x_1);
+    let x_5: Obj = rt::lean_ctor_get(x_2, 0);
+    rt::lean_inc_ref(x_5);
+    let x_6: Obj = rt::lean_ctor_get(x_2, 1);
+    rt::lean_inc(x_6);
+    rt::lean_dec_ref(x_2);
+    let x_7: u8 = l_String_ddecEq(x_3, x_5);
+    rt::lean_dec_ref(x_5);
+    rt::lean_dec_ref(x_3);
+    match x_7 {
+        0 => {
+            rt::lean_dec(x_6);
+            rt::lean_dec(x_4);
+            return x_7;
+        }
+        _ => {
+            let x_8: Obj = l_TaggedUrn_dExec_drefinesClosed_d__closed__0();
+            let x_9: u8 = l_TaggedUrn_dmergeWith(x_8, x_4, x_6);
+            return x_9;
+        }
+    }
+}
+
+// Lean: TaggedUrn.Exec.refinesClosed._closed_0
+// Compiled from: TaggedUrn.Exec.refinesClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:79:1
+static C_l_TaggedUrn_dExec_drefinesClosed_d__closed__0: rt::LazyObj = rt::LazyObj::new();
+unsafe fn l_TaggedUrn_dExec_drefinesClosed_d__closed__0__init() -> Obj {
+    let x_1: Obj = rt::lean_alloc_closure(l_TaggedUrn_dtagMatchClosed_d__boxed as *const (), 2, 0);
+    return x_1;
+}
+#[inline]
+pub(crate) unsafe fn l_TaggedUrn_dExec_drefinesClosed_d__closed__0() -> Obj {
+    C_l_TaggedUrn_dExec_drefinesClosed_d__closed__0.get(l_TaggedUrn_dExec_drefinesClosed_d__closed__0__init)
 }
 

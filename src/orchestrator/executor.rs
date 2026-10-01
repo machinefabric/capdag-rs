@@ -3331,8 +3331,12 @@ async fn forward_frames(
                                     prev_cap_urn, produced_urn_str, e
                                 ))
                             })?;
+                        // What was produced is a value, complete in its tags; the
+                        // arg it feeds is a declared type. So it is asked to
+                        // SATISFY the type, not to refine it as one type refines
+                        // another.
                         let conforms =
-                            produced_urn.conforms_to(&target_arg_urn).map_err(|e| {
+                            produced_urn.satisfies(&target_arg_urn).map_err(|e| {
                                 ExecutionError::HostError(format!(
                                     "pipelined forward: cap '{}' output URN '{}' could not \
                                      be compared to downstream arg URN '{}': {}",

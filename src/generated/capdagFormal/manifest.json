@@ -2,7 +2,7 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.78.3254",
+  "generator_version": "1.81.24",
   "runtime_abi": 1,
   "modules": [
     "Init.Prelude",
@@ -660,17 +660,19 @@
     "TaggedUrn.Exec",
     "TaggedUrn",
     "CapDAG.Cap",
+    "CapDAG.Query",
     "CapDAG.Ranking",
+    "CapDAG.Route",
     "CapDAG.Exec"
   ],
-  "declarations": 435,
+  "declarations": 642,
   "exports": [
     {
       "lean_name": "CapDAG.Exec.accepts",
       "module": "CapDAG.Exec",
       "rust_path": "exec::accepts",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:48:1",
+      "source": "formal/CapDAG/Exec.lean:208:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -692,7 +694,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::comparable",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:89:1",
+      "source": "formal/CapDAG/Exec.lean:254:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -714,7 +716,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::dispatch",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:35:1",
+      "source": "formal/CapDAG/Exec.lean:190:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -736,7 +738,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::effect_ok",
       "lean_type": "CapDAG.Effect → CapDAG.Effect → Bool",
-      "source": "formal/CapDAG/Exec.lean:28:1",
+      "source": "formal/CapDAG/Exec.lean:29:1",
       "trust": {
         "axioms": [],
         "depends_on_sorry": false,
@@ -752,7 +754,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::equivalent",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:88:1",
+      "source": "formal/CapDAG/Exec.lean:253:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -770,11 +772,237 @@
       }
     },
     {
+      "lean_name": "CapDAG.Exec.flows",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::flows",
+      "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
+      "source": "formal/CapDAG/Exec.lean:277:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.mayDispatch",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::may_dispatch",
+      "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
+      "source": "formal/CapDAG/Exec.lean:199:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.mayFlow",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::may_flow",
+      "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
+      "source": "formal/CapDAG/Exec.lean:283:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryAdmits",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_admits",
+      "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
+      "source": "formal/CapDAG/Exec.lean:134:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryBetween",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_between",
+      "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
+      "source": "formal/CapDAG/Exec.lean:96:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryConsuming",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_consuming",
+      "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
+      "source": "formal/CapDAG/Exec.lean:92:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryGrade",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_grade",
+      "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → CapDAG.Grade",
+      "source": "formal/CapDAG/Exec.lean:170:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryMayAdmit",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_may_admit",
+      "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
+      "source": "formal/CapDAG/Exec.lean:146:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryOfPattern",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_of_pattern",
+      "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
+      "source": "formal/CapDAG/Exec.lean:80:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryOfRequest",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_of_request",
+      "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
+      "source": "formal/CapDAG/Exec.lean:74:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      }
+    },
+    {
+      "lean_name": "CapDAG.Exec.queryProducing",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::query_producing",
+      "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
+      "source": "formal/CapDAG/Exec.lean:87:1",
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      }
+    },
+    {
       "lean_name": "CapDAG.Exec.rankingKey",
       "module": "CapDAG.Exec",
       "rust_path": "exec::ranking_key",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Nat × Nat",
-      "source": "formal/CapDAG/Exec.lean:112:1",
+      "source": "formal/CapDAG/Exec.lean:291:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -797,7 +1025,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::select",
       "lean_type": "List CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Option CapDAG.Exec.WfCap",
-      "source": "formal/CapDAG/Exec.lean:116:1",
+      "source": "formal/CapDAG/Exec.lean:295:1",
       "trust": {
         "axioms": [
           "Classical.choice",
@@ -824,7 +1052,7 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::specificity",
       "lean_type": "CapDAG.Exec.WfCap → Nat",
-      "source": "formal/CapDAG/Exec.lean:110:1",
+      "source": "formal/CapDAG/Exec.lean:289:1",
       "trust": {
         "axioms": [
           "Classical.choice",

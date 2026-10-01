@@ -740,16 +740,23 @@ impl CapUrn {
             .expect("CapUrn::without_tag produced an illegal cap declaration")
     }
 
-    /// Whether this cap, as a PATTERN, accepts `request` as an instance: the
-    /// request's input refines this cap's, this cap's output refines the
-    /// request's, the effect matches (this cap's `?effect` matching any), and
-    /// the request's cap-tags refine this cap's.
+    /// Whether `cap` fits this cap read as a PATTERN over caps — what a search
+    /// asks: `cap`'s input is within this pattern's, its output covers the
+    /// pattern's, its effect is the pattern's (a pattern's `?effect` fits
+    /// any), and its cap-tags — complete: a cap has the tags it has — satisfy
+    /// the pattern's.
     ///
-    /// Decided by the proved model (`CapDAG.Exec.accepts`). Note the cap-tag
-    /// axis runs opposite to [`is_dispatchable`](Self::is_dispatchable)'s:
-    /// this is the pattern relation, dispatch is the routing one.
-    pub fn accepts(&self, request: &CapUrn) -> bool {
-        crate::formal::exec::accepts(self.formal.clone(), request.formal.clone())
+    /// A side the pattern leaves open is not asked about. `cap:candle` fits
+    /// every cap tagged `candle`, whatever it takes and gives: its open output
+    /// is "not established", not the type "anything" — which only a cap whose
+    /// output is `media:` would cover.
+    ///
+    /// Decided by the proved model (`CapDAG.Exec.accepts`, which
+    /// `accepts_decides` shows is `CapDAG.fits`: the query
+    /// `Query.ofPattern` admitting the cap). For a question that is not a cap
+    /// URN — "what gives this, whatever it takes" — ask a [`CapQuery`].
+    pub fn accepts(&self, cap: &CapUrn) -> bool {
+        crate::formal::exec::accepts(self.formal.clone(), cap.formal.clone())
     }
 
     /// Check if this request conforms to (can be handled by) the given cap.
@@ -768,54 +775,83 @@ impl CapUrn {
         Ok(self.conforms_to(&cap))
     }
 
-    /// Check if two cap URNs are comparable in the order-theoretic sense.
-    ///
-    /// Two URNs are comparable if either one accepts (subsumes) the other.
-    /// This is the symmetric closure of the accepts relation.
-    ///
-    /// Use this for routing when you want to find any handler that could
-    /// potentially satisfy a request, regardless of which is more specific.
+    /// Whether the two caps are on one chain: one stands in for the other on
+    /// every side. Both are read as descriptions — nothing is unknown — so a
+    /// cap that leaves a side open is comparable only with what that open
+    /// side, as the type "anything", bounds.
     pub fn is_comparable(&self, other: &CapUrn) -> bool {
         crate::formal::exec::comparable(self.formal.clone(), other.formal.clone())
     }
 
-    /// Check if two cap URNs are equivalent in the order-theoretic sense.
+    /// Whether the two are the SAME cap: equivalent on every side, the effects
+    /// agreeing. What resolving a name to its cap asks.
     ///
-    /// Two URNs are equivalent if each accepts (subsumes) the other.
-    /// This means they have the same position in the specificity lattice.
-    ///
-    /// Use this for exact matching where you need URNs to be interchangeable.
+    /// Both are read as descriptions and nothing is unknown: a cap that
+    /// promises no particular output is not the same cap as one that promises
+    /// pages, though as a pattern it fits it ([`accepts`](Self::accepts)).
     pub fn is_equivalent(&self, other: &CapUrn) -> bool {
         crate::formal::exec::equivalent(self.formal.clone(), other.formal.clone())
     }
 
-    /// Whether this candidate can serve `request` — the PRIMARY predicate for
-    /// routing and dispatch.
+    /// Whether this candidate SERVES `request` — the predicate routing and
+    /// dispatch act on.
+    ///
+    /// The candidate takes at least what the request sends (it may take
+    /// more), gives at least what the request needs (it may give something
+    /// more specific), has the effect asked for unless the request says
+    /// `?effect`, and has the cap-tags asked for — its own tags being
+    /// complete, so a request for `!x` is served by a candidate that does not
+    /// mention `x`, and a candidate may carry tags the request does not ask
+    /// about.
+    ///
+    /// An input the request leaves open is not established: the caller has
+    /// not said what it will send, and every candidate passes that side. That
+    /// is "some input", not "any input" — the type `media:` on a CANDIDATE's
+    /// input does mean it takes anything.
+    ///
+    /// This is a guarantee. What only could serve — a candidate that gives
+    /// "some ext" for a request that needs a pdf — does not; see
+    /// [`may_dispatch`](Self::may_dispatch) and [`CapQuery::grade`].
     ///
     /// Decided by the proved model (`CapDAG.Exec.dispatch`, which
-    /// `dispatch_decides` shows is exactly `CapDAG.dispatch`): every axis is a
-    /// type. The request's input refines the candidate's (a candidate may
-    /// accept more), the candidate's output refines the request's (it must
-    /// produce at least what is needed), the effect matches unless the request
-    /// says `?effect`, and the candidate's cap-tags refine the request's (it
-    /// satisfies every tag the request states, and may add more).
-    ///
-    /// `media:` on a request's input is a type — "may send anything" — so only
-    /// a candidate that accepts anything serves it. That is what makes dispatch
-    /// compose (`dispatch_trans`): a candidate that serves what another serves
-    /// serves everything that one does.
+    /// `dispatch_decides` shows is `CapDAG.serves`: the query
+    /// `Query.ofRequest` admitting the candidate, and by
+    /// `serves_unknown_iff` exactly the candidates that serve SOME typed call
+    /// the request could become).
     ///
     /// Not symmetric: `a.is_dispatchable(&b)` says nothing about the reverse.
     pub fn is_dispatchable(&self, request: &CapUrn) -> bool {
         crate::formal::exec::dispatch(self.formal.clone(), request.formal.clone())
     }
 
+    /// Whether this candidate COULD serve `request`: not guaranteed, not
+    /// excluded. For exploring what the fabric might do — never for routing a
+    /// call, which must be served.
+    pub fn may_dispatch(&self, request: &CapUrn) -> bool {
+        crate::formal::exec::may_dispatch(self.formal.clone(), request.formal.clone())
+    }
+
+    /// Whether what this cap gives, `next` takes: the edge of a route.
+    pub fn flows_into(&self, next: &CapUrn) -> bool {
+        crate::formal::exec::flows(self.formal.clone(), next.formal.clone())
+    }
+
+    /// Whether what this cap gives COULD be something `next` takes: an edge a
+    /// search may explore and a run has to check.
+    pub fn may_flow_into(&self, next: &CapUrn) -> bool {
+        crate::formal::exec::may_flow(self.formal.clone(), next.formal.clone())
+    }
+
     /// Apply this cap URN to a concrete runtime input media URN.
     ///
-    /// This validates that the runtime input conforms to the cap's declared
+    /// This validates that the runtime input satisfies the cap's declared
     /// input and, if so, returns the concrete runtime output media URN after
     /// the cap's effect semantics are applied. The resulting runtime output
-    /// must conform to the declared output or this method fails hard.
+    /// must satisfy the declared output or this method fails hard.
+    ///
+    /// A runtime media URN is the media of a value that exists, so it is read
+    /// complete ([`MediaUrn::satisfies`]): the tags it does not have, it does
+    /// not have. The declared input and output are types, and stay open.
     pub fn apply_to_runtime_input_media(
         &self,
         runtime_input: &MediaUrn,
@@ -833,7 +869,7 @@ impl CapUrn {
             ))
         })?;
 
-        if !runtime_input.conforms_to(&declared_in).map_err(|e| {
+        if !runtime_input.satisfies(&declared_in).map_err(|e| {
             CapUrnError::InvalidEffectApplication(format!(
                 "Failed to compare runtime input '{}' against declared input '{}': {}",
                 runtime_input, declared_in, e
@@ -869,7 +905,7 @@ impl CapUrn {
             }
         };
 
-        if !runtime_out.conforms_to(&declared_out).map_err(|e| {
+        if !runtime_out.satisfies(&declared_out).map_err(|e| {
             CapUrnError::InvalidEffectApplication(format!(
                 "Failed to validate runtime output '{}' against declared output '{}': {}",
                 runtime_out, declared_out, e
@@ -913,7 +949,7 @@ impl CapUrn {
     /// - `effect=declared` promises only the declared `out=`, so an
     ///   emission that is MORE specific than the declaration is legal and
     ///   desirable (e.g. declaring `out=media:record` and emitting
-    ///   `media:fmt=json;record`); the emission must `conform_to` the
+    ///   `media:fmt=json;record`); the emission must `satisfy` the
     ///   declared output. A more generic emission breaks every downstream
     ///   plan refinement and fails.
     ///
@@ -937,7 +973,7 @@ impl CapUrn {
                     ))
                 })
             }
-            CapEffect::Declared => runtime_output.conforms_to(&inferred).map_err(|e| {
+            CapEffect::Declared => runtime_output.satisfies(&inferred).map_err(|e| {
                 CapUrnError::InvalidEffectApplication(format!(
                     "Failed to compare emitted output '{}' against declared output '{}': {}",
                     runtime_output, inferred, e
@@ -2306,13 +2342,14 @@ mod tests {
         );
     }
 
-    // TEST048: A handler whose output is `media:` promises no particular output
+    // TEST048: A pattern that leaves a side open asks nothing of it
     //
-    // A generic INPUT accepts any request input; a generic OUTPUT guarantees
-    // nothing, so it does not satisfy a request that needs a record — the same
-    // rule dispatch applies. Skipping the output axis for a `media:` handler
-    // made acceptance non-transitive (../formal,
-    // Legacy.accepts_skipping_top_output_not_transitive).
+    // `cap:generate` as a pattern says nothing of what a cap takes or gives:
+    // both are unknown, not the type "anything", so it fits a cap that takes a
+    // string and gives a record. Read as a type, its open output would be
+    // covered only by a cap that gives `media:` — which is how a pattern
+    // search came to find nothing (../formal, Query.ofPattern, and
+    // Legacy.skipping_top_output_is_fits).
     #[test]
     fn test048_matching_semantics_test8_wildcard_direction_matches_anything() {
         let cap = CapUrn::from_string("cap:generate").unwrap();
@@ -2322,9 +2359,13 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            !cap.accepts(&request),
-            "a media:-output handler does not promise the record the request needs"
+            cap.accepts(&request),
+            "a pattern with open sides fits a cap whatever it takes and gives"
         );
+        // As descriptions the two are not the same cap, and a cap that gives
+        // `media:` does not SERVE a request that needs the record.
+        assert!(!cap.is_equivalent(&request));
+        assert!(!cap.is_dispatchable(&request), "media: out guarantees no record");
         let any_output_request =
             CapUrn::from_string("cap:ext=pdf;in=media:string;generate").unwrap();
         assert!(
@@ -2572,15 +2613,12 @@ fn test647_wildcard_009_invalid_out_spec_fails() {
     assert!(matches!(err, CapUrnError::InvalidOutSpec(_)));
 }
 
-// TEST648: A generic handler accepts a more specific request only where it
-// promises enough
+// TEST648: An open pattern fits specific caps; fitting is not serving
 //
-// `cap:raw` takes any input and promises no particular output. It accepts a
-// request that sends something specific; it does not accept one that needs
-// `media:text` out, since a `media:` output guarantees nothing (the rule
-// dispatch applies). Skipping the output axis for a `media:` handler made
-// acceptance non-transitive (../formal,
-// Legacy.accepts_skipping_top_output_not_transitive).
+// `cap:raw` as a pattern leaves both sides open, so it fits a cap that gives
+// text and one that takes text. Whether `cap:raw`, as a CANDIDATE, serves a
+// request that needs text out is a different question with a different
+// answer: a `media:` output guarantees nothing.
 #[test]
 fn test648_wildcard_010_wildcard_accepts_specific() {
     let wildcard = CapUrn::from_string("cap:raw").unwrap();
@@ -2588,8 +2626,16 @@ fn test648_wildcard_010_wildcard_accepts_specific() {
     let specific_in = CapUrn::from_string("cap:in=media:text;raw").unwrap();
 
     assert!(
-        !wildcard.accepts(&specific_out),
-        "a media:-output handler does not promise text out"
+        wildcard.accepts(&specific_out),
+        "an open pattern fits a cap that gives text"
+    );
+    assert!(
+        specific_out.conforms_to(&wildcard),
+        "the same, asked from the cap's side"
+    );
+    assert!(
+        !wildcard.is_dispatchable(&specific_out),
+        "a media:-output candidate does not serve a request that needs text"
     );
     assert!(
         specific_out.accepts(&wildcard),
@@ -3080,14 +3126,19 @@ mod tier_tests {
         assert!(candidate.is_dispatchable(&request));
     }
 
-    // TEST825: a request that may send anything is served only by a candidate
-    // that accepts anything
+    // TEST825: a request that leaves its input open has not said what it will
+    // send, and is served whatever the candidate takes
     //
-    // `media:` on a request's input is a type — "any A" — not a wildcard that
-    // switches the axis off. Read as "don't care", a PDF-only candidate served
-    // it, and dispatch stopped composing: the PDF-only cap served that request,
-    // which served an image request, which the PDF-only cap did not
-    // (../formal, Legacy.wildcard_input_not_transitive).
+    // The open input is unknown — "some input" — not the type "anything": the
+    // request is served by exactly the candidates that serve SOME typed call
+    // it could become (../formal, serves_unknown_iff). Read as "anything" it
+    // was served only by a candidate that takes anything, and asking the
+    // fabric "what gives me this?" found nothing.
+    //
+    // What a candidate cannot do is stand in for the request AS A DESCRIPTION
+    // — that relation is typed and composes, and is what `is_equivalent` and
+    // the model's `capRefines` are about (Legacy.wildcard_input_not_transitive
+    // is why the two were never one relation).
     #[test]
     fn test825_dispatch_request_unconstrained_input() {
         let pdf_only =
@@ -3098,10 +3149,17 @@ mod tier_tests {
         let request =
             CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf-8;record""#).unwrap();
         assert!(
-            !pdf_only.is_dispatchable(&request),
-            "a PDF-only candidate cannot take whatever the request may send"
+            pdf_only.is_dispatchable(&request),
+            "the request has not said what it sends: a PDF-only candidate serves it"
         );
         assert!(accepts_anything.is_dispatchable(&request));
+        // A request that DOES say what it sends is held to it.
+        let png_request =
+            CapUrn::from_string(r#"cap:analyze;in="media:ext=png";out="media:enc=utf-8;record""#)
+                .unwrap();
+        assert!(!pdf_only.is_dispatchable(&png_request));
+        assert!(accepts_anything.is_dispatchable(&png_request));
+        assert!(!pdf_only.is_equivalent(&request), "serving a request is not being it");
     }
 
     // TEST826: is_dispatchable — candidate output must satisfy request output (covariance)
@@ -3687,12 +3745,14 @@ mod tier_tests {
         // labels are spaced so a leading `!` is not interpreted as
         // an inner doc comment.
         let expected: [[bool; 7]; 7] = [
-            // Each form means the set of states it allows, on either side; an
-            // instance is accepted when its set lies inside the pattern's
-            // (tagged-urn formal, `tagMatch_iff_allows`).
+            // Each form means the set of states it allows; the cap fits when,
+            // key by key, its set lies inside the pattern's (tagged-urn formal,
+            // `tagMatch_iff_allows`). The cap's own tags are complete, so a key
+            // it does not mention it does not have: its "miss" row is the row
+            // of `!x` (`Constraint.closed`), not of "anything".
             //          miss   ?x    x?=v   x      x!=v   x=v    !x
             /* miss */
-            [true, true, false, false, false, false, false],
+            [true, true, true, false, false, false, true],
             /* ?x   */ [true, true, false, false, false, false, false],
             /* x?=v */ [true, true, true, false, false, false, false],
             /* x    */ [true, true, false, true, false, false, false],

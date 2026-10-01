@@ -582,6 +582,30 @@ impl MediaUrn {
         self.0.conforms_to(&pattern.0).map_err(MediaUrnError::Match)
     }
 
+    /// Whether this media type and `other` COULD describe the same value:
+    /// not a guarantee (`conforms_to`), and not excluded. `media:ext` meets
+    /// `media:ext=pdf`; `media:ext=pdf` does not meet `media:ext=png`.
+    pub fn meets(&self, other: &MediaUrn) -> Result<bool, MediaUrnError> {
+        self.0.meets(&other.0).map_err(MediaUrnError::Match)
+    }
+
+    /// Whether a VALUE whose media this is satisfies the type `pattern`.
+    ///
+    /// `conforms_to` compares two types, and a type that does not mention a
+    /// key says nothing about it. A value that exists is complete: the tags
+    /// it does not have, it does not have. So a value tagged `media:ext=pdf`
+    /// satisfies `media:ext=pdf;!compressed`, which the TYPE `media:ext=pdf`
+    /// does not conform to. Use this where the left side is the media of
+    /// actual data — a stream that arrived, an output that was produced.
+    pub fn satisfies(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
+        self.0.satisfies(&pattern.0).map_err(MediaUrnError::Match)
+    }
+
+    /// Whether a value whose media this is COULD satisfy `pattern`.
+    pub fn may_satisfy(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
+        self.0.may_satisfy(&pattern.0).map_err(MediaUrnError::Match)
+    }
+
     /// Check if this media URN (pattern) accepts the given instance.
     /// Equivalent to `instance.conforms_to(self)`.
     pub fn accepts(&self, instance: &MediaUrn) -> Result<bool, MediaUrnError> {

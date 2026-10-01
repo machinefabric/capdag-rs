@@ -1016,7 +1016,8 @@ pub fn find_stream_conforming<'a>(
     };
     streams.iter().find_map(|(urn_str, bytes, _meta)| {
         let urn = crate::MediaUrn::from_string(urn_str).ok()?;
-        if urn.conforms_to(&p).unwrap_or(false) {
+        // A stream that arrived is a value: it satisfies the pattern, or not.
+        if urn.satisfies(&p).unwrap_or(false) {
             Some(bytes.as_slice())
         } else {
             None
@@ -3272,7 +3273,7 @@ impl FilePathContext {
             Ok(u) => u,
             Err(_) => return false,
         };
-        self.file_path_pattern.accepts(&arg_urn).unwrap_or(false)
+        arg_urn.satisfies(&self.file_path_pattern).unwrap_or(false)
     }
 
     /// Find a cap arg whose media URN is equivalent to the incoming URN.
@@ -10828,8 +10829,7 @@ mod tests {
 
                 if let (Some(urn_str), Some(val)) = (arg_urn_str, arg_value) {
                     if let Ok(arg_urn) = MediaUrn::from_string(&urn_str) {
-                        let matches = in_spec.accepts(&arg_urn).unwrap_or(false)
-                            || arg_urn.conforms_to(&in_spec).unwrap_or(false);
+                        let matches = arg_urn.satisfies(&in_spec).unwrap_or(false);
                         if matches {
                             found_value = Some(val);
                             break;

@@ -109,7 +109,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dselect(x_1: Obj, x_2: Obj) -> Obj {
 pub(crate) unsafe extern "C" fn l_CapDAG_dselectStep(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
     rt::lean_inc_ref(x_1);
     rt::lean_inc_ref(x_3);
-    let x_4: u8 = l_CapDAG_dinstDecidableDispatch(x_3, x_1);
+    let x_4: u8 = l_CapDAG_dinstDecidableServes(x_3, x_1);
     match x_4 {
         0 => {
             rt::lean_dec_ref(x_3);

@@ -6,9 +6,27 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Exec.WfAsk",
+    "kind": "type",
+    "rust_path": "exec::WfAsk",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Exec.WfCap",
     "kind": "type",
     "rust_path": "exec::WfCap",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery",
+    "kind": "type",
+    "rust_path": "exec::WfQuery",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Grade",
+    "kind": "type",
+    "rust_path": "Grade",
     "renamed": false
   },
   {
@@ -46,6 +64,72 @@
     "kind": "function",
     "rust_path": "exec::equivalent",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.flows",
+    "kind": "function",
+    "rust_path": "exec::flows",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.mayDispatch",
+    "kind": "function",
+    "rust_path": "exec::may_dispatch",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.mayFlow",
+    "kind": "function",
+    "rust_path": "exec::may_flow",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryAdmits",
+    "kind": "function",
+    "rust_path": "exec::query_admits",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryBetween",
+    "kind": "function",
+    "rust_path": "exec::query_between",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryConsuming",
+    "kind": "function",
+    "rust_path": "exec::query_consuming",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryGrade",
+    "kind": "function",
+    "rust_path": "exec::query_grade",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryMayAdmit",
+    "kind": "function",
+    "rust_path": "exec::query_may_admit",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryOfPattern",
+    "kind": "function",
+    "rust_path": "exec::query_of_pattern",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryOfRequest",
+    "kind": "function",
+    "rust_path": "exec::query_of_request",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.queryProducing",
+    "kind": "function",
+    "rust_path": "exec::query_producing",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Exec.rankingKey",
@@ -96,6 +180,48 @@
     "renamed": true
   },
   {
+    "lean_name": "CapDAG.Exec.WfAsk.unknown",
+    "kind": "constructor",
+    "rust_path": "exec::WfAsk::Unknown",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.within",
+    "kind": "constructor",
+    "rust_path": "exec::WfAsk::Within",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.within.u",
+    "kind": "field",
+    "rust_path": "exec::WfAsk::Within.u",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.covers",
+    "kind": "constructor",
+    "rust_path": "exec::WfAsk::Covers",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.covers.u",
+    "kind": "field",
+    "rust_path": "exec::WfAsk::Covers.u",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.same",
+    "kind": "constructor",
+    "rust_path": "exec::WfAsk::Same",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfAsk.same.u",
+    "kind": "field",
+    "rust_path": "exec::WfAsk::Same.u",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Exec.WfCap.mk",
     "kind": "constructor",
     "rust_path": "exec::WfCap",
@@ -124,6 +250,60 @@
     "kind": "field",
     "rust_path": "exec::WfCap.effect",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery.mk",
+    "kind": "constructor",
+    "rust_path": "exec::WfQuery",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery.input",
+    "kind": "field",
+    "rust_path": "exec::WfQuery.input",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery.output",
+    "kind": "field",
+    "rust_path": "exec::WfQuery.output",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery.tags",
+    "kind": "field",
+    "rust_path": "exec::WfQuery.tags",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.WfQuery.effect",
+    "kind": "field",
+    "rust_path": "exec::WfQuery.effect",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Grade.exact",
+    "kind": "constructor",
+    "rust_path": "Grade::Exact",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Grade.guaranteed",
+    "kind": "constructor",
+    "rust_path": "Grade::Guaranteed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Grade.possible",
+    "kind": "constructor",
+    "rust_path": "Grade::Possible",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Grade.none",
+    "kind": "constructor",
+    "rust_path": "Grade::None",
+    "renamed": true
   },
   {
     "lean_name": "TaggedUrn.Constraint.missing",

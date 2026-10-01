@@ -62,6 +62,94 @@ pub(crate) unsafe extern "C" fn l_List_dall_d__at___dTaggedUrn_dmergeTags_dspec_
     }
 }
 
+// Lean: List.all._at_.TaggedUrn.mergeWith.spec_0
+// Compiled from: List.all
+// Source: <lean>/Init/Data/List/Basic.lean:1915:1
+pub(crate) unsafe extern "C" fn l_List_dall_d__at___dTaggedUrn_dmergeWith_dspec__0(mut x_1: Obj, mut x_2: Obj) -> u8 {
+    'tail: loop {
+        match rt::lean_obj_tag(x_2) {
+            0 => {
+                rt::lean_dec_ref(x_1);
+                let x_3: u8 = 1u8;
+                return x_3;
+            }
+            _ => {
+                let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+                rt::lean_inc(x_4);
+                let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+                rt::lean_inc(x_5);
+                rt::lean_dec_ref(x_2);
+                let x_6: Obj = rt::lean_ctor_get(x_4, 1);
+                rt::lean_inc(x_6);
+                rt::lean_dec(x_4);
+                let x_7: Obj = rt::lean_box(0);
+                rt::lean_inc_ref(x_1);
+                let x_8: Obj = rt::lean_apply_2(x_1, x_7, x_6);
+                let x_9: u8 = rt::lean_unbox(x_8) as u8;
+                match x_9 {
+                    0 => {
+                        rt::lean_dec(x_5);
+                        rt::lean_dec_ref(x_1);
+                        let x_10: u8 = rt::lean_unbox(x_8) as u8;
+                        return x_10;
+                    }
+                    _ => {
+                        let t_0: Obj = x_1;
+                        let t_1: Obj = x_5;
+                        x_1 = t_0;
+                        x_2 = t_1;
+                        continue 'tail;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Lean: List.all._at_.TaggedUrn.mergeWith.spec_1
+// Compiled from: List.all
+// Source: <lean>/Init/Data/List/Basic.lean:1915:1
+pub(crate) unsafe extern "C" fn l_List_dall_d__at___dTaggedUrn_dmergeWith_dspec__1(mut x_1: Obj, mut x_2: Obj) -> u8 {
+    'tail: loop {
+        match rt::lean_obj_tag(x_2) {
+            0 => {
+                rt::lean_dec_ref(x_1);
+                let x_3: u8 = 1u8;
+                return x_3;
+            }
+            _ => {
+                let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+                rt::lean_inc(x_4);
+                let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+                rt::lean_inc(x_5);
+                rt::lean_dec_ref(x_2);
+                let x_6: Obj = rt::lean_ctor_get(x_4, 1);
+                rt::lean_inc(x_6);
+                rt::lean_dec(x_4);
+                let x_7: Obj = rt::lean_box(0);
+                rt::lean_inc_ref(x_1);
+                let x_8: Obj = rt::lean_apply_2(x_1, x_6, x_7);
+                let x_9: u8 = rt::lean_unbox(x_8) as u8;
+                match x_9 {
+                    0 => {
+                        rt::lean_dec(x_5);
+                        rt::lean_dec_ref(x_1);
+                        let x_10: u8 = rt::lean_unbox(x_8) as u8;
+                        return x_10;
+                    }
+                    _ => {
+                        let t_0: Obj = x_1;
+                        let t_1: Obj = x_5;
+                        x_1 = t_0;
+                        x_2 = t_1;
+                        continue 'tail;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Lean: TaggedUrn.instDecidableSorted
 // Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:29:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableSorted(x_1: Obj) -> u8 {
@@ -188,5 +276,166 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dmergeTags(mut x_1: Obj, mut x_2: Ob
             }
         }
     }
+}
+
+// Lean: TaggedUrn.mergeWith
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:209:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dmergeWith(mut x_1: Obj, mut x_2: Obj, mut x_3: Obj) -> u8 {
+    'tail: loop {
+        match rt::lean_obj_tag(x_2) {
+            0 => {
+                let x_4: u8 = l_List_dall_d__at___dTaggedUrn_dmergeWith_dspec__0(x_1, x_3);
+                return x_4;
+            }
+            _ => {
+                match rt::lean_obj_tag(x_3) {
+                    0 => {
+                        let x_5: u8 = l_List_dall_d__at___dTaggedUrn_dmergeWith_dspec__1(x_1, x_2);
+                        return x_5;
+                    }
+                    _ => {
+                        let x_6: Obj = rt::lean_ctor_get(x_3, 0);
+                        let x_7: Obj = rt::lean_ctor_get(x_2, 0);
+                        let x_8: Obj = rt::lean_ctor_get(x_2, 1);
+                        let x_9: Obj = rt::lean_ctor_get(x_3, 1);
+                        let x_10: Obj = rt::lean_ctor_get(x_6, 0);
+                        let x_11: Obj = rt::lean_ctor_get(x_6, 1);
+                        let x_12: Obj = rt::lean_ctor_get(x_7, 0);
+                        let x_13: Obj = rt::lean_ctor_get(x_7, 1);
+                        let x_14: u8 = l_String_ddecidableLT(x_12, x_10);
+                        match x_14 {
+                            0 => {
+                                rt::lean_inc(x_11);
+                                rt::lean_inc(x_10);
+                                rt::lean_inc(x_9);
+                                rt::lean_dec_ref(x_3);
+                                let x_15: u8 = l_String_ddecidableLT(x_10, x_12);
+                                rt::lean_dec(x_10);
+                                match x_15 {
+                                    0 => {
+                                        rt::lean_inc(x_13);
+                                        rt::lean_inc(x_8);
+                                        rt::lean_dec_ref(x_2);
+                                        rt::lean_inc_ref(x_1);
+                                        let x_16: Obj = rt::lean_apply_2(x_1, x_13, x_11);
+                                        let x_17: u8 = rt::lean_unbox(x_16) as u8;
+                                        match x_17 {
+                                            0 => {
+                                                rt::lean_dec(x_9);
+                                                rt::lean_dec(x_8);
+                                                rt::lean_dec_ref(x_1);
+                                                let x_18: u8 = rt::lean_unbox(x_16) as u8;
+                                                return x_18;
+                                            }
+                                            _ => {
+                                                let t_0: Obj = x_1;
+                                                let t_1: Obj = x_8;
+                                                let t_2: Obj = x_9;
+                                                x_1 = t_0;
+                                                x_2 = t_1;
+                                                x_3 = t_2;
+                                                continue 'tail;
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        let x_20: Obj = rt::lean_box(0);
+                                        rt::lean_inc_ref(x_1);
+                                        let x_21: Obj = rt::lean_apply_2(x_1, x_20, x_11);
+                                        let x_22: u8 = rt::lean_unbox(x_21) as u8;
+                                        match x_22 {
+                                            0 => {
+                                                rt::lean_dec(x_9);
+                                                rt::lean_dec_ref(x_2);
+                                                rt::lean_dec_ref(x_1);
+                                                let x_23: u8 = rt::lean_unbox(x_21) as u8;
+                                                return x_23;
+                                            }
+                                            _ => {
+                                                let t_0: Obj = x_1;
+                                                let t_1: Obj = x_2;
+                                                let t_2: Obj = x_9;
+                                                x_1 = t_0;
+                                                x_2 = t_1;
+                                                x_3 = t_2;
+                                                continue 'tail;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                rt::lean_inc(x_13);
+                                rt::lean_inc(x_8);
+                                rt::lean_dec_ref(x_2);
+                                let x_25: Obj = rt::lean_box(0);
+                                rt::lean_inc_ref(x_1);
+                                let x_26: Obj = rt::lean_apply_2(x_1, x_13, x_25);
+                                let x_27: u8 = rt::lean_unbox(x_26) as u8;
+                                match x_27 {
+                                    0 => {
+                                        rt::lean_dec(x_8);
+                                        rt::lean_dec_ref(x_3);
+                                        rt::lean_dec_ref(x_1);
+                                        let x_28: u8 = rt::lean_unbox(x_26) as u8;
+                                        return x_28;
+                                    }
+                                    _ => {
+                                        let t_0: Obj = x_1;
+                                        let t_1: Obj = x_8;
+                                        let t_2: Obj = x_3;
+                                        x_1 = t_0;
+                                        x_2 = t_1;
+                                        x_3 = t_2;
+                                        continue 'tail;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Lean: TaggedUrn.tagMatchClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:315:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagMatchClosed(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = l_TaggedUrn_dConstraint_dclosed(x_1);
+    let x_4: u8 = l_TaggedUrn_dtagMatch(x_3, x_2);
+    rt::lean_dec(x_3);
+    return x_4;
+}
+
+// Lean: TaggedUrn.tagMatchClosed._boxed
+// Compiled from: TaggedUrn.tagMatchClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:315:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagMatchClosed_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_TaggedUrn_dtagMatchClosed(x_1, x_2);
+    rt::lean_dec(x_2);
+    rt::lean_dec(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
+}
+
+// Lean: TaggedUrn.tagMeetsClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:318:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagMeetsClosed(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: Obj = l_TaggedUrn_dConstraint_dclosed(x_1);
+    let x_4: u8 = l_TaggedUrn_dtagMeets(x_3, x_2);
+    rt::lean_dec(x_3);
+    return x_4;
+}
+
+// Lean: TaggedUrn.tagMeetsClosed._boxed
+// Compiled from: TaggedUrn.tagMeetsClosed
+// Source: formal/../../tagged-urn/formal/TaggedUrn/Sorted.lean:318:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagMeetsClosed_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_TaggedUrn_dtagMeetsClosed(x_1, x_2);
+    rt::lean_dec(x_2);
+    rt::lean_dec(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
 }
 
