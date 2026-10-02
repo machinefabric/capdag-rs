@@ -134,7 +134,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
                                 }
                             };
                             for f in &ready_frames {
-                                if matches!(f.frame_type, FrameType::End | FrameType::Err) {
+                                if f.frame_type.is_terminal() {
                                     reorder.cleanup_flow(&FlowKey::from_frame(f));
                                 }
                             }
@@ -187,7 +187,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
                                 }
                             };
                             for f in &ready_frames {
-                                if matches!(f.frame_type, FrameType::End | FrameType::Err) {
+                                if f.frame_type.is_terminal() {
                                     reorder.cleanup_flow(&FlowKey::from_frame(f));
                                 }
                             }
@@ -340,7 +340,7 @@ impl RelayMaster {
                     }
                     let ready = self.reorder.accept(frame)?;
                     for f in &ready {
-                        if matches!(f.frame_type, FrameType::End | FrameType::Err) {
+                        if f.frame_type.is_terminal() {
                             self.reorder.cleanup_flow(&FlowKey::from_frame(f));
                         }
                     }

@@ -31,6 +31,8 @@ pub mod router;
 pub mod stats;
 
 #[cfg(test)]
+mod conformance_tests;
+#[cfg(test)]
 mod integration_tests;
 
 /// CBOR-decode a response chunk payload to extract raw bytes.

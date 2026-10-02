@@ -49,6 +49,61 @@ pub(crate) unsafe extern "C" fn l_List_ddecidableBAll_d__redArg(mut x_1: Obj, mu
     }
 }
 
+// Lean: List.drop._redArg
+// Compiled from: List.drop
+// Source: <lean>/Init/Data/List/Basic.lean:924:1
+pub(crate) unsafe extern "C" fn l_List_ddrop_d__redArg(mut x_1: Obj, mut x_2: Obj) -> Obj {
+    'tail: loop {
+        let x_3: Obj = rt::nat::lean_usize_to_nat(0);
+        let x_4: u8 = l_Nat_ddecEq(x_1, x_3);
+        match x_4 {
+            1 => {
+                rt::lean_dec(x_1);
+                rt::lean_inc(x_2);
+                return x_2;
+            }
+            _ => {
+                match rt::lean_obj_tag(x_2) {
+                    0 => {
+                        rt::lean_dec(x_1);
+                        return x_2;
+                    }
+                    _ => {
+                        let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+                        let x_6: Obj = rt::nat::lean_usize_to_nat(1);
+                        let x_7: Obj = l_Nat_dsub(x_1, x_6);
+                        rt::lean_dec(x_1);
+                        let t_0: Obj = x_7;
+                        let t_1: Obj = x_5;
+                        x_1 = t_0;
+                        x_2 = t_1;
+                        continue 'tail;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Lean: List.head?._redArg
+// Compiled from: List.head?
+// Source: <lean>/Init/Data/List/Basic.lean:371:1
+pub(crate) unsafe extern "C" fn l_List_dhead_x3f__d__redArg(x_1: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        0 => {
+            let x_2: Obj = rt::lean_box(0);
+            return x_2;
+        }
+        _ => {
+            let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc(x_3);
+            let x_4: Obj = rt::lean_alloc_ctor(1, 1, 0);
+            rt::lean_ctor_set(x_4, 0, x_3);
+            return x_4;
+        }
+    }
+}
+
 // Lean: List.instDecidablePairwise._redArg
 // Compiled from: List.instDecidablePairwise
 // Source: <lean>/Init/Data/List/Basic.lean:1389:1

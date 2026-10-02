@@ -24,6 +24,30 @@
     ]
   },
   {
+    "lean_name": "Array.mkEmpty",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3235,
+      1
+    ],
+    "end": [
+      3242,
+      21
+    ]
+  },
+  {
+    "lean_name": "Array.push",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3327,
+      1
+    ],
+    "end": [
+      3339,
+      35
+    ]
+  },
+  {
     "lean_name": "Array.size",
     "file": "<lean>/Init/Prelude.lean",
     "start": [
@@ -33,6 +57,30 @@
     "end": [
       3270,
       17
+    ]
+  },
+  {
+    "lean_name": "Array.toList",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3217,
+      3
+    ],
+    "end": [
+      3217,
+      9
+    ]
+  },
+  {
+    "lean_name": "Bool.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      76,
+      1
+    ],
+    "end": [
+      78,
+      24
     ]
   },
   {
@@ -147,6 +195,2550 @@
     "end": [
       46,
       21
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.acquired.elim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      42,
+      3
+    ],
+    "end": [
+      43,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.closed.elim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      46,
+      3
+    ],
+    "end": [
+      47,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      40,
+      1
+    ],
+    "end": [
+      48,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.wait.elim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      44,
+      3
+    ],
+    "end": [
+      45,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.accepted.elim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      95,
+      3
+    ],
+    "end": [
+      96,
+      31
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      93,
+      1
+    ],
+    "end": [
+      99,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.violation.elim",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      97,
+      3
+    ],
+    "end": [
+      98,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      50,
+      1
+    ],
+    "end": [
+      54,
+      97
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.close",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      62,
+      1
+    ],
+    "end": [
+      66,
+      45
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.grant",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      56,
+      1
+    ],
+    "end": [
+      60,
+      52
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.opened",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      37,
+      1
+    ],
+    "end": [
+      38,
+      56
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.arrive",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      101,
+      1
+    ],
+    "end": [
+      103,
+      92
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.consume",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      117,
+      1
+    ],
+    "end": [
+      120,
+      50
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.continued",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      122,
+      1
+    ],
+    "end": [
+      126,
+      47
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.flush",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      111,
+      1
+    ],
+    "end": [
+      115,
+      77
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.opened",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      89,
+      1
+    ],
+    "end": [
+      91,
+      77
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.grantTarget",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      68,
+      1
+    ],
+    "end": [
+      76,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqAcquire",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      48,
+      18
+    ],
+    "end": [
+      48,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqAcquire.decEq",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      48,
+      18
+    ],
+    "end": [
+      48,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqArrival",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      99,
+      18
+    ],
+    "end": [
+      99,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqArrival.decEq",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      99,
+      18
+    ],
+    "end": [
+      99,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqGate",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      35,
+      18
+    ],
+    "end": [
+      35,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqGate.decEq",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      35,
+      18
+    ],
+    "end": [
+      35,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqGranted",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      109,
+      18
+    ],
+    "end": [
+      109,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqGranted.decEq",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      109,
+      18
+    ],
+    "end": [
+      109,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqWindow",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      87,
+      18
+    ],
+    "end": [
+      87,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instDecidableEqWindow.decEq",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      87,
+      18
+    ],
+    "end": [
+      87,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprAcquire",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      48,
+      12
+    ],
+    "end": [
+      48,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprAcquire.repr",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      48,
+      12
+    ],
+    "end": [
+      48,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprArrival",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      99,
+      12
+    ],
+    "end": [
+      99,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprArrival.repr",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      99,
+      12
+    ],
+    "end": [
+      99,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprGate",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      35,
+      12
+    ],
+    "end": [
+      35,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprGate.repr",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      35,
+      12
+    ],
+    "end": [
+      35,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprGranted",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      109,
+      12
+    ],
+    "end": [
+      109,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprGranted.repr",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      109,
+      12
+    ],
+    "end": [
+      109,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprWindow",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      87,
+      12
+    ],
+    "end": [
+      87,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.instReprWindow.repr",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      87,
+      12
+    ],
+    "end": [
+      87,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.negotiate",
+    "file": "formal/CapDAG/Bifaci/Credit.lean",
+    "start": [
+      21,
+      1
+    ],
+    "end": [
+      26,
+      43
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      110,
+      1
+    ],
+    "end": [
+      122,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.deliver.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      112,
+      3
+    ],
+    "end": [
+      113,
+      47
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.duplicate.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      118,
+      3
+    ],
+    "end": [
+      119,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.hold.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      114,
+      3
+    ],
+    "end": [
+      115,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.overflow.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      120,
+      3
+    ],
+    "end": [
+      121,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.stale.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      116,
+      3
+    ],
+    "end": [
+      117,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.cancel.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      32,
+      3
+    ],
+    "end": [
+      32,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.chunk.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      23,
+      3
+    ],
+    "end": [
+      23,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.closeStream.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      34,
+      3
+    ],
+    "end": [
+      34,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.code",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      37,
+      1
+    ],
+    "end": [
+      52,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.credit.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      33,
+      3
+    ],
+    "end": [
+      33,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      19,
+      1
+    ],
+    "end": [
+      35,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.err.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      26,
+      3
+    ],
+    "end": [
+      26,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.fin.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      24,
+      3
+    ],
+    "end": [
+      24,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.heartbeat.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      27,
+      3
+    ],
+    "end": [
+      27,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.hello.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      21,
+      3
+    ],
+    "end": [
+      21,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      72,
+      1
+    ],
+    "end": [
+      76,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      78,
+      1
+    ],
+    "end": [
+      81,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.log.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      25,
+      3
+    ],
+    "end": [
+      25,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      54,
+      1
+    ],
+    "end": [
+      70,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofNat",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.relayNotify.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      30,
+      3
+    ],
+    "end": [
+      30,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.relayState.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      31,
+      3
+    ],
+    "end": [
+      31,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.req.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      22,
+      3
+    ],
+    "end": [
+      22,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.streamEnd.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      29,
+      3
+    ],
+    "end": [
+      29,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.streamStart.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      28,
+      3
+    ],
+    "end": [
+      28,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.accept",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      124,
+      1
+    ],
+    "end": [
+      132,
+      59
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.start",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      92,
+      1
+    ],
+    "end": [
+      93,
+      39
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.insertAscending",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      95,
+      1
+    ],
+    "end": [
+      98,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqAccepted",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      122,
+      18
+    ],
+    "end": [
+      122,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqAccepted.decEq",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      122,
+      18
+    ],
+    "end": [
+      122,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqFrameType",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      35,
+      18
+    ],
+    "end": [
+      35,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqReorder",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      90,
+      18
+    ],
+    "end": [
+      90,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqReorder.decEq",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      90,
+      18
+    ],
+    "end": [
+      90,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprAccepted",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      122,
+      12
+    ],
+    "end": [
+      122,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprAccepted.repr",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      122,
+      12
+    ],
+    "end": [
+      122,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprFrameType",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      35,
+      12
+    ],
+    "end": [
+      35,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprFrameType.repr",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      35,
+      12
+    ],
+    "end": [
+      35,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprReorder",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      90,
+      12
+    ],
+    "end": [
+      90,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.instReprReorder.repr",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      90,
+      12
+    ],
+    "end": [
+      90,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.takeRun",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      100,
+      1
+    ],
+    "end": [
+      108,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.admitted.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      154,
+      3
+    ],
+    "end": [
+      155,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      152,
+      1
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.queued.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      156,
+      3
+    ],
+    "end": [
+      157,
+      51
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.unknownPool.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      158,
+      3
+    ],
+    "end": [
+      159,
+      32
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.atMost.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      201,
+      3
+    ],
+    "end": [
+      202,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      197,
+      1
+    ],
+    "end": [
+      205,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.exhausted.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      203,
+      3
+    ],
+    "end": [
+      204,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.unbounded.elim",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      199,
+      3
+    ],
+    "end": [
+      200,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool.hasRoom",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      58,
+      1
+    ],
+    "end": [
+      58,
+      79
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.admit",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      142,
+      1
+    ],
+    "end": [
+      146,
+      17
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.admitNext",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      124,
+      1
+    ],
+    "end": [
+      126,
+      57
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.admitted",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      120,
+      1
+    ],
+    "end": [
+      122,
+      83
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.arrive",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      172,
+      1
+    ],
+    "end": [
+      183,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.empty",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      74,
+      1
+    ],
+    "end": [
+      74,
+      39
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.enqueue",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      102,
+      1
+    ],
+    "end": [
+      104,
+      81
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.hasRoom",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      82,
+      1
+    ],
+    "end": [
+      84,
+      68
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.heldBack",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      185,
+      1
+    ],
+    "end": [
+      193,
+      33
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.join",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      162,
+      1
+    ],
+    "end": [
+      170,
+      53
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.leave",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      148,
+      1
+    ],
+    "end": [
+      150,
+      58
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.nextUp",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      116,
+      1
+    ],
+    "end": [
+      118,
+      89
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.pool",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      76,
+      1
+    ],
+    "end": [
+      76,
+      91
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.position",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      106,
+      1
+    ],
+    "end": [
+      114,
+      58
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.release",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      97,
+      1
+    ],
+    "end": [
+      100,
+      79
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.setCapacity",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      86,
+      1
+    ],
+    "end": [
+      90,
+      60
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.settle",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      138,
+      1
+    ],
+    "end": [
+      140,
+      87
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.settleWithin",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      128,
+      1
+    ],
+    "end": [
+      136,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.take",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      92,
+      1
+    ],
+    "end": [
+      95,
+      79
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.unknown",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      78,
+      1
+    ],
+    "end": [
+      80,
+      47
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.advertised",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      38,
+      1
+    ],
+    "end": [
+      44,
+      72
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.all",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      23,
+      1
+    ],
+    "end": [
+      24,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.chain",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      46,
+      1
+    ],
+    "end": [
+      49,
+      78
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.effective",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      26,
+      1
+    ],
+    "end": [
+      36,
+      35
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqArrival",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqArrival.decEq",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqPatience",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      205,
+      18
+    ],
+    "end": [
+      205,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqPatience.decEq",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      205,
+      18
+    ],
+    "end": [
+      205,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqPool",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      56,
+      18
+    ],
+    "end": [
+      56,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqPool.decEq",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      56,
+      18
+    ],
+    "end": [
+      56,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqState",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      72,
+      18
+    ],
+    "end": [
+      72,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqState.decEq",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      72,
+      18
+    ],
+    "end": [
+      72,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqWaiter",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      65,
+      18
+    ],
+    "end": [
+      65,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instDecidableEqWaiter.decEq",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      65,
+      18
+    ],
+    "end": [
+      65,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprArrival",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprArrival.repr",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprPatience",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      205,
+      12
+    ],
+    "end": [
+      205,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprPatience.repr",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      205,
+      12
+    ],
+    "end": [
+      205,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprPool",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      56,
+      12
+    ],
+    "end": [
+      56,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprPool.repr",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      56,
+      12
+    ],
+    "end": [
+      56,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprState",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      72,
+      12
+    ],
+    "end": [
+      72,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprState.repr",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      72,
+      12
+    ],
+    "end": [
+      72,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprWaiter",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      65,
+      12
+    ],
+    "end": [
+      65,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.instReprWaiter.repr",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      65,
+      12
+    ],
+    "end": [
+      65,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.patience",
+    "file": "formal/CapDAG/Bifaci/Pools.lean",
+    "start": [
+      207,
+      1
+    ],
+    "end": [
+      214,
+      86
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      67,
+      1
+    ],
+    "end": [
+      76,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.noRoute.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      73,
+      3
+    ],
+    "end": [
+      75,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.ofNat",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.route.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      69,
+      3
+    ],
+    "end": [
+      70,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.straggler.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      71,
+      3
+    ],
+    "end": [
+      72,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.start",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      170,
+      1
+    ],
+    "end": [
+      170,
+      49
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.step",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      172,
+      1
+    ],
+    "end": [
+      207,
+      94
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.chunk.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      138,
+      3
+    ],
+    "end": [
+      138,
+      42
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      135,
+      1
+    ],
+    "end": [
+      144,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.err.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      141,
+      3
+    ],
+    "end": [
+      141,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.fin.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      140,
+      3
+    ],
+    "end": [
+      140,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.other.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      142,
+      3
+    ],
+    "end": [
+      143,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamEnd.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      139,
+      3
+    ],
+    "end": [
+      139,
+      53
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamStart.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      137,
+      3
+    ],
+    "end": [
+      137,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.after",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      47,
+      1
+    ],
+    "end": [
+      49,
+      41
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.created.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      41,
+      3
+    ],
+    "end": [
+      42,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      39,
+      1
+    ],
+    "end": [
+      45,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.ofNat",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.streaming.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      43,
+      3
+    ],
+    "end": [
+      44,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.disposition",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      129,
+      1
+    ],
+    "end": [
+      131,
+      54
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.empty",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      105,
+      1
+    ],
+    "end": [
+      105,
+      39
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.isLive",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      107,
+      1
+    ],
+    "end": [
+      107,
+      85
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.register",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      113,
+      1
+    ],
+    "end": [
+      117,
+      86
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.terminate",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      119,
+      1
+    ],
+    "end": [
+      127,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Table.xidOf",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      109,
+      1
+    ],
+    "end": [
+      111,
+      40
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.cancelled.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      29,
+      3
+    ],
+    "end": [
+      29,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      25,
+      1
+    ],
+    "end": [
+      31,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.failed.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      28,
+      3
+    ],
+    "end": [
+      28,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.finished.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      27,
+      3
+    ],
+    "end": [
+      27,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.masterDied.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      30,
+      3
+    ],
+    "end": [
+      30,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.ofNat",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.afterEnd.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      148,
+      3
+    ],
+    "end": [
+      149,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkCountWrong.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      156,
+      3
+    ],
+    "end": [
+      157,
+      56
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkOutOfPlace.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      154,
+      3
+    ],
+    "end": [
+      155,
+      59
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      146,
+      1
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.endWithOpenStream.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      158,
+      3
+    ],
+    "end": [
+      159,
+      40
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamNotOpen.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      152,
+      3
+    ],
+    "end": [
+      153,
+      36
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamRestarted.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      150,
+      3
+    ],
+    "end": [
+      151,
+      38
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.ctorElim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      53,
+      1
+    ],
+    "end": [
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.ctorIdx",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.send.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      55,
+      3
+    ],
+    "end": [
+      56,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.suppress.elim",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      57,
+      3
+    ],
+    "end": [
+      58,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.check",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      209,
+      1
+    ],
+    "end": [
+      218,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.check.go",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      212,
+      11
+    ],
+    "end": [
+      217,
+      45
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.dispose",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      78,
+      1
+    ],
+    "end": [
+      81,
+      72
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqDisposition",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      76,
+      18
+    ],
+    "end": [
+      76,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqEmission",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      168,
+      18
+    ],
+    "end": [
+      168,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqEmission.decEq",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      168,
+      18
+    ],
+    "end": [
+      168,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqEmitted",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      144,
+      18
+    ],
+    "end": [
+      144,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqEmitted.decEq",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      144,
+      18
+    ],
+    "end": [
+      144,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqPhase",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      45,
+      18
+    ],
+    "end": [
+      45,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqTable",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      103,
+      18
+    ],
+    "end": [
+      103,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqTable.decEq",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      103,
+      18
+    ],
+    "end": [
+      103,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqTerminal",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      31,
+      18
+    ],
+    "end": [
+      31,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqViolation",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqViolation.decEq",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqWrite",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      59,
+      18
+    ],
+    "end": [
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instDecidableEqWrite.decEq",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      59,
+      18
+    ],
+    "end": [
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprDisposition",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      76,
+      12
+    ],
+    "end": [
+      76,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprDisposition.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      76,
+      12
+    ],
+    "end": [
+      76,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprEmission",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      168,
+      12
+    ],
+    "end": [
+      168,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprEmission.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      168,
+      12
+    ],
+    "end": [
+      168,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprEmitted",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      144,
+      12
+    ],
+    "end": [
+      144,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprEmitted.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      144,
+      12
+    ],
+    "end": [
+      144,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprPhase",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      45,
+      12
+    ],
+    "end": [
+      45,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprPhase.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      45,
+      12
+    ],
+    "end": [
+      45,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprTable",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      103,
+      12
+    ],
+    "end": [
+      103,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprTable.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      103,
+      12
+    ],
+    "end": [
+      103,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprTerminal",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      31,
+      12
+    ],
+    "end": [
+      31,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprTerminal.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      31,
+      12
+    ],
+    "end": [
+      31,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprViolation",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprViolation.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprWrite",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      59,
+      12
+    ],
+    "end": [
+      59,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.instReprWrite.repr",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      59,
+      12
+    ],
+    "end": [
+      59,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.ledger",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      85,
+      1
+    ],
+    "end": [
+      92,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.terminalOf",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      33,
+      1
+    ],
+    "end": [
+      37,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.write",
+    "file": "formal/CapDAG/Bifaci/Request.lean",
+    "start": [
+      61,
+      1
+    ],
+    "end": [
+      63,
+      87
     ]
   },
   {
@@ -1752,6 +4344,18 @@
     ]
   },
   {
+    "lean_name": "Int.add",
+    "file": "<lean>/Init/Data/Int/Basic.lean",
+    "start": [
+      152,
+      1
+    ],
+    "end": [
+      168,
+      47
+    ]
+  },
+  {
     "lean_name": "Int.decLt",
     "file": "<lean>/Init/Data/Int/Basic.lean",
     "start": [
@@ -1800,6 +4404,30 @@
     ]
   },
   {
+    "lean_name": "Int.sub",
+    "file": "<lean>/Init/Data/Int/Basic.lean",
+    "start": [
+      197,
+      1
+    ],
+    "end": [
+      209,
+      52
+    ]
+  },
+  {
+    "lean_name": "Lean.Option.hasQuote",
+    "file": "<lean>/Init/Meta/Defs.lean",
+    "start": [
+      1468,
+      1
+    ],
+    "end": [
+      1471,
+      50
+    ]
+  },
+  {
     "lean_name": "List.all",
     "file": "<lean>/Init/Data/List/Basic.lean",
     "start": [
@@ -1833,6 +4461,42 @@
     "end": [
       896,
       47
+    ]
+  },
+  {
+    "lean_name": "List.drop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      924,
+      1
+    ],
+    "end": [
+      938,
+      28
+    ]
+  },
+  {
+    "lean_name": "List.elem",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      783,
+      1
+    ],
+    "end": [
+      799,
+      25
+    ]
+  },
+  {
+    "lean_name": "List.filterTR.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2472,
+      17
+    ],
+    "end": [
+      2476,
+      28
     ]
   },
   {
@@ -1884,6 +4548,18 @@
     ]
   },
   {
+    "lean_name": "List.head?",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      371,
+      1
+    ],
+    "end": [
+      383,
+      19
+    ]
+  },
+  {
     "lean_name": "List.instDecidableEqNil",
     "file": "<lean>/Init/Prelude.lean",
     "start": [
@@ -1905,6 +4581,42 @@
     "end": [
       1398,
       54
+    ]
+  },
+  {
+    "lean_name": "List.lengthTR",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3061,
+      1
+    ],
+    "end": [
+      3072,
+      19
+    ]
+  },
+  {
+    "lean_name": "List.lengthTRAux",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3056,
+      1
+    ],
+    "end": [
+      3059,
+      48
+    ]
+  },
+  {
+    "lean_name": "List.lookup",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      1824,
+      1
+    ],
+    "end": [
+      1838,
+      27
     ]
   },
   {
@@ -1953,6 +4665,18 @@
     "end": [
       435,
       77
+    ]
+  },
+  {
+    "lean_name": "List.repr'",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      440,
+      1
+    ],
+    "end": [
+      444,
+      81
     ]
   },
   {
@@ -2172,6 +4896,42 @@
     ]
   },
   {
+    "lean_name": "Option.instBEq.beq",
+    "file": "<lean>/Init/Data/Option/Basic.lean",
+    "start": [
+      52,
+      19
+    ],
+    "end": [
+      52,
+      22
+    ]
+  },
+  {
+    "lean_name": "Option.instDecidableEq",
+    "file": "<lean>/Init/Data/Option/Basic.lean",
+    "start": [
+      18,
+      1
+    ],
+    "end": [
+      30,
+      115
+    ]
+  },
+  {
+    "lean_name": "Option.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      113,
+      1
+    ],
+    "end": [
+      121,
+      65
+    ]
+  },
+  {
     "lean_name": "Prod.repr",
     "file": "<lean>/Init/Data/Repr.lean",
     "start": [
@@ -2205,6 +4965,18 @@
     "end": [
       187,
       123
+    ]
+  },
+  {
+    "lean_name": "Std.Format.fill",
+    "file": "<lean>/Init/Data/Format/Basic.lean",
+    "start": [
+      122,
+      1
+    ],
+    "end": [
+      128,
+      45
     ]
   },
   {
@@ -3066,6 +5838,18 @@
     "end": null
   },
   {
+    "lean_name": "_private.Init.Data.List.Impl.0.List.takeWhileTR.go",
+    "file": "<lean>/Init/Data/List/Impl.lean",
+    "start": [
+      237,
+      17
+    ],
+    "end": [
+      239,
+      66
+    ]
+  },
+  {
     "lean_name": "_private.Init.Data.Random.0.initFn._@.Init.Data.Random.2456098205._hygCtx._hyg.2",
     "file": "<lean>/Init/Data/Random.lean",
     "start": [
@@ -3147,6 +5931,18 @@
     "end": [
       3023,
       121
+    ]
+  },
+  {
+    "lean_name": "instDecidableEqNat",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1878,
+      1
+    ],
+    "end": [
+      1878,
+      50
     ]
   },
   {

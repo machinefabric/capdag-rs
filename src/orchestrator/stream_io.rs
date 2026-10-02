@@ -442,12 +442,47 @@ pub type CreditGrantFn = Arc<dyn Fn(Option<String>, u64) + Send + Sync>;
 /// The receive-side credit plumbing for a collect/forward loop (L10/L14):
 /// `router` delivers inbound CREDIT frames (the cartridge crediting OUR input
 /// streams) to the engine-side send gates; `grant` replenishes the
-/// cartridge's output window as response chunks are consumed; `batch` is the
-/// grant batching threshold (chunks consumed per CREDIT frame sent).
+/// cartridge's output window as response chunks are consumed; `window` is the
+/// negotiated window of each of its streams, which decides how grants are
+/// batched (`bifaci::credit::CreditWindow`).
 pub struct CreditPlumbing {
     pub router: crate::bifaci::credit::CreditRouter,
     pub grant: CreditGrantFn,
-    pub batch: u64,
+    pub window: u64,
+}
+
+/// What a collect/forward loop has consumed of each response stream and not
+/// yet granted back. When a grant is due is each stream's
+/// [`crate::bifaci::credit::CreditWindow`]; this keeps one per stream.
+#[derive(Debug, Default)]
+pub struct ConsumedStreams {
+    windows: std::collections::HashMap<Option<String>, crate::bifaci::credit::CreditWindow>,
+}
+
+impl ConsumedStreams {
+    /// A chunk of `stream_id` was consumed: the grant now due, if one is.
+    pub fn consumed(&mut self, stream_id: &Option<String>, window: u64) -> Option<u64> {
+        self.windows
+            .entry(stream_id.clone())
+            .or_insert_with(|| crate::bifaci::credit::CreditWindow::new(window))
+            .consumed()
+    }
+
+    /// Every grant still pending, to send before blocking (L10).
+    pub fn flush(&mut self) -> Vec<(Option<String>, u64)> {
+        self.windows
+            .iter()
+            .filter_map(|(stream_id, window)| window.flush().map(|grant| (stream_id.clone(), grant)))
+            .collect()
+    }
+
+    /// Per stream, the chunks consumed and not yet granted back (diagnostics).
+    pub fn pending(&self) -> Vec<(Option<String>, u64)> {
+        self.windows
+            .iter()
+            .map(|(stream_id, window)| (stream_id.clone(), window.pending()))
+            .collect()
+    }
 }
 
 // =============================================================================
@@ -1304,7 +1339,7 @@ pub struct TerminalOutput {
     progress_fn: Option<CapProgressFn>,
     log_fn: Option<PipelineLogFn>,
     credit: Option<CreditPlumbing>,
-    consumed_since_grant: std::collections::HashMap<Option<String>, u64>,
+    consumed: ConsumedStreams,
     is_sequence: Option<bool>,
     terminal_meta: TerminalMeta,
     /// Set once END was seen; `next_item` returns None afterwards.
@@ -1337,7 +1372,7 @@ impl TerminalOutput {
             progress_fn,
             log_fn,
             credit,
-            consumed_since_grant: std::collections::HashMap::new(),
+            consumed: ConsumedStreams::default(),
             is_sequence: None,
             terminal_meta: TerminalMeta::default(),
             ended: false,
@@ -1373,11 +1408,8 @@ impl TerminalOutput {
                     // deadlock-freedom rule) so a producer with a smaller
                     // send window than our batch threshold can proceed.
                     if let Some(plumbing) = &self.credit {
-                        for (stream_id, counter) in self.consumed_since_grant.iter_mut() {
-                            if *counter > 0 {
-                                (plumbing.grant)(stream_id.clone(), *counter);
-                                *counter = 0;
-                            }
+                        for (stream_id, grant) in self.consumed.flush() {
+                            (plumbing.grant)(stream_id, grant);
                         }
                     }
                     self.rx.recv().await
@@ -1417,14 +1449,9 @@ impl TerminalOutput {
                 }
                 FrameType::Chunk => {
                     if let Some(plumbing) = &self.credit {
-                        let counter = self
-                            .consumed_since_grant
-                            .entry(frame.stream_id.clone())
-                            .or_insert(0);
-                        *counter += 1;
-                        if *counter >= plumbing.batch {
-                            (plumbing.grant)(frame.stream_id.clone(), *counter);
-                            *counter = 0;
+                        if let Some(grant) = self.consumed.consumed(&frame.stream_id, plumbing.window)
+                        {
+                            (plumbing.grant)(frame.stream_id.clone(), grant);
                         }
                     }
                     if let Some(payload) = frame.payload {
@@ -1635,8 +1662,7 @@ pub async fn collect_terminal_output(
     // Consumed-chunk accounting for batched grants (L10): the producer's
     // output window is replenished as we consume, so it can stream past the
     // initial window without stalling.
-    let mut consumed_since_grant: std::collections::HashMap<Option<String>, u64> =
-        std::collections::HashMap::new();
+    let mut consumed = ConsumedStreams::default();
     let mut timer = ActivityTimer::new(activity_timeout_secs);
     let has_writer = writer.is_some();
     let mut terminal_meta = TerminalMeta::default();
@@ -1689,13 +1715,9 @@ pub async fn collect_terminal_output(
                         }
                         // Replenish the producer's window (L10), batched.
                         if let Some(plumbing) = credit {
-                            let counter = consumed_since_grant
-                                .entry(frame.stream_id.clone())
-                                .or_insert(0);
-                            *counter += 1;
-                            if *counter >= plumbing.batch {
-                                (plumbing.grant)(frame.stream_id.clone(), *counter);
-                                *counter = 0;
+                            if let Some(grant) = consumed.consumed(&frame.stream_id, plumbing.window)
+                            {
+                                (plumbing.grant)(frame.stream_id.clone(), grant);
                             }
                         }
                     }
@@ -1993,11 +2015,8 @@ pub async fn collect_terminal_output(
                 // be smaller than our grant batch, in which case it is stalled
                 // waiting for exactly this credit.
                 if let Some(plumbing) = credit {
-                    for (stream_id, counter) in consumed_since_grant.iter_mut() {
-                        if *counter > 0 {
-                            (plumbing.grant)(stream_id.clone(), *counter);
-                            *counter = 0;
-                        }
+                    for (stream_id, grant) in consumed.flush() {
+                        (plumbing.grant)(stream_id, grant);
                     }
                 }
                 // Per-cap activity-silence observation, NOT an abort.
@@ -2014,7 +2033,8 @@ pub async fn collect_terminal_output(
                     // counters (all flushed just above, so non-zero means
                     // the flush path itself is broken) and total consumed
                     // bytes locate the starved edge.
-                    let pending: Vec<String> = consumed_since_grant
+                    let pending: Vec<String> = consumed
+                        .pending()
                         .iter()
                         .map(|(sid, n)| format!("{:?}: pending_grants={}", sid, n))
                         .collect();

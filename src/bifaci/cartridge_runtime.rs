@@ -503,7 +503,9 @@ impl InputRx {
 }
 
 /// Emits CREDIT grants for one input stream as the handler consumes it (L10).
-/// Grants are batched: one CREDIT per `batch` consumed chunks.
+///
+/// When a grant is due, and for how much, is the stream's [`CreditWindow`] —
+/// the model's decision. This puts the grant on the wire.
 pub(crate) struct InputGrantEmitter {
     sender: Arc<dyn FrameSender>,
     rid: MessageId,
@@ -515,28 +517,21 @@ pub(crate) struct InputGrantEmitter {
     /// Request for handler-input consumption, Response for peer-response
     /// consumption.
     direction: crate::bifaci::frame::CreditDirection,
-    batch: u64,
-    consumed_since_grant: u64,
-    /// Shared with the demux's violation accounting: granting extends the
-    /// window the demux checks arriving chunks against.
-    window: Arc<std::sync::atomic::AtomicI64>,
+    /// The stream's window, shared with whatever sees its chunks arrive: a
+    /// grant extends the window arriving chunks are checked against.
+    window: Arc<crate::bifaci::credit::CreditWindow>,
 }
 
 impl InputGrantEmitter {
-    /// Record one consumed chunk; emit a batched CREDIT grant when due.
+    /// Record one consumed chunk; emit the batched CREDIT grant when one is due.
     fn consumed(&mut self) {
-        self.consumed_since_grant += 1;
-        if self.consumed_since_grant >= self.batch {
-            self.flush();
+        if let Some(grant) = self.window.consumed() {
+            self.send(grant);
         }
     }
 
-    /// Build a second emitter over the SAME window/sender for the demux's
-    /// fragment crediting on sequence streams, with `batch = 1` so every
-    /// grant flushes immediately. Immediate flushing is load-bearing: the
-    /// demux only runs when frames arrive, so a batched (held) grant while
-    /// the producer is stalled on exactly that credit would deadlock the
-    /// stream mid-item (L10 has no other flush point inside the demux).
+    /// A second emitter over the SAME window, for the demux to credit the
+    /// frames that only continue a sequence item (see [`Self::continued`]).
     fn fragment_sibling(&self) -> InputGrantEmitter {
         InputGrantEmitter {
             sender: Arc::clone(&self.sender),
@@ -544,10 +539,18 @@ impl InputGrantEmitter {
             xid: self.xid.clone(),
             stream_id: self.stream_id.clone(),
             direction: self.direction,
-            batch: 1,
-            consumed_since_grant: 0,
             window: Arc::clone(&self.window),
         }
+    }
+
+    /// A frame that only continues an item already begun arrived: grant it
+    /// back at once. Immediate granting is load-bearing: the demux only runs
+    /// when frames arrive, so a held grant while the producer is stalled on
+    /// exactly that credit would deadlock the stream mid-item (L10 has no
+    /// other flush point inside the demux).
+    fn continued(&mut self) {
+        let grant = self.window.continued();
+        self.send(grant);
     }
 
     /// Emit any pending (sub-batch) grant immediately.
@@ -559,14 +562,14 @@ impl InputGrantEmitter {
     /// receiver's batch threshold. Flushing at the block point guarantees
     /// progress under any window/batch mismatch.
     fn flush(&mut self) {
-        if self.consumed_since_grant == 0 {
-            return;
+        if let Some(grant) = self.window.flush() {
+            self.send(grant);
         }
-        let n = self.consumed_since_grant;
-        self.consumed_since_grant = 0;
-        self.window
-            .fetch_add(n as i64, std::sync::atomic::Ordering::SeqCst);
-        let mut frame = Frame::credit(self.rid.clone(), self.stream_id.clone(), n, self.direction);
+    }
+
+    fn send(&self, grant: u64) {
+        let mut frame =
+            Frame::credit(self.rid.clone(), self.stream_id.clone(), grant, self.direction);
         frame.routing_id = self.xid.clone();
         // A failed grant send means the runtime is shutting down; the
         // sender-side gate will be closed by the terminal path (counted
@@ -2172,9 +2175,10 @@ impl PeerCall {
             // Peer-response consumption credits the CALLEE's output streams —
             // response direction, routed toward the handler (L11).
             direction: crate::bifaci::frame::CreditDirection::Response,
-            batch: (self.initial_credit / 2).max(1),
-            consumed_since_grant: 0,
-            window: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            // The callee's send window was negotiated on ITS link, which this
+            // side cannot see: arriving chunks are not checked against this
+            // window, which only paces the grants for what is consumed.
+            window: Arc::new(crate::bifaci::credit::CreditWindow::new(self.initial_credit)),
         });
         let peer_response = demux_single_stream(response_rx, grants);
 
@@ -3582,12 +3586,13 @@ fn demux_multi_stream(
         // (mirrors the file-path pattern: the value is a small reference,
         // never the data).
         let mut lf_accumulators: HashMap<String, (String, Vec<Vec<u8>>)> = HashMap::new();
-        // Per-stream remaining credit windows (L10/L12). The window starts at
-        // the negotiated initial_credit; handler consumption (grants) extends
-        // it; a chunk arriving with the window at zero is a fatal
-        // CREDIT_VIOLATION. The demux itself never blocks — accounting keeps
-        // control frames flowing regardless of data pressure.
-        let mut stream_windows: HashMap<String, Arc<std::sync::atomic::AtomicI64>> = HashMap::new();
+        // Per-stream credit windows (L10/L12). The window starts at the
+        // negotiated initial_credit; handler consumption (grants) extends it; a
+        // chunk arriving with nothing left of it is a fatal CREDIT_VIOLATION.
+        // The demux itself never blocks — accounting keeps control frames
+        // flowing regardless of data pressure.
+        let mut stream_windows: HashMap<String, Arc<crate::bifaci::credit::CreditWindow>> =
+            HashMap::new();
         // Sequence-mode streams: stream_id → item reassembly state (see
         // `SeqReassembly` — frame payloads are RFC 8742 fragments, decoded
         // at item granularity).
@@ -3624,8 +3629,8 @@ fn demux_multi_stream(
                         let (chunk_tx, chunk_rx) = tokio::sync::mpsc::unbounded_channel();
                         stream_channels.insert(stream_id.clone(), chunk_tx);
                         let grants = credit.as_ref().map(|ctx| {
-                            let window = Arc::new(std::sync::atomic::AtomicI64::new(
-                                ctx.initial_credit as i64,
+                            let window = Arc::new(crate::bifaci::credit::CreditWindow::new(
+                                ctx.initial_credit,
                             ));
                             stream_windows.insert(stream_id.clone(), Arc::clone(&window));
                             InputGrantEmitter {
@@ -3634,8 +3639,6 @@ fn demux_multi_stream(
                                 xid: ctx.xid.clone(),
                                 stream_id: Some(stream_id.clone()),
                                 direction: crate::bifaci::frame::CreditDirection::Request,
-                                batch: (ctx.initial_credit / 2).max(1),
-                                consumed_since_grant: 0,
                                 window,
                             }
                         });
@@ -3690,8 +3693,7 @@ fn demux_multi_stream(
                     // Credit-violation check (L12): a chunk beyond the granted
                     // window is a fatal protocol error for this request.
                     if let Some(window) = stream_windows.get(&stream_id) {
-                        let before = window.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                        if before <= 0 {
+                        if window.arrive().is_err() {
                             if let Some(tx) = stream_channels.get(&stream_id) {
                                 let _ = tx.send(Err(StreamError::Protocol(format!(
                                     "CREDIT_VIOLATION: chunk received beyond the granted window on stream {} (L12)",
@@ -3738,7 +3740,7 @@ fn demux_multi_stream(
                                     // per consumed ITEM, so without this an item
                                     // spanning more frames than the credit window
                                     // could never finish arriving.
-                                    g.consumed();
+                                    g.continued();
                                 }
                                 seq.buf.extend_from_slice(&payload);
                                 loop {
@@ -4122,7 +4124,7 @@ fn demux_single_stream(
                             if seq.buf.is_empty() {
                                 seq.item_meta = chunk_meta;
                             } else if let Some(g) = seq.fragment_grants.as_mut() {
-                                g.consumed();
+                                g.continued();
                             }
                             seq.buf.extend_from_slice(&payload);
                             loop {
@@ -4238,57 +4240,69 @@ struct QueuedRequest {
 
 /// The runtime's materialized concurrency pools (see `bifaci::pools`): one
 /// singleton pool per registered handler pattern, every declared shared
-/// pool from the manifest, and `all`. One mutex guards capacities, active
-/// counts and the singleton queues, so an admission decision is atomic
-/// across a cap's whole chain — a request is admitted through EVERY pool in
-/// its chain or queued on its cap's own queue, never half-admitted.
+/// pool from the manifest, and `all`.
+///
+/// Who is admitted, and when, is the proved model's decision
+/// (`formal/CapDAG/Bifaci/Pools.lean`): `state` is its picture of this
+/// cartridge — each pool's limit and how many requests hold a slot in it, and
+/// the line of waiters in order of arrival. A request is admitted through EVERY
+/// pool in its chain or it waits, never half-admitted; and whenever anything
+/// changes, the first waiter whose whole chain has room goes next. This struct
+/// keeps what the model has no use for: the three numbers each pool carries on
+/// the wire, and the queued requests themselves.
 pub(crate) struct RuntimePools {
-    pools: std::collections::BTreeMap<String, RuntimePool>,
+    state: crate::formal::bifaci::pools::State,
+    /// Each pool's wire numbers and members, by pool name.
+    meta: std::collections::BTreeMap<String, PoolMeta>,
     /// Registered handler pattern (canonical) → its pool chain in admission
     /// order: singleton, declared pools containing it, `all`.
     chains: HashMap<String, Vec<String>>,
-    /// Singleton queues — queues lead to pools. Keyed by registered pattern.
-    queues: std::collections::BTreeMap<String, std::collections::VecDeque<QueuedRequest>>,
-    /// Global FIFO ticket counter: cross-cap admission on a shared-pool
-    /// release is arrival-ordered, never cap-biased.
-    next_ticket: u64,
+    /// The requests in line, by the ticket the model gave each.
+    waiting: HashMap<u64, QueuedRequest>,
 }
 
 #[derive(Debug)]
-struct RuntimePool {
+struct PoolMeta {
     declared: u64,
     configured: u64,
     /// Cartridge self-report; `None` = static (the normal case). Written
     /// only through [`PoolHandle::set`].
     available: Option<u64>,
-    active: u64,
     /// Member patterns (shared pools and `all`); singletons empty.
     members: Vec<String>,
 }
 
-impl RuntimePool {
+impl PoolMeta {
     fn effective(&self) -> u64 {
         crate::bifaci::pools::effective_capacity(self.configured, self.available)
     }
+}
 
-    fn has_room(&self) -> bool {
-        let effective = self.effective();
-        effective == crate::bifaci::pools::CAPACITY_UNLIMITED || self.active < effective
-    }
+/// What became of a request that arrived.
+pub(crate) enum Arrived {
+    /// Its chain had room: it holds its slots, and is handed back to be run.
+    Admitted(QueuedRequest),
+    /// It is in line, at this position (from 1) among the requests waiting on
+    /// its own cap.
+    Queued { position: usize },
 }
 
 impl std::fmt::Debug for RuntimePools {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // QueuedRequest carries an opaque factory; summarize queues by depth.
-        let queue_depths: std::collections::BTreeMap<&String, usize> =
-            self.queues.iter().map(|(k, q)| (k, q.len())).collect();
+        // QueuedRequest carries an opaque factory; the line is the model's.
         f.debug_struct("RuntimePools")
-            .field("pools", &self.pools)
+            .field("state", &self.state)
+            .field("meta", &self.meta)
             .field("chains", &self.chains)
-            .field("queue_depths", &queue_depths)
-            .field("next_ticket", &self.next_ticket)
             .finish()
     }
+}
+
+/// A count out of the model that was put in as a `u64`, or counts something
+/// this process holds in memory.
+fn pool_count(n: &lungo::Nat) -> u64 {
+    n.to_u64()
+        .unwrap_or_else(|| panic!("pool count {n} exceeds u64"))
 }
 
 impl RuntimePools {
@@ -4300,6 +4314,7 @@ impl RuntimePools {
         handler_patterns: &[String],
         declarations: &crate::bifaci::pools::PoolDeclarations,
     ) -> Result<Self, String> {
+        use crate::formal::bifaci::pools::state;
         let mut patterns = Vec::with_capacity(handler_patterns.len());
         for raw in handler_patterns {
             let urn = CapUrn::from_string(raw)
@@ -4323,20 +4338,23 @@ impl RuntimePools {
             Ok(canon)
         };
 
-        let mut pools = std::collections::BTreeMap::new();
-        let mut queues = std::collections::BTreeMap::new();
+        // Singletons in registration order, declared pools in name order, then
+        // `all`: the order the pools are listed in everywhere after.
+        let mut order: Vec<String> = Vec::new();
+        let mut meta = std::collections::BTreeMap::new();
         for pattern in &patterns {
             let declared = declarations
                 .capacities
                 .get(pattern)
                 .copied()
                 .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
-            pools.insert(
+            meta.insert(
                 pattern.clone(),
-                RuntimePool { declared, configured: declared, available: None, active: 0, members: Vec::new() },
+                PoolMeta { declared, configured: declared, available: None, members: Vec::new() },
             );
-            queues.insert(pattern.clone(), std::collections::VecDeque::new());
+            order.push(pattern.clone());
         }
+        let mut resolved_shared: Vec<(String, Vec<String>)> = Vec::new();
         for (name, members) in &declarations.pools {
             let mut resolved = Vec::with_capacity(members.len());
             for member in members {
@@ -4347,14 +4365,16 @@ impl RuntimePools {
                 .get(name)
                 .copied()
                 .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
-            pools.insert(
+            meta.insert(
                 name.clone(),
-                RuntimePool { declared, configured: declared, available: None, active: 0, members: resolved },
+                PoolMeta { declared, configured: declared, available: None, members: resolved.clone() },
             );
+            order.push(name.clone());
+            resolved_shared.push((name.clone(), resolved));
         }
         for key in declarations.capacities.keys() {
             if key != crate::bifaci::pools::POOL_ALL
-                && !pools.contains_key(key)
+                && !meta.contains_key(key)
                 && !CapUrn::from_string(key).map(|u| patterns.contains(&u.to_string())).unwrap_or(false)
             {
                 return Err(format!(
@@ -4369,33 +4389,36 @@ impl RuntimePools {
             .get(crate::bifaci::pools::POOL_ALL)
             .copied()
             .unwrap_or(crate::bifaci::pools::CAPACITY_UNLIMITED);
-        pools.insert(
+        meta.insert(
             crate::bifaci::pools::POOL_ALL.to_string(),
-            RuntimePool {
+            PoolMeta {
                 declared: all_declared,
                 configured: all_declared,
                 available: None,
-                active: 0,
                 members: patterns.clone(),
             },
         );
+        order.push(crate::bifaci::pools::POOL_ALL.to_string());
 
+        let mut pools = state::empty();
+        for name in &order {
+            pools = state::set_capacity(pools, name.clone(), lungo::Nat::from(meta[name].effective()));
+        }
+
+        let shared: lungo::List<(String, lungo::List<String>)> = resolved_shared
+            .into_iter()
+            .map(|(name, members)| (name, members.into_iter().collect()))
+            .collect();
         let mut chains = HashMap::new();
         for pattern in &patterns {
-            let mut chain = vec![pattern.clone()];
-            for (name, pool) in &pools {
-                if name != crate::bifaci::pools::POOL_ALL
-                    && name != pattern
-                    && pool.members.iter().any(|m| m == pattern)
-                {
-                    chain.push(name.clone());
-                }
-            }
-            chain.push(crate::bifaci::pools::POOL_ALL.to_string());
+            let chain: Vec<String> =
+                crate::formal::bifaci::pools::chain(pattern.clone(), shared.clone())
+                    .into_iter()
+                    .collect();
             chains.insert(pattern.clone(), chain);
         }
 
-        Ok(Self { pools, chains, queues, next_ticket: 0 })
+        Ok(Self { state: pools, meta, chains, waiting: HashMap::new() })
     }
 
     fn chain(&self, pattern: &str) -> &[String] {
@@ -4404,45 +4427,46 @@ impl RuntimePools {
             .unwrap_or_else(|| panic!("no pool chain for registered pattern '{pattern}'"))
     }
 
-    fn chain_has_room(&self, pattern: &str) -> bool {
-        self.chain(pattern)
-            .iter()
-            .all(|pool| self.pools[pool].has_room())
+    fn model_chain(&self, pattern: &str) -> lungo::List<String> {
+        self.chain(pattern).iter().cloned().collect()
     }
 
-    /// Admit one dispatch of `pattern` if its whole chain has room.
-    fn try_admit(&mut self, pattern: &str) -> bool {
-        if !self.chain_has_room(pattern) {
-            return false;
+    /// A request arrives: admitted at once through its cap's whole chain when
+    /// every pool of it has room, and otherwise in line on its cap's own queue.
+    fn arrive(&mut self, mut request: QueuedRequest) -> Arrived {
+        use crate::formal::bifaci::pools::{state, Arrival};
+        match state::arrive(self.state.clone(), self.model_chain(&request.pattern)) {
+            Arrival::Admitted { state } => {
+                self.state = state;
+                Arrived::Admitted(request)
+            }
+            Arrival::Queued { state, ticket, position } => {
+                self.state = state;
+                request.ticket = pool_count(&ticket);
+                self.waiting.insert(request.ticket, request);
+                Arrived::Queued { position: pool_count(&position) as usize }
+            }
+            Arrival::UnknownPool { name } => {
+                unreachable!("a registered pattern's chain names only this runtime's pools, not '{name}'")
+            }
         }
-        for pool in self.chain(pattern).to_vec() {
-            self.pools.get_mut(&pool).expect("chain pool exists").active += 1;
-        }
-        true
     }
 
     /// Release one dispatch of `pattern` across its chain.
     fn release(&mut self, pattern: &str) {
-        for pool in self.chain(pattern).to_vec() {
-            let slot = self.pools.get_mut(&pool).expect("chain pool exists");
-            slot.active = slot
-                .active
-                .checked_sub(1)
-                .unwrap_or_else(|| panic!("pool '{pool}' released below zero active"));
+        let chain = self.chain(pattern).to_vec();
+        for pool in &chain {
+            let active = (&self.state.pools)
+                .into_iter()
+                .find(|p| &p.name == pool)
+                .map(|p| pool_count(&p.active))
+                .unwrap_or_else(|| panic!("chain pool '{pool}' is not one of this runtime's pools"));
+            assert!(active > 0, "pool '{pool}' released below zero active");
         }
-    }
-
-    /// Queue a request on its cap's singleton queue, returning its queue
-    /// position (1-based) for the "queued" LOG.
-    fn enqueue(&mut self, mut request: QueuedRequest) -> usize {
-        request.ticket = self.next_ticket;
-        self.next_ticket += 1;
-        let queue = self
-            .queues
-            .get_mut(&request.pattern)
-            .unwrap_or_else(|| panic!("no singleton queue for pattern '{}'", request.pattern));
-        queue.push_back(request);
-        queue.len()
+        self.state = crate::formal::bifaci::pools::state::release(
+            self.state.clone(),
+            chain.into_iter().collect(),
+        );
     }
 
     /// Remove a queued (not-yet-admitted) request by its request id — the
@@ -4450,38 +4474,30 @@ impl RuntimePools {
     /// released. Returns the removed request, or `None` when the id is not
     /// queued (it is running, or unknown).
     fn remove_queued(&mut self, request_id: &MessageId) -> Option<QueuedRequest> {
-        for queue in self.queues.values_mut() {
-            if let Some(pos) = queue.iter().position(|q| &q.request_id == request_id) {
-                return queue.remove(pos);
-            }
-        }
-        None
+        let ticket = self
+            .waiting
+            .iter()
+            .find(|(_, queued)| &queued.request_id == request_id)
+            .map(|(ticket, _)| *ticket)?;
+        self.state = crate::formal::bifaci::pools::state::leave(
+            self.state.clone(),
+            lungo::Nat::from(ticket),
+        );
+        self.waiting.remove(&ticket)
     }
 
-    /// Pop-and-admit the oldest queued request whose chain has room —
-    /// arrival-ordered across all caps by the global ticket.
-    fn pop_admissible(&mut self) -> Option<QueuedRequest> {
-        let mut best: Option<(u64, String)> = None;
-        for (pattern, queue) in &self.queues {
-            if let Some(front) = queue.front() {
-                if self.chain_has_room(pattern)
-                    && best.as_ref().map_or(true, |(ticket, _)| front.ticket < *ticket)
-                {
-                    best = Some((front.ticket, pattern.clone()));
-                }
-            }
-        }
-        let (_, pattern) = best?;
-        let request = self
-            .queues
-            .get_mut(&pattern)
-            .expect("queue exists")
-            .pop_front()
-            .expect("front observed above");
-        for pool in self.chain(&pattern).to_vec() {
-            self.pools.get_mut(&pool).expect("chain pool exists").active += 1;
-        }
-        Some(request)
+    /// Admit whoever is next: the request that has waited longest among those
+    /// whose whole chain has room — in order of arrival across all caps, never
+    /// cap-biased. `None` when nobody in line can be admitted.
+    fn admit_next(&mut self) -> Option<QueuedRequest> {
+        let (waiter, state) = crate::formal::bifaci::pools::state::admit_next(self.state.clone())?;
+        self.state = state;
+        let ticket = pool_count(&waiter.ticket);
+        Some(
+            self.waiting
+                .remove(&ticket)
+                .unwrap_or_else(|| panic!("ticket {ticket} is in line but its request is not held")),
+        )
     }
 
     /// Apply an operator's desired `configured` values (heartbeat probe).
@@ -4491,24 +4507,34 @@ impl RuntimePools {
         desired: &crate::bifaci::pools::DesiredCapacities,
     ) -> Result<(), String> {
         for name in desired.keys() {
-            if !self.pools.contains_key(name) {
+            if !self.meta.contains_key(name) {
                 return Err(format!("unknown pool '{name}'"));
             }
         }
         for (name, configured) in desired {
-            self.pools.get_mut(name).expect("validated above").configured = *configured;
+            self.meta.get_mut(name).expect("validated above").configured = *configured;
+            self.limit_changed(name);
         }
         Ok(())
     }
 
     /// Cartridge self-report for one pool (see [`PoolHandle`]).
     fn set_available(&mut self, pool: &str, available: u64) -> Result<(), String> {
-        let slot = self
-            .pools
+        self.meta
             .get_mut(pool)
-            .ok_or_else(|| format!("unknown pool '{pool}'"))?;
-        slot.available = Some(available);
+            .ok_or_else(|| format!("unknown pool '{pool}'"))?
+            .available = Some(available);
+        self.limit_changed(pool);
         Ok(())
+    }
+
+    /// One of a pool's numbers changed: tell the model its new limit.
+    fn limit_changed(&mut self, pool: &str) {
+        self.state = crate::formal::bifaci::pools::state::set_capacity(
+            self.state.clone(),
+            pool.to_string(),
+            lungo::Nat::from(self.meta[pool].effective()),
+        );
     }
 
     /// The full wire-shaped state map. `queued` counts each waiting request
@@ -4517,30 +4543,22 @@ impl RuntimePools {
     /// number of waiters it is actually holding back.
     fn snapshot(&self) -> crate::bifaci::pools::PoolStates {
         let mut states = crate::bifaci::pools::PoolStates::new();
-        for (name, pool) in &self.pools {
+        for pool in &self.state.pools {
+            let meta = &self.meta[&pool.name];
             states.insert(
-                name.clone(),
+                pool.name.clone(),
                 crate::bifaci::pools::PoolState {
-                    declared: pool.declared,
-                    configured: pool.configured,
-                    available: pool.available,
-                    active: pool.active,
-                    queued: 0,
-                    caps: pool.members.clone(),
+                    declared: meta.declared,
+                    configured: meta.configured,
+                    available: meta.available,
+                    active: pool_count(&pool.active),
+                    queued: pool_count(&crate::formal::bifaci::pools::state::held_back(
+                        self.state.clone(),
+                        pool.name.clone(),
+                    )),
+                    caps: meta.members.clone(),
                 },
             );
-        }
-        for (pattern, queue) in &self.queues {
-            let waiting = queue.len() as u64;
-            if waiting == 0 {
-                continue;
-            }
-            states.get_mut(pattern).expect("singleton state exists").queued += waiting;
-            for pool in self.chain(pattern) {
-                if pool != pattern && !self.pools[pool].has_room() {
-                    states.get_mut(pool).expect("chain state exists").queued += waiting;
-                }
-            }
         }
         states
     }
@@ -4556,6 +4574,9 @@ impl RuntimePools {
 #[derive(Clone)]
 pub struct PoolHandle {
     pools: Arc<Mutex<Option<RuntimePools>>>,
+    /// Wakes the runtime's main loop: a limit that rises may let a request in
+    /// line go, and the loop is what admits it.
+    changed: Arc<tokio::sync::Notify>,
     name: String,
 }
 
@@ -4564,11 +4585,17 @@ impl PoolHandle {
     /// unknown pool name, or a call before the runtime materialized its
     /// pools (`run()` not started).
     pub fn set(&self, available: u64) -> Result<(), String> {
-        let mut pools = self.pools.lock().expect("runtime pools mutex poisoned");
-        pools
-            .as_mut()
-            .ok_or_else(|| "runtime pools are not materialized yet (before run())".to_string())?
-            .set_available(&self.name, available)
+        {
+            let mut pools = self.pools.lock().expect("runtime pools mutex poisoned");
+            pools
+                .as_mut()
+                .ok_or_else(|| "runtime pools are not materialized yet (before run())".to_string())?
+                .set_available(&self.name, available)?;
+        }
+        // Without this a request queued behind the old limit waited for the
+        // next frame from the host to be noticed, however long that took.
+        self.changed.notify_one();
+        Ok(())
     }
 }
 
@@ -4617,6 +4644,10 @@ pub struct CartridgeRuntime {
     /// them from the handler set + the manifest's declarations; shared via
     /// [`PoolHandle`] so handlers can self-report `available` dynamically.
     pools: Arc<Mutex<Option<RuntimePools>>>,
+
+    /// Signalled when a handler changes a pool's `available` through a
+    /// [`PoolHandle`], so the main loop looks at the line again.
+    pools_changed: Arc<tokio::sync::Notify>,
 
     /// Process-wide dropped-frame accounting (L8). Shared with every
     /// ChannelFrameSender and the stats surface. Drops mean something went
@@ -4697,19 +4728,25 @@ pub(crate) fn write_gated<W: std::io::Write>(
     terminated: &mut crate::bifaci::stats::TerminatedFlows,
     stragglers: &crate::bifaci::stats::StragglerCounters,
 ) -> GatedWrite {
+    use crate::formal::bifaci::request::{write, Write};
     let key = FlowKey::from_frame(&frame);
-    if frame.is_flow_frame() && terminated.contains(&key) {
-        let total = stragglers.record(frame.frame_type);
+    // Whether the frame is written, and whether writing it ends the flow, is
+    // the proved model's decision (`formal/CapDAG/Bifaci/Request.lean`).
+    let ends = match write(terminated.contains(&key), frame.frame_type.model()) {
+        Write::Send { ends } => ends,
+        Write::Suppress => {
+            let total = stragglers.record(frame.frame_type);
         tracing::debug!(
             target: "cartridge_runtime",
             rid = ?frame.id,
             ftype = frame.frame_type.as_str(),
             straggler_total = total,
-            "[CartridgeRuntime] writer: suppressed benign post-terminal straggler — \
-             END/ERR already written for this flow, the frame is moot (L4)"
-        );
-        return GatedWrite::SuppressedStraggler;
-    }
+                "[CartridgeRuntime] writer: suppressed benign post-terminal straggler — \
+                 END/ERR already written for this flow, the frame is moot (L4)"
+            );
+            return GatedWrite::SuppressedStraggler;
+        }
+    };
     seq_assigner.assign(&mut frame);
     let ftype = frame.frame_type;
     if let Err(e) = crate::bifaci::io::write_frame_sync(writer, &frame, limits) {
@@ -4721,7 +4758,7 @@ pub(crate) fn write_gated<W: std::io::Write>(
         );
         return GatedWrite::WriterDead;
     }
-    if matches!(ftype, FrameType::End | FrameType::Err) {
+    if ends {
         seq_assigner.remove(&key);
         terminated.insert(key);
     }
@@ -4957,6 +4994,7 @@ impl CartridgeRuntime {
             manifest: parsed_manifest,
             limits: Limits::default(),
             pools: Arc::new(Mutex::new(None)),
+            pools_changed: Arc::new(tokio::sync::Notify::new()),
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -4983,6 +5021,7 @@ impl CartridgeRuntime {
             manifest: Some(manifest),
             limits: Limits::default(),
             pools: Arc::new(Mutex::new(None)),
+            pools_changed: Arc::new(tokio::sync::Notify::new()),
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -5048,6 +5087,7 @@ impl CartridgeRuntime {
     pub fn pool_handle(&self, pool: &str) -> PoolHandle {
         PoolHandle {
             pools: Arc::clone(&self.pools),
+            changed: Arc::clone(&self.pools_changed),
             name: pool.to_string(),
         }
     }
@@ -6042,7 +6082,7 @@ impl CartridgeRuntime {
             loop {
                 let queued = {
                     let mut pools = self.pools.lock().expect("runtime pools mutex poisoned");
-                    match pools.as_mut().expect("pools materialized at startup").pop_admissible() {
+                    match pools.as_mut().expect("pools materialized at startup").admit_next() {
                         Some(q) => q,
                         None => break,
                     }
@@ -6131,6 +6171,9 @@ impl CartridgeRuntime {
                     }
                     continue
                 },
+                // A handler changed what one of its pools can serve: look at
+                // the line again (the top of the loop admits whoever can go).
+                _ = self.pools_changed.notified() => continue,
                 // Frame from reader task.
                 result = frame_rx.recv() => {
                     match result {
@@ -6207,70 +6250,67 @@ impl CartridgeRuntime {
                     // the cap's OWN queue — a saturated sibling cap never
                     // holds this request back except through a pool they
                     // genuinely share.
-                    let admitted = self
+                    let arrived = self
                         .pools
                         .lock()
                         .expect("runtime pools mutex poisoned")
                         .as_mut()
                         .expect("pools materialized at startup")
-                        .try_admit(&pattern);
-                    if !admitted {
-                        // Chain full — queue the request, send "queued" LOG back.
-                        let queue_pos = {
-                            let mut pools =
-                                self.pools.lock().expect("runtime pools mutex poisoned");
-                            pools.as_mut().expect("pools materialized at startup").enqueue(
-                                QueuedRequest {
-                                    factory,
-                                    cap_urn,
-                                    pattern: pattern.clone(),
-                                    ticket: 0, // assigned by enqueue
-                                    routing_id: routing_id.clone(),
-                                    request_id: request_id.clone(),
-                                    raw_rx,
-                                },
-                            )
-                        };
-                        let mut log_frame = Frame::log(
-                            request_id,
-                            "queued",
-                            crate::failure::AttributionClass::Internal,
-                            &format!(
-                                "Request queued (position {} on pool '{}')",
-                                queue_pos, pattern
-                            ),
-                            None,
-                        );
-                        log_frame.routing_id = routing_id;
-                        let _ = output_tx.send(log_frame);
-                    } else {
-                        // Chain has room — spawn handler immediately.
-                        let handler_rid = request_id.clone();
-                        let handler_xid = routing_id.clone();
-                        let feed_handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>> =
-                            Arc::new(Mutex::new(Vec::new()));
-                        live_feed_handles_by_rid
-                            .insert(handler_rid.clone(), Arc::clone(&feed_handles));
-                        handler_patterns.insert(handler_rid.clone(), pattern);
-                        let handle = spawn_handler(
-                            raw_rx,
+                        .arrive(QueuedRequest {
                             factory,
                             cap_urn,
-                            request_id,
-                            routing_id,
-                            &output_tx,
-                            &pending_peer_requests,
-                            &self.manifest,
-                            negotiated_limits.max_chunk,
-                            &handler_done_tx,
-                            &self.drop_counters,
-                            &credit_router,
-                            negotiated_limits.initial_credit,
-                            &self.live_feed_overruns,
-                            &feed_handles,
-                        );
-                        active_handlers.insert(handler_rid.clone(), handle);
-                        handler_routing_ids.insert(handler_rid, handler_xid);
+                            pattern: pattern.clone(),
+                            ticket: 0, // the model's, once in line
+                            routing_id: routing_id.clone(),
+                            request_id: request_id.clone(),
+                            raw_rx,
+                        });
+                    match arrived {
+                        Arrived::Queued { position } => {
+                            // Chain full — the request is in line; say so.
+                            let mut log_frame = Frame::log(
+                                request_id,
+                                "queued",
+                                crate::failure::AttributionClass::Internal,
+                                &format!(
+                                    "Request queued (position {} on pool '{}')",
+                                    position, pattern
+                                ),
+                                None,
+                            );
+                            log_frame.routing_id = routing_id;
+                            let _ = output_tx.send(log_frame);
+                        }
+                        Arrived::Admitted(admitted) => {
+                            // Chain has room — spawn handler immediately.
+                            let handler_rid = request_id.clone();
+                            let handler_xid = routing_id.clone();
+                            let feed_handles: Arc<
+                                Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>,
+                            > = Arc::new(Mutex::new(Vec::new()));
+                            live_feed_handles_by_rid
+                                .insert(handler_rid.clone(), Arc::clone(&feed_handles));
+                            handler_patterns.insert(handler_rid.clone(), pattern);
+                            let handle = spawn_handler(
+                                admitted.raw_rx,
+                                admitted.factory,
+                                admitted.cap_urn,
+                                request_id,
+                                routing_id,
+                                &output_tx,
+                                &pending_peer_requests,
+                                &self.manifest,
+                                negotiated_limits.max_chunk,
+                                &handler_done_tx,
+                                &self.drop_counters,
+                                &credit_router,
+                                negotiated_limits.initial_credit,
+                                &self.live_feed_overruns,
+                                &feed_handles,
+                            );
+                            active_handlers.insert(handler_rid.clone(), handle);
+                            handler_routing_ids.insert(handler_rid, handler_xid);
+                        }
                     }
                 }
 
@@ -6699,6 +6739,19 @@ mod tests {
     const POOL_CAP_A: &str = "cap:pool-a";
     const POOL_CAP_B: &str = "cap:pool-b";
 
+    /// A request for `pattern` arrives: whether it was admitted at once.
+    fn admitted_on_arrival(pools: &mut RuntimePools, pattern: &str) -> bool {
+        matches!(pools.arrive(pool_test_request(pattern)), Arrived::Admitted(_))
+    }
+
+    /// A request for `pattern` arrives and must wait: its position in line.
+    fn queued_on_arrival(pools: &mut RuntimePools, pattern: &str) -> usize {
+        match pools.arrive(pool_test_request(pattern)) {
+            Arrived::Queued { position } => position,
+            Arrived::Admitted(_) => panic!("a request for '{pattern}' was admitted, not queued"),
+        }
+    }
+
     // TEST1527: RuntimePools materializes one singleton per registered
     // pattern, every declared shared pool, and `all` — and a declaration
     // referencing a cap no handler serves is a hard cartridge-author error,
@@ -6751,21 +6804,23 @@ mod tests {
         )
         .expect("valid declarations must materialize");
 
-        assert!(pools.try_admit(POOL_CAP_A), "first dispatch admits");
-        assert!(!pools.try_admit(POOL_CAP_A), "singleton capacity 1 is full");
-        let position = pools.enqueue(pool_test_request(POOL_CAP_A));
-        assert_eq!(position, 1, "queue position is 1-based for the LOG");
+        assert!(admitted_on_arrival(&mut pools, POOL_CAP_A), "first dispatch admits");
+        assert_eq!(
+            queued_on_arrival(&mut pools, POOL_CAP_A),
+            1,
+            "singleton capacity 1 is full; queue position is 1-based for the LOG"
+        );
         assert!(
-            pools.try_admit(POOL_CAP_B),
+            admitted_on_arrival(&mut pools, POOL_CAP_B),
             "a saturated sibling must not block this cap"
         );
         assert!(
-            pools.pop_admissible().is_none(),
+            pools.admit_next().is_none(),
             "nothing is admissible while the singleton is full"
         );
         pools.release(POOL_CAP_A);
         let admitted = pools
-            .pop_admissible()
+            .admit_next()
             .expect("the release must admit the queued request");
         assert_eq!(admitted.pattern, POOL_CAP_A);
     }
@@ -6782,18 +6837,22 @@ mod tests {
         )
         .expect("valid declarations must materialize");
 
-        assert!(pools.try_admit(POOL_CAP_A), "gpu slot taken");
-        // B arrives before A — the global ticket must remember that even
+        assert!(admitted_on_arrival(&mut pools, POOL_CAP_A), "gpu slot taken");
+        // B arrives before A — the order of arrival must be remembered even
         // though "cap:pool-a" sorts first.
-        pools.enqueue(pool_test_request(POOL_CAP_B));
-        pools.enqueue(pool_test_request(POOL_CAP_A));
+        assert_eq!(queued_on_arrival(&mut pools, POOL_CAP_B), 1);
+        assert_eq!(
+            queued_on_arrival(&mut pools, POOL_CAP_A),
+            1,
+            "a position is among the requests waiting on the same cap"
+        );
         pools.release(POOL_CAP_A);
         let first = pools
-            .pop_admissible()
+            .admit_next()
             .expect("released gpu slot must admit the oldest waiter");
         assert_eq!(first.pattern, POOL_CAP_B, "arrival order, not cap order");
         assert!(
-            pools.pop_admissible().is_none(),
+            pools.admit_next().is_none(),
             "gpu capacity 1 admits exactly one"
         );
     }
@@ -6826,9 +6885,9 @@ mod tests {
         let mut good = crate::bifaci::pools::DesiredCapacities::new();
         good.insert(POOL_CAP_A.to_string(), 2);
         pools.apply_desired(&good).expect("valid batch applies");
-        assert!(pools.try_admit(POOL_CAP_A));
-        assert!(pools.try_admit(POOL_CAP_A), "raise admits immediately");
-        assert!(!pools.try_admit(POOL_CAP_A), "raised bound still bounds");
+        assert!(admitted_on_arrival(&mut pools, POOL_CAP_A));
+        assert!(admitted_on_arrival(&mut pools, POOL_CAP_A), "raise admits immediately");
+        assert!(!admitted_on_arrival(&mut pools, POOL_CAP_A), "raised bound still bounds");
     }
 
     // TEST1531: `available` is the cartridge's self-report — effective =
@@ -6847,12 +6906,12 @@ mod tests {
         pools
             .set_available("gpu", 1)
             .expect("gpu is a declared pool");
-        assert!(pools.try_admit(POOL_CAP_A));
-        assert!(
-            !pools.try_admit(POOL_CAP_B),
+        assert!(admitted_on_arrival(&mut pools, POOL_CAP_A));
+        assert_eq!(
+            queued_on_arrival(&mut pools, POOL_CAP_B),
+            1,
             "the self-report must bound admission below `configured`"
         );
-        pools.enqueue(pool_test_request(POOL_CAP_B));
 
         let snapshot = pools.snapshot();
         assert_eq!(snapshot["gpu"].available, Some(1));
@@ -6873,14 +6932,251 @@ mod tests {
         pools
             .set_available("gpu", 0)
             .expect("gpu is a declared pool");
-        assert!(
-            pools.try_admit(POOL_CAP_B),
-            "clearing the self-limit (0 = unlimited) restores min(configured, ∞) = 2"
+        assert_eq!(
+            pools
+                .admit_next()
+                .expect("clearing the self-limit (0 = unlimited) restores min(configured, ∞) = 2")
+                .pattern,
+            POOL_CAP_B,
+            "the request held back by the self-limit goes as soon as it is lifted"
         );
         let error = pools
             .set_available("cap:ghost", 1)
             .expect_err("self-report on an unknown pool must refuse");
         assert!(error.contains("cap:ghost"));
+    }
+
+    // TEST12384: the runtime's pools admit, queue and release exactly as the
+    // model's scripts say — who holds a slot in which pool, who is in line, who
+    // goes next, and how many waiters each pool is holding back — including
+    // where a pool's limit rose and a request arrives while somebody in line
+    // could go: it waits behind them rather than taking the slot.
+    #[test]
+    fn test12384_runtime_pools_follow_the_model() {
+        use crate::bifaci::conformance_tests::{conclude, rows, uint};
+        let canon = |name: &str| match CapUrn::from_string(name) {
+            Ok(urn) if name.starts_with("cap:") => urn.to_string(),
+            _ => name.to_string(),
+        };
+        let scripts = rows("pools");
+        let mut wrong = Vec::new();
+        for script in scripts {
+            let caps: Vec<String> =
+                script["caps"].as_array().unwrap().iter().map(|c| canon(c.as_str().unwrap())).collect();
+            let mut declarations = crate::bifaci::pools::PoolDeclarations::default();
+            for pool in script["shared"].as_array().unwrap() {
+                declarations.pools.insert(
+                    pool["name"].as_str().unwrap().to_string(),
+                    pool["caps"].as_array().unwrap().iter().map(|c| canon(c.as_str().unwrap())).collect(),
+                );
+            }
+            for capacity in script["capacities"].as_array().unwrap() {
+                declarations
+                    .capacities
+                    .insert(canon(capacity["pool"].as_str().unwrap()), uint(&capacity["capacity"]));
+            }
+            let mut pools = RuntimePools::init(&caps, &declarations).expect("the script's pools");
+            let names: Vec<String> =
+                script["pools"].as_array().unwrap().iter().map(|n| canon(n.as_str().unwrap())).collect();
+            let mut in_line: HashMap<u64, MessageId> = HashMap::new();
+
+            let ops = script["ops"].as_array().unwrap();
+            let steps = script["steps"].as_array().unwrap();
+            for (index, (op, step)) in ops.iter().zip(steps).enumerate() {
+                let agreed = match op["op"].as_str().unwrap() {
+                    "arrive" => {
+                        let request = pool_test_request(&canon(op["cap"].as_str().unwrap()));
+                        let rid = request.request_id.clone();
+                        match pools.arrive(request) {
+                            Arrived::Admitted(admitted) => {
+                                admitted.request_id == rid && step["admitted"].as_bool().unwrap()
+                            }
+                            Arrived::Queued { position } => {
+                                let ticket = pools
+                                    .waiting
+                                    .iter()
+                                    .find(|(_, queued)| queued.request_id == rid)
+                                    .map(|(ticket, _)| *ticket)
+                                    .expect("a queued request is held");
+                                in_line.insert(ticket, rid);
+                                !step["admitted"].as_bool().unwrap()
+                                    && ticket == uint(&step["ticket"])
+                                    && position as u64 == uint(&step["position"])
+                            }
+                        }
+                    }
+                    "release" => {
+                        pools.release(&canon(op["cap"].as_str().unwrap()));
+                        true
+                    }
+                    "admit_next" => {
+                        let went = pools.admit_next();
+                        match (&went, step["ticket"].as_u64()) {
+                            (Some(queued), Some(ticket)) => {
+                                queued.ticket == ticket && in_line.remove(&ticket) == Some(queued.request_id.clone())
+                            }
+                            (None, None) => true,
+                            _ => false,
+                        }
+                    }
+                    "leave_oldest" => {
+                        let ticket = uint(&step["ticket"]);
+                        let rid = in_line.remove(&ticket).expect("the script's waiter is in line here");
+                        matches!(pools.remove_queued(&rid), Some(left) if left.ticket == ticket)
+                            && pools.remove_queued(&rid).is_none()
+                    }
+                    "capacity" => {
+                        let mut desired = crate::bifaci::pools::DesiredCapacities::new();
+                        desired.insert(canon(op["pool"].as_str().unwrap()), uint(&op["capacity"]));
+                        pools.apply_desired(&desired).is_ok()
+                    }
+                    other => panic!("unknown pools operation '{other}'"),
+                };
+                let snapshot = pools.snapshot();
+                let active: Vec<u64> = names.iter().map(|n| snapshot[n].active).collect();
+                let held_back: Vec<u64> = names.iter().map(|n| snapshot[n].queued).collect();
+                let mut waiting: Vec<u64> = pools.waiting.keys().copied().collect();
+                waiting.sort_unstable();
+                let numbers = |field: &str| -> Vec<u64> {
+                    step[field].as_array().unwrap().iter().map(uint).collect()
+                };
+                if !agreed
+                    || active != numbers("active")
+                    || held_back != numbers("held_back")
+                    || waiting != numbers("waiting")
+                {
+                    wrong.push(format!(
+                        "step {index} of {script}: agreed {agreed}, active {active:?}, held back \
+                         {held_back:?}, waiting {waiting:?}"
+                    ));
+                    break;
+                }
+            }
+        }
+        conclude("pools", scripts.len(), wrong);
+    }
+
+    /// A frame as the model's recognizer of a flow's order sees it; `None` for
+    /// a frame that is not of the flow.
+    fn emitted(frame: &Frame) -> Option<crate::formal::bifaci::request::Emitted> {
+        use crate::formal::bifaci::request::Emitted;
+        if !frame.is_flow_frame() {
+            return None;
+        }
+        let stream = || frame.stream_id.clone().expect("a stream frame names its stream");
+        Some(match frame.frame_type {
+            FrameType::StreamStart => Emitted::StreamStart { stream: stream() },
+            FrameType::Chunk => Emitted::Chunk {
+                stream: stream(),
+                index: lungo::Nat::from(frame.chunk_index.expect("a chunk carries its index")),
+            },
+            FrameType::StreamEnd => Emitted::StreamEnd {
+                stream: stream(),
+                count: frame.chunk_count.map(lungo::Nat::from),
+            },
+            FrameType::End => Emitted::Fin,
+            FrameType::Err => Emitted::Err,
+            _ => Emitted::Other,
+        })
+    }
+
+    // TEST12385: what an output stream and the writer put on the wire for one
+    // request is a flow in order, by the model's own recognizer: the stream is
+    // started once, its chunks are numbered 0, 1, 2, …, its end says how many
+    // there were, and nothing of the flow follows END — although a late
+    // progress frame and a late chunk were handed to the writer after it.
+    #[tokio::test]
+    async fn test12385_what_reaches_the_wire_is_a_flow_in_order() {
+        use crate::formal::bifaci::request::{check, Violation};
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Frame>();
+        let sender: Arc<dyn FrameSender> = Arc::new(ChannelFrameSender {
+            tx: out_tx,
+            drops: Arc::new(crate::bifaci::stats::DropCounters::new()),
+        });
+        let rid = MessageId::new_uuid();
+        let output = OutputStream::new(
+            Arc::clone(&sender),
+            "s1".to_string(),
+            "media:enc=utf-8".to_string(),
+            rid.clone(),
+            None,
+            4,
+        );
+        output.start(false, None).unwrap();
+        output.write(&[7u8; 10]).await.unwrap();
+        output.progress(0.5, "halfway");
+        output.close().await.unwrap();
+
+        let mut handed_over = Vec::new();
+        while let Ok(frame) = out_rx.try_recv() {
+            handed_over.push(frame);
+        }
+        handed_over.push(Frame::end_ok_with(rid.clone(), None, Some(1.0), None));
+        // What a detached sender does: frames that lost the race with END.
+        handed_over.push(Frame::progress(rid.clone(), 1.0, "late keepalive"));
+        let late = vec![9u8];
+        let checksum = Frame::compute_checksum(&late);
+        handed_over.push(Frame::chunk(rid.clone(), "s1".to_string(), 0, late, 3, checksum));
+
+        let limits = Limits::default();
+        let mut wire: Vec<u8> = Vec::new();
+        let mut seq = SeqAssigner::new();
+        let mut terminated = crate::bifaci::stats::TerminatedFlows::new(16);
+        let stragglers = crate::bifaci::stats::StragglerCounters::new();
+        for frame in handed_over.iter().cloned() {
+            write_gated(frame, &mut wire, &limits, &mut seq, &mut terminated, &stragglers);
+        }
+        let on_wire = decode_wire(&wire);
+        let flow: Vec<_> = on_wire.iter().filter_map(emitted).collect();
+        assert_eq!(check(flow.iter().cloned().collect()), None, "the wire carries {flow:?}");
+
+        let chunks = on_wire.iter().filter(|f| f.frame_type == FrameType::Chunk).count();
+        assert_eq!(chunks, 3, "ten bytes at four a chunk");
+        assert_eq!(
+            on_wire.iter().find(|f| f.frame_type == FrameType::StreamEnd).unwrap().chunk_count,
+            Some(3),
+            "the stream's end says how many chunks it carried"
+        );
+        assert_eq!(on_wire.last().unwrap().frame_type, FrameType::End);
+
+        // The recognizer is what found nothing wrong, not a rubber stamp: what
+        // was handed to the writer, ungated, is refused for its late frames.
+        let handed: Vec<_> = handed_over.iter().filter_map(emitted).collect();
+        assert_eq!(check(handed.into_iter().collect()), Some(Violation::AfterEnd));
+    }
+
+    // TEST12386: a handler changing what one of its pools can serve leaves a
+    // wake for the runtime's main loop. The loop is what admits whoever can now
+    // go; without the wake a request in line waited for the host's next frame.
+    #[tokio::test]
+    async fn test12386_a_self_report_wakes_the_runtime() {
+        let runtime = CartridgeRuntime::new(TEST_MANIFEST.as_bytes());
+        *runtime.pools.lock().unwrap() = Some(
+            RuntimePools::init(
+                &[POOL_CAP_A.to_string()],
+                &pool_declarations(&[("gpu", &[POOL_CAP_A])], &[("gpu", 2)]),
+            )
+            .expect("valid declarations must materialize"),
+        );
+        let soon = std::time::Duration::from_millis(50);
+        assert!(
+            tokio::time::timeout(soon, runtime.pools_changed.notified()).await.is_err(),
+            "nothing has changed yet"
+        );
+
+        runtime.pool_handle("gpu").set(1).expect("gpu is a declared pool");
+        assert!(
+            tokio::time::timeout(soon, runtime.pools_changed.notified()).await.is_ok(),
+            "the main loop must be woken by a self-report"
+        );
+        assert_eq!(
+            runtime.pools.lock().unwrap().as_ref().unwrap().snapshot()["gpu"].available,
+            Some(1)
+        );
+
+        // A refused self-report changed nothing, and wakes nobody.
+        runtime.pool_handle("cap:ghost").set(1).expect_err("an unknown pool must refuse");
+        assert!(tokio::time::timeout(soon, runtime.pools_changed.notified()).await.is_err());
     }
 
     // TEST7020: A flow frame reaching the writer after the flow's END has been written is suppressed as a benign counted straggler (never a drop) — END is the last flow frame on the wire.

@@ -1,5 +1,119 @@
 [
   {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire",
+    "kind": "type",
+    "rust_path": "bifaci::credit::Acquire",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival",
+    "kind": "type",
+    "rust_path": "bifaci::credit::Arrival",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate",
+    "kind": "type",
+    "rust_path": "bifaci::credit::Gate",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Granted",
+    "kind": "type",
+    "rust_path": "bifaci::credit::Granted",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window",
+    "kind": "type",
+    "rust_path": "bifaci::credit::Window",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted",
+    "kind": "type",
+    "rust_path": "bifaci::flow::Accepted",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType",
+    "kind": "type",
+    "rust_path": "bifaci::flow::FrameType",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder",
+    "kind": "type",
+    "rust_path": "bifaci::flow::Reorder",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival",
+    "kind": "type",
+    "rust_path": "bifaci::pools::Arrival",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience",
+    "kind": "type",
+    "rust_path": "bifaci::pools::Patience",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool",
+    "kind": "type",
+    "rust_path": "bifaci::pools::Pool",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State",
+    "kind": "type",
+    "rust_path": "bifaci::pools::State",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Waiter",
+    "kind": "type",
+    "rust_path": "bifaci::pools::Waiter",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition",
+    "kind": "type",
+    "rust_path": "bifaci::request::Disposition",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted",
+    "kind": "type",
+    "rust_path": "bifaci::request::Emitted",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase",
+    "kind": "type",
+    "rust_path": "bifaci::request::Phase",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal",
+    "kind": "type",
+    "rust_path": "bifaci::request::Terminal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation",
+    "kind": "type",
+    "rust_path": "bifaci::request::Violation",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write",
+    "kind": "type",
+    "rust_path": "bifaci::request::Write",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Effect",
     "kind": "type",
     "rust_path": "Effect",
@@ -33,6 +147,234 @@
     "lean_name": "TaggedUrn.Constraint",
     "kind": "type",
     "rust_path": "_root_::tagged_urn::Constraint",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
+    "kind": "function",
+    "rust_path": "bifaci::credit::gate::acquire",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.close",
+    "kind": "function",
+    "rust_path": "bifaci::credit::gate::close",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.grant",
+    "kind": "function",
+    "rust_path": "bifaci::credit::gate::grant",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.opened",
+    "kind": "function",
+    "rust_path": "bifaci::credit::gate::opened",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.arrive",
+    "kind": "function",
+    "rust_path": "bifaci::credit::window::arrive",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.consume",
+    "kind": "function",
+    "rust_path": "bifaci::credit::window::consume",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.continued",
+    "kind": "function",
+    "rust_path": "bifaci::credit::window::continued",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.flush",
+    "kind": "function",
+    "rust_path": "bifaci::credit::window::flush",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.opened",
+    "kind": "function",
+    "rust_path": "bifaci::credit::window::opened",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.grantTarget",
+    "kind": "function",
+    "rust_path": "bifaci::credit::grant_target",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.negotiate",
+    "kind": "function",
+    "rust_path": "bifaci::credit::negotiate",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.code",
+    "kind": "function",
+    "rust_path": "bifaci::flow::frame_type::code",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
+    "kind": "function",
+    "rust_path": "bifaci::flow::frame_type::is_flow",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
+    "kind": "function",
+    "rust_path": "bifaci::flow::frame_type::is_terminal",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
+    "kind": "function",
+    "rust_path": "bifaci::flow::frame_type::of_code",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.accept",
+    "kind": "function",
+    "rust_path": "bifaci::flow::reorder::accept",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.start",
+    "kind": "function",
+    "rust_path": "bifaci::flow::reorder::start",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.admit",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::admit",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.admitNext",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::admit_next",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.arrive",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::arrive",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.empty",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::empty",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.hasRoom",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::has_room",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.heldBack",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::held_back",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.join",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::join",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.leave",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::leave",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.position",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::position",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.release",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::release",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.setCapacity",
+    "kind": "function",
+    "rust_path": "bifaci::pools::state::set_capacity",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.advertised",
+    "kind": "function",
+    "rust_path": "bifaci::pools::advertised",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.chain",
+    "kind": "function",
+    "rust_path": "bifaci::pools::chain",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.effective",
+    "kind": "function",
+    "rust_path": "bifaci::pools::effective",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.patience",
+    "kind": "function",
+    "rust_path": "bifaci::pools::patience",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.after",
+    "kind": "function",
+    "rust_path": "bifaci::request::phase::after",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.check",
+    "kind": "function",
+    "rust_path": "bifaci::request::check",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.dispose",
+    "kind": "function",
+    "rust_path": "bifaci::request::dispose",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.ledger",
+    "kind": "function",
+    "rust_path": "bifaci::request::ledger",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.terminalOf",
+    "kind": "function",
+    "rust_path": "bifaci::request::terminal_of",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.write",
+    "kind": "function",
+    "rust_path": "bifaci::request::write",
     "renamed": false
   },
   {
@@ -154,6 +496,630 @@
     "kind": "function",
     "rust_path": "_root_::tagged_urn::exec::make",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.acquired",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Acquire::Acquired",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.acquired.gate",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Acquire::Acquired.gate",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.wait",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Acquire::Wait",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.closed",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Acquire::Closed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Acquire.closed.reason",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Acquire::Closed.reason",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.accepted",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Arrival::Accepted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.accepted.window",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Arrival::Accepted.window",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Arrival.violation",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Arrival::Violation",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Gate",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.available",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Gate.available",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Gate.closed",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Gate.closed",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Granted.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Granted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Granted.window",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Granted.window",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Granted.grant",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Granted.grant",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::credit::Window",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.remaining",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Window.remaining",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.pending",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Window.pending",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Credit.Window.batch",
+    "kind": "field",
+    "rust_path": "bifaci::credit::Window.batch",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.deliver",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Accepted::Deliver",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.deliver.flow",
+    "kind": "field",
+    "rust_path": "bifaci::flow::Accepted::Deliver.flow",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.deliver.seqs",
+    "kind": "field",
+    "rust_path": "bifaci::flow::Accepted::Deliver.seqs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.hold",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Accepted::Hold",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.hold.flow",
+    "kind": "field",
+    "rust_path": "bifaci::flow::Accepted::Hold.flow",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.stale",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Accepted::Stale",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.duplicate",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Accepted::Duplicate",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Accepted.overflow",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Accepted::Overflow",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.hello",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Hello",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.req",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Req",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.chunk",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Chunk",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.fin",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Fin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.log",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Log",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.err",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Err",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.heartbeat",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Heartbeat",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.streamStart",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::StreamStart",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.streamEnd",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::StreamEnd",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.relayNotify",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::RelayNotify",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.relayState",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::RelayState",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.cancel",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Cancel",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.credit",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Credit",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.closeStream",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::CloseStream",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::Reorder",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.expected",
+    "kind": "field",
+    "rust_path": "bifaci::flow::Reorder.expected",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.Reorder.held",
+    "kind": "field",
+    "rust_path": "bifaci::flow::Reorder.held",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.admitted",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Arrival::Admitted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.admitted.state",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Arrival::Admitted.state",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.queued",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Arrival::Queued",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.queued.state",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Arrival::Queued.state",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.queued.ticket",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Arrival::Queued.ticket",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.queued.position",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Arrival::Queued.position",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.unknownPool",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Arrival::UnknownPool",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Arrival.unknownPool.name",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Arrival::UnknownPool.name",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.unbounded",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Patience::Unbounded",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.atMost",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Patience::AtMost",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.atMost.remaining",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Patience::AtMost.remaining",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Patience.exhausted",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Patience::Exhausted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Pool",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool.name",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Pool.name",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool.capacity",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Pool.capacity",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Pool.active",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Pool.active",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::State",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.pools",
+    "kind": "field",
+    "rust_path": "bifaci::pools::State.pools",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.queue",
+    "kind": "field",
+    "rust_path": "bifaci::pools::State.queue",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.State.next",
+    "kind": "field",
+    "rust_path": "bifaci::pools::State.next",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Waiter.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::pools::Waiter",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Waiter.ticket",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Waiter.ticket",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Pools.Waiter.chain",
+    "kind": "field",
+    "rust_path": "bifaci::pools::Waiter.chain",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.route",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Disposition::Route",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.straggler",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Disposition::Straggler",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Disposition.noRoute",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Disposition::NoRoute",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamStart",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::StreamStart",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamStart.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emitted::StreamStart.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.chunk",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::Chunk",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.chunk.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emitted::Chunk.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.chunk.index",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emitted::Chunk.index",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamEnd",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::StreamEnd",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamEnd.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emitted::StreamEnd.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.streamEnd.count",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emitted::StreamEnd.count",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.fin",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::Fin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.err",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::Err",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emitted.other",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emitted::Other",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.created",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Phase::Created",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Phase.streaming",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Phase::Streaming",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.finished",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Terminal::Finished",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.failed",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Terminal::Failed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.cancelled",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Terminal::Cancelled",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Terminal.masterDied",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Terminal::MasterDied",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.afterEnd",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::AfterEnd",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamRestarted",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::StreamRestarted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamRestarted.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::StreamRestarted.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamNotOpen",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::StreamNotOpen",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.streamNotOpen.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::StreamNotOpen.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkOutOfPlace",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::ChunkOutOfPlace",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkOutOfPlace.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkOutOfPlace.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkOutOfPlace.expected",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkOutOfPlace.expected",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkOutOfPlace.got",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkOutOfPlace.got",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkCountWrong",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::ChunkCountWrong",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkCountWrong.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkCountWrong.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkCountWrong.sent",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkCountWrong.sent",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.chunkCountWrong.said",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::ChunkCountWrong.said",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.endWithOpenStream",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Violation::EndWithOpenStream",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Violation.endWithOpenStream.stream",
+    "kind": "field",
+    "rust_path": "bifaci::request::Violation::EndWithOpenStream.stream",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.send",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Write::Send",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.send.ends",
+    "kind": "field",
+    "rust_path": "bifaci::request::Write::Send.ends",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Write.suppress",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Write::Suppress",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Effect.unspecified",

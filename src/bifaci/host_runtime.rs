@@ -29,6 +29,7 @@ use crate::bifaci::frame::{
     CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner,
 };
 use crate::bifaci::io::{handshake, verify_identity, CborError, FrameReader, FrameWriter};
+use crate::bifaci::request_state::Disposition;
 use crate::bifaci::relay_switch::{
     CartridgeAttachmentError, CartridgeAttachmentErrorKind, CartridgeLifecycle,
     CartridgeRuntimeStats, InstalledCartridgeRecord, RelayNotifyCapabilitiesPayload,
@@ -1108,6 +1109,13 @@ impl CartridgeHostRuntime {
         self.recent_released_rids.iter().any(|r| r == rid)
     }
 
+    /// What a frame for `rid` with no routing entry is: a benign straggler
+    /// when the entry was released by a terminal lately, a routing anomaly
+    /// otherwise. The proved model's classification (`Disposition`).
+    fn unrouted(&self, rid: &MessageId) -> Disposition {
+        Disposition::of(false, self.recently_released_rid(rid))
+    }
+
     /// Run the GC if any routing table has crossed its soft
     /// watermark. Logs at `tracing::error` level — this is
     /// unusual enough that we want it visible by default in
@@ -1838,7 +1846,7 @@ impl CartridgeHostRuntime {
                     // nothing went wrong, counted separately from drops); a
                     // RID this host never routed is a genuine anomaly
                     // (`no_route` drop, warn).
-                    if self.recently_released_rid(&frame.id) {
+                    if self.unrouted(&frame.id) == Disposition::Straggler {
                         let total = self.stragglers.record(frame.frame_type);
                         tracing::debug!(
                             target: "host_runtime",
@@ -1868,7 +1876,7 @@ impl CartridgeHostRuntime {
                 };
 
                 let is_terminal =
-                    frame.frame_type == FrameType::End || frame.frame_type == FrameType::Err;
+                    frame.frame_type.is_terminal();
 
                 // If the cartridge is dead, send ERR to engine and clean up routing.
                 if self
@@ -1956,7 +1964,7 @@ impl CartridgeHostRuntime {
                     let rid_for_touch = frame.id.clone();
                     self.touch_outgoing_rid(&rid_for_touch);
                     let _ = self.send_to_cartridge(cartridge_idx, frame);
-                } else if self.recently_released_rid(&frame.id) {
+                } else if self.unrouted(&frame.id) == Disposition::Straggler {
                     // A LOG that crossed its peer request's terminal in
                     // flight — benign straggler, counted as such (never a
                     // drop): the request is over and the diagnostic is moot.
@@ -2246,7 +2254,7 @@ impl CartridgeHostRuntime {
                 if frame.is_flow_frame() {
                     let flow_key = FlowKey::from_frame(&frame);
                     let is_terminal =
-                        frame.frame_type == FrameType::End || frame.frame_type == FrameType::Err;
+                        frame.frame_type.is_terminal();
                     if is_terminal {
                         self.outgoing_max_seq.remove(&flow_key);
                         self.outgoing_max_seq_touched.remove(&flow_key);
@@ -3639,7 +3647,7 @@ impl CartridgeHostRuntime {
                 if let Err(_) = writer.write(&frame).await {
                     break;
                 }
-                if matches!(frame.frame_type, FrameType::End | FrameType::Err) {
+                if frame.frame_type.is_terminal() {
                     seq_assigner.remove(&FlowKey::from_frame(&frame));
                 }
             }

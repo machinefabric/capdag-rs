@@ -100,24 +100,36 @@ impl PoolState {
     }
 }
 
-/// `min(configured, available)` under the 0-as-unlimited convention.
+/// A count for the model, from one the wire carries.
+fn nat(n: u64) -> lungo::Nat {
+    lungo::Nat::from(n)
+}
+
+/// A capacity out of the model: it is one of the numbers it was given.
+fn capacity(n: lungo::Nat) -> u64 {
+    n.to_u64()
+        .expect("an effective capacity is one of the u64 capacities it was computed from")
+}
+
+/// `min(configured, available)` under the 0-as-unlimited convention — the
+/// proved model's `effective` (`formal/CapDAG/Bifaci/Pools.lean`).
 pub fn effective_capacity(configured: u64, available: Option<u64>) -> u64 {
-    let configured = if configured == CAPACITY_UNLIMITED {
-        u64::MAX
-    } else {
-        configured
-    };
-    let available = match available {
-        None => u64::MAX,
-        Some(CAPACITY_UNLIMITED) => u64::MAX,
-        Some(n) => n,
-    };
-    let effective = configured.min(available);
-    if effective == u64::MAX {
-        CAPACITY_UNLIMITED
-    } else {
-        effective
-    }
+    capacity(crate::formal::bifaci::pools::effective(nat(configured), available.map(nat)))
+}
+
+/// The limit a relay switch admits against for one pool of a cartridge. A
+/// cartridge that is not running yet is given ONE request, through `all` — the
+/// cold-start canary: the first body proves the spawn before the capacities the
+/// process will advertise are believed. A cold `all` advertises one request,
+/// not a declared-width fan-out, and a cold process cannot yet self-report the
+/// `available` it would declare one heartbeat after spawning.
+pub fn advertised_capacity(running: bool, pool: &str, state: &PoolState) -> u64 {
+    capacity(crate::formal::bifaci::pools::advertised(
+        running,
+        pool.to_string(),
+        nat(state.configured),
+        state.available.map(nat),
+    ))
 }
 
 /// The full pool-state map of one cartridge process, keyed by pool name
@@ -256,34 +268,41 @@ impl PoolDeclarations {
     /// every declared pool containing it, then `all`. `cap` must be the
     /// canonical URN string.
     pub fn chain_for(&self, cap: &str) -> Vec<String> {
-        let mut chain = vec![cap.to_string()];
-        for (name, members) in &self.pools {
-            if members.iter().any(|m| m == cap) {
-                chain.push(name.clone());
-            }
-        }
-        chain.push(POOL_ALL.to_string());
-        chain
+        chain(
+            cap,
+            self.pools.iter().map(|(name, members)| (name.clone(), members.clone())),
+        )
     }
 }
 
+/// A cap's chain, by the proved model: its own pool, the shared pools it is a
+/// member of (in the order given), then `all`.
+fn chain(cap: &str, shared: impl Iterator<Item = (String, Vec<String>)>) -> Vec<String> {
+    let shared: lungo::List<(String, lungo::List<String>)> = shared
+        .map(|(name, members)| (name, members.into_iter().collect()))
+        .collect();
+    crate::formal::bifaci::pools::chain(cap.to_string(), shared)
+        .into_iter()
+        .collect()
+}
+
 /// The chain of one cap over a MATERIALIZED state map (roster / heartbeat
-/// truth): the singleton pool, every pool listing the cap as a member,
-/// then `all`. Order: singleton, declared pools in map order, `all`.
-pub fn chain_from_states(states: &PoolStates, cap: &str) -> Vec<String> {
-    let mut chain = Vec::new();
-    if states.contains_key(cap) {
-        chain.push(cap.to_string());
+/// truth): the singleton pool, every pool listing the cap as a member (in map
+/// order), then `all`. `Err` names the first pool of the chain the map does not
+/// have: a cap its cartridge's pool map does not cover is refused, never
+/// admitted through whatever part of its chain happens to be there.
+pub fn chain_from_states(states: &PoolStates, cap: &str) -> Result<Vec<String>, String> {
+    let names = chain(
+        cap,
+        states
+            .iter()
+            .filter(|(name, _)| name.as_str() != POOL_ALL && name.as_str() != cap)
+            .map(|(name, state)| (name.clone(), state.caps.clone())),
+    );
+    match names.iter().find(|name| !states.contains_key(*name)) {
+        Some(missing) => Err(format!("its pool map has no '{missing}' pool")),
+        None => Ok(names),
     }
-    for (name, state) in states {
-        if name != POOL_ALL && name != cap && state.caps.iter().any(|m| m == cap) {
-            chain.push(name.clone());
-        }
-    }
-    if states.contains_key(POOL_ALL) {
-        chain.push(POOL_ALL.to_string());
-    }
-    chain
 }
 
 /// Encode a pool-state map for frame meta (JSON bytes — the manifest's own
@@ -370,8 +389,14 @@ mod tests {
         // And the same chain derived from the materialized states.
         assert_eq!(
             chain_from_states(&states, &generate),
-            vec![generate, "gpu".to_string(), POOL_ALL.to_string()]
+            Ok(vec![generate.clone(), "gpu".to_string(), POOL_ALL.to_string()])
         );
+        // A map that does not cover the cap is refused naming what is missing,
+        // not answered with the part of the chain that happens to be there.
+        let mut uncovered = states.clone();
+        uncovered.remove(POOL_ALL);
+        let refusal = chain_from_states(&uncovered, &generate).unwrap_err();
+        assert!(refusal.contains(POOL_ALL), "{refusal}");
     }
 
     // TEST1522: pool declarations are validated hard — reserved name, a

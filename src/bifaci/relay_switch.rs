@@ -1754,7 +1754,11 @@ impl RelaySwitch {
     /// knew: a genuine routing anomaly, counted as a `no_route` drop and
     /// logged as a warning.
     fn account_unrouted_frame(&self, recently_terminated: bool, frame: &Frame, context: &str) {
-        if recently_terminated {
+        // Which of the two it is is the model's decision (`Disposition`); a
+        // frame handed here has no live request, so it is never routed.
+        if crate::bifaci::request_state::Disposition::of(false, recently_terminated)
+            == crate::bifaci::request_state::Disposition::Straggler
+        {
             let total = self.stragglers.record(frame.frame_type);
             tracing::debug!(
                 rid = ?frame.id,
@@ -1859,18 +1863,24 @@ impl RelaySwitch {
         }
         let mut capacities = Vec::with_capacity(stats.pools.len());
         for (name, state) in &stats.pools {
-            let effective = if !stats.running && name == crate::bifaci::pools::POOL_ALL {
-                1
-            } else {
-                usize::try_from(state.effective()).map_err(|_| {
-                    RelaySwitchError::Protocol(format!(
-                        "cartridge '{cartridge_id}' pool '{name}' capacity exceeds this host's address space"
-                    ))
-                })?
-            };
-            capacities.push((name.clone(), effective));
+            capacities.push((name.clone(), Self::advertised(stats.running, name, state, cartridge_id)?));
         }
         Ok(capacities)
+    }
+
+    /// The capacity this switch admits against for one advertised pool
+    /// (`pools::advertised_capacity` — the cold-start canary included).
+    fn advertised(
+        running: bool,
+        name: &str,
+        state: &crate::bifaci::pools::PoolState,
+        cartridge_id: &str,
+    ) -> Result<usize, RelaySwitchError> {
+        usize::try_from(crate::bifaci::pools::advertised_capacity(running, name, state)).map_err(|_| {
+            RelaySwitchError::Protocol(format!(
+                "cartridge '{cartridge_id}' pool '{name}' capacity exceeds this host's address space"
+            ))
+        })
     }
 
     async fn cap_admission_target(
@@ -1955,27 +1965,16 @@ impl RelaySwitch {
                 ))
             })?
             .to_string();
-        let names = crate::bifaci::pools::chain_from_states(&stats.pools, &canonical);
-        if names.first() != Some(&canonical)
-            || names.last() != Some(&crate::bifaci::pools::POOL_ALL.to_string())
-        {
-            return Err(RelaySwitchError::Protocol(format!(
-                "cartridge '{cartridge_id}' advertises cap '{canonical}' with no pool coverage — its pool map is missing the cap's singleton or the '{}' pool",
-                crate::bifaci::pools::POOL_ALL
-            )));
-        }
+        let names = crate::bifaci::pools::chain_from_states(&stats.pools, &canonical).map_err(
+            |uncovered| {
+                RelaySwitchError::Protocol(format!(
+                    "cartridge '{cartridge_id}' advertises cap '{canonical}' with no pool coverage — {uncovered}"
+                ))
+            },
+        )?;
         let mut chain = Vec::with_capacity(names.len());
         for name in names {
-            let effective = if !stats.running && name == crate::bifaci::pools::POOL_ALL {
-                // The cold-start canary clamp — see `pool_capacities`.
-                1
-            } else {
-                usize::try_from(stats.pools[&name].effective()).map_err(|_| {
-                    RelaySwitchError::Protocol(format!(
-                        "cartridge '{cartridge_id}' pool '{name}' capacity exceeds this host's address space"
-                    ))
-                })?
-            };
+            let effective = Self::advertised(stats.running, &name, &stats.pools[&name], cartridge_id)?;
             chain.push((
                 crate::bifaci::request_state::PoolKey {
                     install: install.clone(),
@@ -2143,6 +2142,12 @@ impl RelaySwitch {
             })?
             .to_string();
         let chain = crate::bifaci::pools::chain_from_states(&stats.pools, &canonical)
+            .map_err(|uncovered| {
+                RelaySwitchError::Protocol(format!(
+                    "cartridge '{}' advertises cap '{canonical}' with no pool coverage — {uncovered}",
+                    record.id
+                ))
+            })?
             .into_iter()
             .map(|name| {
                 let state = stats.pools[&name].clone();
@@ -3614,7 +3619,7 @@ impl RelaySwitch {
             writer.write(frame).await
         };
 
-        if matches!(frame.frame_type, FrameType::End | FrameType::Err) {
+        if frame.frame_type.is_terminal() {
             let mut seq = master.seq_assigner.lock().await;
             seq.remove(&FlowKey::from_frame(frame));
         }
@@ -3897,7 +3902,7 @@ impl RelaySwitch {
                     let key = (xid.clone(), rid.clone());
 
                     let is_terminal =
-                        frame.frame_type == FrameType::End || frame.frame_type == FrameType::Err;
+                        frame.frame_type.is_terminal();
 
                     /// Where a response frame must go next.
                     enum RouteBack {
@@ -3916,11 +3921,8 @@ impl RelaySwitch {
                         let mut requests = self.requests.write().await;
                         requests.record_frame(&key, FrameDirection::Inbound, &frame);
                         if is_terminal {
-                            let kind = if frame.frame_type == FrameType::End {
-                                TerminalKind::End
-                            } else {
-                                TerminalKind::Err
-                            };
+                            let kind = TerminalKind::of_frame(frame.frame_type)
+                                .expect("a terminal frame is an END or an ERR");
                             match requests.terminate(&key, kind) {
                                 Some(state) => {
                                     let route = match state.origin {

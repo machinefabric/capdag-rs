@@ -16,11 +16,35 @@ pub(crate) unsafe extern "C" fn l_Array_dmk(x_1: Obj, x_2: Obj) -> Obj {
     r
 }
 
+// Lean: Array.mkEmpty
+// Source: <lean>/Init/Prelude.lean:3235:1
+#[inline(always)]
+pub(crate) unsafe extern "C" fn l_Array_dmkEmpty(x_1: Obj, x_2: Obj) -> Obj {
+    let r: Obj = rt::intrinsics::lean_mk_empty_array_with_capacity(x_2);
+    r
+}
+
+// Lean: Array.push
+// Source: <lean>/Init/Prelude.lean:3327:1
+#[inline(always)]
+pub(crate) unsafe extern "C" fn l_Array_dpush(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
+    let r: Obj = rt::intrinsics::lean_array_push(x_2, x_3);
+    r
+}
+
 // Lean: Array.size
 // Source: <lean>/Init/Prelude.lean:3259:1
 #[inline(always)]
 pub(crate) unsafe extern "C" fn l_Array_dsize(x_1: Obj, x_2: Obj) -> Obj {
     let r: Obj = rt::intrinsics::lean_array_get_size(x_2);
+    r
+}
+
+// Lean: Array.toList
+// Source: <lean>/Init/Prelude.lean:3217:3
+#[inline(always)]
+pub(crate) unsafe extern "C" fn l_Array_dtoList(x_1: Obj, x_2: Obj) -> Obj {
+    let r: Obj = rt::intrinsics::lean_array_to_list(x_2);
     r
 }
 
@@ -108,6 +132,39 @@ pub(crate) unsafe extern "C" fn l_List_dinstDecidableEqNil_d__redArg(x_1: Obj) -
         _ => {
             let x_3: u8 = 0u8;
             return x_3;
+        }
+    }
+}
+
+// Lean: List.lengthTR._redArg
+// Compiled from: List.lengthTR
+// Source: <lean>/Init/Prelude.lean:3061:1
+pub(crate) unsafe extern "C" fn l_List_dlengthTR_d__redArg(x_1: Obj) -> Obj {
+    let x_2: Obj = rt::nat::lean_usize_to_nat(0);
+    let x_3: Obj = l_List_dlengthTRAux_d__redArg(x_1, x_2);
+    return x_3;
+}
+
+// Lean: List.lengthTRAux._redArg
+// Compiled from: List.lengthTRAux
+// Source: <lean>/Init/Prelude.lean:3056:1
+pub(crate) unsafe extern "C" fn l_List_dlengthTRAux_d__redArg(mut x_1: Obj, mut x_2: Obj) -> Obj {
+    'tail: loop {
+        match rt::lean_obj_tag(x_1) {
+            0 => {
+                return x_2;
+            }
+            _ => {
+                let x_3: Obj = rt::lean_ctor_get(x_1, 1);
+                let x_4: Obj = rt::nat::lean_usize_to_nat(1);
+                let x_5: Obj = l_Nat_dadd(x_2, x_4);
+                rt::lean_dec(x_2);
+                let t_0: Obj = x_3;
+                let t_1: Obj = x_5;
+                x_1 = t_0;
+                x_2 = t_1;
+                continue 'tail;
+            }
         }
     }
 }
@@ -337,6 +394,24 @@ pub(crate) unsafe extern "C" fn l_instDecidableEqList_d__redArg(x_1: Obj, x_2: O
             }
         }
     }
+}
+
+// Lean: instDecidableEqNat
+// Source: <lean>/Init/Prelude.lean:1878:1
+pub(crate) unsafe extern "C" fn l_instDecidableEqNat(x_1: Obj, x_2: Obj) -> u8 {
+    let x_3: u8 = l_Nat_ddecEq(x_1, x_2);
+    return x_3;
+}
+
+// Lean: instDecidableEqNat._boxed
+// Compiled from: instDecidableEqNat
+// Source: <lean>/Init/Prelude.lean:1878:1
+pub(crate) unsafe extern "C" fn l_instDecidableEqNat_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_instDecidableEqNat(x_1, x_2);
+    rt::lean_dec(x_2);
+    rt::lean_dec(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
 }
 
 // Lean: instDecidableEqString

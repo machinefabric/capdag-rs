@@ -14,7 +14,6 @@
 use crate::bifaci::frame::{CancelReason, Frame, FrameType, MessageId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -60,29 +59,13 @@ pub struct PoolKey {
     pub pool: String,
 }
 
-#[derive(Debug, Default)]
-struct PoolSlot {
-    /// EFFECTIVE capacity (min of configured/available, 0 = unlimited),
-    /// as advertised by the roster.
-    capacity: usize,
-    active: usize,
-    /// FIFO tickets. Populated only on SINGLETON pool keys (a request
-    /// queues on its cap's own pool); shared pools hold no queue — their
-    /// waiters are the union of member singleton queues.
-    queue: VecDeque<u64>,
-}
-
-impl PoolSlot {
-    fn has_room(&self) -> bool {
-        self.capacity == 0 || self.active < self.capacity
-    }
-}
-
-/// Install-level availability. Outages are a PROCESS fact (a respawn, a
-/// roster republish), so they are tracked per install and inherited by
-/// every pool of that install.
-#[derive(Debug, Default)]
+/// Install-level admission state: the cartridge's pools and its waiters — the
+/// model's (`formal/CapDAG/Bifaci/Pools.lean`) — and whether the cartridge is
+/// there. Outages are a PROCESS fact (a respawn, a roster republish), so they
+/// are tracked per install and apply to every pool of that install.
+#[derive(Debug)]
 struct InstallState {
+    pools: crate::formal::bifaci::pools::State,
     /// `None` while the target is available; `Some(since)` from the moment it
     /// went unavailable. Kept as an instant rather than a bool so the grace
     /// window measures the OUTAGE, not the arrival time of each waiter — a
@@ -92,30 +75,30 @@ struct InstallState {
     unavailable_since: Option<tokio::time::Instant>,
 }
 
-impl InstallState {
-    fn available(&self) -> bool {
-        self.unavailable_since.is_none()
+impl Default for InstallState {
+    fn default() -> Self {
+        Self {
+            pools: crate::formal::bifaci::pools::state::empty(),
+            unavailable_since: None,
+        }
     }
+}
 
+impl InstallState {
     fn mark_unavailable(&mut self, now: tokio::time::Instant) {
         self.unavailable_since.get_or_insert(now);
     }
 
-    /// Remaining grace for an outage, or `None` when available.
-    /// `Some(Duration::ZERO)` means the window has expired.
-    fn grace_remaining(
-        &self,
-        now: tokio::time::Instant,
-        grace: std::time::Duration,
-    ) -> Option<std::time::Duration> {
+    /// How long the target has been unavailable, in milliseconds; `None` while
+    /// it is available.
+    fn unavailable_for(&self, now: tokio::time::Instant) -> Option<lungo::Nat> {
         self.unavailable_since
-            .map(|since| grace.saturating_sub(now.duration_since(since)))
+            .map(|since| lungo::Nat::from(now.duration_since(since).as_millis() as u64))
     }
 }
 
 #[derive(Debug)]
 struct AdmissionInner {
-    slots: HashMap<PoolKey, PoolSlot>,
     installs: HashMap<AdmissionKey, InstallState>,
     /// [`ADMISSION_UNAVAILABLE_GRACE`] in production. Tests shorten it to drive
     /// the expiry path without sleeping through a real minute — the same hook
@@ -127,19 +110,41 @@ struct AdmissionInner {
 impl Default for AdmissionInner {
     fn default() -> Self {
         Self {
-            slots: HashMap::new(),
             installs: HashMap::new(),
             grace: ADMISSION_UNAVAILABLE_GRACE,
         }
     }
 }
 
-/// FIFO admission shared by every request path in a RelaySwitch.
+/// Admission shared by every request path in a RelaySwitch.
+///
+/// Who may go next is the proved model's decision: the first waiter, in order
+/// of arrival, whose whole pool chain has room — the same rule the cartridge's
+/// own runtime admits by. This owns the waiting: each request parks until the
+/// model says it is its turn, its cartridge's outage outlasts the grace, or it
+/// is cancelled.
 #[derive(Debug, Clone, Default)]
 pub struct AdmissionController {
     inner: Arc<Mutex<AdmissionInner>>,
     notify: Arc<tokio::sync::Notify>,
-    tickets: Arc<AtomicU64>,
+}
+
+/// The pool names of a chain, and the one install they all belong to.
+fn chain_of_one_install(chain: &[PoolKey]) -> Result<(AdmissionKey, Vec<String>), String> {
+    let head = chain.first().ok_or_else(|| {
+        "admission chain is empty — a dispatch always has at least its cap's own pool".to_string()
+    })?;
+    if let Some(other) = chain.iter().find(|key| key.install != head.install) {
+        return Err(format!(
+            "admission chain spans two installs ('{}' and '{}') — a dispatch is admitted through \
+             one cartridge's pools",
+            head.install.id, other.install.id
+        ));
+    }
+    Ok((
+        head.install.clone(),
+        chain.iter().map(|key| key.pool.clone()).collect(),
+    ))
 }
 
 impl AdmissionController {
@@ -148,21 +153,16 @@ impl AdmissionController {
     /// which is what releases waiters queued through a respawn or a roster
     /// round-trip.
     pub fn configure_pools(&self, install: AdmissionKey, pools: &[(String, usize)]) {
+        use crate::formal::bifaci::pools::state;
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner
-            .installs
-            .entry(install.clone())
-            .or_default()
-            .unavailable_since = None;
+        let entry = inner.installs.entry(install).or_default();
+        entry.unavailable_since = None;
         for (pool, capacity) in pools {
-            let slot = inner
-                .slots
-                .entry(PoolKey {
-                    install: install.clone(),
-                    pool: pool.clone(),
-                })
-                .or_default();
-            slot.capacity = *capacity;
+            entry.pools = state::set_capacity(
+                entry.pools.clone(),
+                pool.clone(),
+                lungo::Nat::from(*capacity as u64),
+            );
         }
         drop(inner);
         self.notify.notify_waiters();
@@ -196,10 +196,11 @@ impl AdmissionController {
         self.notify.notify_waiters();
     }
 
-    /// Take a FIFO admission slot across a cap's whole pool CHAIN, waiting
-    /// for capacity. The chain's FIRST key is the cap's singleton pool — the
-    /// queue the ticket waits in; admission requires EVERY chain pool to
-    /// have room, decided in one critical section (no half-admission).
+    /// Take an admission slot across a cap's whole pool CHAIN, waiting for
+    /// capacity. The chain's FIRST key is the cap's singleton pool; admission
+    /// requires EVERY chain pool to have room, decided in one critical section
+    /// (no half-admission), and goes to the request that has waited longest
+    /// among those whose chain has room.
     ///
     /// An UNAVAILABLE target (an install-level fact) does not fail the
     /// caller immediately. The request stays queued for
@@ -210,35 +211,39 @@ impl AdmissionController {
     /// process loss must not terminate unrelated queued bodies). Only when
     /// the window expires does the wait fail, and it fails hard.
     pub async fn acquire(&self, chain: Vec<PoolKey>) -> Result<AdmissionPermit, String> {
-        let head = chain.first().cloned().ok_or_else(|| {
-            "admission chain is empty — a dispatch always has at least its cap's own pool"
-                .to_string()
-        })?;
-        let install = head.install.clone();
-        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed);
-        {
+        use crate::formal::bifaci::pools::{self as model, state};
+        let (install, names) = chain_of_one_install(&chain)?;
+        let ticket = {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            for key in &chain {
-                if !inner.slots.contains_key(key) {
+            let Some(entry) = inner.installs.get_mut(&install) else {
+                return Err(format!(
+                    "cartridge '{}' has no configured admission pool '{}'",
+                    install.id, names[0]
+                ));
+            };
+            // Join the line even while unavailable: the loop below owns the
+            // grace window, so a request arriving mid-outage gets the same
+            // treatment as one that was already waiting when the outage began.
+            match state::join(entry.pools.clone(), names.iter().cloned().collect()) {
+                model::Arrival::Queued { state: joined, ticket, .. } => {
+                    entry.pools = joined;
+                    ticket
+                }
+                model::Arrival::UnknownPool { name } => {
                     return Err(format!(
                         "cartridge '{}' has no configured admission pool '{}'",
-                        key.install.id, key.pool
+                        install.id, name
                     ));
                 }
+                model::Arrival::Admitted { .. } => {
+                    unreachable!("joining the line never admits: admission is a turn taken from it")
+                }
             }
-            let slot = inner
-                .slots
-                .get_mut(&head)
-                .expect("checked above");
-            // Queue even while unavailable: the loop below owns the grace
-            // window, so a request arriving mid-outage gets the same treatment
-            // as one that was already waiting when the outage began.
-            slot.queue.push_back(ticket);
-        }
+        };
         let mut waiter = AdmissionWaiter {
             controller: self.clone(),
-            key: head.clone(),
-            ticket,
+            install: install.clone(),
+            ticket: ticket.clone(),
             queued: true,
         };
         loop {
@@ -246,57 +251,33 @@ impl AdmissionController {
             let wait_budget = {
                 let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
                 let grace = inner.grace;
-                let available = inner
+                let entry = inner
                     .installs
-                    .get(&install)
-                    .map(|state| state.available())
-                    .unwrap_or(false);
-                let chain_has_room = chain.iter().all(|key| {
-                    inner
-                        .slots
-                        .get(key)
-                        .expect("admission pool disappeared while request was queued")
-                        .has_room()
-                });
-                let is_head = inner
-                    .slots
-                    .get(&head)
-                    .expect("admission pool disappeared while request was queued")
-                    .queue
-                    .front()
-                    == Some(&ticket);
-                if available && chain_has_room && is_head {
-                    inner
-                        .slots
-                        .get_mut(&head)
-                        .expect("checked above")
-                        .queue
-                        .pop_front();
-                    for key in &chain {
-                        inner.slots.get_mut(key).expect("checked above").active += 1;
+                    .get_mut(&install)
+                    .expect("an install with a queued request keeps its admission state");
+                let unavailable_for = entry.unavailable_for(tokio::time::Instant::now());
+                if unavailable_for.is_none() {
+                    if let Some(admitted) = state::admit(entry.pools.clone(), ticket.clone()) {
+                        entry.pools = admitted;
+                        waiter.queued = false;
+                        drop(inner);
+                        self.notify.notify_waiters();
+                        return Ok(AdmissionPermit {
+                            controller: self.clone(),
+                            held: Some((install, names)),
+                        });
                     }
-                    waiter.queued = false;
-                    drop(inner);
-                    self.notify.notify_waiters();
-                    return Ok(AdmissionPermit {
-                        controller: self.clone(),
-                        chain: Some(chain),
-                    });
                 }
-                let install_state = inner.installs.get(&install).map(|state| {
-                    state.grace_remaining(tokio::time::Instant::now(), grace)
-                });
-                match install_state {
-                    // Available (or never seen — treated as an outage that
-                    // just began would hide a real config gap; an install
-                    // with slots but no state is unreachable because
-                    // configure_pools writes both): wait for capacity.
-                    Some(None) => None,
+                match model::patience(unavailable_for, lungo::Nat::from(grace.as_millis() as u64)) {
+                    // The target is there: wait for this request's turn.
+                    model::Patience::Unbounded => None,
                     // Outage still inside its window: wait, but no longer than
                     // what is left of it.
-                    Some(Some(remaining)) if !remaining.is_zero() => Some(remaining),
+                    model::Patience::AtMost { remaining } => Some(std::time::Duration::from_millis(
+                        remaining.to_u64().expect("what is left of the grace fits its own unit"),
+                    )),
                     // Outage outlived the window — the target is gone, not slow.
-                    Some(Some(_)) => {
+                    model::Patience::Exhausted => {
                         drop(inner);
                         return Err(format!(
                             "cartridge '{}' was unavailable for longer than {}s while this request \
@@ -305,20 +286,12 @@ impl AdmissionController {
                             grace.as_secs()
                         ));
                     }
-                    None => {
-                        drop(inner);
-                        return Err(format!(
-                            "cartridge '{}' has admission pools but no install state — \
-                             configure_pools was bypassed",
-                            install.id
-                        ));
-                    }
                 }
             };
             match wait_budget {
                 None => notified.await,
                 // A timeout here is not an error: it means the grace window is
-                // up, and the next loop iteration re-reads the slot and decides.
+                // up, and the next loop iteration asks again and decides.
                 Some(remaining) => {
                     let _ = tokio::time::timeout(remaining, notified).await;
                 }
@@ -334,66 +307,101 @@ impl AdmissionController {
         inner.grace = grace;
     }
 
-    fn cancel_waiter(&self, key: &PoolKey, ticket: u64) {
+    fn cancel_waiter(&self, install: &AdmissionKey, ticket: &lungo::Nat) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = inner.slots.get_mut(key) {
-            if let Some(position) = slot.queue.iter().position(|queued| *queued == ticket) {
-                slot.queue.remove(position);
-            }
+        if let Some(entry) = inner.installs.get_mut(install) {
+            entry.pools =
+                crate::formal::bifaci::pools::state::leave(entry.pools.clone(), ticket.clone());
         }
         drop(inner);
         self.notify.notify_waiters();
     }
 
-    fn release(&self, chain: &[PoolKey]) {
+    fn release(&self, install: &AdmissionKey, chain: &[String]) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        for key in chain {
-            let slot = inner
-                .slots
-                .get_mut(key)
-                .expect("admission permit references an unknown pool");
-            slot.active = slot
-                .active
-                .checked_sub(1)
-                .expect("admission permit released without an active request");
-        }
+        let entry = inner
+            .installs
+            .get_mut(install)
+            .expect("admission permit references an unknown install");
+        entry.pools = crate::formal::bifaci::pools::state::release(
+            entry.pools.clone(),
+            chain.iter().cloned().collect(),
+        );
         drop(inner);
         self.notify.notify_waiters();
+    }
+
+    /// The tickets in an install's line, in order of arrival (tests and
+    /// diagnostics).
+    pub fn waiting(&self, install: &AdmissionKey) -> Vec<u64> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .installs
+            .get(install)
+            .map(|entry| {
+                (&entry.pools.queue)
+                    .into_iter()
+                    .map(|waiter| waiter.ticket.to_u64().expect("a ticket counts arrivals"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Per pool of an install: how many requests hold a slot in it (tests and
+    /// diagnostics).
+    pub fn active(&self, install: &AdmissionKey) -> Vec<(String, u64)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .installs
+            .get(install)
+            .map(|entry| {
+                (&entry.pools.pools)
+                    .into_iter()
+                    .map(|pool| {
+                        (
+                            pool.name.clone(),
+                            pool.active.to_u64().expect("an active count is a count of live requests"),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
 struct AdmissionWaiter {
     controller: AdmissionController,
-    key: PoolKey,
-    ticket: u64,
+    install: AdmissionKey,
+    ticket: lungo::Nat,
     queued: bool,
 }
 
 impl Drop for AdmissionWaiter {
     fn drop(&mut self) {
         if self.queued {
-            self.controller.cancel_waiter(&self.key, self.ticket);
+            self.controller.cancel_waiter(&self.install, &self.ticket);
         }
     }
 }
 
 pub struct AdmissionPermit {
     controller: AdmissionController,
-    chain: Option<Vec<PoolKey>>,
+    /// The install and the pool chain this permit holds a slot in.
+    held: Option<(AdmissionKey, Vec<String>)>,
 }
 
 impl std::fmt::Debug for AdmissionPermit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdmissionPermit")
-            .field("chain", &self.chain)
+            .field("held", &self.held)
             .finish()
     }
 }
 
 impl Drop for AdmissionPermit {
     fn drop(&mut self) {
-        if let Some(chain) = self.chain.take() {
-            self.controller.release(&chain);
+        if let Some((install, chain)) = self.held.take() {
+            self.controller.release(&install, &chain);
         }
     }
 }
@@ -424,6 +432,45 @@ impl TerminalKind {
             TerminalKind::Err => "err",
             TerminalKind::Cancelled => "cancelled",
             TerminalKind::MasterDied => "master_died",
+        }
+    }
+}
+
+impl TerminalKind {
+    /// The end a frame of this type is, if it is one: END or ERR. Cancellation
+    /// and a dead master end a request without a frame of its flow.
+    pub fn of_frame(frame_type: FrameType) -> Option<TerminalKind> {
+        use crate::formal::bifaci::request::Terminal;
+        match crate::formal::bifaci::request::terminal_of(frame_type.model())? {
+            Terminal::Finished => Some(TerminalKind::End),
+            Terminal::Failed => Some(TerminalKind::Err),
+            Terminal::Cancelled => Some(TerminalKind::Cancelled),
+            Terminal::MasterDied => Some(TerminalKind::MasterDied),
+        }
+    }
+}
+
+/// Where a routing runtime sends a frame (L6): to its request; nowhere, because
+/// it crossed its request's end in flight; or nowhere, because no such request
+/// is known — which is the one that means something went wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    Route,
+    /// A benign post-terminal straggler: counted, never a drop.
+    Straggler,
+    /// A routing anomaly: a counted `no_route` drop.
+    NoRoute,
+}
+
+impl Disposition {
+    /// The model's decision, given whether the frame's request is live here and
+    /// whether it ended lately (`formal/CapDAG/Bifaci/Request.lean`).
+    pub fn of(live: bool, ended_lately: bool) -> Disposition {
+        use crate::formal::bifaci::request::Disposition as Model;
+        match crate::formal::bifaci::request::dispose(live, ended_lately) {
+            Model::Route => Disposition::Route,
+            Model::Straggler => Disposition::Straggler,
+            Model::NoRoute => Disposition::NoRoute,
         }
     }
 }
@@ -538,10 +585,18 @@ impl RequestState {
     }
 
     fn record(&mut self, direction: FrameDirection, frame: &Frame) {
+        use crate::formal::bifaci::request as model;
         self.last_activity = Instant::now();
-        if frame.is_flow_frame() {
-            self.phase = RequestPhase::Streaming;
-        }
+        self.phase = match model::phase::after(
+            match self.phase {
+                RequestPhase::Created => model::Phase::Created,
+                RequestPhase::Streaming => model::Phase::Streaming,
+            },
+            frame.frame_type.model(),
+        ) {
+            model::Phase::Created => RequestPhase::Created,
+            model::Phase::Streaming => RequestPhase::Streaming,
+        };
         // A fresh stream starts with the NEGOTIATED initial window (L10): the
         // producer may send that many chunks before any CREDIT frame arrives,
         // so a ledger that starts at zero reads every healthy stream as
@@ -573,16 +628,18 @@ impl RequestState {
         }
         // A chunk consumes one credit from ITS stream's window regardless of
         // which way it flows past this runtime — a stream's chunks all flow
-        // one direction, and its grants flow the other.
-        if frame.frame_type == FrameType::Chunk {
-            stats.credit_outstanding -= 1;
-        }
+        // one direction, and its grants flow the other. The arithmetic is the
+        // model's ledger.
+        stats.credit_outstanding = model::ledger(
+            lungo::Int::from(stats.credit_outstanding),
+            frame.frame_type.model(),
+            lungo::Nat::from(frame.credit_count().unwrap_or(0)),
+        )
+        .to_i64()
+        .expect("a stream's credit ledger stays within the counts of frames that moved it");
         match frame.frame_type {
             FrameType::StreamStart if frame.is_unbounded() => stats.unbounded = true,
             FrameType::StreamEnd => stats.ended = true,
-            FrameType::Credit => {
-                stats.credit_outstanding += frame.credit_count().unwrap_or(0) as i64;
-            }
             _ => {}
         }
     }
@@ -624,11 +681,12 @@ const RECENT_TERMINATED_CAP: usize = 64;
 /// The unified request table (L7): one entry per in-flight request, one
 /// registration, one termination, plus the rid→xid secondary index and the
 /// recently-terminated ring.
-#[derive(Default)]
 pub struct RequestTable {
     entries: HashMap<RequestKey, RequestState>,
     rid_index: HashMap<MessageId, MessageId>,
     recent_terminated: VecDeque<TerminatedSummary>,
+    /// How many terminated-request summaries the ring keeps.
+    recent_capacity: usize,
     total_registered: u64,
     terminated_by_kind: BTreeMap<&'static str, u64>,
     /// Called with every termination's summary, synchronously under the
@@ -649,9 +707,42 @@ impl std::fmt::Debug for RequestTable {
     }
 }
 
+impl Default for RequestTable {
+    fn default() -> Self {
+        Self::with_recent_capacity(RECENT_TERMINATED_CAP)
+    }
+}
+
 impl RequestTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A table that remembers the last `recent_capacity` terminations. Every
+    /// runtime uses [`RECENT_TERMINATED_CAP`]; a smaller ring is how the
+    /// conformance scripts reach eviction in a handful of steps.
+    pub fn with_recent_capacity(recent_capacity: usize) -> Self {
+        assert!(recent_capacity > 0, "a request table remembers at least its last termination");
+        Self {
+            entries: HashMap::new(),
+            rid_index: HashMap::new(),
+            recent_terminated: VecDeque::new(),
+            recent_capacity,
+            total_registered: 0,
+            terminated_by_kind: BTreeMap::new(),
+            terminate_observer: None,
+        }
+    }
+
+    /// Where a frame for `rid` goes: to its request while one is live, and
+    /// otherwise a straggler or a routing anomaly by whether it ended lately.
+    pub fn disposition(&self, rid: &MessageId) -> Disposition {
+        Disposition::of(self.rid_index.contains_key(rid), self.recently_terminated_rid(rid))
+    }
+
+    /// How many requests were ever registered.
+    pub fn total_registered(&self) -> u64 {
+        self.total_registered
     }
 
     /// Register a request. A request is registered exactly once (L7):
@@ -756,7 +847,7 @@ impl RequestTable {
                     acc.3 + s.bytes_out,
                 )
             });
-        if self.recent_terminated.len() == RECENT_TERMINATED_CAP {
+        if self.recent_terminated.len() == self.recent_capacity {
             self.recent_terminated.pop_front();
         }
         self.recent_terminated.push_back(TerminatedSummary {
@@ -1219,6 +1310,158 @@ mod tests {
         assert!(
             error.contains("cap:ghost"),
             "the failure must name the unknown pool: {error}"
+        );
+    }
+
+    // TEST12387: the switch admits as the model's scripts say. Every arrival
+    // is a waiting task; after each thing that happens — an arrival, a release,
+    // a waiter giving up, a limit changing — exactly the requests the model
+    // admits have been admitted, in the model's order across caps, and each
+    // pool holds what the model says it holds.
+    #[tokio::test]
+    async fn test12387_switch_admission_follows_the_model() {
+        use crate::bifaci::conformance_tests::{conclude, rows, uint};
+        let scripts = rows("admission");
+        let mut wrong = Vec::new();
+        for script in scripts {
+            let controller = AdmissionController::default();
+            let install = admission_key();
+            let limits: HashMap<&str, u64> = script["capacities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| (c["pool"].as_str().unwrap(), uint(&c["capacity"])))
+                .collect();
+            let names: Vec<String> =
+                script["pools"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect();
+            let advertised: Vec<(String, usize)> = names
+                .iter()
+                .map(|name| (name.clone(), limits.get(name.as_str()).copied().unwrap_or(0) as usize))
+                .collect();
+            controller.configure_pools(install.clone(), &advertised);
+            let chain_of = |cap: &str| -> Vec<PoolKey> {
+                let mut chain = vec![pool_key(&install, cap)];
+                for pool in script["shared"].as_array().unwrap() {
+                    if pool["caps"].as_array().unwrap().iter().any(|c| c.as_str() == Some(cap)) {
+                        chain.push(pool_key(&install, pool["name"].as_str().unwrap()));
+                    }
+                }
+                chain.push(pool_key(&install, "all"));
+                chain
+            };
+
+            // Every arrival, by ticket: its cap, and its task until it is
+            // admitted, then its permit until it is released.
+            let mut waiting: Vec<(String, Option<tokio::task::JoinHandle<Result<AdmissionPermit, String>>>)> =
+                Vec::new();
+            let mut holding: Vec<(u64, String, AdmissionPermit)> = Vec::new();
+            let mut went_before: Vec<u64> = Vec::new();
+
+            let ops = script["ops"].as_array().unwrap();
+            let steps = script["steps"].as_array().unwrap();
+            for (index, (op, step)) in ops.iter().zip(steps).enumerate() {
+                match op["op"].as_str().unwrap() {
+                    "arrive" => {
+                        let cap = op["cap"].as_str().unwrap().to_string();
+                        let arriving = controller.clone();
+                        let chain = chain_of(&cap);
+                        waiting.push((cap, Some(tokio::spawn(async move { arriving.acquire(chain).await }))));
+                    }
+                    "release" => {
+                        let cap = op["cap"].as_str().unwrap();
+                        let at = holding
+                            .iter()
+                            .position(|(_, held, _)| held == cap)
+                            .expect("the script releases only what is held");
+                        drop(holding.remove(at));
+                    }
+                    "leave_oldest" => {
+                        let (_, task) = waiting
+                            .iter_mut()
+                            .find(|(_, task)| task.is_some())
+                            .expect("the script's oldest waiter is waiting here");
+                        let task = task.take().unwrap();
+                        task.abort();
+                        let _ = task.await;
+                    }
+                    "capacity" => controller.configure_pools(
+                        install.clone(),
+                        &[(op["pool"].as_str().unwrap().to_string(), uint(&op["capacity"]) as usize)],
+                    ),
+                    other => panic!("unknown admission operation '{other}'"),
+                }
+                // Let everyone who was woken take their turn.
+                for _ in 0..16 {
+                    tokio::task::yield_now().await;
+                }
+                let mut went = Vec::new();
+                for (ticket, (cap, task)) in waiting.iter_mut().enumerate() {
+                    if task.as_ref().is_some_and(|task| task.is_finished()) {
+                        let permit = task.take().unwrap().await.unwrap().expect("an admitted request");
+                        went.push(ticket as u64);
+                        holding.push((ticket as u64, cap.clone(), permit));
+                    }
+                }
+                went_before.extend(went.iter().copied());
+                let numbers = |field: &str| -> Vec<u64> {
+                    step[field].as_array().unwrap().iter().map(uint).collect()
+                };
+                let mut expected_went = numbers("admitted");
+                expected_went.sort_unstable();
+                let active: Vec<u64> = {
+                    let by_name: HashMap<String, u64> = controller.active(&install).into_iter().collect();
+                    names.iter().map(|name| by_name[name]).collect()
+                };
+                let in_line: Vec<u64> = waiting
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (_, task))| task.is_some())
+                    .map(|(ticket, _)| ticket as u64)
+                    .collect();
+                // Who the test still waits for, and who the controller has in
+                // line: a waiter that gave up must be gone from both.
+                if went != expected_went
+                    || active != numbers("active")
+                    || in_line != numbers("waiting")
+                    || controller.waiting(&install) != numbers("waiting")
+                {
+                    wrong.push(format!(
+                        "step {index} of {script}: admitted {went:?}, active {active:?}, waiting {in_line:?}"
+                    ));
+                    break;
+                }
+            }
+            for (_, task) in waiting {
+                if let Some(task) = task {
+                    task.abort();
+                }
+            }
+        }
+        conclude("admission", scripts.len(), wrong);
+    }
+
+    // TEST12388: a request that joins the line late into an outage is given
+    // what is left of the outage's window, not a window of its own: the time is
+    // the outage's.
+    #[tokio::test(start_paused = true)]
+    async fn test12388_a_late_arrival_gets_what_is_left_of_the_outage() {
+        let controller = AdmissionController::default();
+        controller.set_grace_for_test(std::time::Duration::from_millis(1000));
+        let key = admission_key();
+        controller.configure_pools(key.clone(), &[("all".to_string(), 1)]);
+        controller.disable_master(key.master_idx);
+        tokio::time::advance(std::time::Duration::from_millis(900)).await;
+
+        let arrived = tokio::time::Instant::now();
+        let error = controller
+            .acquire(all_chain(&key))
+            .await
+            .expect_err("a target that never came back admits nobody");
+        assert!(error.contains("unavailable for longer than"), "{error}");
+        let waited = arrived.elapsed();
+        assert!(
+            waited >= std::time::Duration::from_millis(100) && waited < std::time::Duration::from_millis(200),
+            "it waited {waited:?}: the 100ms left of the outage's window, not a second of its own"
         );
     }
 

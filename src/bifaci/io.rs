@@ -763,6 +763,20 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     }
 }
 
+/// The credit window both ends start every stream with (L9): the smaller of
+/// the two proposals, decided by the proved model. A proposal of zero is a
+/// handshake failure — under a zero window no chunk could be sent and, with
+/// nothing consumed, none would ever be granted: every stream would deadlock
+/// at its first chunk.
+fn negotiated_initial_credit(ours: u64, theirs: u64) -> Result<u64, CborError> {
+    crate::bifaci::credit::negotiate_initial_credit(ours, theirs).ok_or_else(|| {
+        CborError::Handshake(format!(
+            "initial_credit negotiates to zero (ours {ours}, theirs {theirs}) — a stream needs a \
+             window of at least one chunk"
+        ))
+    })
+}
+
 /// Perform HELLO handshake and extract cartridge manifest (host side - sends first).
 /// Returns HandshakeResult containing negotiated limits and cartridge manifest.
 /// Fails if cartridge HELLO is missing the required manifest.
@@ -832,7 +846,7 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         max_frame: DEFAULT_MAX_FRAME.min(their_max_frame),
         max_chunk: DEFAULT_MAX_CHUNK.min(their_max_chunk),
         max_reorder_buffer: DEFAULT_MAX_REORDER_BUFFER.min(their_max_reorder_buffer),
-        initial_credit: DEFAULT_INITIAL_CREDIT.min(their_initial_credit),
+        initial_credit: negotiated_initial_credit(DEFAULT_INITIAL_CREDIT, their_initial_credit)?,
     };
 
     // Update both reader and writer with negotiated limits
@@ -897,7 +911,7 @@ pub async fn handshake_accept<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         max_frame: DEFAULT_MAX_FRAME.min(their_max_frame),
         max_chunk: DEFAULT_MAX_CHUNK.min(their_max_chunk),
         max_reorder_buffer: DEFAULT_MAX_REORDER_BUFFER.min(their_max_reorder_buffer),
-        initial_credit: DEFAULT_INITIAL_CREDIT.min(their_initial_credit),
+        initial_credit: negotiated_initial_credit(DEFAULT_INITIAL_CREDIT, their_initial_credit)?,
     };
 
     // Send our HELLO with manifest
@@ -2320,11 +2334,12 @@ mod tests {
                         .hello_max_reorder_buffer()
                         .unwrap_or(DEFAULT_MAX_REORDER_BUFFER),
                 ),
-                initial_credit: cartridge_limits.initial_credit.min(
+                initial_credit: negotiated_initial_credit(
+                    cartridge_limits.initial_credit,
                     their_frame
                         .hello_initial_credit()
                         .unwrap_or(DEFAULT_INITIAL_CREDIT),
-                ),
+                )?,
             })
         });
 
@@ -2415,6 +2430,27 @@ mod tests {
         let (host_result, cart_result) = run_v4_handshake(larger).await;
         assert_eq!(host_result.unwrap().limits.initial_credit, 32);
         assert_eq!(cart_result.unwrap().initial_credit, 32);
+    }
+
+    // TEST12389: a HELLO proposing a credit window of zero fails the handshake
+    // on both ends, naming the window. Under a zero window no chunk may be sent,
+    // and with none consumed none is ever granted: every stream would stop at
+    // its first chunk, for good.
+    #[tokio::test]
+    async fn test12389_handshake_refuses_a_zero_credit_window() {
+        let zero = Limits {
+            initial_credit: 0,
+            ..Limits::default()
+        };
+        let (host_result, cart_result) = run_v4_handshake(zero).await;
+        for refusal in [host_result.map(|_| ()), cart_result.map(|_| ())] {
+            match refusal {
+                Err(CborError::Handshake(message)) => {
+                    assert!(message.contains("initial_credit"), "{message}")
+                }
+                other => panic!("a zero window must fail the handshake, got {other:?}"),
+            }
+        }
     }
 
     // =========================================================================

@@ -2720,7 +2720,7 @@ async fn run_group_chain(
         super::stream_io::CreditPlumbing {
             router: credit_routers[last_idx].clone(),
             grant,
-            batch: (initial_credit / 2).max(1),
+            window: initial_credit,
         }
     };
 
@@ -3247,8 +3247,11 @@ async fn forward_frames(
     let effect_audit = super::stream_io::EffectAudit::new(prev_cap_urn, prev_contract)
         .map_err(|e| ExecutionError::HostError(format!("pipelined forward: {}", e)))?;
 
-    let mut stream_id_map: HashMap<String, (String, Arc<CreditGate>, u64)> = HashMap::new();
-    let grant_batch = (initial_credit / 2).max(1);
+    // Per upstream stream: its downstream stream id, the gate on the downstream
+    // window, and the upstream window — what has been consumed of the producer
+    // and is owed back to it as grants.
+    let mut stream_id_map: HashMap<String, (String, Arc<CreditGate>, crate::bifaci::credit::CreditWindow)> =
+        HashMap::new();
     let mut timer = super::stream_io::ActivityTimer::new(activity_timeout_secs);
     let mut activity_warning_logged = false;
 
@@ -3272,7 +3275,14 @@ async fn forward_frames(
                             Some(new_sid.clone()),
                             Arc::clone(&gate),
                         );
-                        stream_id_map.insert(prev_sid, (new_sid.clone(), gate, 0));
+                        stream_id_map.insert(
+                            prev_sid,
+                            (
+                                new_sid.clone(),
+                                gate,
+                                crate::bifaci::credit::CreditWindow::new(initial_credit),
+                            ),
+                        );
 
                         // Effect audit FIRST, on the producer's own claim: the
                         // emission must satisfy the producer cap's declared
@@ -3395,10 +3405,8 @@ async fn forward_frames(
                             // Flush-before-block (L10 corollary): the downstream
                             // acquire is about to wait, and the upstream producer
                             // may be stalled on exactly the sub-batch grants we hold.
-                            for (flush_sid, (_, _, consumed)) in stream_id_map.iter_mut() {
-                                if *consumed > 0 {
-                                    let n = *consumed;
-                                    *consumed = 0;
+                            for (flush_sid, (_, _, upstream)) in stream_id_map.iter() {
+                                if let Some(n) = upstream.flush() {
                                     send_upstream_credit(
                                         &switch,
                                         prev_rid.clone(),
@@ -3457,8 +3465,8 @@ async fn forward_frames(
                                 }
                             }
                         }
-                        let (new_sid, _, consumed) =
-                            stream_id_map.get_mut(&prev_sid).ok_or_else(|| {
+                        let (new_sid, _, upstream) =
+                            stream_id_map.get(&prev_sid).ok_or_else(|| {
                                 ExecutionError::HostError(format!(
                                     "forward CHUNK: unknown stream_id '{}'",
                                     prev_sid
@@ -3474,10 +3482,7 @@ async fn forward_frames(
                             ExecutionError::HostError(format!("forward CHUNK: {}", e))
                         })?;
 
-                        *consumed += 1;
-                        if *consumed >= grant_batch {
-                            let n = *consumed;
-                            *consumed = 0;
+                        if let Some(n) = upstream.consumed() {
                             send_upstream_credit(
                                 &switch,
                                 prev_rid.clone(),
@@ -3505,7 +3510,7 @@ async fn forward_frames(
                         new_frame.id = next_rid.clone();
                         new_frame.routing_id = None;
                         new_frame.seq = 0;
-                        new_frame.stream_id = Some(new_sid);
+                        new_frame.stream_id = Some(new_sid.clone());
                         switch.send_to_master(new_frame, None).await.map_err(|e| {
                             ExecutionError::HostError(format!("forward STREAM_END: {}", e))
                         })?;
@@ -3693,10 +3698,8 @@ async fn forward_frames(
                 return Err(ExecutionError::HostError(msg));
             }
             Err(_timeout) => {
-                for (prev_sid, (_, _, consumed)) in stream_id_map.iter_mut() {
-                    if *consumed > 0 {
-                        let n = *consumed;
-                        *consumed = 0;
+                for (prev_sid, (_, _, upstream)) in stream_id_map.iter() {
+                    if let Some(n) = upstream.flush() {
                         send_upstream_credit(
                             &switch,
                             prev_rid.clone(),
@@ -3718,13 +3721,13 @@ async fn forward_frames(
                     // flush above).
                     let credit_state: Vec<String> = stream_id_map
                         .iter()
-                        .map(|(prev_sid, (new_sid, gate, consumed))| {
+                        .map(|(prev_sid, (new_sid, gate, upstream))| {
                             format!(
                                 "stream {}→{}: downstream_available={} pending_upstream_grants={} gate_closed={}",
                                 prev_sid,
                                 new_sid,
                                 gate.available(),
-                                consumed,
+                                upstream.pending(),
                                 gate.is_closed(),
                             )
                         })

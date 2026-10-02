@@ -96,6 +96,9 @@ required-features = ["capture"]
 [dev-dependencies]
 serial_test = "3.0"
 tempfile = "3.10"
+# A clock the tests move themselves: what a request waits out during an outage
+# is checked to the millisecond, without sleeping through it.
+tokio = { version = "1.0", features = ["test-util"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # build.rs parses MFR_BUNDLED_CARTRIDGE_HASHES (a JSON map) to codegen the baked
@@ -109,4 +112,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.825.33"
+version = "1.826.0"

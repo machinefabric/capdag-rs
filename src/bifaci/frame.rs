@@ -150,6 +150,42 @@ impl FrameType {
         }
     }
 
+    /// This frame type as the proved model names it
+    /// (`formal/CapDAG/Bifaci/Flow.lean`). The model's wire numbers are these
+    /// discriminants — `test12375` holds the two to each other for every type.
+    pub(crate) fn model(self) -> crate::formal::bifaci::flow::FrameType {
+        use crate::formal::bifaci::flow::FrameType as Model;
+        match self {
+            FrameType::Hello => Model::Hello,
+            FrameType::Req => Model::Req,
+            FrameType::Chunk => Model::Chunk,
+            FrameType::End => Model::Fin,
+            FrameType::Log => Model::Log,
+            FrameType::Err => Model::Err,
+            FrameType::Heartbeat => Model::Heartbeat,
+            FrameType::StreamStart => Model::StreamStart,
+            FrameType::StreamEnd => Model::StreamEnd,
+            FrameType::RelayNotify => Model::RelayNotify,
+            FrameType::RelayState => Model::RelayState,
+            FrameType::Cancel => Model::Cancel,
+            FrameType::Credit => Model::Credit,
+            FrameType::CloseStream => Model::CloseStream,
+        }
+    }
+
+    /// Whether frames of this type are part of a flow: numbered by the writer
+    /// and kept in order. Hello, Heartbeat, RelayNotify, RelayState, Cancel,
+    /// Credit and CloseStream are not — Credit in particular must never queue
+    /// behind the data it is the permission for.
+    pub fn is_flow(self) -> bool {
+        crate::formal::bifaci::flow::frame_type::is_flow(self.model())
+    }
+
+    /// Whether a frame of this type ends its flow: END or ERR.
+    pub fn is_terminal(self) -> bool {
+        crate::formal::bifaci::flow::frame_type::is_terminal(self.model())
+    }
+
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(FrameType::Hello),
@@ -1459,21 +1495,10 @@ impl Frame {
         hash
     }
 
-    /// Returns true if this frame type participates in flow ordering (seq tracking).
-    /// Non-flow frames (Hello, Heartbeat, RelayNotify, RelayState, Cancel, Credit)
-    /// bypass seq assignment and reorder buffers entirely — Credit in particular must
-    /// never queue behind the data it is flow-controlling.
+    /// Returns true if this frame participates in flow ordering (seq tracking):
+    /// see [`FrameType::is_flow`].
     pub fn is_flow_frame(&self) -> bool {
-        !matches!(
-            self.frame_type,
-            FrameType::Hello
-                | FrameType::Heartbeat
-                | FrameType::RelayNotify
-                | FrameType::RelayState
-                | FrameType::Cancel
-                | FrameType::Credit
-                | FrameType::CloseStream
-        )
+        self.frame_type.is_flow()
     }
 }
 
@@ -1556,9 +1581,10 @@ impl SeqAssigner {
 
 use crate::bifaci::io::CborError;
 
-/// Per-flow state for the reorder buffer.
+/// Per-flow state for the reorder buffer: what the model knows of the flow —
+/// the seq expected next and the seqs held — and the held frames themselves.
 struct FlowState {
-    expected_seq: u64,
+    order: crate::formal::bifaci::flow::Reorder,
     buffer: BTreeMap<u64, Frame>,
 }
 
@@ -1566,8 +1592,12 @@ struct FlowState {
 /// Keyed by FlowKey (RID + optional XID). Each flow tracks expected seq
 /// and buffers out-of-order frames until gaps are filled.
 ///
+/// What becomes of an arriving frame — hand it on with what it was holding
+/// up, hold it, or refuse it — is the proved model's decision
+/// (`formal/CapDAG/Bifaci/Flow.lean`); this keeps the frames.
+///
 /// Protocol errors:
-/// - Stale/duplicate seq (frame.seq < expected_seq)
+/// - Stale seq (frame.seq < expected_seq), or one already held
 /// - Buffer overflow (buffered frames exceed max_buffer_per_flow)
 pub struct ReorderBuffer {
     flows: HashMap<FlowKey, FlowState>,
@@ -1586,52 +1616,61 @@ impl ReorderBuffer {
     /// Returns a Vec of frames ready for delivery (in seq order).
     /// Non-flow frames bypass reordering and are returned immediately.
     pub fn accept(&mut self, frame: Frame) -> Result<Vec<Frame>, CborError> {
+        use crate::formal::bifaci::flow::{reorder, Accepted};
         if !frame.is_flow_frame() {
             return Ok(vec![frame]);
         }
 
         let key = FlowKey::from_frame(&frame);
         let state = self.flows.entry(key).or_insert_with(|| FlowState {
-            expected_seq: 0,
+            order: reorder::start(),
             buffer: BTreeMap::new(),
         });
+        let expected = state.order.expected.clone();
 
-        if frame.seq == state.expected_seq {
-            // In-order: deliver this frame + drain consecutive buffered frames
-            let mut ready = vec![frame];
-            state.expected_seq += 1;
-            while let Some(buffered) = state.buffer.remove(&state.expected_seq) {
-                ready.push(buffered);
-                state.expected_seq += 1;
+        match reorder::accept(
+            state.order.clone(),
+            lungo::Nat::from(frame.seq),
+            lungo::Nat::from(self.max_buffer_per_flow as u64),
+        ) {
+            Accepted::Deliver { flow, seqs } => {
+                // The frame itself, then the held frames it was holding up.
+                let mut ready = Vec::new();
+                let mut arrived = Some(frame);
+                for seq in seqs {
+                    let seq = seq.to_u64().expect("a seq the model releases is one a frame carried");
+                    ready.push(match arrived.take() {
+                        Some(frame) => frame,
+                        None => state
+                            .buffer
+                            .remove(&seq)
+                            .expect("the model releases only seqs it was told are held"),
+                    });
+                }
+                state.order = flow;
+                Ok(ready)
             }
-            Ok(ready)
-        } else if frame.seq > state.expected_seq {
-            // Out-of-order: buffer it
-            // Check if this seq is already buffered (duplicate)
-            if state.buffer.contains_key(&frame.seq) {
-                return Err(CborError::Protocol(format!(
-                    "stale/duplicate seq: seq {} already buffered (expected >= {})",
-                    frame.seq, state.expected_seq,
-                )));
+            Accepted::Hold { flow } => {
+                state.order = flow;
+                state.buffer.insert(frame.seq, frame);
+                Ok(vec![])
             }
-            if state.buffer.len() >= self.max_buffer_per_flow {
-                return Err(CborError::Protocol(format!(
-                    "reorder buffer overflow: flow has {} buffered frames (max {}), \
-                     expected seq {} but got seq {}",
-                    state.buffer.len(),
-                    self.max_buffer_per_flow,
-                    state.expected_seq,
-                    frame.seq,
-                )));
-            }
-            state.buffer.insert(frame.seq, frame);
-            Ok(vec![])
-        } else {
-            // Stale or duplicate
-            Err(CborError::Protocol(format!(
+            Accepted::Stale => Err(CborError::Protocol(format!(
                 "stale/duplicate seq: expected >= {} but got {}",
-                state.expected_seq, frame.seq,
-            )))
+                expected, frame.seq,
+            ))),
+            Accepted::Duplicate => Err(CborError::Protocol(format!(
+                "stale/duplicate seq: seq {} already buffered (expected >= {})",
+                frame.seq, expected,
+            ))),
+            Accepted::Overflow => Err(CborError::Protocol(format!(
+                "reorder buffer overflow: flow has {} buffered frames (max {}), \
+                 expected seq {} but got seq {}",
+                state.buffer.len(),
+                self.max_buffer_per_flow,
+                expected,
+                frame.seq,
+            ))),
         }
     }
 

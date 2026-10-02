@@ -778,7 +778,7 @@ impl InProcessCartridgeHost {
                     tracing::error!("[InProcessCartridgeHost] writer error: {}", e);
                     break;
                 }
-                if matches!(frame.frame_type, FrameType::End | FrameType::Err) {
+                if frame.frame_type.is_terminal() {
                     seq_assigner.remove(&FlowKey::from_frame(&frame));
                 }
             }

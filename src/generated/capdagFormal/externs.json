@@ -16,12 +16,36 @@
     "source": "<lean>/Init/Prelude.lean:3210:3"
   },
   {
+    "declaration": "Array.mkEmpty",
+    "key": "lean_mk_empty_array_with_capacity",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_mk_empty_array_with_capacity",
+    "lean_type": "{α : Type u} → Nat → Array α",
+    "source": "<lean>/Init/Prelude.lean:3235:1"
+  },
+  {
+    "declaration": "Array.push",
+    "key": "lean_array_push",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_array_push",
+    "lean_type": "{α : Type u} → Array α → α → Array α",
+    "source": "<lean>/Init/Prelude.lean:3327:1"
+  },
+  {
     "declaration": "Array.size",
     "key": "lean_array_get_size",
     "resolution": "runtime",
     "implementation": "lungo::__runtime::intrinsics::lean_array_get_size",
     "lean_type": "{α : Type u} → Array α → Nat",
     "source": "<lean>/Init/Prelude.lean:3259:1"
+  },
+  {
+    "declaration": "Array.toList",
+    "key": "lean_array_to_list",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_array_to_list",
+    "lean_type": "{α : Type u} → Array α → List α",
+    "source": "<lean>/Init/Prelude.lean:3217:3"
   },
   {
     "declaration": "ByteArray.get!",
@@ -104,6 +128,14 @@
     "source": "<lean>/Init/System/IO.lean:749:1"
   },
   {
+    "declaration": "Int.add",
+    "key": "lean_int_add",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_int_add",
+    "lean_type": "Int → Int → Int",
+    "source": "<lean>/Init/Data/Int/Basic.lean:152:1"
+  },
+  {
     "declaration": "Int.decLt",
     "key": "lean_int_dec_lt",
     "resolution": "runtime",
@@ -126,6 +158,14 @@
     "implementation": "lungo::__runtime::intrinsics::lean_nat_to_int",
     "lean_type": "Nat → Int",
     "source": "<lean>/Init/Data/Int/Basic.lean:47:3"
+  },
+  {
+    "declaration": "Int.sub",
+    "key": "lean_int_sub",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_int_sub",
+    "lean_type": "Int → Int → Int",
+    "source": "<lean>/Init/Data/Int/Basic.lean:197:1"
   },
   {
     "declaration": "Nat.add",

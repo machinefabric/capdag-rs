@@ -5,17 +5,47 @@
 //! exhausted; the receiving endpoint replenishes it with CREDIT frames as it
 //! consumes chunks (L9/L10 in the normative bifaci protocol documentation).
 //!
+//! Every decision here — may this chunk be sent, is this arriving chunk within
+//! what was granted, is a grant due — is made by the proved model
+//! (`formal/CapDAG/Bifaci/Credit.lean`), as generated code. What this module
+//! owns is the waiting: [`CreditGate`] parks a sender until a grant or a close
+//! changes the answer, and [`CreditWindow`] is the receiver's side of the same
+//! stream, shared between whatever sees chunks arrive and whatever consumes
+//! them.
+//!
 //! `CreditGate` is deliberately built on a mutex + notify pair rather than a
 //! semaphore so its semantics translate directly to the mirrors: Python uses a
-//! `threading.Condition` over an integer, Go a token channel, Swift a
-//! continuation queue. The observable contract is identical everywhere:
-//! `acquire` waits until credit is available or the gate closes; `close`
-//! releases all waiters with an error; grants never block.
+//! `threading.Condition`, Go a channel, Swift a continuation queue. The
+//! observable contract is identical everywhere: `acquire` waits until credit is
+//! available or the gate closes; `close` releases all waiters with an error;
+//! grants never block.
 
 use crate::bifaci::frame::{Frame, FrameType, MessageId};
+use crate::formal::bifaci::credit as model;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
+
+/// A count the model works in, from one the wire carries.
+fn nat(n: u64) -> lungo::Nat {
+    lungo::Nat::from(n)
+}
+
+/// A count for the wire, from one the model works in. The model's numbers are
+/// unbounded; a window is a count of chunks a peer granted in `u64` grants, so
+/// one that does not fit is a defect, not a value to truncate.
+fn count(n: &lungo::Nat) -> u64 {
+    n.to_u64()
+        .unwrap_or_else(|| panic!("credit count {n:?} exceeds u64 — a window is bounded by the grants it received"))
+}
+
+/// The window two ends start every stream with: the smaller proposal. `None`
+/// when either proposes zero — nothing could be sent under a zero window, and
+/// with nothing consumed nothing would ever be granted, so it is refused at
+/// the handshake instead of deadlocking the first stream.
+pub fn negotiate_initial_credit(ours: u64, theirs: u64) -> Option<u64> {
+    model::negotiate(nat(ours), nat(theirs)).map(|window| count(&window))
+}
 
 /// Error returned to a credit waiter when its gate closes (request terminal,
 /// cancellation, or connection death) — the waiter must stop sending.
@@ -33,13 +63,6 @@ impl std::fmt::Display for CreditClosed {
 
 impl std::error::Error for CreditClosed {}
 
-struct GateState {
-    /// Chunks the sender may still emit before waiting.
-    available: u64,
-    /// Set when the gate is closed; all current and future acquires fail.
-    closed: Option<String>,
-}
-
 /// A replenishable per-stream credit window for one sender.
 ///
 /// - `acquire(1)` before each CHUNK: returns immediately while the window is
@@ -48,17 +71,14 @@ struct GateState {
 /// - `close(reason)` on request terminal/cancel: releases all waiters with
 ///   `CreditClosed` (L13 — a credit-blocked sender must never hang).
 pub struct CreditGate {
-    state: Mutex<GateState>,
+    state: Mutex<model::Gate>,
     notify: Notify,
 }
 
 impl CreditGate {
     pub fn new(initial_credit: u64) -> Self {
         Self {
-            state: Mutex::new(GateState {
-                available: initial_credit,
-                closed: None,
-            }),
+            state: Mutex::new(model::gate::opened(nat(initial_credit))),
             notify: Notify::new(),
         }
     }
@@ -67,8 +87,8 @@ impl CreditGate {
     /// Fails with `CreditClosed` if the gate closes before (or while) waiting.
     pub async fn acquire(&self, n: u64) -> Result<(), CreditClosed> {
         loop {
-            // Register interest BEFORE checking state so a grant/close that
-            // lands between the check and the await cannot be missed.
+            // Register interest BEFORE asking so a grant/close that lands
+            // between the answer and the await cannot be missed.
             //
             // CRITICAL: creating `notified()` does NOT register it —
             // `notify_waiters()` only wakes futures that have been polled (or
@@ -79,17 +99,8 @@ impl CreditGate {
             let notified = self.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            {
-                let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(reason) = &s.closed {
-                    return Err(CreditClosed {
-                        reason: reason.clone(),
-                    });
-                }
-                if s.available >= n {
-                    s.available -= n;
-                    return Ok(());
-                }
+            if self.try_acquire(n)? {
+                return Ok(());
             }
             notified.await;
         }
@@ -98,17 +109,14 @@ impl CreditGate {
     /// Non-waiting acquire. Returns false when the window is exhausted.
     /// Fails with `CreditClosed` if the gate is closed.
     pub fn try_acquire(&self, n: u64) -> Result<bool, CreditClosed> {
-        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(reason) = &s.closed {
-            return Err(CreditClosed {
-                reason: reason.clone(),
-            });
-        }
-        if s.available >= n {
-            s.available -= n;
-            Ok(true)
-        } else {
-            Ok(false)
+        let mut gate = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match model::gate::acquire(gate.clone(), nat(n)) {
+            model::Acquire::Acquired { gate: after } => {
+                *gate = after;
+                Ok(true)
+            }
+            model::Acquire::Wait => Ok(false),
+            model::Acquire::Closed { reason } => Err(CreditClosed { reason }),
         }
     }
 
@@ -124,35 +132,29 @@ impl CreditGate {
         }
     }
 
-    /// Replenish the window by `n` chunks and wake all waiters.
+    /// Replenish the window by `n` chunks and wake all waiters. A grant to a
+    /// closed gate is nothing.
     pub fn grant(&self, n: u64) {
         {
-            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            if s.closed.is_some() {
-                return; // grants after close are no-ops
-            }
-            s.available = s.available.saturating_add(n);
+            let mut gate = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            *gate = model::gate::grant(gate.clone(), nat(n));
         }
         self.notify.notify_waiters();
     }
 
     /// Close the gate: all current and future acquires fail with `CreditClosed`.
+    /// The first reason given is the one waiters are told.
     pub fn close(&self, reason: &str) {
         {
-            let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            if s.closed.is_none() {
-                s.closed = Some(reason.to_string());
-            }
+            let mut gate = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            *gate = model::gate::close(gate.clone(), reason.to_string());
         }
         self.notify.notify_waiters();
     }
 
     /// Currently available credit (diagnostic/stats).
     pub fn available(&self) -> u64 {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .available
+        count(&self.state.lock().unwrap_or_else(|e| e.into_inner()).available)
     }
 
     /// Whether the gate has been closed.
@@ -162,6 +164,87 @@ impl CreditGate {
             .unwrap_or_else(|e| e.into_inner())
             .closed
             .is_some()
+    }
+}
+
+/// The receiving end of one stream's credit: how many more chunks the sender
+/// was promised room for, and how many have been consumed without yet being
+/// granted back (L10/L12).
+///
+/// Shared between what sees chunks ARRIVE (a demux, a collector) and what
+/// CONSUMES them (a handler reading its input). Each method is one decision of
+/// the model; a method that returns a grant returns the number of chunks to
+/// put in a CREDIT frame now.
+#[derive(Debug)]
+pub struct CreditWindow {
+    state: Mutex<model::Window>,
+}
+
+/// A CHUNK arrived beyond the window its receiver granted: the sender broke the
+/// protocol, and the request fails with `CREDIT_VIOLATION` (L12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreditViolation;
+
+impl CreditWindow {
+    /// A stream's window, as negotiated. Grants are batched at half of it.
+    pub fn new(initial_credit: u64) -> Self {
+        Self {
+            state: Mutex::new(model::window::opened(nat(initial_credit))),
+        }
+    }
+
+    /// A chunk arrived. `Err` when it is beyond what was granted; the window
+    /// is then left as it was — the stream has failed.
+    pub fn arrive(&self) -> Result<(), CreditViolation> {
+        let mut window = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match model::window::arrive(window.clone()) {
+            model::Arrival::Accepted { window: after } => {
+                *window = after;
+                Ok(())
+            }
+            model::Arrival::Violation => Err(CreditViolation),
+        }
+    }
+
+    /// A chunk was consumed. Returns the grant that is now due, if one is.
+    pub fn consumed(&self) -> Option<u64> {
+        self.apply(model::window::consume)
+    }
+
+    /// Grant back everything consumed so far. Called before the receiver blocks
+    /// on anything (L10's flush-before-block): a sender whose window is smaller
+    /// than this receiver's batch would otherwise wait on credit that is only
+    /// pending here.
+    pub fn flush(&self) -> Option<u64> {
+        self.apply(model::window::flush)
+    }
+
+    /// A chunk that only continues an item already begun arrived and is granted
+    /// back at once. The consumer grants once per item, so without this an item
+    /// spanning more chunks than the window could never finish arriving.
+    pub fn continued(&self) -> u64 {
+        self.apply(model::window::continued)
+            .expect("a continued chunk is always granted back")
+    }
+
+    /// Chunks the sender may still send (diagnostic/tests).
+    pub fn remaining(&self) -> u64 {
+        count(&self.state.lock().unwrap_or_else(|e| e.into_inner()).remaining)
+    }
+
+    /// Chunks consumed and not yet granted back (diagnostic/tests).
+    pub fn pending(&self) -> u64 {
+        count(&self.state.lock().unwrap_or_else(|e| e.into_inner()).pending)
+    }
+
+    fn apply(&self, step: fn(model::Window) -> model::Granted) -> Option<u64> {
+        let mut window = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let granted = step(window.clone());
+        *window = granted.window;
+        match count(&granted.grant) {
+            0 => None,
+            grant => Some(grant),
+        }
     }
 }
 
@@ -211,20 +294,23 @@ impl CreditRouter {
             return false;
         };
         let gates = self.gates.lock().unwrap_or_else(|e| e.into_inner());
-        let exact = gates.get(&(frame.id.clone(), frame.stream_id.clone()));
-        if let Some(gate) = exact {
-            gate.grant(credits);
-            return true;
-        }
-        // No stream_id on the grant: match the request's sole gate if exactly one.
-        if frame.stream_id.is_none() {
-            let mut request_gates = gates.iter().filter(|((r, _), _)| *r == frame.id);
-            if let (Some((_, gate)), None) = (request_gates.next(), request_gates.next()) {
-                gate.grant(credits);
-                return true;
+        // Which of the request's streams the grant credits is the model's
+        // decision: the one it names, or — naming none — the only one.
+        let streams: lungo::List<Option<String>> = gates
+            .keys()
+            .filter(|(rid, _)| *rid == frame.id)
+            .map(|(_, stream)| stream.clone())
+            .collect();
+        match model::grant_target(streams, frame.stream_id.clone()) {
+            Some(stream) => {
+                gates
+                    .get(&(frame.id.clone(), stream))
+                    .expect("the model chose among this request's registered streams")
+                    .grant(credits);
+                true
             }
+            None => false,
         }
-        false
     }
 
     /// Number of registered gates (diagnostic/stats).
