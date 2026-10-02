@@ -2,7 +2,7 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.81.24",
+  "generator_version": "1.83.79",
   "runtime_abi": 1,
   "modules": [
     "Init.Prelude",

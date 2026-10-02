@@ -8532,10 +8532,14 @@ mod tests {
             }),
         );
         let mut stream = package.recv().await.unwrap().unwrap();
-        // Let the demux drain all three pre-queued chunks before anything is
-        // consumed — no grant can extend the window, so the third chunk is
-        // deterministically a violation.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // The demux has seen all three chunks once the request has ended, and
+        // only then is anything consumed — so no grant can extend the window
+        // and the third chunk is a violation by construction, not by a sleep
+        // that a loaded machine outlasts.
+        assert!(
+            package.recv().await.is_none(),
+            "the request has one stream and then ends"
+        );
         // First two chunks are within the window.
         assert!(stream.recv().await.unwrap().is_ok());
         assert!(stream.recv().await.unwrap().is_ok());
