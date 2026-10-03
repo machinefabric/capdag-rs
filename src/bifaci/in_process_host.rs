@@ -346,7 +346,11 @@ impl PeerInvoker for InProcessPeerInvoker {
 /// For handlers that don't need streaming — they accumulate all input, process,
 /// then emit a response.
 ///
-/// Returns Err on CBOR decode failure (protocol violation).
+/// Returns Err on CBOR decode failure (protocol violation), and when the input
+/// does not reach its END: an ERR from upstream, or the host closing the input
+/// because the request was cancelled or its connection ended. Incomplete input
+/// is never returned as if it were the request's arguments.
+///
 /// Accumulate input frames into argument values and request-level metadata.
 ///
 /// Returns `(args, meta)` where `meta` is the stream metadata from the first
@@ -358,6 +362,7 @@ pub async fn accumulate_input(
     let mut streams: Vec<(String, String, Vec<u8>)> = Vec::new(); // (stream_id, media_urn, data)
     let mut active: HashMap<String, usize> = HashMap::new();
     let mut request_meta: Option<crate::StreamMeta> = None;
+    let mut ended = false;
 
     while let Some(frame) = input.recv().await {
         match frame.frame_type {
@@ -402,9 +407,16 @@ pub async fn accumulate_input(
                 }
             }
             FrameType::StreamEnd => {} // nothing to do
-            FrameType::End => break,
+            FrameType::End => {
+                ended = true;
+                break;
+            }
+            FrameType::Err => return Err(abandoned_by_err(&frame)),
             _ => {} // ignore unexpected frame types
         }
+    }
+    if !ended {
+        return Err(INPUT_ENDED_WITHOUT_END.to_string());
     }
 
     let args = streams
@@ -417,6 +429,22 @@ pub async fn accumulate_input(
 // =============================================================================
 // BUILT-IN IDENTITY HANDLER
 // =============================================================================
+
+/// Why a request's input stopped before its END: the host closed it, because
+/// the request was cancelled or the connection ended. Its arguments are
+/// incomplete, and answering them would answer a request that no longer
+/// exists — the cancel bug was a handler responding with whatever had arrived.
+pub const INPUT_ENDED_WITHOUT_END: &str =
+    "the request's input ended before its END: the request was cancelled or its connection closed";
+
+/// An ERR from upstream for a request whose input was still arriving.
+fn abandoned_by_err(frame: &Frame) -> String {
+    format!(
+        "the request failed upstream before its input was complete: {}: {}",
+        frame.error_code().unwrap_or("ERR"),
+        frame.error_message().unwrap_or("")
+    )
+}
 
 /// Identity handler: raw byte passthrough (no CBOR decode/encode).
 ///
@@ -436,6 +464,7 @@ impl FrameHandler for IdentityHandler {
     ) {
         // Accumulate raw payload bytes (no CBOR decode — identity is raw passthrough)
         let mut data = Vec::new();
+        let mut ended = false;
         while let Some(frame) = input.recv().await {
             match frame.frame_type {
                 FrameType::Chunk => {
@@ -443,9 +472,20 @@ impl FrameHandler for IdentityHandler {
                         data.extend_from_slice(p);
                     }
                 }
-                FrameType::End => break,
+                FrameType::End => {
+                    ended = true;
+                    break;
+                }
+                // The request failed upstream: it is over, and has no answer.
+                FrameType::Err => return,
                 _ => {} // STREAM_START, STREAM_END — skip
             }
+        }
+        // Input that stopped before its END belongs to a request that was
+        // cancelled or whose connection closed. Echoing what had arrived would
+        // answer a request that no longer exists.
+        if !ended {
+            return;
         }
 
         // Echo back as a single stream (raw bytes, no CBOR encode)
@@ -769,17 +809,42 @@ impl InProcessCartridgeHost {
         // Writer runs in a separate task with SeqAssigner
         let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Frame>();
         let writer_task = tokio::spawn(async move {
+            use crate::formal::bifaci::request::{write, Write};
             let mut writer = FrameWriter::new(local_write);
             let mut seq_assigner = SeqAssigner::new();
+            // A request has one terminal. Whether a frame is written, and
+            // whether writing it ends its flow, is the proved model's
+            // decision (L4), the same one the cartridge runtime's writer
+            // makes: a handler still emitting after a Cancel's ERR, or a
+            // Cancel arriving after the handler's END, produces post-terminal
+            // frames, and those are suppressed here, never written.
+            let mut terminated = crate::bifaci::stats::TerminatedFlows::new(1024);
+            let stragglers = crate::bifaci::stats::StragglerCounters::new();
 
             while let Some(mut frame) = write_rx.recv().await {
+                let key = FlowKey::from_frame(&frame);
+                let ends = match write(terminated.contains(&key), frame.frame_type.model()) {
+                    Write::Send { ends } => ends,
+                    Write::Suppress => {
+                        let total = stragglers.record(frame.frame_type);
+                        tracing::debug!(
+                            target: "in_process_host",
+                            rid = ?frame.id,
+                            ftype = frame.frame_type.as_str(),
+                            straggler_total = total,
+                            "post-terminal frame suppressed — END/ERR already written for this flow (L4)"
+                        );
+                        continue;
+                    }
+                };
                 seq_assigner.assign(&mut frame);
                 if let Err(e) = writer.write(&frame).await {
                     tracing::error!("[InProcessCartridgeHost] writer error: {}", e);
                     break;
                 }
-                if frame.frame_type.is_terminal() {
-                    seq_assigner.remove(&FlowKey::from_frame(&frame));
+                if ends {
+                    seq_assigner.remove(&key);
+                    terminated.insert(key);
                 }
             }
         });
@@ -1012,6 +1077,24 @@ impl InProcessCartridgeHost {
                         .cancel_reason()
                         .expect("a Cancel frame always yields a reason");
 
+                    // Terminal ERR under the cancel's own cause, queued BEFORE
+                    // the handler learns of the cancel: a handler that saw its
+                    // input close first could fail and queue its own ERR ahead
+                    // of this one, and the cancel's attribution would be the
+                    // frame suppressed. Whatever the stopping handler emits
+                    // after it — or the whole ERR, when the handler had
+                    // already sent its END — is a post-terminal frame the
+                    // writer suppresses (L4).
+                    let mut err = Frame::err(
+                        target_rid.clone(),
+                        reason.terminal_code(),
+                        reason.terminal_class(),
+                        &reason.terminal_message(),
+                        None,
+                    );
+                    err.routing_id = xid;
+                    let _ = write_tx.send(err);
+
                     // Drop active sender → handler's input recv() returns None
                     active.remove(&target_rid);
                     serving
@@ -1039,16 +1122,6 @@ impl InProcessCartridgeHost {
                         }
                     }
 
-                    // Terminal ERR under the cancel's own cause
-                    let mut err = Frame::err(
-                        target_rid,
-                        reason.terminal_code(),
-                        reason.terminal_class(),
-                        &reason.terminal_message(),
-                        None,
-                    );
-                    err.routing_id = xid;
-                    let _ = write_tx.send(err);
                 }
 
                 FrameType::Heartbeat => {
@@ -1163,6 +1236,188 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A handler that answers however its input ended: at END, or when the
+    /// host closed its input. It stands for every handler that does not check
+    /// — the host, not the handler, is what keeps a request to one terminal.
+    /// `answered` is signalled once it has sent its answer.
+    #[derive(Debug)]
+    struct AnswersAnywayHandler {
+        answered: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl FrameHandler for AnswersAnywayHandler {
+        async fn handle_request(
+            &self,
+            _cap_urn: &str,
+            mut input: mpsc::UnboundedReceiver<Frame>,
+            output: ResponseWriter,
+            _peer: Arc<dyn PeerInvoker>,
+        ) {
+            while let Some(frame) = input.recv().await {
+                if frame.frame_type == FrameType::End {
+                    break;
+                }
+            }
+            output.emit_response("media:", b"an answer");
+            self.answered.notify_one();
+        }
+    }
+
+    // TEST344: input that does not reach its END is refused, not returned as
+    // the request's arguments.
+    //
+    // The host closes a handler's input when the request is cancelled or its
+    // connection ends, and forwards an ERR from upstream. Each was accumulated
+    // as if the request were complete, so a handler answered a request that
+    // no longer existed, with whatever part of its input had arrived.
+    #[tokio::test]
+    async fn test344_accumulate_refuses_input_that_never_ended() {
+        let rid = MessageId::new_uuid();
+        let start = Frame::stream_start(rid.clone(), "arg0".into(), "media:text".into(), None);
+        let payload = cbor_bytes_payload(b"part");
+        let chunk = Frame::chunk(rid.clone(), "arg0".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload));
+
+        // Closed before END: cancelled, or the connection went.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tx.send(start.clone()).unwrap();
+        tx.send(chunk.clone()).unwrap();
+        drop(tx);
+        let refused = accumulate_input(&mut rx).await.unwrap_err();
+        assert_eq!(refused, INPUT_ENDED_WITHOUT_END);
+
+        // An ERR from upstream.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tx.send(start.clone()).unwrap();
+        tx.send(Frame::err(rid.clone(), "UPSTREAM_DIED", crate::failure::AttributionClass::Internal, "the producer failed", None))
+            .unwrap();
+        let refused = accumulate_input(&mut rx).await.unwrap_err();
+        assert!(refused.contains("UPSTREAM_DIED") && refused.contains("the producer failed"), "{refused}");
+
+        // Reaching END is the request's arguments.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tx.send(start).unwrap();
+        tx.send(chunk).unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "arg0".into(), 1)).unwrap();
+        tx.send(Frame::end(rid, None)).unwrap();
+        drop(tx);
+        let (args, _) = accumulate_input(&mut rx).await.unwrap();
+        assert_eq!(args.len(), 1);
+        assert_eq!(args[0].value, b"part");
+    }
+
+    // TEST345: once a request has its terminal, the host sends nothing more
+    // for it.
+    //
+    // Two ways a request ended and more followed: a CANCEL arriving after the
+    // handler finished, answered with a second terminal; and a CANCEL while
+    // input was open, after which a handler that answers anyway sent its
+    // response around the cancel's ERR. The ERR must be that request's only
+    // frame.
+    #[tokio::test]
+    async fn test345_a_request_ends_once() {
+        let cap_urn = "cap:in=\"media:text\";echo;out=\"media:text\"";
+        // Runs `script` against a fresh host and returns every frame the host
+        // sent for the request, up to the connection's end.
+        async fn frames_for(
+            cap_urn: &str,
+            script: impl FnOnce(
+                MessageId,
+                FrameWriter<BufWriter<crate::bifaci::local_socket::OwnedWriteHalf>>,
+                FrameReader<BufReader<crate::bifaci::local_socket::OwnedReadHalf>>,
+                Arc<tokio::sync::Notify>,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = (
+                                Vec<Frame>,
+                                FrameReader<BufReader<crate::bifaci::local_socket::OwnedReadHalf>>,
+                            ),
+                        > + Send,
+                >,
+            >,
+        ) -> Vec<Frame> {
+            let answered = Arc::new(tokio::sync::Notify::new());
+            let handlers = vec![(
+                "answers".to_string(),
+                vec![make_test_cap(cap_urn)],
+                Arc::new(AnswersAnywayHandler { answered: answered.clone() }) as Arc<dyn FrameHandler>,
+            )];
+            let host = InProcessCartridgeHost::new(InProcessHostIdentity::for_test("in-process-test"), handlers);
+            let (host_sock, test_sock) = UnixStream::pair().unwrap();
+            let (host_read, host_write) = host_sock.into_split();
+            let (test_read, test_write) = test_sock.into_split();
+            let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+            let mut reader = FrameReader::new(BufReader::new(test_read));
+            let writer = FrameWriter::new(BufWriter::new(test_write));
+            assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::RelayNotify);
+
+            let rid = MessageId::new_uuid();
+            let (mut seen, mut reader) = script(rid.clone(), writer, reader, answered).await;
+            // The script dropped its writer: the host ends, and everything it
+            // sent is read to the connection's end.
+            while let Some(frame) = reader.read().await.unwrap() {
+                seen.push(frame);
+            }
+            host_task.await.unwrap().unwrap();
+            seen.into_iter().filter(|f| f.id == rid).collect()
+        }
+        let open = |rid: &MessageId| {
+            let mut req = Frame::req(rid.clone(), cap_urn, vec![], "application/cbor");
+            req.routing_id = Some(MessageId::Uint(1));
+            [req, Frame::stream_start(rid.clone(), "arg0".into(), "media:text".into(), None)]
+        };
+
+        // A CANCEL after the handler finished: the request's END stands alone.
+        let after_end = frames_for(cap_urn, |rid, mut writer, mut reader, answered| {
+            Box::pin(async move {
+                for frame in open(&rid) {
+                    writer.write(&frame).await.unwrap();
+                }
+                writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+                answered.notified().await;
+                let mut seen = Vec::new();
+                loop {
+                    let frame = reader.read().await.unwrap().unwrap();
+                    let end = frame.id == rid && frame.frame_type == FrameType::End;
+                    seen.push(frame);
+                    if end {
+                        break;
+                    }
+                }
+                let mut cancel = Frame::cancel(MessageId::Uint(0), &CancelReason::user(false));
+                cancel.id = rid;
+                cancel.routing_id = Some(MessageId::Uint(1));
+                writer.write(&cancel).await.unwrap();
+                drop(writer);
+                (seen, reader)
+            })
+        })
+        .await;
+        let types: Vec<FrameType> = after_end.iter().map(|f| f.frame_type).collect();
+        assert_eq!(types.last(), Some(&FrameType::End), "{types:?}");
+        assert_eq!(types.iter().filter(|t| **t == FrameType::Err).count(), 0, "a cancel after END adds no terminal: {types:?}");
+
+        // A CANCEL while input is open: its ERR is the request's only frame.
+        let cancelled = frames_for(cap_urn, |rid, mut writer, reader, _answered| {
+            Box::pin(async move {
+                for frame in open(&rid) {
+                    writer.write(&frame).await.unwrap();
+                }
+                let mut cancel = Frame::cancel(MessageId::Uint(0), &CancelReason::user(false));
+                cancel.id = rid;
+                cancel.routing_id = Some(MessageId::Uint(1));
+                writer.write(&cancel).await.unwrap();
+                drop(writer);
+                (Vec::new(), reader)
+            })
+        })
+        .await;
+        assert_eq!(cancelled.len(), 1, "{cancelled:?}");
+        assert_eq!(cancelled[0].frame_type, FrameType::Err);
+        assert_eq!(cancelled[0].error_code(), Some("CANCELLED"));
     }
 
     fn make_test_cap(urn_str: &str) -> Cap {

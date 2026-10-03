@@ -399,6 +399,14 @@ pub enum StreamError {
     #[error("Stream closed")]
     Closed,
 
+    /// Frames stopped before their END: a request's input, closed by the
+    /// runtime because the request was cancelled or the connection ended, or
+    /// a peer's response, cut short the same way. Every stream still open
+    /// errors with this — a stream cut short never looks like one that
+    /// finished, so a handler cannot answer with whatever part had arrived.
+    #[error("the frames stopped before their END: the request was cancelled or its connection closed")]
+    Abandoned,
+
     #[error("CBOR decode error: {0}")]
     Decode(String),
 
@@ -3597,8 +3605,20 @@ fn demux_multi_stream(
         // `SeqReassembly` — frame payloads are RFC 8742 fragments, decoded
         // at item granularity).
         let mut seq_reassembly: HashMap<String, SeqReassembly> = HashMap::new();
+        // Whether the request's input channel closed before END: the runtime
+        // closed it, because the request was cancelled or the connection
+        // ended. Every other way out of the loop is END, an ERR, or an error
+        // already delivered.
+        let mut cut_short = false;
 
-        for frame in raw_rx {
+        loop {
+            let frame = match raw_rx.recv() {
+                Ok(frame) => frame,
+                Err(_) => {
+                    cut_short = true;
+                    break;
+                }
+            };
             match frame.frame_type {
                 FrameType::StreamStart => {
                     let stream_id = match frame.stream_id.as_ref() {
@@ -4049,6 +4069,15 @@ fn demux_multi_stream(
                 }
             }
         }
+        if cut_short {
+            // The input stopped before END: cancelled, or the connection
+            // ended. Every open stream errors rather than ending, and so does
+            // the package — dropping the channels alone reads as completion.
+            for tx in stream_channels.values() {
+                let _ = tx.send(Err(StreamError::Abandoned));
+            }
+            let _ = streams_tx.send(Err(StreamError::Abandoned));
+        }
         // Dropping stream_channels closes all per-stream channels
         drop(stream_channels);
     });
@@ -4082,7 +4111,14 @@ fn demux_single_stream(
         // STREAM_START with is_sequence=true arrives). Sequence frame
         // payloads are RFC 8742 fragments — decode at item granularity.
         let mut seq: Option<SeqReassembly> = None;
-        while let Some(frame) = raw_rx.recv().await {
+        loop {
+            // A response channel that closes before the response's END was
+            // cut short — the peer call was cancelled, or the connection
+            // ended. It errors: a cut-short response never reads as complete.
+            let Some(frame) = raw_rx.recv().await else {
+                let _ = item_tx.send(PeerResponseItem::Data(Err(StreamError::Abandoned), None));
+                break;
+            };
             match frame.frame_type {
                 FrameType::StreamStart => {
                     if frame.is_sequence.unwrap_or(false) {
@@ -4804,6 +4840,43 @@ pub fn derive_response_media(cap_urn: &str) -> Result<String, RuntimeError> {
         })
 }
 
+/// Who ends a request: its handler or a cancel — exactly one of them.
+///
+/// A request has one terminal frame. Its handler's completion sends END (or its
+/// ERR); a cancel's ERR is sent once the handler has exited. Without a decision
+/// both were sent: a handler that finished just as a cancel arrived had its END
+/// followed by the cancel's ERR, and a handler that noticed the cancel and
+/// failed had its own ERR followed by the cancel's. Whichever claims first
+/// ends the request; the other sends nothing.
+#[derive(Clone)]
+pub(crate) struct TerminalClaim(Arc<std::sync::atomic::AtomicU8>);
+
+impl TerminalClaim {
+    const OPEN: u8 = 0;
+    const BY_HANDLER: u8 = 1;
+    const BY_CANCEL: u8 = 2;
+
+    fn open() -> Self {
+        Self(Arc::new(std::sync::atomic::AtomicU8::new(Self::OPEN)))
+    }
+
+    /// The handler finished: may it send its terminal?
+    fn for_handler(&self) -> bool {
+        self.claim(Self::BY_HANDLER)
+    }
+
+    /// A cancel arrived: will its ERR be the terminal?
+    fn for_cancel(&self) -> bool {
+        self.claim(Self::BY_CANCEL)
+    }
+
+    fn claim(&self, by: u8) -> bool {
+        self.0
+            .compare_exchange(Self::OPEN, by, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+}
+
 /// The crossbeam receiver carries frames routed by the main loop's active_requests
 /// map. The handler's demux drains them (even if they arrived before this spawn).
 fn spawn_handler(
@@ -4822,6 +4895,7 @@ fn spawn_handler(
     initial_credit: u64,
     live_feed_overruns: &Arc<std::sync::atomic::AtomicU64>,
     live_feed_handles: &Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>,
+    terminal: TerminalClaim,
 ) -> JoinHandle<()> {
     let output_tx_clone = output_tx.clone();
     let pending_clone = Arc::clone(pending_peer_requests);
@@ -4880,7 +4954,9 @@ fn spawn_handler(
                     e.failure_arg_urn(),
                 );
                 err_frame.routing_id = routing_id;
-                let _ = sender.send(&err_frame);
+                if terminal.for_handler() {
+                    let _ = sender.send(&err_frame);
+                }
                 let _ = done_tx.send(request_id);
                 return;
             }
@@ -4910,6 +4986,18 @@ fn spawn_handler(
         let op = factory();
         let peer_arc: Arc<dyn PeerInvoker> = Arc::new(peer_invoker);
         let result = dispatch_op(op, input_package, output, peer_arc).await;
+
+        // A cancel that claimed the request first ends it with its own ERR,
+        // sent by the main loop once this task reports done.
+        if !terminal.for_handler() {
+            tracing::debug!(
+                target: "cartridge_runtime",
+                rid = ?request_id,
+                "the request was cancelled first — the handler's terminal is not sent"
+            );
+            let _ = done_tx.send(request_id);
+            return;
+        }
 
         match result {
             Ok(()) => {
@@ -6030,6 +6118,9 @@ impl CartridgeRuntime {
         // Track cancelled requests to prevent duplicate ERR frames
         let mut cancelled_requests: std::collections::HashMap<MessageId, CancelReason> =
             std::collections::HashMap::new();
+        // Each running handler's terminal claim (see `TerminalClaim`), until
+        // it reports done.
+        let mut terminal_claims: HashMap<MessageId, TerminalClaim> = HashMap::new();
 
         // Routes inbound CREDIT frames to the gates of streams local senders are
         // writing. Gates register when an OutputStream starts a credited stream;
@@ -6124,6 +6215,11 @@ impl CartridgeRuntime {
                     negotiated_limits.initial_credit,
                     &self.live_feed_overruns,
                     &feed_handles,
+                    {
+                        let claim = TerminalClaim::open();
+                        terminal_claims.insert(handler_rid.clone(), claim.clone());
+                        claim
+                    },
                 );
                 active_handlers.insert(handler_rid.clone(), handle);
                 handler_routing_ids.insert(handler_rid, handler_xid);
@@ -6155,6 +6251,7 @@ impl CartridgeRuntime {
                             handle.close();
                         }
                     }
+                    terminal_claims.remove(&rid);
                     if let Some(reason) = cancelled_requests.remove(&rid) {
                         let routing_id = handler_routing_ids.remove(&rid).flatten();
                         let mut err = Frame::err(
@@ -6307,6 +6404,11 @@ impl CartridgeRuntime {
                                 negotiated_limits.initial_credit,
                                 &self.live_feed_overruns,
                                 &feed_handles,
+                                {
+                                    let claim = TerminalClaim::open();
+                                    terminal_claims.insert(handler_rid.clone(), claim.clone());
+                                    claim
+                                },
                             );
                             active_handlers.insert(handler_rid.clone(), handle);
                             handler_routing_ids.insert(handler_rid, handler_xid);
@@ -6476,6 +6578,21 @@ impl CartridgeRuntime {
                     // stream lifecycle completes (no orphaned streams) and produces
                     // identical wire behavior regardless of implementation language.
                     if active_handlers.contains_key(&target_rid) {
+                        // The handler may already have sent its terminal and
+                        // not yet reported done: then the request is over, and
+                        // a cancel's ERR would be its second terminal.
+                        let claimed = terminal_claims
+                            .get(&target_rid)
+                            .expect("a running handler has a terminal claim")
+                            .for_cancel();
+                        if !claimed {
+                            tracing::debug!(
+                                target: "cartridge_runtime",
+                                rid = ?target_rid,
+                                "cancel for a request whose handler already ended it — nothing to send"
+                            );
+                            continue;
+                        }
                         cancelled_requests.insert(target_rid.clone(), reason.clone());
                         active_requests.remove(&target_rid);
                         // Release any credit-blocked writers immediately (L13,
@@ -13216,5 +13333,97 @@ mod tests {
             "STREAM_END promises the coalesced count"
         );
     }
-}
 
+    // TEST351: frames cut short before their END are an error, not a stream
+    // that finished.
+    //
+    // A cooperative cancel closes the request's input, and the demux took the
+    // closed channel for the end of every stream: a handler saw its input end
+    // normally and answered with whatever part had arrived. A peer response
+    // cut short the same way read as a complete response.
+    #[tokio::test]
+    async fn test351_frames_cut_short_are_an_error() {
+        let rid = MessageId::new_uuid();
+        let payload = {
+            let mut bytes = Vec::new();
+            ciborium::into_writer(&ciborium::Value::Bytes(b"part".to_vec()), &mut bytes).unwrap();
+            bytes
+        };
+        let chunk = Frame::chunk(rid.clone(), "arg0".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload));
+
+        // A request's input, closed mid-stream.
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        raw_tx
+            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None))
+            .unwrap();
+        raw_tx.send(chunk.clone()).unwrap();
+        let mut package = demux_multi_stream(raw_rx, None, None, None);
+        let mut stream = package.recv().await.unwrap().unwrap();
+        let (first, _) = stream.recv().await.unwrap().unwrap();
+        assert_eq!(first, ciborium::Value::Bytes(b"part".to_vec()));
+        drop(raw_tx);
+        assert!(
+            matches!(stream.recv().await, Some(Err(StreamError::Abandoned))),
+            "an open stream whose input closed errors"
+        );
+        assert!(
+            matches!(package.recv().await, Some(Err(StreamError::Abandoned))),
+            "and so does the package"
+        );
+
+        // The same input with its END is a stream that finished.
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        raw_tx
+            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None))
+            .unwrap();
+        raw_tx.send(chunk.clone()).unwrap();
+        raw_tx.send(Frame::stream_end(rid.clone(), "arg0".into(), 1)).unwrap();
+        raw_tx.send(Frame::end(rid.clone(), None)).unwrap();
+        drop(raw_tx);
+        let mut package = demux_multi_stream(raw_rx, None, None, None);
+        let mut stream = package.recv().await.unwrap().unwrap();
+        assert!(stream.recv().await.unwrap().is_ok());
+        assert!(stream.recv().await.is_none(), "a stream that reached STREAM_END ends");
+        assert!(package.recv().await.is_none(), "an input that reached END ends");
+
+        // A peer response, closed before its END.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(Frame::stream_start(rid.clone(), "r".into(), "media:enc=utf-8".into(), None)).unwrap();
+        tx.send(Frame::chunk(rid.clone(), "r".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload)))
+            .unwrap();
+        drop(tx);
+        let mut response = demux_single_stream(rx, None);
+        assert!(matches!(response.recv().await, Some(PeerResponseItem::Data(Ok(_), _))));
+        assert!(
+            matches!(response.recv().await, Some(PeerResponseItem::Data(Err(StreamError::Abandoned), _))),
+            "a peer response cut short errors"
+        );
+        assert!(response.recv().await.is_none());
+    }
+
+    // TEST373: a request's terminal is claimed exactly once, by its handler or
+    // by a cancel.
+    //
+    // Both used to send: a handler finishing just as a cancel arrived had its
+    // END followed by the cancel's ERR. Whoever claims first ends the request,
+    // however many try at once.
+    #[test]
+    fn test373_a_terminal_is_claimed_exactly_once() {
+        for _ in 0..200 {
+            let claim = TerminalClaim::open();
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let handler = {
+                let (claim, barrier) = (claim.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    claim.for_handler()
+                })
+            };
+            barrier.wait();
+            let cancel = claim.for_cancel();
+            let handler = handler.join().unwrap();
+            assert!(handler ^ cancel, "exactly one of them ends the request");
+            assert!(!claim.for_handler() && !claim.for_cancel(), "and nobody after");
+        }
+    }
+}
