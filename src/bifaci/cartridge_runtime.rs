@@ -2908,10 +2908,18 @@ fn extract_effective_payload(
         if let Some(ref expected) = expected_media_urn {
             valid_targets.push(expected.clone());
         }
-        for (_, info) in &arg_defs {
+        for (parsed, info) in &arg_defs {
             if let Some(ref stdin_urn_str) = info.stdin_target {
                 if let Ok(stdin_urn) = MediaUrn::from_string(stdin_urn_str) {
                     valid_targets.push(stdin_urn);
+                }
+                // A live-feed reference stands for the input it names: its
+                // slot carries the REFERENCE urn and the runtime resolves it
+                // into the stdin target's content after this check (13.2
+                // §Reference Media). Asked only for the content urn, a CLI
+                // run handed a feed selector was refused as having no input.
+                if parsed.is_live_feed() {
+                    valid_targets.push(parsed.clone());
                 }
             }
         }
@@ -13407,6 +13415,63 @@ mod tests {
     // Both used to send: a handler finishing just as a cancel arrived had its
     // END followed by the cancel's ERR. Whoever claims first ends the request,
     // however many try at once.
+    /// TEST12467: a live-feed reference is the input of a cap that takes the
+    /// feed's content; an argument for some other media is still refused.
+    ///
+    /// A CLI run of a cap whose input is a live feed hands it the feed's
+    /// selector, in the slot that carries the REFERENCE urn; the runtime
+    /// resolves that into the content stream afterwards. The check that the
+    /// input is present asked only for the content urn, so every such run
+    /// was refused: `No argument found matching expected input media type
+    /// 'media:feed-frames' in CBOR arguments`.
+    #[test]
+    fn test12467_a_live_feed_reference_is_the_caps_input() {
+        let mut cap = Cap::new(
+            crate::CapUrnBuilder::new()
+                .marker("drain-feed")
+                .in_spec("media:feed-frames")
+                .out_spec("media:feed-summary;fmt=json;record")
+                .build()
+                .unwrap(),
+            "Drain Live Feed".to_string(),
+            vec!["drain_feed".to_string()],
+        );
+        cap.args = vec![crate::CapArg {
+            media_urn: "media:live;synthetic".to_string(),
+            required: true,
+            is_sequence: true,
+            streaming: true,
+            sources: vec![
+                ArgSource::Stdin { stdin: "media:feed-frames".to_string() },
+                ArgSource::Position { position: 0 },
+            ],
+            arg_description: None,
+            default_value: None,
+            metadata: None,
+        }];
+        let payload = |urn: &str| {
+            let args = ciborium::Value::Array(vec![ciborium::Value::Map(vec![
+                (
+                    ciborium::Value::Text("media_urn".to_string()),
+                    ciborium::Value::Text(urn.to_string()),
+                ),
+                (
+                    ciborium::Value::Text("value".to_string()),
+                    ciborium::Value::Bytes(br#"{"params":{"items":3}}"#.to_vec()),
+                ),
+            ])]);
+            let mut bytes = Vec::new();
+            ciborium::into_writer(&args, &mut bytes).unwrap();
+            bytes
+        };
+        extract_effective_payload(&payload("media:live;synthetic"), Some("application/cbor"), &cap, true)
+            .expect("a feed selector in the reference slot is the cap's input");
+        let refused =
+            extract_effective_payload(&payload("media:txt;textable"), Some("application/cbor"), &cap, true)
+                .expect_err("an argument for other media is not the cap's input");
+        assert!(refused.to_string().contains("media:feed-frames"), "{refused}");
+    }
+
     #[test]
     fn test373_a_terminal_is_claimed_exactly_once() {
         for _ in 0..200 {
