@@ -6,3 +6,5 @@ Content:
 Question: {{ question }}
 
 Choose a number between {{ min_value }} and {{ max_value }} (inclusive) that best represents your answer. Also provide a confidence score between 0.0 and 1.0 indicating how certain you are about your choice.
+
+Respond with a JSON object: "choice" is the number you chose, "confidence" is your confidence between 0.0 and 1.0, and "reasoning" is one short sentence on why.
