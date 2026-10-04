@@ -47,7 +47,13 @@ impl Default for RequestType {
 /// LLM Generation Request — input for all LLM caps.
 ///
 /// Matches: media:fmt=json;llm-generation-request;record
+///
+/// Read strictly: a field this record does not have is refused, never
+/// dropped. It carried top-level `json_schema` and `grammar` fields that no
+/// cartridge read — the constraint goes in `constraint` — and a request that
+/// set one was generated unconstrained while its sender believed otherwise.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LlmGenerationRequest {
     pub prompt: String,
     pub model_spec: String,
@@ -78,12 +84,6 @@ pub struct LlmGenerationRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u32>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grammar: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub json_schema: Option<JsonValue>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub constraint: Option<ConstraintSpec>,
@@ -132,8 +132,6 @@ impl LlmGenerationRequest {
             top_p: Some(0.9),
             min_p: Some(0.05),
             seed: Some(42),
-            grammar: None,
-            json_schema: None,
             constraint: None,
             chat_template: None,
             stop_sequences: None,
@@ -415,6 +413,24 @@ mod tests {
         assert_eq!(parsed.prompt, "Hello");
         assert_eq!(parsed.model_spec, "model/test");
         assert_eq!(parsed.max_tokens, Some(512));
+    }
+
+    // TEST12483: a request is read strictly. A field it does not have — the
+    // top-level `json_schema` a constrained request used to set, which no
+    // cartridge read — is refused by name, not dropped, so a constraint can
+    // only be where it is read: `constraint`.
+    #[test]
+    fn test12483_a_request_with_a_field_it_does_not_have_is_refused() {
+        for field in ["json_schema", "grammar"] {
+            let text = format!(r#"{{"prompt": "p", "model_spec": "m", "{field}": {{}}}}"#);
+            let refused = serde_json::from_str::<LlmGenerationRequest>(&text)
+                .expect_err("an unknown field is refused");
+            let said = refused.to_string();
+            assert!(said.contains(field) && said.contains("constraint"), "{said}");
+        }
+        let governed = r#"{"prompt": "p", "model_spec": "m", "constraint": {"type": "json_schema", "schema": {"type": "object"}}}"#;
+        let request: LlmGenerationRequest = serde_json::from_str(governed).expect("a constraint where it is read");
+        assert!(request.constraint.is_some());
     }
 
     // Round-trip: each stream message variant serializes and deserializes to itself.
