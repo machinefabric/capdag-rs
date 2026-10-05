@@ -49,6 +49,7 @@ pub mod input_resolver;
 pub mod llm;
 pub mod machine;
 pub mod media;
+pub mod model_storage;
 pub mod net_retry;
 pub mod orchestrator;
 pub mod pages;
