@@ -16,6 +16,29 @@ pub enum ModelLoading {
     Read,
 }
 
+/// The model-loading setting's media URN: the argument a model-loading cap
+/// takes (`--model-loading`), declared in the fabric as
+/// `inference-model-loading`.
+pub const MEDIA_MODEL_LOADING: &str =
+    "media:enc=utf-8;inference;model;model-loading;operator;policy";
+
+impl ModelLoading {
+    /// The setting's value, as the fabric declares it: `auto`, `map` or
+    /// `read`. Anything else is refused rather than taken for `auto`: a
+    /// misspelt `raed` would otherwise map a model from the share it was
+    /// set to keep away from.
+    pub fn from_setting(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "auto" => Ok(Self::Auto),
+            "map" => Ok(Self::Map),
+            "read" => Ok(Self::Read),
+            other => Err(format!(
+                "model loading is `auto`, `map` or `read`; `{other}` is none of them"
+            )),
+        }
+    }
+}
+
 /// Whether `model_path` is mapped rather than read, under `loading`.
 ///
 /// Mapping is the right way to load from a local disk: nothing is copied, and
@@ -111,6 +134,18 @@ fn on_network_filesystem(path: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // TEST12511: the setting is read as the fabric declares it, and a value
+    // that is not one of its three is refused, not taken for `auto`.
+    #[test]
+    fn test12511_the_setting_is_one_of_three() {
+        assert_eq!(ModelLoading::from_setting("auto").unwrap(), ModelLoading::Auto);
+        assert_eq!(ModelLoading::from_setting(" map\n").unwrap(), ModelLoading::Map);
+        assert_eq!(ModelLoading::from_setting("read").unwrap(), ModelLoading::Read);
+        for bad in ["", "raed", "Auto", "mmap"] {
+            assert!(ModelLoading::from_setting(bad).is_err(), "`{bad}` was accepted");
+        }
+    }
 
     // TEST12503: a model on a local disk is mapped, an explicit choice is
     // honoured whatever the disk, and a path whose filesystem cannot be told
