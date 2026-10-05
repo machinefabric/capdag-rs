@@ -1,10 +1,10 @@
 {
-  "build_key": "b64236df5e09902fc39406546c6457fcfd31903a27ef612e432f0a875f20aac9",
+  "build_key": "f50717c0ec9ed414abbe3d4acde2ba1c0b81aab4b3042ee9d6f8f2ce079ee914",
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
   "adapter_version": 1,
-  "lungo_version": "1.87.0",
+  "lungo_version": "1.86.160",
   "runtime_abi": 1,
   "worker_identity": "0587064dd2f5b65f8d77fefae9b7a41737221883cc74030f7cd7469534700252",
   "input_digests": {
@@ -30,9 +30,9 @@
   "project": "formal",
   "link_directives": [],
   "output_digests": {
-    "capdagFormal.rs": "0ed6f718c83eaabe3370b2f9a577d701f2872333934299b45dbf690fa68f8411",
+    "capdagFormal.rs": "b5a8aed59f72de349da3bc90d315902dbc78eb0ace4e76dce8e584a78e3a8230",
     "externs.json": "fbb58de5e7528e24ec8bea4fa464cfb1752d79b774fb089d928e50600ecbc4d4",
-    "manifest.json": "43cf84c70316cdd172a58df93aef8a7961d466bf930860124f3b5ba38d0e8470",
+    "manifest.json": "ae00463176ccb7fcdc23eb7ddc95e8d5ac94630d2236be6944ae366627b6a509",
     "modules/CapDAG-Bifaci-Credit.rs": "b5d60cfe89a7c8df82936918f3e762ea6300a314118bc7b1631d4bb7dd8a2ff7",
     "modules/CapDAG-Bifaci-Flow.rs": "784bb90af198348288e40fbab46e844942d3d97884e4a4c8b8293e4430ce5d00",
     "modules/CapDAG-Bifaci-Pools.rs": "094b7ec867d83b91c5f6679386cc9180c45ddcf6b86c1a875f330eb0131357d9",
