@@ -120,7 +120,7 @@ fn on_network_filesystem(path: &Path) -> Result<bool, String> {
                 let kind = unsafe {
                     windows_sys::Win32::Storage::FileSystem::GetDriveTypeW(root.as_ptr())
                 };
-                Ok(kind == windows_sys::Win32::Storage::FileSystem::DRIVE_REMOTE)
+                Ok(kind == windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE)
             }
             _ => Ok(false),
         },

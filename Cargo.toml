@@ -35,7 +35,7 @@ urlencoding = "2.1"
 uuid = { version = "1.0", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading", "Win32_System_WindowsProgramming"] }
 
 [dependencies.ops-rs]
 version = "1.65.635"
@@ -112,4 +112,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.847.93"
+version = "1.848.97"
