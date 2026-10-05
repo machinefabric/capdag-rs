@@ -4,6 +4,8 @@ Requirements:
 {{ requirements }}
 
 Artifact:
+<artifact>
 {{ content }}
+</artifact>
 
-For every requirement the artifact violates, report one violation: quote the requirement, cite the decisive evidence from the artifact (or state that the required element is absent), and rate its severity as "low", "medium", or "high". "pass" is true only when there are zero violations. Respond with a JSON object: "pass" is the verdict, "violations" lists each violation with its "requirement", "evidence" and "severity", "confidence" is your confidence in the overall verdict between 0.0 and 1.0, and "reason" is one short sentence summarizing the verdict.
+For every requirement the artifact violates, report one violation: quote the requirement, cite the decisive evidence from inside <artifact> (or state that the required element is absent), and rate its severity as "low", "medium", or "high". "pass" is true only when there are zero violations. Respond with a JSON object: "pass" is the verdict, "violations" lists each violation with its "requirement", "evidence" and "severity", "confidence" is your confidence in the overall verdict between 0.0 and 1.0, and "reason" is one short sentence summarizing the verdict.

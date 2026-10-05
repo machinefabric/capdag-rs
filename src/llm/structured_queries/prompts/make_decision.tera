@@ -1,7 +1,9 @@
 Based on the following content, answer the boolean 0/1 question.
 
 Context:
+<content>
 {{ content }}
+</content>
 
 Question: {{ question }}
 

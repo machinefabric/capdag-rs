@@ -1,7 +1,9 @@
 Based on the following content, make a choice between {{ min_value }} and {{ max_value }} that best answers the question.
 
 Content:
+<content>
 {{ content }}
+</content>
 
 Question: {{ question }}
 

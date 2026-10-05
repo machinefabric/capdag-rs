@@ -5,6 +5,8 @@ Classify the item below into exactly one of the allowed labels.
 {% endif %}Allowed labels: {{ labels_display }}
 
 Item:
+<item>
 {{ content }}
+</item>
 
 Pick the single best-fitting label from the allowed set — you cannot invent a new label. Respond with a JSON object: "label" is the chosen label, "confidence" is your confidence between 0.0 and 1.0, and "reason" is one short sentence naming the decisive evidence.

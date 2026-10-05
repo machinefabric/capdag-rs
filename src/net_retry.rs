@@ -290,6 +290,79 @@ where
     make_request().await
 }
 
+/// A whole response body, with its status, fetched under the retry `policy`.
+///
+/// [`retry_request`] rides out what goes wrong before a response arrives. A
+/// body that breaks off part-way goes wrong AFTER one: the status was 200, the
+/// connection dropped while the bytes were still coming, and reqwest says so
+/// only when the body is read (`error decoding response body`). That is as
+/// transient as a refused connection, and for a GET as safe to repeat — a test
+/// guest lost a fabric manifest that way, and the cartridge build it was for
+/// failed. So here an attempt is the whole exchange: a fresh request, read to
+/// its end.
+///
+/// The status comes back with the body, as [`retry_request`] returns the
+/// response: success or a permanent status, for the caller to interpret. When
+/// the attempts are spent, the last outcome is returned as it was.
+pub async fn retry_body<F, Fut>(
+    policy: &RetryPolicy,
+    label: &str,
+    mut make_request: F,
+) -> reqwest::Result<(StatusCode, Vec<u8>)>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = reqwest::Result<Response>>,
+{
+    let attempts = policy.max_attempts.max(1);
+    let mut attempt = 0;
+    loop {
+        let last = attempt + 1 >= attempts;
+        let (reason, retry_after) = match classify(make_request().await) {
+            Attempt::Done(result) => match read_whole(result?).await {
+                Ok(read) => return Ok(read),
+                Err(error) if last || !broke_off(&error) => return Err(error),
+                Err(error) => (format!("the body broke off: {error}"), None),
+            },
+            Attempt::Retry {
+                reason,
+                retry_after,
+                result,
+            } => {
+                if last {
+                    // The real last outcome — the genuine 503 and its body, or
+                    // the transport error — exactly as `retry_request` does.
+                    return read_whole(result?).await;
+                }
+                (reason, retry_after)
+            }
+        };
+        let base = match retry_after {
+            Some(server) => server.min(policy.retry_after_cap),
+            None => policy.backoff_for(attempt),
+        };
+        let wait = jitter(base);
+        eprintln!(
+            "[net_retry] {label}: attempt {}/{} failed ({reason}); retrying in {} ms",
+            attempt + 1,
+            attempts,
+            wait.as_millis()
+        );
+        tokio::time::sleep(wait).await;
+        attempt += 1;
+    }
+}
+
+async fn read_whole(response: Response) -> reqwest::Result<(StatusCode, Vec<u8>)> {
+    let status = response.status();
+    Ok((status, response.bytes().await?.to_vec()))
+}
+
+/// A body read that failed because the transfer stopped, not because of what
+/// was sent: the connection dropped, timed out, or ended short of its length.
+fn broke_off(error: &reqwest::Error) -> bool {
+    error.is_body() || error.is_decode() || is_transient_transport(error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +533,69 @@ mod tests {
         for _ in 0..1000 {
             assert!(jitter(base) <= base, "jitter must not exceed the base delay");
         }
+    }
+
+    // A server whose answers are scripted whole: each is a status, the body it
+    // declares, and how much of that body is actually sent before the
+    // connection closes. Sending less than the declared length is a transfer
+    // that broke off part-way.
+    async fn broken_off_server(answers: Vec<(u16, &'static str, usize)>) -> (String, Arc<AtomicU32>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicU32::new(0));
+        let hits_for_task = Arc::clone(&hits);
+        tokio::spawn(async move {
+            for (status, body, sent) in answers {
+                let (mut sock, _) = match listener.accept().await {
+                    Ok(pair) => pair,
+                    Err(_) => return,
+                };
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                hits_for_task.fetch_add(1, Ordering::SeqCst);
+                let head = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+                let _ = sock.write_all(&body.as_bytes()[..sent]).await;
+                let _ = sock.flush().await;
+            }
+        });
+        (format!("http://{addr}/"), hits)
+    }
+
+    const MANIFEST: &str = "{\"version\":4,\"caps\":[\"cap:in=media:;out=media:\"]}";
+
+    // TEST12499: a body that breaks off part-way is fetched again, and the
+    // caller gets the whole of the second one. A fabric manifest cut short on a
+    // test guest failed the build it was for, where a repeat would have worked.
+    #[tokio::test]
+    async fn test12499_a_body_that_breaks_off_is_fetched_again() {
+        let (url, hits) = broken_off_server(vec![(200, MANIFEST, 10), (200, MANIFEST, MANIFEST.len())]).await;
+        let client = reqwest::Client::new();
+        let (status, body) = retry_body(&fast_policy(), "test", || client.get(&url).send())
+            .await
+            .expect("the second, whole body comes back");
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, MANIFEST.as_bytes());
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+    }
+
+    // TEST12500: a body that breaks off every time is an error once the
+    // attempts are spent — never the part that arrived, which would parse as
+    // nothing or, worse, as something.
+    #[tokio::test]
+    async fn test12500_a_body_that_always_breaks_off_is_an_error() {
+        let (url, hits) = broken_off_server(vec![(200, MANIFEST, 10); 4]).await;
+        let client = reqwest::Client::new();
+        let error = retry_body(&fast_policy(), "test", || client.get(&url).send())
+            .await
+            .expect_err("no whole body ever arrived");
+        assert!(broke_off(&error), "the error is the broken-off read: {error}");
+        assert_eq!(hits.load(Ordering::SeqCst), 4, "every attempt was made");
     }
 }

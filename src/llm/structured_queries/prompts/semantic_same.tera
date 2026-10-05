@@ -3,10 +3,14 @@ Decide whether the two items below refer to the same thing.
 {% if context %}Judgment context (what "the same" means here): {{ context }}
 
 {% endif %}Item A:
+<item_a>
 {{ left }}
+</item_a>
 
 Item B:
+<item_b>
 {{ right }}
+</item_b>
 
 Judge semantic identity, not textual equality: spelling variants, abbreviations, legal suffixes, reordering, and formatting differences do not make two references to one thing different. Two genuinely different things are not the same however similar they look.
 

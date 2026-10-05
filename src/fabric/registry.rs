@@ -2474,6 +2474,21 @@ fn media_url_and_cache_path(
     }
 }
 
+/// One registry object's whole body and its status, the request repeated
+/// when it fails on the way (`net_retry::retry_body`): a connection refused,
+/// a timeout, a 503, or a body that broke off part-way — which a test guest's
+/// manifest fetch did, failing the cartridge build it was for.
+async fn fetch_body(
+    client: &reqwest::Client,
+    url: &str,
+    label: &str,
+) -> reqwest::Result<(reqwest::StatusCode, Vec<u8>)> {
+    crate::net_retry::retry_body(&crate::net_retry::RetryPolicy::default(), label, || {
+        client.get(url).send()
+    })
+    .await
+}
+
 /// Build the R2 URL for a per-alias object at the given defver. Aliases
 /// are keyed by `sha256(normalized_name)` and are versioned-only (defver
 /// >= 1); there is no v0 flat path.
@@ -2527,27 +2542,21 @@ async fn fetch_one_alias(
         )));
     }
     let (url, cache_path) = alias_url_and_cache_path(cache_dir, config, normalized_name, defver);
-    let response = client.get(&url).send().await.map_err(|e| {
-        FabricRegistryError::HttpError(format!(
-            "Failed to fetch alias '{}': {}",
-            normalized_name, e
-        ))
-    })?;
-    if !response.status().is_success() {
+    let (status, body) = fetch_body(client, &url, &format!("fetch alias '{normalized_name}'"))
+        .await
+        .map_err(|e| {
+            FabricRegistryError::HttpError(format!(
+                "Failed to fetch alias '{}': {}",
+                normalized_name, e
+            ))
+        })?;
+    if !status.is_success() {
         return Err(FabricRegistryError::NotFound(format!(
             "alias '{}' not found in registry (HTTP {}) at {}",
-            normalized_name,
-            response.status(),
-            url
+            normalized_name, status, url
         )));
     }
-    let body = response.text().await.map_err(|e| {
-        FabricRegistryError::HttpError(format!(
-            "Failed to read alias '{}' body: {}",
-            normalized_name, e
-        ))
-    })?;
-    let alias: StoredAlias = serde_json::from_str(&body).map_err(|e| {
+    let alias: StoredAlias = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
             "Failed to parse alias '{}': {}",
             normalized_name, e
@@ -2660,21 +2669,16 @@ async fn fetch_one_cap_atomic(
 
     let (url, cache_file) = cap_url_and_cache_path(cache_dir, config, normalized_urn, defver);
 
-    let response = client
-        .get(&url)
-        .send()
+    let (status, body) = fetch_body(client, &url, &format!("fetch cap '{normalized_urn}'"))
         .await
         .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch cap: {}", e)))?;
-    if !response.status().is_success() {
+    if !status.is_success() {
         return Err(FabricRegistryError::NotFound(format!(
             "Cap '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn,
-            defver,
-            response.status(),
-            url
+            normalized_urn, defver, status, url
         )));
     }
-    let cap: Cap = response.json().await.map_err(|e| {
+    let cap: Cap = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!("Failed to parse cap '{}': {}", normalized_urn, e))
     })?;
 
@@ -2820,20 +2824,16 @@ pub(crate) async fn fetch_one_media_def(
 
     let (url, cache_file) = media_url_and_cache_path(cache_dir, config, normalized_urn, defver);
 
-    let response =
-        client.get(&url).send().await.map_err(|e| {
-            FabricRegistryError::HttpError(format!("Failed to fetch media def: {}", e))
-        })?;
-    if !response.status().is_success() {
+    let (status, body) = fetch_body(client, &url, &format!("fetch media def '{normalized_urn}'"))
+        .await
+        .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch media def: {}", e)))?;
+    if !status.is_success() {
         return Err(FabricRegistryError::NotFound(format!(
             "Media def '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn,
-            defver,
-            response.status(),
-            url
+            normalized_urn, defver, status, url
         )));
     }
-    let spec: StoredMediaDef = response.json().await.map_err(|e| {
+    let spec: StoredMediaDef = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
             "Failed to parse media def '{}': {}",
             normalized_urn, e
@@ -2921,24 +2921,21 @@ async fn load_or_fetch_manifest(
     }
 
     let url = format!("{}/manifest/{}.json", config.registry_base_url, version);
-    let response = client.get(&url).send().await.map_err(|e| {
-        FabricRegistryError::HttpError(format!(
-            "Failed to fetch manifest v{} at {}: {}",
-            version, url, e
-        ))
-    })?;
-    if !response.status().is_success() {
+    let (status, body) = fetch_body(client, &url, &format!("fetch manifest v{version}"))
+        .await
+        .map_err(|e| {
+            FabricRegistryError::HttpError(format!(
+                "Failed to fetch manifest v{} at {}: {}",
+                version, url, e
+            ))
+        })?;
+    if !status.is_success() {
         return Err(FabricRegistryError::NotFound(format!(
             "Manifest v{} not found in registry (HTTP {}) at {}",
-            version,
-            response.status(),
-            url
+            version, status, url
         )));
     }
-    let body = response.text().await.map_err(|e| {
-        FabricRegistryError::HttpError(format!("Failed to read manifest v{} body: {}", version, e))
-    })?;
-    let manifest: Manifest = serde_json::from_str(&body).map_err(|e| {
+    let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!("Failed to parse manifest v{}: {}", version, e))
     })?;
     if manifest.version != version {
