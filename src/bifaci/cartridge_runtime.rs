@@ -9893,7 +9893,10 @@ mod tests {
     async fn test336_file_path_reads_file_passes_bytes() {
         use std::sync::{Arc, Mutex};
 
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test336_input.pdf");
         std::fs::write(&test_file, b"PDF binary content 336").unwrap();
 
@@ -9964,7 +9967,10 @@ mod tests {
     // TEST337: file-path arg without stdin source passes path as string (no conversion)
     #[test]
     fn test337_file_path_without_stdin_passes_string() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test337_input.txt");
         std::fs::write(&test_file, b"content").unwrap();
 
@@ -10001,7 +10007,10 @@ mod tests {
     // TEST338: file-path arg reads file via --file CLI flag
     #[test]
     fn test338_file_path_via_cli_flag() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test338.pdf");
         std::fs::write(&test_file, b"PDF via flag 338").unwrap();
 
@@ -10047,7 +10056,8 @@ mod tests {
         // glob to N files and the runtime delivers them as a CBOR Array of
         // Bytes — one array item per matched file. List-ness comes from the
         // arg declaration, not from any `;list` URN tag.
-        let temp_dir = std::env::temp_dir().join("test339");
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().join("test339");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let file1 = temp_dir.join("doc1.txt");
@@ -10152,7 +10162,10 @@ mod tests {
     // TEST341: stdin takes precedence over file-path in source order
     #[test]
     fn test341_stdin_precedence_over_file_path() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test341_input.txt");
         std::fs::write(&test_file, b"file content").unwrap();
 
@@ -10199,7 +10212,10 @@ mod tests {
     // TEST342: file-path with position 0 reads first positional arg as file
     #[test]
     fn test342_file_path_position_zero_reads_first_arg() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test342.dat");
         std::fs::write(&test_file, b"binary data 342").unwrap();
 
@@ -10326,7 +10342,10 @@ mod tests {
     // TEST6587: file-path-array with literal nonexistent path fails hard
     #[test]
     fn test6587_file_path_array_one_file_missing_fails_hard() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let missing_path = temp_dir.join("test345_missing.txt");
 
         let cap = create_test_cap(
@@ -10389,7 +10408,10 @@ mod tests {
     // TEST346: Large file (1MB) reads successfully
     #[test]
     fn test346_large_file_reads_successfully() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test346_large.bin");
 
         // Create 1MB file
@@ -10427,7 +10449,10 @@ mod tests {
     // TEST347: Empty file reads as empty bytes
     #[test]
     fn test347_empty_file_reads_as_empty_bytes() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test347_empty.txt");
         std::fs::write(&test_file, b"").unwrap();
 
@@ -10461,7 +10486,10 @@ mod tests {
     // TEST348: file-path conversion respects source order
     #[test]
     fn test348_file_path_conversion_respects_source_order() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test348.txt");
         std::fs::write(&test_file, b"file content 348").unwrap();
 
@@ -10503,7 +10531,10 @@ mod tests {
     // TEST349: file-path arg with multiple sources tries all in order
     #[test]
     fn test349_file_path_multiple_sources_fallback() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test349.txt");
         std::fs::write(&test_file, b"content 349").unwrap();
 
@@ -10549,7 +10580,10 @@ mod tests {
     async fn test350_full_cli_mode_with_file_path_integration() {
         use std::sync::{Arc, Mutex};
 
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test350_input.pdf");
         let test_content = b"PDF file content for integration test";
         std::fs::write(&test_file, test_content).unwrap();
@@ -10686,7 +10720,10 @@ mod tests {
     fn test352_file_permission_denied_clear_error() {
         use std::os::unix::fs::PermissionsExt;
 
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test352_noperm.txt");
 
         // Clean up any existing file from previous test runs (might have restricted permissions)
@@ -10833,7 +10870,10 @@ mod tests {
     // TEST354: Glob pattern with no matches fails hard (NO FALLBACK)
     #[test]
     fn test354_glob_pattern_no_matches_empty_array() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
 
         let cap = create_test_cap(
             "cap:in=media:;batch;out=media:void",
@@ -10892,7 +10932,8 @@ mod tests {
     // TEST355: Glob pattern skips directories
     #[test]
     fn test355_glob_pattern_skips_directories() {
-        let temp_dir = std::env::temp_dir().join("test355");
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().join("test355");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let subdir = temp_dir.join("subdir");
@@ -10945,7 +10986,8 @@ mod tests {
     // TEST356: Multiple glob patterns combined
     #[test]
     fn test356_multiple_glob_patterns_combined() {
-        let temp_dir = std::env::temp_dir().join("test356");
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().join("test356");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         let file1 = temp_dir.join("doc.txt");
@@ -11048,7 +11090,8 @@ mod tests {
     fn test357_symlinks_followed() {
         use std::os::unix::fs as unix_fs;
 
-        let temp_dir = std::env::temp_dir().join("test357");
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().join("test357");
         // Clean up from previous test runs
         std::fs::remove_dir_all(&temp_dir).ok();
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -11094,7 +11137,10 @@ mod tests {
     // TEST358: Binary file with non-UTF8 data reads correctly
     #[test]
     fn test358_binary_file_non_utf8() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test358.bin");
 
         // Binary data that's not valid UTF-8
@@ -11184,7 +11230,10 @@ mod tests {
     // TEST360: Extract effective payload handles file-path data correctly
     #[test]
     fn test360_extract_effective_payload_with_file_data() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test360.pdf");
         let pdf_content = b"PDF content for extraction test";
         std::fs::write(&test_file, pdf_content).unwrap();
@@ -11276,7 +11325,10 @@ mod tests {
     // TEST361: CLI mode with file path - pass file path as command-line argument
     #[test]
     fn test361_cli_mode_file_path() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test361.pdf");
         let pdf_content = b"PDF content for CLI file path test";
         std::fs::write(&test_file, pdf_content).unwrap();
@@ -11458,7 +11510,10 @@ mod tests {
     // TEST364: CBOR mode with file path - send file path in CBOR arguments (auto-conversion)
     #[test]
     fn test364_cbor_mode_file_path() {
-        let temp_dir = std::env::temp_dir();
+        // A directory of this test's own: fixed names under the shared temp
+        // directory were shared by every copy of this binary running at once.
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().to_path_buf();
         let test_file = temp_dir.join("test364.pdf");
         let pdf_content = b"PDF content for CBOR file path test";
         std::fs::write(&test_file, pdf_content).unwrap();
@@ -11550,7 +11605,8 @@ mod tests {
     // TEST1121: CBOR Array of file-paths in CBOR mode (validates new Array support)
     #[test]
     fn test1121_cbor_array_file_paths_in_cbor_mode() {
-        let temp_dir = std::env::temp_dir().join("test361");
+        let scratch = tempfile::tempdir().unwrap();
+        let temp_dir = scratch.path().join("test361");
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Create three test files
