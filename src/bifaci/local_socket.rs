@@ -40,8 +40,8 @@ mod windows {
     use std::io::{self, Read, Write};
     use std::path::{Path, PathBuf};
     use std::pin::Pin;
-    use std::sync::mpsc;
-    use std::task::{Context, Poll};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::task::{Context, Poll, Waker};
     use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
     use tokio::sync::oneshot;
 
@@ -57,15 +57,43 @@ mod windows {
 
     pub struct OwnedWriteHalf {
         tx: mpsc::Sender<WriteCommand>,
-        pending_write: Option<oneshot::Receiver<io::Result<usize>>>,
+        queue: Arc<Mutex<Queue>>,
         pending_flush: Option<oneshot::Receiver<io::Result<()>>>,
         pending_shutdown: Option<oneshot::Receiver<io::Result<()>>>,
     }
 
     enum WriteCommand {
-        Write(Vec<u8>, oneshot::Sender<io::Result<usize>>),
+        Write(Vec<u8>),
         Flush(oneshot::Sender<io::Result<()>>),
         Shutdown(oneshot::Sender<io::Result<()>>),
+    }
+
+    /// How many bytes may wait for the writer thread before `poll_write`
+    /// waits. One write of any size is taken while under it, so a frame is
+    /// never split by the budget.
+    const QUEUED_BYTES: usize = 1024 * 1024;
+
+    /// What the write half and its thread share.
+    ///
+    /// A write is COMMITTED when `poll_write` returns `Ready`: the bytes are
+    /// queued, the thread writes them all, and a failure is kept here for the
+    /// next write, flush or shutdown to report. `Pending` means only that the
+    /// queue is full and nothing was taken — tokio's contract, which a caller
+    /// that drops the future (`select!`, a timeout) relies on. The write used
+    /// to go to the thread on the first poll and come back `Pending` until it
+    /// was done, so a dropped future had still written its bytes and the next
+    /// `poll_write`, for different bytes, was answered with the old count.
+    #[derive(Default)]
+    struct Queue {
+        bytes: usize,
+        waiting: Option<Waker>,
+        failed: Option<(io::ErrorKind, String)>,
+    }
+
+    impl Queue {
+        fn failure(&self) -> Option<io::Error> {
+            self.failed.as_ref().map(|(kind, message)| io::Error::new(*kind, message.clone()))
+        }
     }
 
     impl UnixStream {
@@ -109,7 +137,9 @@ mod windows {
             std::thread::spawn(move || read_loop(read_socket, read_tx));
 
             let (write_tx, write_rx) = mpsc::channel();
-            std::thread::spawn(move || write_loop(write_socket, write_rx));
+            let queue = Arc::new(Mutex::new(Queue::default()));
+            let shared = queue.clone();
+            std::thread::spawn(move || write_loop(write_socket, write_rx, shared));
 
             Self {
                 read: OwnedReadHalf {
@@ -118,7 +148,7 @@ mod windows {
                 },
                 write: OwnedWriteHalf {
                     tx: write_tx,
-                    pending_write: None,
+                    queue,
                     pending_flush: None,
                     pending_shutdown: None,
                 },
@@ -210,19 +240,39 @@ mod windows {
     /// So the thread shuts the direction down when asked and when its channel
     /// closes — that is, when the half is dropped — after every write queued
     /// before it has gone out.
-    fn write_loop(mut socket: Socket, rx: mpsc::Receiver<WriteCommand>) {
+    fn write_loop(mut socket: Socket, rx: mpsc::Receiver<WriteCommand>, queue: Arc<Mutex<Queue>>) {
+        let failure = |queue: &Arc<Mutex<Queue>>| queue.lock().expect("the write queue is not poisoned").failure();
         for command in rx {
             match command {
-                WriteCommand::Write(bytes, ack) => {
-                    let result = socket.write(&bytes);
-                    let _ = ack.send(result);
+                WriteCommand::Write(bytes) => {
+                    // Written whole: `poll_write` already told its caller all
+                    // of it was taken. After a failure nothing more is written
+                    // — the stream is broken — but the budget still comes back.
+                    let result = match failure(&queue) {
+                        Some(_) => Ok(()),
+                        None => socket.write_all(&bytes),
+                    };
+                    let mut state = queue.lock().expect("the write queue is not poisoned");
+                    state.bytes -= bytes.len();
+                    if let Err(e) = result {
+                        state.failed.get_or_insert((e.kind(), e.to_string()));
+                    }
+                    if let Some(waker) = state.waiting.take() {
+                        waker.wake();
+                    }
                 }
                 WriteCommand::Flush(ack) => {
-                    let result = socket.flush();
+                    let result = match failure(&queue) {
+                        Some(e) => Err(e),
+                        None => socket.flush(),
+                    };
                     let _ = ack.send(result);
                 }
                 WriteCommand::Shutdown(ack) => {
-                    let result = socket.shutdown(std::net::Shutdown::Write);
+                    let result = match failure(&queue) {
+                        Some(e) => Err(e),
+                        None => socket.shutdown(std::net::Shutdown::Write),
+                    };
                     let _ = ack.send(result);
                     return;
                 }
@@ -291,29 +341,30 @@ mod windows {
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<io::Result<usize>> {
-            if self.pending_write.is_none() {
-                let (tx, rx) = oneshot::channel();
-                self.tx
-                    .send(WriteCommand::Write(buf.to_vec(), tx))
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::BrokenPipe, "AF_UNIX writer closed")
-                    })?;
-                self.pending_write = Some(rx);
+            if buf.is_empty() {
+                return Poll::Ready(Ok(0));
             }
-
-            let rx = self.pending_write.as_mut().expect("pending write set");
-            match Pin::new(rx).poll(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(result) => {
-                    self.pending_write = None;
-                    Poll::Ready(result.unwrap_or_else(|_| {
-                        Err(io::Error::new(
-                            io::ErrorKind::BrokenPipe,
-                            "AF_UNIX writer thread stopped",
-                        ))
-                    }))
+            {
+                let mut state = self.queue.lock().expect("the write queue is not poisoned");
+                if let Some(e) = state.failure() {
+                    return Poll::Ready(Err(e));
                 }
+                if state.bytes >= QUEUED_BYTES {
+                    // Full: nothing is taken, so a caller that gives up here
+                    // has written nothing.
+                    state.waiting = Some(cx.waker().clone());
+                    return Poll::Pending;
+                }
+                state.bytes += buf.len();
             }
+            if self.tx.send(WriteCommand::Write(buf.to_vec())).is_err() {
+                self.queue.lock().expect("the write queue is not poisoned").bytes -= buf.len();
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "AF_UNIX writer closed",
+                )));
+            }
+            Poll::Ready(Ok(buf.len()))
         }
 
         fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -466,5 +517,49 @@ mod tests {
             .expect("the peer never read end-of-file after the write half was shut down")
             .expect("read to end");
         assert!(got.is_empty());
+    }
+
+    /// TEST12590: a write answered `Pending` wrote nothing, so the peer
+    /// receives exactly the bytes answered `Ready` — and a caller that drops a
+    /// pending write (`select!`, a timeout) has not written it.
+    ///
+    /// The Windows stream sent a write to its thread on the first poll and
+    /// answered `Pending` until it finished: a dropped write had still been
+    /// written, and the next `poll_write`, for other bytes, got the old count.
+    #[tokio::test]
+    async fn test12590_a_pending_write_wrote_nothing() {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use tokio::io::AsyncWrite;
+
+        let (left, right) = UnixStream::pair().expect("create AF_UNIX stream pair");
+        let (_left_read, mut left_write) = left.into_split();
+        let (mut right_read, _right_write) = right.into_split();
+
+        // Nothing reads yet, so the stream fills and a write is answered
+        // `Pending`. Each poll once, as a caller that may give up would.
+        let mut accepted = Vec::new();
+        let mut cx = Context::from_waker(Waker::noop());
+        let mut chunk_number = 0u32;
+        loop {
+            chunk_number += 1;
+            assert!(chunk_number < 100_000, "the stream never filled");
+            let chunk = vec![(chunk_number % 251) as u8; 64 * 1024];
+            match Pin::new(&mut left_write).poll_write(&mut cx, &chunk) {
+                Poll::Ready(Ok(taken)) => accepted.extend_from_slice(&chunk[..taken]),
+                Poll::Ready(Err(e)) => panic!("write failed: {e}"),
+                // Given up on: these bytes were never taken.
+                Poll::Pending => break,
+            }
+        }
+
+        drop(left_write);
+        let mut got = Vec::new();
+        tokio::time::timeout(std::time::Duration::from_secs(60), right_read.read_to_end(&mut got))
+            .await
+            .expect("the peer never read end-of-file")
+            .expect("read to end");
+        assert_eq!(got.len(), accepted.len(), "the peer received bytes no write was answered for");
+        assert!(got == accepted, "the peer received other bytes than the ones answered for");
     }
 }
