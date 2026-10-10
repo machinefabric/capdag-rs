@@ -7311,6 +7311,60 @@ mod tests {
         );
     }
 
+    // TEST12653: A cartridge that is ALIVE AND SILENT — it completed its handshake and then neither reads nor writes, as a frozen or wedged process does — is retired promptly when its heartbeat is declared lost, and the request it was serving is failed. The death handler waits for the cartridge's writer and reader tasks; with a live peer holding its pipes open those waits must still end.
+    #[tokio::test]
+    async fn test12653_a_silent_live_cartridge_is_retired_without_waiting_on_it() {
+        let manifest = r#"{"name":"HBCartridge","version":"1.0","channel":"release","registry_url":null,"description":"Heartbeat cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[]},{"urn":"cap:in=\"media:void\";hb;out=\"media:void\"","title":"Test","aliases": ["test"],"args":[]}],"adapter_urns":[]}]}"#;
+        let (p_to_rt, rt_from_p) = UnixStream::pair().unwrap();
+        let (rt_to_p, p_from_rt) = UnixStream::pair().unwrap();
+        let (p_read, _) = rt_from_p.into_split();
+        let (_, p_write) = rt_to_p.into_split();
+
+        let m = manifest.as_bytes().to_vec();
+        let (silent_tx, silent_rx) = tokio::sync::oneshot::channel::<()>();
+        let cartridge_handle = tokio::spawn(async move {
+            // Handshake, then hold both pipes open and say nothing more.
+            let (_r, _w) = cartridge_handshake_with_identity(p_from_rt, p_to_rt, &m).await;
+            let _ = silent_rx.await;
+        });
+
+        let mut runtime = CartridgeHostRuntime::new();
+        let idx = runtime.attach_cartridge(p_read, p_write).await.unwrap();
+        let generation = runtime.cartridges[idx].generation;
+
+        // A request it was serving, and a probe it never answered.
+        let xid = MessageId::Uint(41);
+        let rid = MessageId::Uint(42);
+        runtime.incoming_rxids.insert((xid.clone(), rid.clone()), idx);
+        let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
+        runtime
+            .send_heartbeats_and_check_timeouts(&outbound_tx)
+            .await
+            .expect("probing a silent cartridge is not an error");
+        assert_eq!(runtime.cartridges[idx].pending_heartbeats.len(), 1, "one probe is outstanding");
+
+        runtime.cartridges[idx].shutdown_reason = Some(ShutdownReason::HeartbeatTimeout);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            runtime.handle_cartridge_death(idx, generation, &outbound_tx),
+        )
+        .await
+        .expect("retiring a silent cartridge must not wait on the cartridge")
+        .expect("the retirement itself succeeds");
+
+        assert!(!runtime.cartridges[idx].running);
+        assert!(!runtime.incoming_rxids.contains_key(&(xid, rid)));
+        let frames: Vec<Frame> = std::iter::from_fn(|| outbound_rx.try_recv().ok()).collect();
+        let terminal = frames
+            .iter()
+            .find(|frame| frame.frame_type == FrameType::Err)
+            .expect("the request it was serving is failed");
+        assert_eq!(terminal.error_code(), Some("CARTRIDGE_UNHEALTHY"));
+
+        let _ = silent_tx.send(());
+        cartridge_handle.await.unwrap();
+    }
+
     // TEST8116: the terminal-release ring discriminates and stays bounded —
     // released rids classify as benign-straggler material, unknown rids do not,
     // duplicates collapse, and eviction past the cap ages a rid back out.
