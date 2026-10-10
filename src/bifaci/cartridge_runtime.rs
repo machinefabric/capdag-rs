@@ -6150,24 +6150,20 @@ impl CartridgeRuntime {
         // handler-done signals can wake the loop even when no frames arrive.
         let (frame_tx, mut frame_rx) =
             tokio::sync::mpsc::unbounded_channel::<Result<Frame, CborError>>();
-        let reader_handle = tokio::spawn(async move {
-            loop {
-                match frame_reader.read().await {
-                    Ok(Some(frame)) => {
-                        if frame_tx.send(Ok(frame)).is_err() {
-                            break; // Main loop dropped — shutting down
-                        }
-                    }
-                    Ok(None) => {
-                        break; // EOF — stdin closed
-                    }
-                    Err(e) => {
-                        let _ = frame_tx.send(Err(e));
-                        break;
-                    }
-                }
-            }
-        });
+        // On a thread of its own, which also answers heartbeats: see
+        // `spawn_frame_reader` for why neither may depend on this runtime.
+        spawn_frame_reader(
+            frame_reader,
+            HeartbeatResponder {
+                pools: Arc::clone(&self.pools),
+                drop_counters: Arc::clone(&self.drop_counters),
+                straggler_counters: Arc::clone(&self.straggler_counters),
+                live_feed_overruns: Arc::clone(&self.live_feed_overruns),
+            },
+            output_tx_sync,
+            frame_tx,
+        )
+        .map_err(RuntimeError::Io)?;
 
         // Main loop: select between incoming frames and handler completion signals.
         // When a handler finishes it sends its RID on handler_done_tx, waking the
@@ -6650,90 +6646,11 @@ impl CartridgeRuntime {
                 }
 
                 FrameType::Heartbeat => {
-                    // The heartbeat is the capacity CONFIG channel: a probe
-                    // may carry the operator's desired `configured` values.
-                    // The whole batch is validated first — an unknown pool
-                    // refuses it all with an ERR naming it, and the probe
-                    // gets that ERR instead of a reply, so the host's
-                    // awaited apply fails precisely rather than silently.
-                    if let Some(bytes) = frame.desired_capacity_bytes() {
-                        let applied = crate::bifaci::pools::decode_desired(bytes)
-                            .and_then(|desired| {
-                                self.pools
-                                    .lock()
-                                    .expect("runtime pools mutex poisoned")
-                                    .as_mut()
-                                    .expect("pools materialized at startup")
-                                    .apply_desired(&desired)
-                            });
-                        if let Err(reason) = applied {
-                            let err = Frame::err(
-                                frame.id,
-                                "UNKNOWN_POOL",
-                                crate::failure::AttributionClass::Internal,
-                                &format!("desired capacities refused: {reason}"),
-                                None,
-                            );
-                            let _ = output_tx.send(err);
-                            continue;
-                        }
-                    }
-                    let mut response = Frame::heartbeat(frame.id);
-                    let mut meta = std::collections::BTreeMap::new();
-                    if let Some((footprint_mb, rss_mb)) = get_own_memory_mb() {
-                        meta.insert(
-                            "footprint_mb".into(),
-                            ciborium::Value::Integer(footprint_mb.into()),
-                        );
-                        meta.insert("rss_mb".into(), ciborium::Value::Integer(rss_mb.into()));
-                    }
-                    // Protocol observability (L8): the cartridge's dropped-
-                    // frame total rides every heartbeat so the host can
-                    // surface it without a dedicated stats round-trip. The
-                    // benign straggler total rides alongside, under its own
-                    // name — stragglers are not drops.
-                    meta.insert(
-                        "drops_total".into(),
-                        ciborium::Value::Integer(
-                            u64::try_from(self.drop_counters.total())
-                                .expect("drop total must fit the protocol's uint64 domain")
-                                .into(),
-                        ),
-                    );
-                    meta.insert(
-                        "stragglers_total".into(),
-                        ciborium::Value::Integer(
-                            u64::try_from(self.straggler_counters.total())
-                                .expect("straggler total must fit the protocol's uint64 domain")
-                                .into(),
-                        ),
-                    );
-                    meta.insert(
-                        "overruns_total".into(),
-                        ciborium::Value::Integer(
-                            self.live_feed_overruns
-                                .load(std::sync::atomic::Ordering::Relaxed)
-                                .into(),
-                        ),
-                    );
-                    // The full concurrency-pool state — capacities, active
-                    // and queued per pool — rides every heartbeat reply.
-                    // Mandatory: the host hard-errors on a reply without it.
-                    let pool_snapshot = self
-                        .pools
-                        .lock()
-                        .expect("runtime pools mutex poisoned")
-                        .as_ref()
-                        .expect("pools materialized at startup")
-                        .snapshot();
-                    meta.insert(
-                        crate::bifaci::pools::META_POOLS.into(),
-                        ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(
-                            &pool_snapshot,
-                        )),
-                    );
-                    response.meta = Some(meta);
-                    let _ = output_tx.send(response);
+                    // ALREADY ANSWERED, by the reader's own thread (see
+                    // `spawn_frame_reader`). It is passed on only so this
+                    // loop turns: a probe may have raised a pool's capacity,
+                    // and the admission at the top of the loop is what lets
+                    // a waiting request in.
                 }
 
                 FrameType::Hello => {
@@ -6758,8 +6675,10 @@ impl CartridgeRuntime {
         }
 
         // Graceful shutdown
-        reader_handle.abort();
-        let _ = reader_handle.await;
+        // The reader's thread ends by itself: at EOF, or on its next frame
+        // once this loop's receiver is gone. It is blocked in a read of stdin
+        // and is not waited for.
+        drop(frame_rx);
         drop(output_tx);
 
         let _ = tokio::task::spawn_blocking(move || {
@@ -6809,10 +6728,258 @@ fn get_own_memory_mb() -> Option<(u64, u64)> {
     None
 }
 
+
+/// What a heartbeat reply is made from. All of it is shared state behind
+/// locks and atomics, so a reply can be built from any thread.
+struct HeartbeatResponder {
+    pools: Arc<Mutex<Option<RuntimePools>>>,
+    drop_counters: Arc<crate::bifaci::stats::DropCounters>,
+    straggler_counters: Arc<crate::bifaci::stats::StragglerCounters>,
+    live_feed_overruns: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl HeartbeatResponder {
+    /// The reply to one heartbeat probe — or the ERR that refuses it.
+    fn answer(&self, frame: &Frame) -> Frame {
+        // The heartbeat is the capacity CONFIG channel: a probe may carry the
+        // operator's desired `configured` values. The whole batch is validated
+        // first — an unknown pool refuses it all with an ERR naming it, and
+        // the probe gets that ERR instead of a reply, so the host's awaited
+        // apply fails precisely rather than silently.
+        if let Some(bytes) = frame.desired_capacity_bytes() {
+            let applied = crate::bifaci::pools::decode_desired(bytes).and_then(|desired| {
+                self.pools
+                    .lock()
+                    .expect("runtime pools mutex poisoned")
+                    .as_mut()
+                    .expect("pools materialized at startup")
+                    .apply_desired(&desired)
+            });
+            if let Err(reason) = applied {
+                return Frame::err(
+                    frame.id.clone(),
+                    "UNKNOWN_POOL",
+                    crate::failure::AttributionClass::Internal,
+                    &format!("desired capacities refused: {reason}"),
+                    None,
+                );
+            }
+        }
+        let mut response = Frame::heartbeat(frame.id.clone());
+        let mut meta = std::collections::BTreeMap::new();
+        if let Some((footprint_mb, rss_mb)) = get_own_memory_mb() {
+            meta.insert(
+                "footprint_mb".into(),
+                ciborium::Value::Integer(footprint_mb.into()),
+            );
+            meta.insert("rss_mb".into(), ciborium::Value::Integer(rss_mb.into()));
+        }
+        // Protocol observability (L8): the cartridge's dropped-frame total
+        // rides every heartbeat so the host can surface it without a
+        // dedicated stats round-trip. The benign straggler total rides
+        // alongside, under its own name — stragglers are not drops.
+        meta.insert(
+            "drops_total".into(),
+            ciborium::Value::Integer(
+                u64::try_from(self.drop_counters.total())
+                    .expect("drop total must fit the protocol's uint64 domain")
+                    .into(),
+            ),
+        );
+        meta.insert(
+            "stragglers_total".into(),
+            ciborium::Value::Integer(
+                u64::try_from(self.straggler_counters.total())
+                    .expect("straggler total must fit the protocol's uint64 domain")
+                    .into(),
+            ),
+        );
+        meta.insert(
+            "overruns_total".into(),
+            ciborium::Value::Integer(
+                self.live_feed_overruns
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .into(),
+            ),
+        );
+        // The full concurrency-pool state — capacities, active and queued per
+        // pool — rides every heartbeat reply. Mandatory: the host hard-errors
+        // on a reply without it.
+        let pool_snapshot = self
+            .pools
+            .lock()
+            .expect("runtime pools mutex poisoned")
+            .as_ref()
+            .expect("pools materialized at startup")
+            .snapshot();
+        meta.insert(
+            crate::bifaci::pools::META_POOLS.into(),
+            ciborium::Value::Bytes(crate::bifaci::pools::encode_pool_states(&pool_snapshot)),
+        );
+        response.meta = Some(meta);
+        response
+    }
+}
+
+/// Read the host's frames on a thread of their own, and answer its heartbeats
+/// from there.
+///
+/// A HEARTBEAT ASKS WHETHER THE CARTRIDGE IS THERE, and the host gives it ten
+/// seconds to say so. The frames were read by a task on the cartridge's
+/// runtime, answered by the main loop on the same runtime, and handed to the
+/// writer by a third task on it — so the answer waited on whatever the
+/// handlers were doing. A handler that kept the runtime's threads busy (a
+/// download's worth of hashing, a long document rendered page after page) got
+/// its cartridge declared dead in the middle of work it was doing correctly,
+/// and the work was thrown away.
+///
+/// The writer was already a plain thread for this reason. The reader is now
+/// one too, with a small runtime of its own to drive the async read, and it
+/// answers a heartbeat itself, straight into the writer's queue: nothing
+/// between the probe arriving and the reply leaving touches the runtime the
+/// handlers run on. Every frame, heartbeats included, is still passed to the
+/// main loop, in the order it arrived.
+///
+/// What this does NOT claim: that the handlers are making progress. That is
+/// what a request's own activity and stall tracking say. A heartbeat says the
+/// process is alive and reading its input.
+fn spawn_frame_reader<R>(
+    mut frame_reader: FrameReader<R>,
+    responder: HeartbeatResponder,
+    output: std::sync::mpsc::Sender<Frame>,
+    frames: tokio::sync::mpsc::UnboundedSender<Result<Frame, CborError>>,
+) -> io::Result<thread::JoinHandle<()>>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    thread::Builder::new()
+        .name("capdag-frame-reader".into())
+        .spawn(move || {
+            runtime.block_on(async move {
+                loop {
+                    match frame_reader.read().await {
+                        Ok(Some(frame)) => {
+                            if frame.frame_type == FrameType::Heartbeat
+                                && output.send(responder.answer(&frame)).is_err()
+                            {
+                                break; // The writer is gone — shutting down
+                            }
+                            if frames.send(Ok(frame)).is_err() {
+                                break; // Main loop dropped — shutting down
+                            }
+                        }
+                        Ok(None) => break, // EOF — stdin closed
+                        Err(e) => {
+                            let _ = frames.send(Err(e));
+                            break;
+                        }
+                    }
+                }
+            });
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bifaci::frame::DEFAULT_MAX_CHUNK;
+
+    /// A responder over real pools (none declared), as a started cartridge has.
+    fn responder_with_no_pools() -> HeartbeatResponder {
+        let pools = RuntimePools::init(&[], &crate::bifaci::pools::PoolDeclarations::default())
+            .expect("no patterns and no declarations is a valid cartridge");
+        HeartbeatResponder {
+            pools: Arc::new(Mutex::new(Some(pools))),
+            drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
+            straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
+            live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(7)),
+        }
+    }
+
+    /// Write frames as the host would, from a runtime that then goes away.
+    fn host_writes(mut host_side: tokio::io::DuplexStream, frames: Vec<Frame>) -> tokio::io::DuplexStream {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let mut writer = FrameWriter::new(&mut host_side);
+            for frame in &frames {
+                writer.write(frame).await.expect("the host's write");
+            }
+            host_side.flush().await.expect("the host's flush");
+        });
+        host_side
+    }
+
+    // TEST12647: A heartbeat is answered when NO runtime of the cartridge's is turning — the reader's thread answers it by itself. A cartridge whose handlers kept its runtime busy was declared dead in the middle of correct work, because the reply waited on that runtime three times over.
+    #[test]
+    fn test12647_heartbeat_is_answered_without_the_handlers_runtime() {
+        let (host_side, cartridge_side) = tokio::io::duplex(64 * 1024);
+        let (output_tx, output_rx) = std::sync::mpsc::channel::<Frame>();
+        let (frames_tx, mut frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        spawn_frame_reader(FrameReader::new(cartridge_side), responder_with_no_pools(), output_tx, frames_tx)
+            .expect("the reader's thread starts");
+
+        let probe = MessageId::new_uuid();
+        // This test's own thread runs no runtime from here on: whatever
+        // answers, it is not something this thread drives.
+        let _host_side = host_writes(host_side, vec![Frame::heartbeat(probe.clone())]);
+
+        let reply = output_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the heartbeat is answered with no handler runtime running");
+        assert_eq!(reply.frame_type, FrameType::Heartbeat);
+        assert_eq!(reply.id, probe, "the reply is to the probe that was sent");
+        let meta = reply.meta.expect("a heartbeat reply carries its meta");
+        assert!(
+            meta.contains_key(crate::bifaci::pools::META_POOLS),
+            "the pool state rides every reply; the host refuses one without it"
+        );
+        assert_eq!(meta.get("overruns_total"), Some(&ciborium::Value::Integer(7u64.into())));
+
+        // And the main loop is still told, so that it turns and admits.
+        let passed_on = frames_rx.blocking_recv().expect("the frame is passed on").expect("as a frame");
+        assert_eq!(passed_on.frame_type, FrameType::Heartbeat);
+        assert_eq!(passed_on.id, probe);
+    }
+
+    // TEST12648: Every other frame goes to the main loop untouched and in order, and nothing is written for it; the end of input ends the reader and closes the loop's channel.
+    #[test]
+    fn test12648_other_frames_reach_the_loop_in_order_and_eof_closes_it() {
+        let (host_side, cartridge_side) = tokio::io::duplex(64 * 1024);
+        let (output_tx, output_rx) = std::sync::mpsc::channel::<Frame>();
+        let (frames_tx, mut frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        let reader = spawn_frame_reader(FrameReader::new(cartridge_side), responder_with_no_pools(), output_tx, frames_tx)
+            .expect("the reader's thread starts");
+
+        let first = MessageId::new_uuid();
+        let second = MessageId::new_uuid();
+        let host_side = host_writes(
+            host_side,
+            vec![
+                Frame::end(first.clone(), None),
+                Frame::heartbeat(MessageId::new_uuid()),
+                Frame::end(second.clone(), None),
+            ],
+        );
+        drop(host_side); // the host closes its end
+
+        let seen: Vec<Frame> = std::iter::from_fn(|| frames_rx.blocking_recv())
+            .map(|frame| frame.expect("a frame"))
+            .collect();
+        assert_eq!(
+            seen.iter().map(|f| f.frame_type).collect::<Vec<_>>(),
+            vec![FrameType::End, FrameType::Heartbeat, FrameType::End],
+            "in the order the host sent them"
+        );
+        assert_eq!(seen[0].id, first);
+        assert_eq!(seen[2].id, second);
+        reader.join().expect("the reader's thread ends at the end of input");
+        let written: Vec<Frame> = output_rx.try_iter().collect();
+        assert_eq!(written.len(), 1, "one reply, to the one heartbeat, and nothing for the others");
+        assert_eq!(written[0].frame_type, FrameType::Heartbeat);
+    }
 
     /// Decode every length-prefixed frame from a captured wire buffer.
     fn decode_wire(buf: &[u8]) -> Vec<Frame> {
