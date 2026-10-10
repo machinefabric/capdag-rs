@@ -1,0 +1,5737 @@
+{
+  "schema_version": 1,
+  "program": "capdagFormal",
+  "provenance": {
+    "lean_version": "4.34.1",
+    "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
+    "lungo_version": "1.105.524",
+    "bir_version": 3,
+    "runtime_abi": 2
+  },
+  "library": {
+    "package": "lungo",
+    "schema_version": 1
+  },
+  "specifications": [
+    {
+      "name": "CapDAG.Query.admits",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Query → CapDAG.Cap → Prop",
+      "definition": "fun q c =>\n  q.input.admits c.input ∧\n    q.output.admits c.output ∧ CapDAG.effectOk c.effect q.effect ∧ TaggedUrn.refinesClosed c.other q.tags",
+      "package": "capdagFormal",
+      "fingerprint": "cdcbe6a0f682f651f43837844599cca8b14bd9b5eca95318773660cf99fe87f1",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 88,
+          "column": 1
+        },
+        "end": {
+          "line": 93,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.consuming",
+      "kind": "lungo.model",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → CapDAG.Query",
+      "definition": "fun input tags =>\n  { input := CapDAG.Ask.covers input, output := CapDAG.Ask.unknown, tags := tags, effect := CapDAG.Effect.unspecified }",
+      "package": "capdagFormal",
+      "fingerprint": "d8bcdf4ec49371cf4d69e3e792babf0ac43254022de8d5ecf6e05838d540a11a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 164,
+          "column": 1
+        },
+        "end": {
+          "line": 167,
+          "column": 93
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.grade",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Query → CapDAG.Cap → CapDAG.Grade",
+      "definition": "fun q c =>\n  if q.exactly.admits c then CapDAG.Grade.exact\n  else if q.admits c then CapDAG.Grade.guaranteed else if q.mayAdmit c then CapDAG.Grade.possible else CapDAG.Grade.none",
+      "package": "capdagFormal",
+      "fingerprint": "3e77f04ec7c6d3249b6285702983f08e3beb36470f1df92717b0507c7400b086",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 304,
+          "column": 1
+        },
+        "end": {
+          "line": 309,
+          "column": 18
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.mayAdmit",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Query → CapDAG.Cap → Prop",
+      "definition": "fun q c =>\n  q.input.mayAdmit c.input ∧\n    q.output.mayAdmit c.output ∧ CapDAG.effectOk c.effect q.effect ∧ TaggedUrn.meetsClosed c.other q.tags",
+      "package": "capdagFormal",
+      "fingerprint": "f51468b5f8c37b1654bc9a04fa51beb74b5c54fc3ce504644bf7c04006a92650",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 98,
+          "column": 1
+        },
+        "end": {
+          "line": 102,
+          "column": 60
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.ofCall",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Cap → CapDAG.Query",
+      "definition": "fun r =>\n  { input := CapDAG.Ask.covers r.input, output := CapDAG.Ask.within r.output, tags := r.other, effect := r.effect }",
+      "package": "capdagFormal",
+      "fingerprint": "1087f3037e9879380a692613a8038887cb6ab29b9eac95d42f6c6f9b085e06dc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 135,
+          "column": 1
+        },
+        "end": {
+          "line": 139,
+          "column": 96
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.ofPattern",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Cap → CapDAG.Query",
+      "definition": "fun p =>\n  { input := CapDAG.Ask.within p.input,\n    output := if CapDAG.unconstrainedMedia p.output then CapDAG.Ask.unknown else CapDAG.Ask.covers p.output,\n    tags := p.other, effect := p.effect }",
+      "package": "capdagFormal",
+      "fingerprint": "f270244de089210349e3b54753fdea73acdaba083b8f2c211690b4513a0c4142",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 150,
+          "column": 1
+        },
+        "end": {
+          "line": 157,
+          "column": 42
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.ofRequest",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Cap → CapDAG.Query",
+      "definition": "fun r =>\n  { input := if CapDAG.unconstrainedMedia r.input then CapDAG.Ask.unknown else CapDAG.Ask.covers r.input,\n    output := CapDAG.Ask.within r.output, tags := r.other, effect := r.effect }",
+      "package": "capdagFormal",
+      "fingerprint": "29cf0512bc6b32cde8cd3738ecf1f27b0399a126a1ee79d1074e96d2dec2d53e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 141,
+          "column": 1
+        },
+        "end": {
+          "line": 148,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Query.producing",
+      "kind": "lungo.model",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → CapDAG.Query",
+      "definition": "fun output tags =>\n  { input := CapDAG.Ask.unknown, output := CapDAG.Ask.within output, tags := tags, effect := CapDAG.Effect.unspecified }",
+      "package": "capdagFormal",
+      "fingerprint": "c2bd4c2597c860e665f1ad3b312bffb087f925de87e5a5e19b0b91ca5756273b",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 159,
+          "column": 1
+        },
+        "end": {
+          "line": 162,
+          "column": 94
+        }
+      }
+    },
+    {
+      "name": "CapDAG.capAccepts",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun pattern request =>\n  TaggedUrn.refines request.input pattern.input ∧\n    TaggedUrn.refines pattern.output request.output ∧\n      (pattern.effect = CapDAG.Effect.unspecified ∨ pattern.effect = request.effect) ∧\n        TaggedUrn.refines request.other pattern.other",
+      "package": "capdagFormal",
+      "fingerprint": "c18f8e9ce4042fc70ca4a7d2e0a46c2c49c4e6917f2f5d397436f5acfc320a17",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Cap.lean",
+        "start": {
+          "line": 64,
+          "column": 1
+        },
+        "end": {
+          "line": 73,
+          "column": 38
+        }
+      }
+    },
+    {
+      "name": "CapDAG.capScore",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Cap → Nat",
+      "definition": "fun c => 10000 * TaggedUrn.urnScore c.output + 100 * TaggedUrn.urnScore c.input + TaggedUrn.urnScore c.other",
+      "package": "capdagFormal",
+      "fingerprint": "9cd834336ec1de1df991042508a9be46e712def7d2d750031422a7be49afc7a3",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Ranking.lean",
+        "start": {
+          "line": 22,
+          "column": 1
+        },
+        "end": {
+          "line": 24,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "CapDAG.effectOk",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Effect → CapDAG.Effect → Prop",
+      "definition": "fun candidate request => request = CapDAG.Effect.unspecified ∨ candidate = request",
+      "package": "capdagFormal",
+      "fingerprint": "ccb4f229a8da6e714620bd2026f343a8a582215b252ca9830594221deebdb529",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Cap.lean",
+        "start": {
+          "line": 49,
+          "column": 1
+        },
+        "end": {
+          "line": 51,
+          "column": 53
+        }
+      }
+    },
+    {
+      "name": "CapDAG.fits",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun pattern cap => (CapDAG.Query.ofPattern pattern).admits cap",
+      "package": "capdagFormal",
+      "fingerprint": "a213d774eaa5744fe9bc7a8e9f92be4dc856dfe450d35798903fccf5191a879d",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 181,
+          "column": 1
+        },
+        "end": {
+          "line": 183,
+          "column": 76
+        }
+      }
+    },
+    {
+      "name": "CapDAG.flows",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun a b => TaggedUrn.refines a.output b.input",
+      "package": "capdagFormal",
+      "fingerprint": "423b0de20a671b4fd66d53ba96d9207ee6938fb28cdc93612389731765c5940a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Route.lean",
+        "start": {
+          "line": 26,
+          "column": 1
+        },
+        "end": {
+          "line": 28,
+          "column": 57
+        }
+      }
+    },
+    {
+      "name": "CapDAG.mayFlow",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun a b => TaggedUrn.meets a.output b.input",
+      "package": "capdagFormal",
+      "fingerprint": "4a8ed4e20b01f138e83a0b10d6023cf31eef9e3ee7b0e15330e1ee641213099f",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Route.lean",
+        "start": {
+          "line": 32,
+          "column": 1
+        },
+        "end": {
+          "line": 34,
+          "column": 57
+        }
+      }
+    },
+    {
+      "name": "CapDAG.mayServe",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun candidate request => (CapDAG.Query.ofRequest request).mayAdmit candidate",
+      "package": "capdagFormal",
+      "fingerprint": "b13e4f6e63ec6c9ec8fd4085245205bbf91c769945144c9290cc805096f59eef",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 175,
+          "column": 1
+        },
+        "end": {
+          "line": 177,
+          "column": 94
+        }
+      }
+    },
+    {
+      "name": "CapDAG.rankingKey",
+      "kind": "lungo.model",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Nat × Nat",
+      "definition": "fun candidate request =>\n  have p := CapDAG.capScore candidate;\n  have r := CapDAG.capScore request;\n  if r ≤ p then (0, p - r) else (1, r - p)",
+      "package": "capdagFormal",
+      "fingerprint": "4f2415cc5a1495bfc32e96889660d9f445bdc6a53fde552d234f4f0d2e1535dc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Ranking.lean",
+        "start": {
+          "line": 26,
+          "column": 1
+        },
+        "end": {
+          "line": 31,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapDAG.select",
+      "kind": "lungo.model",
+      "statement": "List CapDAG.Cap → CapDAG.Cap → Option CapDAG.Cap",
+      "definition": "fun candidates request => List.foldl (CapDAG.selectStep request) none candidates",
+      "package": "capdagFormal",
+      "fingerprint": "08f3428b13247e9f7e916e6518bf45f03d7667813a5dd6fa2265bf56e2009bfc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Ranking.lean",
+        "start": {
+          "line": 55,
+          "column": 1
+        },
+        "end": {
+          "line": 59,
+          "column": 45
+        }
+      }
+    },
+    {
+      "name": "CapDAG.serves",
+      "kind": "lungo.relation",
+      "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
+      "definition": "fun candidate request => (CapDAG.Query.ofRequest request).admits candidate",
+      "package": "capdagFormal",
+      "fingerprint": "54767e0b6458c58a31cf84298b98f1c1424e98b98efb840cb016c9f58c04a3db",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Query.lean",
+        "start": {
+          "line": 169,
+          "column": 1
+        },
+        "end": {
+          "line": 171,
+          "column": 90
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Constraint.allows",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Constraint → TaggedUrn.KeyState → Prop",
+      "definition": "fun x x_1 =>\n  match x, x_1 with\n  | TaggedUrn.Constraint.missing, x => True\n  | TaggedUrn.Constraint.unconstrained, x => True\n  | TaggedUrn.Constraint.optionalNot p, s => s ≠ TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.present, s => s ≠ TaggedUrn.KeyState.unset\n  | TaggedUrn.Constraint.presentNot p, s => s ≠ TaggedUrn.KeyState.unset ∧ s ≠ TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.exact p, s => s = TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.absent, s => s = TaggedUrn.KeyState.unset",
+      "package": "tagged_urn_formal",
+      "fingerprint": "aee80a946434e6281e1210e8eb0085e8ec8f9e2a0fbdb2103966191d5637ecb1",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Constraint.lean",
+        "start": {
+          "line": 36,
+          "column": 1
+        },
+        "end": {
+          "line": 44,
+          "column": 27
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.comparable",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b => TaggedUrn.refines a b ∨ TaggedUrn.refines b a",
+      "package": "tagged_urn_formal",
+      "fingerprint": "a383cafc8c675c9125a90a66a5d9c1d5e0183f54485365327b5b702b952fe396",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 72,
+          "column": 1
+        },
+        "end": {
+          "line": 73,
+          "column": 63
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.equivalent",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b => TaggedUrn.refines a b ∧ TaggedUrn.refines b a",
+      "package": "tagged_urn_formal",
+      "fingerprint": "62a798359c0f814cc5a5394753eac1851acacdc70d11ed2b7d2ce62b8f87d09e",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 74,
+          "column": 1
+        },
+        "end": {
+          "line": 75,
+          "column": 63
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.meets",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b =>\n  a.scheme = b.scheme ∧ ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMeets (a.tag key) (b.tag key) = true",
+      "package": "tagged_urn_formal",
+      "fingerprint": "97f190a845fd77fd75c747f99f5d5712b0d48e64d18d4b48d5aad541d77594a1",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 140,
+          "column": 1
+        },
+        "end": {
+          "line": 145,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.meetsClosed",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b =>\n  a.scheme = b.scheme ∧\n    ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMeets (a.tag key).closed (b.tag key) = true",
+      "package": "tagged_urn_formal",
+      "fingerprint": "ea159e28955c8c84fb3f58e391783b9414880e49ed323718c41e539e02a9a43d",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 257,
+          "column": 1
+        },
+        "end": {
+          "line": 263,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.refines",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b =>\n  a.scheme = b.scheme ∧ ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMatch (a.tag key) (b.tag key) = true",
+      "package": "tagged_urn_formal",
+      "fingerprint": "6942509bbefdfaf5c81174a0da7421e8743d07ddcb0c63a386b768195f3b3c11",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 27,
+          "column": 1
+        },
+        "end": {
+          "line": 31,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.refinesClosed",
+      "kind": "lungo.relation",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b =>\n  a.scheme = b.scheme ∧\n    ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMatch (a.tag key).closed (b.tag key) = true",
+      "package": "tagged_urn_formal",
+      "fingerprint": "9b564936877f0ec34c42054ba630d51450ae609899c55e3b9ae2568d66c76998",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 200,
+          "column": 1
+        },
+        "end": {
+          "line": 203,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.urnScore",
+      "kind": "lungo.model",
+      "statement": "TaggedUrn.Urn → Nat",
+      "definition": "fun u => (List.map (fun pair => TaggedUrn.tagScore pair.snd) u.tags).sum",
+      "package": "tagged_urn_formal",
+      "fingerprint": "7776afd6ad1380896e6b0b3fa9877251656ee579aa9a52fe97fec91efc508edf",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 308,
+          "column": 1
+        },
+        "end": {
+          "line": 311,
+          "column": 49
+        }
+      }
+    }
+  ],
+  "facilities": [],
+  "assumptions": [],
+  "claims": [
+    {
+      "name": "CapDAG.Bifaci.Credit.Gate.opened_spec",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.opened"
+      ],
+      "specifications": [],
+      "statement": "∀ (window : Nat),\n  (CapDAG.Bifaci.Credit.Gate.opened window).available = window ∧ (CapDAG.Bifaci.Credit.Gate.opened window).closed = none",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "1a88feb8f7e6b185d79ce0b4a60c2bdb0445251009ffe2d72838a7cd39fccd46",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 310,
+          "column": 1
+        },
+        "end": {
+          "line": 313,
+          "column": 95
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.acquire_spends",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.acquire"
+      ],
+      "specifications": [],
+      "statement": "∀ {g g' : CapDAG.Bifaci.Credit.Gate} {n : Nat},\n  g.acquire n = CapDAG.Bifaci.Credit.Acquire.acquired g' →\n    g'.available + n = g.available ∧ g.closed = none ∧ g'.closed = none",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "616548f977d81da5c34fac1145cd1b74a6b84e22ee0c67fdac6e40ad9a0e52cf",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 37,
+          "column": 1
+        },
+        "end": {
+          "line": 48,
+          "column": 35
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.batch_positive",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.opened"
+      ],
+      "specifications": [],
+      "statement": "∀ (window : Nat), 0 < (CapDAG.Bifaci.Credit.Window.opened window).batch",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "edf28053c99d1b2f53a6fe5ede637965df09df4a79e847550ed29d4c51a61d4e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 93,
+          "column": 1
+        },
+        "end": {
+          "line": 95,
+          "column": 36
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.close_keeps_first",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.close"
+      ],
+      "specifications": [],
+      "statement": "∀ (g : CapDAG.Bifaci.Credit.Gate) (first second : String), (g.close first).close second = g.close first",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "ceeccfb92f8f242aede0c5f13bd994f7405eba50c5800b534ff2081b86581b8f",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 69,
+          "column": 1
+        },
+        "end": {
+          "line": 74,
+          "column": 44
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.closed_releases",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.close",
+        "CapDAG.Bifaci.Credit.Gate.acquire"
+      ],
+      "specifications": [],
+      "statement": "∀ (g : CapDAG.Bifaci.Credit.Gate) (reason : String) (n : Nat),\n  ∃ why, (g.close reason).acquire n = CapDAG.Bifaci.Credit.Acquire.closed why",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2b78cf75362a326deea6c4bb1ebade872e302aac87eca865e4214aea921442d2",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 59,
+          "column": 1
+        },
+        "end": {
+          "line": 67,
+          "column": 36
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.consume_accounts",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.consume"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapDAG.Bifaci.Credit.Window),\n  w.consume.window.pending + w.consume.grant = w.pending + 1 ∧\n    w.consume.window.remaining = w.remaining + w.consume.grant ∧ w.consume.window.batch = w.batch",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d84f5c0c9bab8d105c2bd92823c7116a4f9f7f43529ac9259d943fd5a3c05787",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 110,
+          "column": 1
+        },
+        "end": {
+          "line": 117,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.continued_accounts",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.continued"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapDAG.Bifaci.Credit.Window),\n  w.continued.grant = 1 ∧\n    w.continued.window.remaining = w.remaining + 1 ∧\n      w.continued.window.pending = w.pending ∧ w.continued.window.batch = w.batch",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b99ac16ff46486e3b49a9df5651c539d5003842dde1e9d9c84cede67f362fc61",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 328,
+          "column": 1
+        },
+        "end": {
+          "line": 334,
+          "column": 26
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.flush_grants_pending",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.flush"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapDAG.Bifaci.Credit.Window),\n  w.flush.grant = w.pending ∧\n    w.flush.window.pending = 0 ∧ w.flush.window.remaining = w.remaining + w.pending ∧ w.flush.window.batch = w.batch",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "df9903f2425e9b699a2695ec545876d39a741668e9d80c8f953a3287d40cb5ff",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 103,
+          "column": 1
+        },
+        "end": {
+          "line": 108,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.grantTarget_sound",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.grantTarget"
+      ],
+      "specifications": [],
+      "statement": "∀ (streams : List (Option String)) (named target : Option String),\n  CapDAG.Bifaci.Credit.grantTarget streams named = some target → target ∈ streams",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "0a21ba5787b08d8663e7eacb7f8573bbaa2bdf43dcbe6a38d8d4fb175d88be68",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 315,
+          "column": 1
+        },
+        "end": {
+          "line": 326,
+          "column": 50
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.grant_after_close",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.grant",
+        "CapDAG.Bifaci.Credit.Gate.close"
+      ],
+      "specifications": [],
+      "statement": "∀ (g : CapDAG.Bifaci.Credit.Gate) (reason : String) (n : Nat), (g.close reason).grant n = g.close reason",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "06ed3d65995c937244be76c46b74ab9c0ffca680152fea840ab7c9a1cd5d5acf",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 76,
+          "column": 1
+        },
+        "end": {
+          "line": 81,
+          "column": 44
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.grant_unblocks",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.grant",
+        "CapDAG.Bifaci.Credit.Gate.acquire"
+      ],
+      "specifications": [],
+      "statement": "∀ (g : CapDAG.Bifaci.Credit.Gate) (n granted : Nat),\n  g.closed = none →\n    n ≤ g.available + granted → ∃ g', (g.grant granted).acquire n = CapDAG.Bifaci.Credit.Acquire.acquired g'",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "22daaf1d88a6f82b80ec7b4887c87ff4e46dc7470cd699e3fe228f9ad206204e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 83,
+          "column": 1
+        },
+        "end": {
+          "line": 89,
+          "column": 24
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.negotiate_comm",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.negotiate"
+      ],
+      "specifications": [],
+      "statement": "∀ (ours theirs : Nat), CapDAG.Bifaci.Credit.negotiate ours theirs = CapDAG.Bifaci.Credit.negotiate theirs ours",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2a3a71c9a94433a77b36ed50216c0204b62e37f37d0a0c9b4c0007d3fd4bdc8b",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 30,
+          "column": 1
+        },
+        "end": {
+          "line": 33,
+          "column": 38
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.negotiate_refuses_zero",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.negotiate"
+      ],
+      "specifications": [],
+      "statement": "∀ (ours theirs : Nat), CapDAG.Bifaci.Credit.negotiate ours theirs = none ↔ ours = 0 ∨ theirs = 0",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "1f79b05eec73de028b5cc93e23ac3740876e016bafe0467baeb28e496fc655e2",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 23,
+          "column": 1
+        },
+        "end": {
+          "line": 28,
+          "column": 64
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.negotiate_within",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.negotiate"
+      ],
+      "specifications": [],
+      "statement": "∀ {ours theirs window : Nat},\n  CapDAG.Bifaci.Credit.negotiate ours theirs = some window → 0 < window ∧ window ≤ ours ∧ window ≤ theirs",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "39e08c03e45ee2406e9ca479eb6e9448f0eb5774baec7155aebaf3a28f444e08",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 14,
+          "column": 1
+        },
+        "end": {
+          "line": 21,
+          "column": 28
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.pending_below_batch",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.consume"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapDAG.Bifaci.Credit.Window), 0 < w.batch → w.consume.window.pending < w.batch",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "6a15f82652a35156534d918b34ee1b8892bdf74009b4491ee276f11f8f00afe6",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 119,
+          "column": 1
+        },
+        "end": {
+          "line": 124,
+          "column": 80
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.violation_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Window.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapDAG.Bifaci.Credit.Window), w.arrive = CapDAG.Bifaci.Credit.Arrival.violation ↔ w.remaining = 0",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "abecc4d1c485cbe95ae68f3f0ad055ec4aa897c5fda8a52e1b0a6c6d0bd873e4",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 97,
+          "column": 1
+        },
+        "end": {
+          "line": 101,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.waits_iff_spent",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Credit.Gate.acquire"
+      ],
+      "specifications": [],
+      "statement": "∀ (g : CapDAG.Bifaci.Credit.Gate) (n : Nat),\n  g.acquire n = CapDAG.Bifaci.Credit.Acquire.wait ↔ g.closed = none ∧ g.available < n",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "637407fe494d73e3a8fccf34bdbc91523551fa2bae533f56abade69294c083aa",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Credit.lean",
+        "start": {
+          "line": 50,
+          "column": 1
+        },
+        "end": {
+          "line": 57,
+          "column": 74
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.code_ofCode",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.FrameType.code",
+        "CapDAG.Bifaci.Flow.FrameType.ofCode"
+      ],
+      "specifications": [],
+      "statement": "∀ {n : Nat} {f : CapDAG.Bifaci.Flow.FrameType}, CapDAG.Bifaci.Flow.FrameType.ofCode n = some f → f.code = n",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "3416fe0fb612031c735d28ffe3232cd7c421d38c6548589244d093cd4f96fe00",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 16,
+          "column": 1
+        },
+        "end": {
+          "line": 20,
+          "column": 34
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.control_is_not_flow",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.FrameType.isFlow"
+      ],
+      "specifications": [],
+      "statement": "CapDAG.Bifaci.Flow.FrameType.credit.isFlow = false ∧\n  CapDAG.Bifaci.Flow.FrameType.cancel.isFlow = false ∧ CapDAG.Bifaci.Flow.FrameType.closeStream.isFlow = false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "255124cf9d730687b5d5961cbcba30fd20b13205582ee6f7f578163690ae0b93",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 27,
+          "column": 1
+        },
+        "end": {
+          "line": 31,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.deliver_is_the_next_run",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.Reorder.accept"
+      ],
+      "specifications": [],
+      "statement": "∀ {r r' : CapDAG.Bifaci.Flow.Reorder} {seq limit : Nat} {seqs : List Nat},\n  CapDAG.Bifaci.Flow.Ordered r →\n    r.accept seq limit = CapDAG.Bifaci.Flow.Accepted.deliver r' seqs →\n      seq = r.expected ∧\n        seqs = List.range' r.expected seqs.length ∧\n          seqs ≠ [] ∧\n            r'.expected = r.expected + seqs.length ∧\n              CapDAG.Bifaci.Flow.Ordered r' ∧ ∀ (n : Nat), n ∈ r.held → n ∈ seqs ∨ n ∈ r'.held",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "c4f818715ab38ad55493efefa24aea4bbb31530dee8f6906258962eb8a6c8e0d",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 146,
+          "column": 1
+        },
+        "end": {
+          "line": 178,
+          "column": 93
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.held_within_limit",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.Reorder.accept"
+      ],
+      "specifications": [],
+      "statement": "∀ {r r' : CapDAG.Bifaci.Flow.Reorder} {seq limit : Nat},\n  CapDAG.Bifaci.Flow.Ordered r → r.accept seq limit = CapDAG.Bifaci.Flow.Accepted.hold r' → r'.held.length ≤ limit",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "13675b5d03834a04903a8d5514ed0710882abf8c9ba6e3997e3f7a215469590d",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 210,
+          "column": 1
+        },
+        "end": {
+          "line": 214,
+          "column": 68
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.hold_keeps_order",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.Reorder.accept"
+      ],
+      "specifications": [],
+      "statement": "∀ {r r' : CapDAG.Bifaci.Flow.Reorder} {seq limit : Nat},\n  CapDAG.Bifaci.Flow.Ordered r →\n    r.accept seq limit = CapDAG.Bifaci.Flow.Accepted.hold r' →\n      r'.expected = r.expected ∧\n        CapDAG.Bifaci.Flow.Ordered r' ∧\n          r.expected < seq ∧\n            (∀ (n : Nat), n ∈ r'.held ↔ n = seq ∨ n ∈ r.held) ∧\n              r'.held.length = r.held.length + 1 ∧ r.held.length < limit",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "aa4632a601f7d7c93b6f0168f8db58cfc9bef3c553ee3176cac8c209ce4e2b5b",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 180,
+          "column": 1
+        },
+        "end": {
+          "line": 208,
+          "column": 30
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.ofCode_code",
+      "relation": "lungo.roundtrip",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.FrameType.code",
+        "CapDAG.Bifaci.Flow.FrameType.ofCode"
+      ],
+      "specifications": [],
+      "statement": "∀ (f : CapDAG.Bifaci.Flow.FrameType), CapDAG.Bifaci.Flow.FrameType.ofCode f.code = some f",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "28a0cb39df7eb4601607dc3356ec2ac304b0e7cccdc2348d0f58769d6c4d02fe",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 12,
+          "column": 1
+        },
+        "end": {
+          "line": 14,
+          "column": 18
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.ordered_start",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.Reorder.start"
+      ],
+      "specifications": [],
+      "statement": "CapDAG.Bifaci.Flow.Ordered CapDAG.Bifaci.Flow.Reorder.start",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "73519436a36d13f41170ee35397e571fed71f8a54a5628edaadd1455120bf5c8",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 128,
+          "column": 1
+        },
+        "end": {
+          "line": 129,
+          "column": 82
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.stale_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.Reorder.accept"
+      ],
+      "specifications": [],
+      "statement": "∀ (r : CapDAG.Bifaci.Flow.Reorder) (seq limit : Nat),\n  r.accept seq limit = CapDAG.Bifaci.Flow.Accepted.stale ↔ seq < r.expected",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "fd605e270a6480e6f445023248988558e4ce1c44b0d9feee92f99d4b85277abc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 131,
+          "column": 1
+        },
+        "end": {
+          "line": 144,
+          "column": 80
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.terminal_is_flow",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Flow.FrameType.isTerminal",
+        "CapDAG.Bifaci.Flow.FrameType.isFlow"
+      ],
+      "specifications": [],
+      "statement": "∀ (f : CapDAG.Bifaci.Flow.FrameType), f.isTerminal = true → f.isFlow = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2f52e6f54a4e3af769844029c62856c59571051eaf96a81781ceeebaaab61f73",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Flow.lean",
+        "start": {
+          "line": 22,
+          "column": 1
+        },
+        "end": {
+          "line": 25,
+          "column": 64
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.admission_shortens_line",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.admitNext"
+      ],
+      "specifications": [],
+      "statement": "∀ {s s' : CapDAG.Bifaci.Pools.State} {waiter : CapDAG.Bifaci.Pools.Waiter},\n  s.admitNext = some (waiter, s') → s'.queue.length < s.queue.length",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "fbb76b858a0a46f7b6e5945697d03aaa942d8357646ccaf21c60d5f6552dd0fc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 197,
+          "column": 1
+        },
+        "end": {
+          "line": 220,
+          "column": 12
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.admit_iff_next",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.admit",
+        "CapDAG.Bifaci.Pools.State.admitNext"
+      ],
+      "specifications": [],
+      "statement": "∀ (s s' : CapDAG.Bifaci.Pools.State) (ticket : Nat),\n  s.admit ticket = some s' ↔ ∃ waiter, s.admitNext = some (waiter, s') ∧ waiter.ticket = ticket",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "3700a20250728ff31b1df01472d98c86e4dc01968f374aa9316473a08ef4e20b",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 176,
+          "column": 1
+        },
+        "end": {
+          "line": 195,
+          "column": 40
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.advertised_running",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.advertised"
+      ],
+      "specifications": [],
+      "statement": "∀ (pool : String) (configured : Nat) (available : Option Nat),\n  CapDAG.Bifaci.Pools.advertised true pool configured available = CapDAG.Bifaci.Pools.effective configured available",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b7b7c7c1d0f0399eeee507be0c315c6a07b907ec8cc1a8c7575f3659bf79cef2",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 50,
+          "column": 1
+        },
+        "end": {
+          "line": 53,
+          "column": 20
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.arrive_admits_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} {chain : List String},\n  CapDAG.Bifaci.Pools.Ticketed s →\n    s.unknown chain = none →\n      ((∃ after, s.arrive chain = CapDAG.Bifaci.Pools.Arrival.admitted after) ↔\n        CapDAG.Bifaci.Pools.Settled s ∧ s.hasRoom chain = true)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "ec4541b0a0443b693ab029510150d60db620f74fcd376e103ec0a95568a8ec63",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 348,
+          "column": 1
+        },
+        "end": {
+          "line": 370,
+          "column": 20
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.arrive_keeps_settled",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} {chain : List String},\n  CapDAG.Bifaci.Pools.Ticketed s →\n    CapDAG.Bifaci.Pools.Settled s →\n      s.unknown chain = none →\n        match s.arrive chain with\n        | CapDAG.Bifaci.Pools.Arrival.admitted after => CapDAG.Bifaci.Pools.Settled after\n        | CapDAG.Bifaci.Pools.Arrival.queued after ticket position => CapDAG.Bifaci.Pools.Settled after\n        | CapDAG.Bifaci.Pools.Arrival.unknownPool name => True",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "5f1c36049c7fb9930c102e7abb0ad4e2f215884fa7610b2e592cbf3ab502cce6",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 389,
+          "column": 1
+        },
+        "end": {
+          "line": 412,
+          "column": 39
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.arrive_settled",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} {chain : List String},\n  CapDAG.Bifaci.Pools.Ticketed s →\n    CapDAG.Bifaci.Pools.Settled s →\n      s.unknown chain = none →\n        s.arrive chain =\n          if s.hasRoom chain = true then\n            CapDAG.Bifaci.Pools.Arrival.admitted\n              (have __src := s.take chain;\n              { pools := __src.pools, queue := __src.queue, next := s.next + 1 })\n          else s.join chain",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "262f6b7016c647238fed13460a36436914830e6717241700b34ae02ab4e470cd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 372,
+          "column": 1
+        },
+        "end": {
+          "line": 387,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.arrive_ticketed",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} (chain : List String),\n  CapDAG.Bifaci.Pools.Ticketed s →\n    match s.arrive chain with\n    | CapDAG.Bifaci.Pools.Arrival.admitted after => CapDAG.Bifaci.Pools.Ticketed after\n    | CapDAG.Bifaci.Pools.Arrival.queued after ticket position => CapDAG.Bifaci.Pools.Ticketed after\n    | CapDAG.Bifaci.Pools.Arrival.unknownPool name => True",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "37187d96145b8b7133802744df817607edf6e427e7e35a63936c11ddb6ad198a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 261,
+          "column": 1
+        },
+        "end": {
+          "line": 285,
+          "column": 51
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.canary",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.advertised"
+      ],
+      "specifications": [],
+      "statement": "∀ (configured : Nat) (available : Option Nat),\n  CapDAG.Bifaci.Pools.advertised false CapDAG.Bifaci.Pools.all configured available = 1",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "426ccd468158c792a7e935e8607263ee343c4182119f1374b5b5b949c05f54fc",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 45,
+          "column": 1
+        },
+        "end": {
+          "line": 48,
+          "column": 74
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.chain_includes_all",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.chain"
+      ],
+      "specifications": [],
+      "statement": "∀ (cap : String) (shared : List (String × List String)), CapDAG.Bifaci.Pools.all ∈ CapDAG.Bifaci.Pools.chain cap shared",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "1e9d6ea1eb15baed4a3baf4ba991bd8a3dfc3071d9bbfda28f03b9bd689e10e8",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 62,
+          "column": 1
+        },
+        "end": {
+          "line": 65,
+          "column": 46
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.chain_shared",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.chain"
+      ],
+      "specifications": [],
+      "statement": "∀ (cap : String) (shared : List (String × List String)) (name : String) (members : List String),\n  (name, members) ∈ shared → cap ∈ members → name ∈ CapDAG.Bifaci.Pools.chain cap shared",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "30e6af1f395f19da698c0521a7834e47c7f07cb0a60f7b651f0a9c08dfcd50f7",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 67,
+          "column": 1
+        },
+        "end": {
+          "line": 74,
+          "column": 66
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.chain_starts_with_cap",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.chain"
+      ],
+      "specifications": [],
+      "statement": "∀ (cap : String) (shared : List (String × List String)), (CapDAG.Bifaci.Pools.chain cap shared).head? = some cap",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "22b0f556ae06e456c8c2b35ec57840298a90723501204c3ac9fe5767258890dd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 57,
+          "column": 1
+        },
+        "end": {
+          "line": 60,
+          "column": 47
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.effective_static",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.effective"
+      ],
+      "specifications": [],
+      "statement": "∀ (configured : Nat), CapDAG.Bifaci.Pools.effective configured none = configured",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "cea65d8f3b62919515f6d9c188e0255f1203d3079530ed64b997461b85ba1d65",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 12,
+          "column": 1
+        },
+        "end": {
+          "line": 14,
+          "column": 92
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.effective_unlimited_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.effective"
+      ],
+      "specifications": [],
+      "statement": "∀ (configured : Nat) (available : Option Nat),\n  CapDAG.Bifaci.Pools.effective configured available = 0 ↔ configured = 0 ∧ (available = none ∨ available = some 0)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "0a66e28b58bd3e0844c424067cd53994767caa4b77ec7e4bef3966feceb87bf1",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 16,
+          "column": 1
+        },
+        "end": {
+          "line": 26,
+          "column": 73
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.effective_within_available",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.effective"
+      ],
+      "specifications": [],
+      "statement": "∀ (configured reported : Nat),\n  reported ≠ 0 →\n    CapDAG.Bifaci.Pools.effective configured (some reported) ≤ reported ∧\n      CapDAG.Bifaci.Pools.effective configured (some reported) ≠ 0",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "1c1fad68f4997a62e8882d2d1fc58d075cb8ce1c32c2fcae3f74d401be0fc4c3",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 38,
+          "column": 1
+        },
+        "end": {
+          "line": 43,
+          "column": 73
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.effective_within_configured",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.effective"
+      ],
+      "specifications": [],
+      "statement": "∀ (configured : Nat) (available : Option Nat),\n  configured ≠ 0 →\n    CapDAG.Bifaci.Pools.effective configured available ≤ configured ∧\n      CapDAG.Bifaci.Pools.effective configured available ≠ 0",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b19f4c1f09c4f25f7b43c5fb328fc9484ded1f2afd04e7d6372f34ceac9b3c35",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 28,
+          "column": 1
+        },
+        "end": {
+          "line": 36,
+          "column": 75
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.hasRoom_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.hasRoom"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (chain : List String),\n  s.hasRoom chain = true ↔ ∀ (p : CapDAG.Bifaci.Pools.Pool), p ∈ s.pools → p.name ∈ chain → p.hasRoom = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "ab40a679b479ebf7f837fe05bc9796036559cb23c23458d16666c922a4948da4",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 496,
+          "column": 1
+        },
+        "end": {
+          "line": 509,
+          "column": 44
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.heldBack_le",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.heldBack"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (name : String), s.heldBack name ≤ s.queue.length",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "aa172a1681ad55dbad7167f156227b3553beae6a6f950f5bde31a58bd591bda1",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 529,
+          "column": 1
+        },
+        "end": {
+          "line": 532,
+          "column": 28
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.join_known",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.join"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} {chain : List String},\n  s.unknown chain = none →\n    s.join chain =\n      CapDAG.Bifaci.Pools.Arrival.queued (s.enqueue chain).fst s.next ((s.enqueue chain).fst.position s.next)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "29f98df5554045c8b54d9efc0e18e911537fb30c69e52c91aa9e4aece51602ab",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 313,
+          "column": 1
+        },
+        "end": {
+          "line": 318,
+          "column": 42
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.leave_removes_only_it",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.leave"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (ticket : Nat) (waiter : CapDAG.Bifaci.Pools.Waiter),\n  waiter ∈ (s.leave ticket).queue ↔ waiter ∈ s.queue ∧ waiter.ticket ≠ ticket",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "5eefeeeda8267652be775ebf91d231a30e8d0e0934c498f4d77a3cde438268f4",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 414,
+          "column": 1
+        },
+        "end": {
+          "line": 418,
+          "column": 21
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.patience_available",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.patience"
+      ],
+      "specifications": [],
+      "statement": "∀ (grace : Nat), CapDAG.Bifaci.Pools.patience none grace = CapDAG.Bifaci.Pools.Patience.unbounded",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "a0f78c3dadc31a6e8e268588da3c319f8b02b61d6c611ee2b17401e9fc66910d",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 422,
+          "column": 1
+        },
+        "end": {
+          "line": 424,
+          "column": 83
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.patience_exhausted_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.patience"
+      ],
+      "specifications": [],
+      "statement": "∀ (elapsed grace : Nat),\n  CapDAG.Bifaci.Pools.patience (some elapsed) grace = CapDAG.Bifaci.Pools.Patience.exhausted ↔ grace ≤ elapsed",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "ff3313e90730fef62774c1b067e65e29b4c6cdb62c796477431b298e876ad64f",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 426,
+          "column": 1
+        },
+        "end": {
+          "line": 430,
+          "column": 81
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.patience_is_the_remainder",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.patience"
+      ],
+      "specifications": [],
+      "statement": "∀ (elapsed grace remaining : Nat),\n  CapDAG.Bifaci.Pools.patience (some elapsed) grace = CapDAG.Bifaci.Pools.Patience.atMost remaining →\n    remaining + elapsed = grace ∧ 0 < remaining",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "ec3017fb384679095ad9e1dc5e5f0dfb040f1cae1ffaeb833a93f2e62443caef",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 432,
+          "column": 1
+        },
+        "end": {
+          "line": 440,
+          "column": 23
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.position_zero_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.position"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (ticket : Nat),\n  s.position ticket = 0 ↔ ∀ (w : CapDAG.Bifaci.Pools.Waiter), w ∈ s.queue → w.ticket ≠ ticket",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d544bf96793fd178a3b848e22f92acc4bf615660515652c20c803d2c8b41bb14",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 511,
+          "column": 1
+        },
+        "end": {
+          "line": 527,
+          "column": 55
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.release_undoes_take",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.release"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (chain : List String), (s.take chain).release chain = s",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "7b0b919d42f192f281c38cfd36911d011daa9a0f4de46008be99f19c32c00f34",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 108,
+          "column": 1
+        },
+        "end": {
+          "line": 119,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.release_within",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.release"
+      ],
+      "specifications": [],
+      "statement": "∀ {s : CapDAG.Bifaci.Pools.State} (chain : List String),\n  CapDAG.Bifaci.Pools.Within s → CapDAG.Bifaci.Pools.Within (s.release chain)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "564e531d9b237c668758f1781bde6c559b68a4b0bae9f44226120ab6f7f5b9bf",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 96,
+          "column": 1
+        },
+        "end": {
+          "line": 106,
+          "column": 71
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.setCapacity_others",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.setCapacity"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (name other : String) (capacity : Nat),\n  other ≠ name → (s.setCapacity name capacity).pool other = s.pool other",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "acc062c0fd9c63cc008f38c47f1f71e112ad38b74f7c08ed625f4d6a63fc4fc5",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 474,
+          "column": 1
+        },
+        "end": {
+          "line": 494,
+          "column": 71
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.setCapacity_pool",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.setCapacity"
+      ],
+      "specifications": [],
+      "statement": "∀ (s : CapDAG.Bifaci.Pools.State) (name : String) (capacity : Nat),\n  ∃ p, (s.setCapacity name capacity).pool name = some p ∧ p.capacity = capacity",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d5b7904590be5f9da55f20ed67d4a71b714b44ec0a7f00f3f12fbde46eb6e6e0",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 449,
+          "column": 1
+        },
+        "end": {
+          "line": 472,
+          "column": 11
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.ticketed_empty",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Pools.State.empty"
+      ],
+      "specifications": [],
+      "statement": "CapDAG.Bifaci.Pools.Ticketed CapDAG.Bifaci.Pools.State.empty",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "f23d5e156621f3e4b3ee08db8f61c0460bc4e710dc7077546b0f7d3491a5e971",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Pools.lean",
+        "start": {
+          "line": 228,
+          "column": 1
+        },
+        "end": {
+          "line": 229,
+          "column": 81
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.check_prefix",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.check"
+      ],
+      "specifications": [],
+      "statement": "∀ (frames more : List CapDAG.Bifaci.Request.Emitted) (violation : CapDAG.Bifaci.Request.Violation),\n  CapDAG.Bifaci.Request.check frames = some violation → CapDAG.Bifaci.Request.check (frames ++ more) = some violation",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b7ec230c1667bfe2b0d8e6e0a494782991b2866a5f1e6e3bb68c1c628e71d610",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 266,
+          "column": 1
+        },
+        "end": {
+          "line": 279,
+          "column": 63
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.control_always_written",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.write"
+      ],
+      "specifications": [],
+      "statement": "∀ (over : Bool) (frame : CapDAG.Bifaci.Flow.FrameType),\n  frame.isFlow = false → CapDAG.Bifaci.Request.write over frame = CapDAG.Bifaci.Request.Write.send false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "118d27bff3424f936547e81b0d2047420fdff1bdf9e4d6195e5d613ee52c9c8c",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 38,
+          "column": 1
+        },
+        "end": {
+          "line": 43,
+          "column": 33
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.ledger_unmoved",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.ledger"
+      ],
+      "specifications": [],
+      "statement": "∀ (remaining : Int) (frame : CapDAG.Bifaci.Flow.FrameType) (granted : Nat),\n  frame ≠ CapDAG.Bifaci.Flow.FrameType.chunk ∧ frame ≠ CapDAG.Bifaci.Flow.FrameType.credit →\n    CapDAG.Bifaci.Request.ledger remaining frame granted = remaining",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "bd8fc089e5bf29d23267081e971948e0cc54571b3a7e8f59b0ee141c0cf6e540",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 139,
+          "column": 1
+        },
+        "end": {
+          "line": 143,
+          "column": 36
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.live_is_routed",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.dispose"
+      ],
+      "specifications": [],
+      "statement": "∀ (endedLately : Bool), CapDAG.Bifaci.Request.dispose true endedLately = CapDAG.Bifaci.Request.Disposition.route",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d8847933bf51d73f480a0951b0a5e8fdf6476a2af1dca6a9f4e5ab446fa6694e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 121,
+          "column": 1
+        },
+        "end": {
+          "line": 123,
+          "column": 87
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.live_writes",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.write"
+      ],
+      "specifications": [],
+      "statement": "∀ (frame : CapDAG.Bifaci.Flow.FrameType),\n  CapDAG.Bifaci.Request.write false frame = CapDAG.Bifaci.Request.Write.send frame.isTerminal",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "e64d865ff161b892d4509d2714dfffc80a06e91b34e8df662f0dae3789c75abd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 45,
+          "column": 1
+        },
+        "end": {
+          "line": 50,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.noRoute_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.dispose"
+      ],
+      "specifications": [],
+      "statement": "∀ (live endedLately : Bool),\n  CapDAG.Bifaci.Request.dispose live endedLately = CapDAG.Bifaci.Request.Disposition.noRoute ↔\n    live = false ∧ endedLately = false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "e52f0e29f40ee0842498424a5e3fb82c3f7dea1a8a2965f7d079472e5338d736",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 132,
+          "column": 1
+        },
+        "end": {
+          "line": 135,
+          "column": 54
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.over_suppresses_flow",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.write"
+      ],
+      "specifications": [],
+      "statement": "∀ (frame : CapDAG.Bifaci.Flow.FrameType),\n  CapDAG.Bifaci.Request.write true frame = CapDAG.Bifaci.Request.Write.suppress ↔ frame.isFlow = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "dc0cf212e47fde776cddf1e867ff47d20d463e6adeba6f7263bae80dab0da368",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 32,
+          "column": 1
+        },
+        "end": {
+          "line": 36,
+          "column": 49
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.phase_after",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.Phase.after"
+      ],
+      "specifications": [],
+      "statement": "∀ (p : CapDAG.Bifaci.Request.Phase) (frame : CapDAG.Bifaci.Flow.FrameType),\n  p.after frame = if frame.isFlow = true then CapDAG.Bifaci.Request.Phase.streaming else p",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "dd44e9c397ddf1fe7e868527d78f78a43cb342fc297570770b38c0500b7f9d69",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 26,
+          "column": 1
+        },
+        "end": {
+          "line": 30,
+          "column": 66
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.straggler_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.dispose"
+      ],
+      "specifications": [],
+      "statement": "∀ (live endedLately : Bool),\n  CapDAG.Bifaci.Request.dispose live endedLately = CapDAG.Bifaci.Request.Disposition.straggler ↔\n    live = false ∧ endedLately = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "91ea4348df00ce7005d57273e71de5df2f4cb114ecf684a36de24b54dcbe64c5",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 125,
+          "column": 1
+        },
+        "end": {
+          "line": 130,
+          "column": 54
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.streaming_stays",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.Phase.after"
+      ],
+      "specifications": [],
+      "statement": "∀ (frame : CapDAG.Bifaci.Flow.FrameType),\n  CapDAG.Bifaci.Request.Phase.streaming.after frame = CapDAG.Bifaci.Request.Phase.streaming",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "57ba5a4e9af824bca24c21b10644eaf8c55f074032e3a955b39bec7c65cda1d1",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 21,
+          "column": 1
+        },
+        "end": {
+          "line": 24,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.terminalOf_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.terminalOf"
+      ],
+      "specifications": [],
+      "statement": "∀ (frame : CapDAG.Bifaci.Flow.FrameType), (CapDAG.Bifaci.Request.terminalOf frame).isSome = frame.isTerminal",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b016e74db42af462982c9cdd358be7a18d2fd6eb56c357bd633694398ead5301",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 15,
+          "column": 1
+        },
+        "end": {
+          "line": 19,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.accepts_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.accepts"
+      ],
+      "specifications": [
+        "CapDAG.fits"
+      ],
+      "statement": "∀ (p c : CapDAG.Exec.WfCap),\n  CapDAG.Exec.accepts p c = true ↔ CapDAG.fits (CapDAG.Exec.WfCap.toCap✝ p) (CapDAG.Exec.WfCap.toCap✝ c)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "83492acf32da2b5893bfea303cbbb6a8f3500c5c14dbcc98293f4c12de81ca8e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 235,
+          "column": 1
+        },
+        "end": {
+          "line": 239,
+          "column": 49
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.comparable_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.comparable"
+      ],
+      "specifications": [
+        "CapDAG.capAccepts"
+      ],
+      "statement": "∀ (a b : CapDAG.Exec.WfCap),\n  CapDAG.Exec.comparable a b = true ↔\n    CapDAG.capAccepts (CapDAG.Exec.WfCap.toCap✝ a) (CapDAG.Exec.WfCap.toCap✝ b) ∨\n      CapDAG.capAccepts (CapDAG.Exec.WfCap.toCap✝ b) (CapDAG.Exec.WfCap.toCap✝ a)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "45cb44aeda00c089306a387031b585acdd0addad30f62c3993a0f53d730bfadd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 286,
+          "column": 1
+        },
+        "end": {
+          "line": 290,
+          "column": 61
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.dispatch_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.dispatch"
+      ],
+      "specifications": [
+        "CapDAG.serves"
+      ],
+      "statement": "∀ (c r : CapDAG.Exec.WfCap),\n  CapDAG.Exec.dispatch c r = true ↔ CapDAG.serves (CapDAG.Exec.WfCap.toCap✝ c) (CapDAG.Exec.WfCap.toCap✝ r)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "62b4481ae1e8ea6e3d9b3e979a370b5a8306991e5c7c09e08adb4b9fe195f93f",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 215,
+          "column": 1
+        },
+        "end": {
+          "line": 219,
+          "column": 49
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.effectOk_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.effectOk"
+      ],
+      "specifications": [
+        "CapDAG.effectOk"
+      ],
+      "statement": "∀ (c r : CapDAG.Effect), CapDAG.Exec.effectOk c r = true ↔ CapDAG.effectOk c r",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "c0073b345784db1b15487a6e1b78dbcb465fc5c5edd4fc285ca20e77de18ff96",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 32,
+          "column": 1
+        },
+        "end": {
+          "line": 35,
+          "column": 33
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.equivalent_axiswise",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Exec.equivalent"
+      ],
+      "specifications": [],
+      "statement": "∀ (a b : CapDAG.Exec.WfCap),\n  a.effect ≠ CapDAG.Effect.unspecified →\n    b.effect ≠ CapDAG.Effect.unspecified →\n      (CapDAG.Exec.equivalent a b = true ↔\n        TaggedUrn.equivalent a.input.urn b.input.urn ∧\n          TaggedUrn.equivalent a.output.urn b.output.urn ∧\n            TaggedUrn.equivalent a.other.urn b.other.urn ∧ a.effect = b.effect)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "66b5aa8fc901769999771806b5f47bd5fc6517f5452b29ce77e722519f4a41c7",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 292,
+          "column": 1
+        },
+        "end": {
+          "line": 310,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.equivalent_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.equivalent"
+      ],
+      "specifications": [
+        "CapDAG.capAccepts"
+      ],
+      "statement": "∀ (a b : CapDAG.Exec.WfCap),\n  CapDAG.Exec.equivalent a b = true ↔\n    CapDAG.capAccepts (CapDAG.Exec.WfCap.toCap✝ a) (CapDAG.Exec.WfCap.toCap✝ b) ∧\n      CapDAG.capAccepts (CapDAG.Exec.WfCap.toCap✝ b) (CapDAG.Exec.WfCap.toCap✝ a)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "8d33fafc9815d6512ffb3e281fb97345f46f759e8fb4491e7782925ecb2a14ef",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 280,
+          "column": 1
+        },
+        "end": {
+          "line": 284,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.flows_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.flows"
+      ],
+      "specifications": [
+        "CapDAG.flows"
+      ],
+      "statement": "∀ (a b : CapDAG.Exec.WfCap),\n  CapDAG.Exec.flows a b = true ↔ CapDAG.flows (CapDAG.Exec.WfCap.toCap✝ a) (CapDAG.Exec.WfCap.toCap✝ b)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "07725a2ee1432c277c910cbcc117920a292e1f92ab7f7091a75667d08e5793ae",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 317,
+          "column": 1
+        },
+        "end": {
+          "line": 319,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.mayDispatch_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.mayDispatch"
+      ],
+      "specifications": [
+        "CapDAG.mayServe"
+      ],
+      "statement": "∀ (c r : CapDAG.Exec.WfCap),\n  CapDAG.Exec.mayDispatch c r = true ↔ CapDAG.mayServe (CapDAG.Exec.WfCap.toCap✝ c) (CapDAG.Exec.WfCap.toCap✝ r)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "db4640834d1fb5b847a0601df12fba301b5648e81094c289be49bd1d37942a58",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 225,
+          "column": 1
+        },
+        "end": {
+          "line": 229,
+          "column": 51
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.mayFlow_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.mayFlow"
+      ],
+      "specifications": [
+        "CapDAG.mayFlow"
+      ],
+      "statement": "∀ (a b : CapDAG.Exec.WfCap),\n  CapDAG.Exec.mayFlow a b = true ↔ CapDAG.mayFlow (CapDAG.Exec.WfCap.toCap✝ a) (CapDAG.Exec.WfCap.toCap✝ b)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2e715b26b1a13405391b89b8ef26cb1ed2a30c1b6004fe0b4ec47532224353b0",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 324,
+          "column": 1
+        },
+        "end": {
+          "line": 326,
+          "column": 64
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryAdmits_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.queryAdmits"
+      ],
+      "specifications": [
+        "CapDAG.Query.admits"
+      ],
+      "statement": "∀ (q : CapDAG.Exec.WfQuery) (c : CapDAG.Exec.WfCap),\n  CapDAG.Exec.queryAdmits q c = true ↔ (CapDAG.Exec.WfQuery.toQuery✝ q).admits (CapDAG.Exec.WfCap.toCap✝ c)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "6a4aedb381d882219439c238557c17a7202bc71f7e01d9c070935cf854bf2071",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 157,
+          "column": 1
+        },
+        "end": {
+          "line": 163,
+          "column": 24
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryBetween_reads",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryBetween"
+      ],
+      "specifications": [
+        "CapDAG.Query.ofCall"
+      ],
+      "statement": "∀ (input output tags : TaggedUrn.Exec.Wf),\n  CapDAG.Exec.WfQuery.toQuery✝ (CapDAG.Exec.queryBetween input output tags) =\n    CapDAG.Query.ofCall\n      { input := input.urn, output := output.urn, other := tags.urn, effect := CapDAG.Effect.unspecified }",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2f9a2376a4b6e8f0b74bde020d6cfe9f59deb9778272068a7d1982c03b45b83e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 127,
+          "column": 1
+        },
+        "end": {
+          "line": 132,
+          "column": 80
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryConsuming_reads",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryConsuming"
+      ],
+      "specifications": [
+        "CapDAG.Query.consuming"
+      ],
+      "statement": "∀ (input tags : TaggedUrn.Exec.Wf),\n  CapDAG.Exec.WfQuery.toQuery✝ (CapDAG.Exec.queryConsuming input tags) = CapDAG.Query.consuming input.urn tags.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d7b28611d6d6872eee4f2f7e833f9968c6f59c6eb10376cd85b2ddde0722c3ec",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 123,
+          "column": 1
+        },
+        "end": {
+          "line": 125,
+          "column": 84
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryGrade_decides",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryGrade"
+      ],
+      "specifications": [
+        "CapDAG.Query.grade"
+      ],
+      "statement": "∀ (q : CapDAG.Exec.WfQuery) (c : CapDAG.Exec.WfCap),\n  CapDAG.Exec.queryGrade q c = (CapDAG.Exec.WfQuery.toQuery✝ q).grade (CapDAG.Exec.WfCap.toCap✝ c)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "f8a07e27ed5d581887a2be5cee19575876c0ea817d9664ddcb5028e8624a642f",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 198,
+          "column": 1
+        },
+        "end": {
+          "line": 207,
+          "column": 46
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryMayAdmit_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Exec.queryMayAdmit"
+      ],
+      "specifications": [
+        "CapDAG.Query.mayAdmit"
+      ],
+      "statement": "∀ (q : CapDAG.Exec.WfQuery) (c : CapDAG.Exec.WfCap),\n  CapDAG.Exec.queryMayAdmit q c = true ↔ (CapDAG.Exec.WfQuery.toQuery✝ q).mayAdmit (CapDAG.Exec.WfCap.toCap✝ c)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "2067527186c148ba4b4fdf2aab6c0976db800657bebce6d5903c609065850389",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 170,
+          "column": 1
+        },
+        "end": {
+          "line": 176,
+          "column": 24
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryOfPattern_reads",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryOfPattern"
+      ],
+      "specifications": [
+        "CapDAG.Query.ofPattern"
+      ],
+      "statement": "∀ (p : CapDAG.Exec.WfCap),\n  CapDAG.Exec.WfQuery.toQuery✝ (CapDAG.Exec.queryOfPattern p) = CapDAG.Query.ofPattern (CapDAG.Exec.WfCap.toCap✝ p)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "f87f65c30d931ec4fcace662ed499c623de1891ba91995ce5ff91b3ca51618af",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 110,
+          "column": 1
+        },
+        "end": {
+          "line": 117,
+          "column": 30
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryOfRequest_reads",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryOfRequest"
+      ],
+      "specifications": [
+        "CapDAG.Query.ofRequest"
+      ],
+      "statement": "∀ (r : CapDAG.Exec.WfCap),\n  CapDAG.Exec.WfQuery.toQuery✝ (CapDAG.Exec.queryOfRequest r) = CapDAG.Query.ofRequest (CapDAG.Exec.WfCap.toCap✝ r)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "e301a3aef0bca0541bb1e1c82c2c366cdb58d7bc7bdf7b9e2a0396ef3fd88ab5",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 101,
+          "column": 1
+        },
+        "end": {
+          "line": 108,
+          "column": 30
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryProducing_reads",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.queryProducing"
+      ],
+      "specifications": [
+        "CapDAG.Query.producing"
+      ],
+      "statement": "∀ (output tags : TaggedUrn.Exec.Wf),\n  CapDAG.Exec.WfQuery.toQuery✝ (CapDAG.Exec.queryProducing output tags) = CapDAG.Query.producing output.urn tags.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "5ca842294e4d51cc523add226b35a976bb0ff806a01de78e5bdf9d85909ecd32",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 119,
+          "column": 1
+        },
+        "end": {
+          "line": 121,
+          "column": 86
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.rankingKey_eq",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.rankingKey"
+      ],
+      "specifications": [
+        "CapDAG.rankingKey"
+      ],
+      "statement": "∀ (candidate request : CapDAG.Exec.WfCap),\n  CapDAG.Exec.rankingKey candidate request =\n    CapDAG.rankingKey (CapDAG.Exec.WfCap.toCap✝ candidate) (CapDAG.Exec.WfCap.toCap✝ request)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "c541ba86eafa91833f0157dd3d4bd2b7340db713213c38c072df6518a651a85a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 337,
+          "column": 1
+        },
+        "end": {
+          "line": 339,
+          "column": 90
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.select_decides",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.select"
+      ],
+      "specifications": [
+        "CapDAG.select"
+      ],
+      "statement": "∀ (candidates : List CapDAG.Exec.WfCap) (request : CapDAG.Exec.WfCap),\n  Option.map CapDAG.Exec.WfCap.toCap✝ (CapDAG.Exec.select candidates request) =\n    CapDAG.select (List.map CapDAG.Exec.WfCap.toCap✝ candidates) (CapDAG.Exec.WfCap.toCap✝ request)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "d614890e1d8eb1447f431e1e139d71ff18eb3621b4829c62672c536e7dd94754",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 354,
+          "column": 1
+        },
+        "end": {
+          "line": 396,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.specificity_eq",
+      "relation": "lungo.equals",
+      "subjects": [
+        "CapDAG.Exec.specificity"
+      ],
+      "specifications": [
+        "CapDAG.capScore"
+      ],
+      "statement": "∀ (c : CapDAG.Exec.WfCap), CapDAG.Exec.specificity c = CapDAG.capScore (CapDAG.Exec.WfCap.toCap✝ c)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "b492b78a71c1e820bb282dcfe5c64cb5baaa7c6e3c4761c4e41400bd5cf1b5dd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 330,
+          "column": 1
+        },
+        "end": {
+          "line": 331,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.comparable_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.comparable"
+      ],
+      "specifications": [
+        "TaggedUrn.comparable"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.comparable a b = true ↔ TaggedUrn.comparable a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "ca6a514570a3773c7c219fcbab650705b8ec3209cdf2747bc5d1a247d549f441",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 63,
+          "column": 1
+        },
+        "end": {
+          "line": 66,
+          "column": 74
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.equivalent_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.equivalent"
+      ],
+      "specifications": [
+        "TaggedUrn.equivalent"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.equivalent a b = true ↔ TaggedUrn.equivalent a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "df5c2ec9f21e6e2e994d7f754d0682b6552c34ec0b91eb3340675177fb51add2",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 56,
+          "column": 1
+        },
+        "end": {
+          "line": 59,
+          "column": 75
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.make_isSome_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "TaggedUrn.Exec.make"
+      ],
+      "specifications": [],
+      "statement": "∀ {scheme : String} {tags : List (String × TaggedUrn.Constraint)},\n  (TaggedUrn.Exec.make scheme tags).isSome = true ↔ TaggedUrn.Sorted tags",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "3d6be601f0230b53d77e6b9268e6039a279c909d4847b67a80349a369c651102",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 39,
+          "column": 1
+        },
+        "end": {
+          "line": 44,
+          "column": 21
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.make_urn",
+      "relation": "lungo.law",
+      "subjects": [
+        "TaggedUrn.Exec.make"
+      ],
+      "specifications": [],
+      "statement": "∀ {scheme : String} {tags : List (String × TaggedUrn.Constraint)} {w : TaggedUrn.Exec.Wf},\n  TaggedUrn.Exec.make scheme tags = some w → w.urn = { scheme := scheme, tags := tags }",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "eb8b8b268fa3e023d48a4ca7e20eae3f0a2811c946a39c7a89d9c3f3a93c5a96",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 31,
+          "column": 1
+        },
+        "end": {
+          "line": 37,
+          "column": 12
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.meetsClosed_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.meetsClosed"
+      ],
+      "specifications": [
+        "TaggedUrn.meetsClosed"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.meetsClosed a b = true ↔ TaggedUrn.meetsClosed a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "89f769c0a0097cc699aa52a956b77849bc84ff675ee51fdc366ece46b0559b3e",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 111,
+          "column": 1
+        },
+        "end": {
+          "line": 115,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.meets_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.meets"
+      ],
+      "specifications": [
+        "TaggedUrn.meets"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.meets a b = true ↔ TaggedUrn.meets a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "796d3d22175ecf4a6767ede9143e1900ff445cd1c826b51c6745c1744a176379",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 85,
+          "column": 1
+        },
+        "end": {
+          "line": 87,
+          "column": 90
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.refinesClosed_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.refinesClosed"
+      ],
+      "specifications": [
+        "TaggedUrn.refinesClosed"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.refinesClosed a b = true ↔ TaggedUrn.refinesClosed a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "7bc6b885dcedfad9aab7ed91489bad62a953e5ee4cfac5fe04bb5926ab393cc8",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 101,
+          "column": 1
+        },
+        "end": {
+          "line": 105,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.refines_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.refines"
+      ],
+      "specifications": [
+        "TaggedUrn.refines"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Exec.Wf), TaggedUrn.Exec.refines a b = true ↔ TaggedUrn.refines a.urn b.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "51e6d6fa43ae51d3dbd9e94fe8c45377e8e90b7a1c87f42ce22bee72cb9948a8",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 50,
+          "column": 1
+        },
+        "end": {
+          "line": 52,
+          "column": 94
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.specificity_eq",
+      "relation": "lungo.equals",
+      "subjects": [
+        "TaggedUrn.Exec.specificity"
+      ],
+      "specifications": [
+        "TaggedUrn.urnScore"
+      ],
+      "statement": "∀ (a : TaggedUrn.Exec.Wf), TaggedUrn.Exec.specificity a = TaggedUrn.urnScore a.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "5de9289b98772acc1a3bdeb6f5490dc17554f3b80e70cc1134bbad4a7de782d4",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 71,
+          "column": 1
+        },
+        "end": {
+          "line": 72,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.valuesMatchClosed_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.valuesMatchClosed"
+      ],
+      "specifications": [
+        "TaggedUrn.Constraint.allows"
+      ],
+      "statement": "∀ (i p : TaggedUrn.Constraint),\n  TaggedUrn.Exec.valuesMatchClosed i p = true ↔ ∀ (s : TaggedUrn.KeyState), i.closed.allows s → p.allows s",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "70fe94fa81c48ecfc901f59fedb0eac182494901a83ae15e2dbf767985c1c468",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 120,
+          "column": 1
+        },
+        "end": {
+          "line": 123,
+          "column": 33
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.valuesMatch_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.valuesMatch"
+      ],
+      "specifications": [
+        "TaggedUrn.Constraint.allows"
+      ],
+      "statement": "∀ (i p : TaggedUrn.Constraint),\n  TaggedUrn.Exec.valuesMatch i p = true ↔ ∀ (s : TaggedUrn.KeyState), i.allows s → p.allows s",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "f203615e0a8f0df1a8bf18fef1af72a3154cc1bf1760848c11b1502b5d89b1bb",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 77,
+          "column": 1
+        },
+        "end": {
+          "line": 79,
+          "column": 85
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.valuesMeet_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "TaggedUrn.Exec.valuesMeet"
+      ],
+      "specifications": [
+        "TaggedUrn.Constraint.allows"
+      ],
+      "statement": "∀ (a b : TaggedUrn.Constraint), TaggedUrn.Exec.valuesMeet a b = true ↔ ∃ s, a.allows s ∧ b.allows s",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "fe9f085b676ca28a62abc13fe46fa03a2761f604a851ffb2698ea9b17bf259ac",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 92,
+          "column": 1
+        },
+        "end": {
+          "line": 94,
+          "column": 84
+        }
+      }
+    }
+  ],
+  "roles": [],
+  "exports": [
+    {
+      "name": "CapDAG.Bifaci.Credit.Gate.acquire",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_le",
+          "lean_nat_sub"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.acquire_spends",
+        "CapDAG.Bifaci.Credit.closed_releases",
+        "CapDAG.Bifaci.Credit.grant_unblocks",
+        "CapDAG.Bifaci.Credit.waits_iff_spent"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 50,
+          "column": 1
+        },
+        "end": {
+          "line": 54,
+          "column": 97
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Gate.close",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.close_keeps_first",
+        "CapDAG.Bifaci.Credit.closed_releases",
+        "CapDAG.Bifaci.Credit.grant_after_close"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 62,
+          "column": 1
+        },
+        "end": {
+          "line": 66,
+          "column": 45
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Gate.grant",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.grant_after_close",
+        "CapDAG.Bifaci.Credit.grant_unblocks"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 56,
+          "column": 1
+        },
+        "end": {
+          "line": 60,
+          "column": 52
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Gate.opened",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.Gate.opened_spec"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 37,
+          "column": 1
+        },
+        "end": {
+          "line": 38,
+          "column": 56
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Window.arrive",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_nat_sub"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.violation_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 101,
+          "column": 1
+        },
+        "end": {
+          "line": 103,
+          "column": 92
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Window.consume",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_le"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.consume_accounts",
+        "CapDAG.Bifaci.Credit.pending_below_batch"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 117,
+          "column": 1
+        },
+        "end": {
+          "line": 120,
+          "column": 50
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Window.continued",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.continued_accounts"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 122,
+          "column": 1
+        },
+        "end": {
+          "line": 126,
+          "column": 47
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Window.flush",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.flush_grants_pending"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 111,
+          "column": 1
+        },
+        "end": {
+          "line": 115,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.Window.opened",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_le",
+          "lean_nat_shiftr"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.batch_positive"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 89,
+          "column": 1
+        },
+        "end": {
+          "line": 91,
+          "column": 77
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.grantTarget",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.grantTarget_sound"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 68,
+          "column": 1
+        },
+        "end": {
+          "line": 76,
+          "column": 19
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Credit.negotiate",
+      "module": "CapDAG.Bifaci.Credit",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Credit.negotiate_comm",
+        "CapDAG.Bifaci.Credit.negotiate_refuses_zero",
+        "CapDAG.Bifaci.Credit.negotiate_within"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Credit.lean",
+        "start": {
+          "line": 21,
+          "column": 1
+        },
+        "end": {
+          "line": 26,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.FrameType.code",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.code_ofCode",
+        "CapDAG.Bifaci.Flow.ofCode_code"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 37,
+          "column": 1
+        },
+        "end": {
+          "line": 52,
+          "column": 23
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.control_is_not_flow",
+        "CapDAG.Bifaci.Flow.terminal_is_flow"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 72,
+          "column": 1
+        },
+        "end": {
+          "line": 76,
+          "column": 14
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.terminal_is_flow"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 78,
+          "column": 1
+        },
+        "end": {
+          "line": 81,
+          "column": 15
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.code_ofCode",
+        "CapDAG.Bifaci.Flow.ofCode_code"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 54,
+          "column": 1
+        },
+        "end": {
+          "line": 70,
+          "column": 14
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.Reorder.accept",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le",
+          "lean_nat_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.deliver_is_the_next_run",
+        "CapDAG.Bifaci.Flow.held_within_limit",
+        "CapDAG.Bifaci.Flow.hold_keeps_order",
+        "CapDAG.Bifaci.Flow.stale_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 124,
+          "column": 1
+        },
+        "end": {
+          "line": 132,
+          "column": 59
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Flow.Reorder.start",
+      "module": "CapDAG.Bifaci.Flow",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Flow.ordered_start"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Flow.lean",
+        "start": {
+          "line": 92,
+          "column": 1
+        },
+        "end": {
+          "line": 93,
+          "column": 39
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.admit",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.admit_iff_next"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 142,
+          "column": 1
+        },
+        "end": {
+          "line": 146,
+          "column": 17
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.admitNext",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.admission_shortens_line",
+        "CapDAG.Bifaci.Pools.admit_iff_next"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 124,
+          "column": 1
+        },
+        "end": {
+          "line": 126,
+          "column": 57
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.arrive",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.arrive_admits_iff",
+        "CapDAG.Bifaci.Pools.arrive_keeps_settled",
+        "CapDAG.Bifaci.Pools.arrive_settled",
+        "CapDAG.Bifaci.Pools.arrive_ticketed"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 172,
+          "column": 1
+        },
+        "end": {
+          "line": 183,
+          "column": 23
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.empty",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.ticketed_empty"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 74,
+          "column": 1
+        },
+        "end": {
+          "line": 74,
+          "column": 39
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.hasRoom",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.hasRoom_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 82,
+          "column": 1
+        },
+        "end": {
+          "line": 84,
+          "column": 68
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.heldBack",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.heldBack_le"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 185,
+          "column": 1
+        },
+        "end": {
+          "line": 193,
+          "column": 33
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.join",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.join_known"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 162,
+          "column": 1
+        },
+        "end": {
+          "line": 170,
+          "column": 53
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.leave",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.leave_removes_only_it"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 148,
+          "column": 1
+        },
+        "end": {
+          "line": 150,
+          "column": 58
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.position",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.position_zero_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 106,
+          "column": 1
+        },
+        "end": {
+          "line": 114,
+          "column": 58
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.release",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_sub",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.release_undoes_take",
+        "CapDAG.Bifaci.Pools.release_within"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 97,
+          "column": 1
+        },
+        "end": {
+          "line": 100,
+          "column": 79
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.State.setCapacity",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.setCapacity_others",
+        "CapDAG.Bifaci.Pools.setCapacity_pool"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 86,
+          "column": 1
+        },
+        "end": {
+          "line": 90,
+          "column": 60
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.advertised",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.advertised_running",
+        "CapDAG.Bifaci.Pools.canary"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 38,
+          "column": 1
+        },
+        "end": {
+          "line": 44,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.chain",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.chain_includes_all",
+        "CapDAG.Bifaci.Pools.chain_shared",
+        "CapDAG.Bifaci.Pools.chain_starts_with_cap"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 46,
+          "column": 1
+        },
+        "end": {
+          "line": 49,
+          "column": 78
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.effective",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.effective_static",
+        "CapDAG.Bifaci.Pools.effective_unlimited_iff",
+        "CapDAG.Bifaci.Pools.effective_within_available",
+        "CapDAG.Bifaci.Pools.effective_within_configured"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 26,
+          "column": 1
+        },
+        "end": {
+          "line": 36,
+          "column": 35
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Pools.patience",
+      "module": "CapDAG.Bifaci.Pools",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_lt",
+          "lean_nat_sub"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Pools.patience_available",
+        "CapDAG.Bifaci.Pools.patience_exhausted_iff",
+        "CapDAG.Bifaci.Pools.patience_is_the_remainder"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Pools.lean",
+        "start": {
+          "line": 207,
+          "column": 1
+        },
+        "end": {
+          "line": 214,
+          "column": 86
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.Phase.after",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.phase_after",
+        "CapDAG.Bifaci.Request.streaming_stays"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 47,
+          "column": 1
+        },
+        "end": {
+          "line": 49,
+          "column": 41
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.check",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.check_prefix"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 209,
+          "column": 1
+        },
+        "end": {
+          "line": 218,
+          "column": 27
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.dispose",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.live_is_routed",
+        "CapDAG.Bifaci.Request.noRoute_iff",
+        "CapDAG.Bifaci.Request.straggler_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 78,
+          "column": 1
+        },
+        "end": {
+          "line": 81,
+          "column": 72
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.ledger",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_int_add",
+          "lean_int_sub",
+          "lean_nat_to_int"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.ledger_unmoved"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 85,
+          "column": 1
+        },
+        "end": {
+          "line": 92,
+          "column": 19
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.terminalOf",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.terminalOf_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 33,
+          "column": 1
+        },
+        "end": {
+          "line": 37,
+          "column": 14
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.write",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.control_always_written",
+        "CapDAG.Bifaci.Request.live_writes",
+        "CapDAG.Bifaci.Request.over_suppresses_flow"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 61,
+          "column": 1
+        },
+        "end": {
+          "line": 63,
+          "column": 87
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.accepts",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.accepts_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 231,
+          "column": 1
+        },
+        "end": {
+          "line": 233,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.comparable",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.comparable_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 278,
+          "column": 1
+        },
+        "end": {
+          "line": 278,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.dispatch",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.dispatch_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 211,
+          "column": 1
+        },
+        "end": {
+          "line": 213,
+          "column": 49
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.effectOk",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.effectOk_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 29,
+          "column": 1
+        },
+        "end": {
+          "line": 30,
+          "column": 56
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.equivalent",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.equivalent_axiswise",
+        "CapDAG.Exec.equivalent_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 277,
+          "column": 1
+        },
+        "end": {
+          "line": 277,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.flows",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.flows_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 314,
+          "column": 1
+        },
+        "end": {
+          "line": 315,
+          "column": 74
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.mayDispatch",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.mayDispatch_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 221,
+          "column": 1
+        },
+        "end": {
+          "line": 223,
+          "column": 51
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.mayFlow",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.mayFlow_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 321,
+          "column": 1
+        },
+        "end": {
+          "line": 322,
+          "column": 74
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryAdmits",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.queryAdmits_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 152,
+          "column": 1
+        },
+        "end": {
+          "line": 155,
+          "column": 78
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryBetween",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Exec.queryBetween_reads"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 97,
+          "column": 1
+        },
+        "end": {
+          "line": 99,
+          "column": 99
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryConsuming",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Exec.queryConsuming_reads"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 93,
+          "column": 1
+        },
+        "end": {
+          "line": 95,
+          "column": 93
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryGrade",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.queryGrade_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 190,
+          "column": 1
+        },
+        "end": {
+          "line": 196,
+          "column": 18
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryMayAdmit",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.queryMayAdmit_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 165,
+          "column": 1
+        },
+        "end": {
+          "line": 168,
+          "column": 76
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryOfPattern",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.queryOfPattern_reads"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 81,
+          "column": 1
+        },
+        "end": {
+          "line": 86,
+          "column": 42
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryOfRequest",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.queryOfRequest_reads"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 75,
+          "column": 1
+        },
+        "end": {
+          "line": 79,
+          "column": 70
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.queryProducing",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Exec.queryProducing_reads"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 88,
+          "column": 1
+        },
+        "end": {
+          "line": 91,
+          "column": 94
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.rankingKey",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_le",
+          "lean_nat_mul",
+          "lean_nat_sub"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.rankingKey_eq"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 333,
+          "column": 1
+        },
+        "end": {
+          "line": 335,
+          "column": 50
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.select",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le",
+          "lean_nat_dec_lt",
+          "lean_nat_mul",
+          "lean_nat_sub",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.select_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 341,
+          "column": 1
+        },
+        "end": {
+          "line": 352,
+          "column": 9
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.specificity",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_mul"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.specificity_eq"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 328,
+          "column": 1
+        },
+        "end": {
+          "line": 328,
+          "column": 54
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.make",
+      "module": "TaggedUrn.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "TaggedUrn.Exec.make_isSome_iff",
+        "TaggedUrn.Exec.make_urn"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 26,
+          "column": 1
+        },
+        "end": {
+          "line": 29,
+          "column": 61
+        }
+      }
+    }
+  ]
+}
