@@ -2,8 +2,8 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.88.0",
-  "runtime_abi": 1,
+  "generator_version": "1.105.524",
+  "runtime_abi": 2,
   "modules": [
     "Init.Prelude",
     "Init.Coe",
@@ -654,6 +654,15 @@
     "Init.MethodSpecsSimp",
     "Init.LetFun",
     "Init",
+    "Lungo.Registry",
+    "Lungo.Spec.Contract",
+    "Lungo.Spec.Model",
+    "Lungo.Spec.State",
+    "Lungo.Trace",
+    "Lungo.Monitor",
+    "Lungo.Async",
+    "Lungo.Core",
+    "Lungo",
     "TaggedUrn.Constraint",
     "TaggedUrn.Urn",
     "TaggedUrn.Sorted",
@@ -667,1076 +676,417 @@
     "CapDAG.Bifaci.Credit",
     "CapDAG.Bifaci.Flow",
     "CapDAG.Bifaci.Request",
-    "CapDAG.Bifaci.Pools"
+    "CapDAG.Bifaci.Pools",
+    "Lean.Data.Iterators.Producers.PersistentHashMap",
+    "Lean.Elab.Structure"
   ],
-  "declarations": 1579,
+  "declarations": 1581,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::gate::acquire",
       "lean_type": "CapDAG.Bifaci.Credit.Gate → Nat → CapDAG.Bifaci.Credit.Acquire",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:50:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_le",
-          "lean_nat_sub"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:50:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.close",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::gate::close",
       "lean_type": "CapDAG.Bifaci.Credit.Gate → String → CapDAG.Bifaci.Credit.Gate",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:62:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:62:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.grant",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::gate::grant",
       "lean_type": "CapDAG.Bifaci.Credit.Gate → Nat → CapDAG.Bifaci.Credit.Gate",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:56:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:56:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.opened",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::gate::opened",
       "lean_type": "Nat → CapDAG.Bifaci.Credit.Gate",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:37:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:37:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Window.arrive",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::window::arrive",
       "lean_type": "CapDAG.Bifaci.Credit.Window → CapDAG.Bifaci.Credit.Arrival",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:101:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_nat_sub"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:101:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Window.consume",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::window::consume",
       "lean_type": "CapDAG.Bifaci.Credit.Window → CapDAG.Bifaci.Credit.Granted",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:117:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_le"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:117:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Window.continued",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::window::continued",
       "lean_type": "CapDAG.Bifaci.Credit.Window → CapDAG.Bifaci.Credit.Granted",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:122:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:122:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Window.flush",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::window::flush",
       "lean_type": "CapDAG.Bifaci.Credit.Window → CapDAG.Bifaci.Credit.Granted",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:111:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:111:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.Window.opened",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::window::opened",
       "lean_type": "Nat → CapDAG.Bifaci.Credit.Window",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:89:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_le",
-          "lean_nat_shiftr"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:89:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.grantTarget",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::grant_target",
       "lean_type": "List (Option String) → Option String → Option (Option String)",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:68:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:68:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Credit.negotiate",
       "module": "CapDAG.Bifaci.Credit",
       "rust_path": "bifaci::credit::negotiate",
       "lean_type": "Nat → Nat → Option Nat",
-      "source": "formal/CapDAG/Bifaci/Credit.lean:21:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_nat_dec_le"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Credit.lean:21:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.code",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::code",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Nat",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:37:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:37:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::is_flow",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Bool",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:72:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:72:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::is_terminal",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Bool",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:78:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:78:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::of_code",
       "lean_type": "Nat → Option CapDAG.Bifaci.Flow.FrameType",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:54:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:54:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.Reorder.accept",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::reorder::accept",
       "lean_type": "CapDAG.Bifaci.Flow.Reorder → Nat → Nat → CapDAG.Bifaci.Flow.Accepted",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:124:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_le",
-          "lean_nat_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:124:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.Reorder.start",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::reorder::start",
       "lean_type": "CapDAG.Bifaci.Flow.Reorder",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:92:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Flow.lean:92:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.admit",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::admit",
       "lean_type": "CapDAG.Bifaci.Pools.State → Nat → Option CapDAG.Bifaci.Pools.State",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:142:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_lt",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:142:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.admitNext",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::admit_next",
       "lean_type": "CapDAG.Bifaci.Pools.State → Option (CapDAG.Bifaci.Pools.Waiter × CapDAG.Bifaci.Pools.State)",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:124:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_lt",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:124:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.arrive",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::arrive",
       "lean_type": "CapDAG.Bifaci.Pools.State → List String → CapDAG.Bifaci.Pools.Arrival",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:172:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_array_push",
-          "lean_array_to_list",
-          "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_lt",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:172:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.empty",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::empty",
       "lean_type": "CapDAG.Bifaci.Pools.State",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:74:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:74:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.hasRoom",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::has_room",
       "lean_type": "CapDAG.Bifaci.Pools.State → List String → Bool",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:82:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_nat_dec_lt",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:82:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.heldBack",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::held_back",
       "lean_type": "CapDAG.Bifaci.Pools.State → String → Nat",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:185:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_lt",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:185:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.join",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::join",
       "lean_type": "CapDAG.Bifaci.Pools.State → List String → CapDAG.Bifaci.Pools.Arrival",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:162:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_array_push",
-          "lean_array_to_list",
-          "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:162:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.leave",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::leave",
       "lean_type": "CapDAG.Bifaci.Pools.State → Nat → CapDAG.Bifaci.Pools.State",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:148:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:148:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.position",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::position",
       "lean_type": "CapDAG.Bifaci.Pools.State → Nat → Nat",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:106:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_array_push",
-          "lean_array_to_list",
-          "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:106:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.release",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::release",
       "lean_type": "CapDAG.Bifaci.Pools.State → List String → CapDAG.Bifaci.Pools.State",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:97:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_sub",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:97:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.setCapacity",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::state::set_capacity",
       "lean_type": "CapDAG.Bifaci.Pools.State → String → Nat → CapDAG.Bifaci.Pools.State",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:86:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:86:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.advertised",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::advertised",
       "lean_type": "Bool → String → Nat → Option Nat → Nat",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:38:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_nat_dec_le",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:38:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.chain",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::chain",
       "lean_type": "String → List (String × List String) → List String",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:46:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:46:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.effective",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::effective",
       "lean_type": "Nat → Option Nat → Nat",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:26:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_nat_dec_le"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:26:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.patience",
       "module": "CapDAG.Bifaci.Pools",
       "rust_path": "bifaci::pools::patience",
       "lean_type": "Option Nat → Nat → CapDAG.Bifaci.Pools.Patience",
-      "source": "formal/CapDAG/Bifaci/Pools.lean:207:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_lt",
-          "lean_nat_sub"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Pools.lean:207:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.Phase.after",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::phase::after",
       "lean_type": "CapDAG.Bifaci.Request.Phase → CapDAG.Bifaci.Flow.FrameType → CapDAG.Bifaci.Request.Phase",
-      "source": "formal/CapDAG/Bifaci/Request.lean:47:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:47:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.check",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::check",
       "lean_type": "List CapDAG.Bifaci.Request.Emitted → Option CapDAG.Bifaci.Request.Violation",
-      "source": "formal/CapDAG/Bifaci/Request.lean:209:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:209:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.dispose",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::dispose",
       "lean_type": "Bool → Bool → CapDAG.Bifaci.Request.Disposition",
-      "source": "formal/CapDAG/Bifaci/Request.lean:78:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:78:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.ledger",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::ledger",
       "lean_type": "Int → CapDAG.Bifaci.Flow.FrameType → Nat → Int",
-      "source": "formal/CapDAG/Bifaci/Request.lean:85:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_int_add",
-          "lean_int_sub",
-          "lean_nat_to_int"
-        ]
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:85:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.terminalOf",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::terminal_of",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Option CapDAG.Bifaci.Request.Terminal",
-      "source": "formal/CapDAG/Bifaci/Request.lean:33:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:33:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Request.write",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::write",
       "lean_type": "Bool → CapDAG.Bifaci.Flow.FrameType → CapDAG.Bifaci.Request.Write",
-      "source": "formal/CapDAG/Bifaci/Request.lean:61:1",
-      "trust": {
-        "axioms": [
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Bifaci/Request.lean:61:1"
     },
     {
       "lean_name": "CapDAG.Exec.accepts",
       "module": "CapDAG.Exec",
       "rust_path": "exec::accepts",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:208:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:231:1"
     },
     {
       "lean_name": "CapDAG.Exec.comparable",
       "module": "CapDAG.Exec",
       "rust_path": "exec::comparable",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:254:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:278:1"
     },
     {
       "lean_name": "CapDAG.Exec.dispatch",
       "module": "CapDAG.Exec",
       "rust_path": "exec::dispatch",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:190:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:211:1"
     },
     {
       "lean_name": "CapDAG.Exec.effectOk",
       "module": "CapDAG.Exec",
       "rust_path": "exec::effect_ok",
       "lean_type": "CapDAG.Effect → CapDAG.Effect → Bool",
-      "source": "formal/CapDAG/Exec.lean:29:1",
-      "trust": {
-        "axioms": [],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:29:1"
     },
     {
       "lean_name": "CapDAG.Exec.equivalent",
       "module": "CapDAG.Exec",
       "rust_path": "exec::equivalent",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:253:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:277:1"
     },
     {
       "lean_name": "CapDAG.Exec.flows",
       "module": "CapDAG.Exec",
       "rust_path": "exec::flows",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:277:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:314:1"
     },
     {
       "lean_name": "CapDAG.Exec.mayDispatch",
       "module": "CapDAG.Exec",
       "rust_path": "exec::may_dispatch",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:199:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:221:1"
     },
     {
       "lean_name": "CapDAG.Exec.mayFlow",
       "module": "CapDAG.Exec",
       "rust_path": "exec::may_flow",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:283:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:321:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryAdmits",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_admits",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:134:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:152:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryBetween",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_between",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "formal/CapDAG/Exec.lean:96:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Exec.lean:97:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryConsuming",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_consuming",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "formal/CapDAG/Exec.lean:92:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Exec.lean:93:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryGrade",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_grade",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → CapDAG.Grade",
-      "source": "formal/CapDAG/Exec.lean:170:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:190:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryMayAdmit",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_may_admit",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
-      "source": "formal/CapDAG/Exec.lean:146:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_dec_eq",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:165:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryOfPattern",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_of_pattern",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
-      "source": "formal/CapDAG/Exec.lean:80:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:81:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryOfRequest",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_of_request",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
-      "source": "formal/CapDAG/Exec.lean:74:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:75:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryProducing",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_producing",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "formal/CapDAG/Exec.lean:87:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": []
-      }
+      "source": "formal/CapDAG/Exec.lean:88:1"
     },
     {
       "lean_name": "CapDAG.Exec.rankingKey",
       "module": "CapDAG.Exec",
       "rust_path": "exec::ranking_key",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Nat × Nat",
-      "source": "formal/CapDAG/Exec.lean:291:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_le",
-          "lean_nat_mul",
-          "lean_nat_sub"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:333:1"
     },
     {
       "lean_name": "CapDAG.Exec.select",
       "module": "CapDAG.Exec",
       "rust_path": "exec::select",
       "lean_type": "List CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Option CapDAG.Exec.WfCap",
-      "source": "formal/CapDAG/Exec.lean:295:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_dec_eq",
-          "lean_nat_dec_le",
-          "lean_nat_dec_lt",
-          "lean_nat_mul",
-          "lean_nat_sub",
-          "lean_string_dec_eq",
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:341:1"
     },
     {
       "lean_name": "CapDAG.Exec.specificity",
       "module": "CapDAG.Exec",
       "rust_path": "exec::specificity",
       "lean_type": "CapDAG.Exec.WfCap → Nat",
-      "source": "formal/CapDAG/Exec.lean:289:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_nat_add",
-          "lean_nat_mul"
-        ]
-      }
+      "source": "formal/CapDAG/Exec.lean:328:1"
     },
     {
       "lean_name": "TaggedUrn.Exec.make",
       "module": "TaggedUrn.Exec",
       "rust_path": "_root_::tagged_urn::exec::make",
       "lean_type": "String → List (String × TaggedUrn.Constraint) → Option TaggedUrn.Exec.Wf",
-      "source": "formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:26:1",
-      "trust": {
-        "axioms": [
-          "Classical.choice",
-          "Quot.sound",
-          "propext"
-        ],
-        "depends_on_sorry": false,
-        "unsafe_dependencies": [],
-        "partial_dependencies": [],
-        "extern_dependencies": [
-          "lean_string_dec_lt"
-        ]
-      }
+      "source": "formal/../../tagged-urn/formal/TaggedUrn/Exec.lean:26:1"
     }
   ]
 }

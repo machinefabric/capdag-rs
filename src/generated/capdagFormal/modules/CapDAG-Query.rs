@@ -82,7 +82,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dAsk_dctorIdx_d__boxed(x_1: Obj) -> Obj
 }
 
 // Lean: CapDAG.Ask.exactly
-// Source: formal/CapDAG/Query.lean:286:1
+// Source: formal/CapDAG/Query.lean:296:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dAsk_dexactly(x_1: Obj) -> Obj {
     match rt::lean_obj_tag(x_1) {
         1 => {
@@ -215,7 +215,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dAsk_dwithin_delim_d__redArg(x_1: Obj, 
 }
 
 // Lean: CapDAG.Grade.ctorElim
-// Source: formal/CapDAG/Query.lean:274:1
+// Source: formal/CapDAG/Query.lean:284:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim(x_1: Obj, x_2: Obj, x_3: u8, x_4: Obj, x_5: Obj) -> Obj {
     rt::lean_inc(x_5);
     return x_5;
@@ -223,7 +223,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim(x_1: Obj, x_2: Obj, x_
 
 // Lean: CapDAG.Grade.ctorElim._boxed
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: formal/CapDAG/Query.lean:274:1
+// Source: formal/CapDAG/Query.lean:284:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj, x_5: Obj) -> Obj {
     let x_6: u8 = rt::lean_unbox(x_3) as u8;
     let x_7: Obj = l_CapDAG_dGrade_dctorElim(x_1, x_2, x_6, x_4, x_5);
@@ -234,7 +234,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__boxed(x_1: Obj, x_2
 
 // Lean: CapDAG.Grade.ctorElim._redArg
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: formal/CapDAG/Query.lean:274:1
+// Source: formal/CapDAG/Query.lean:284:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -242,7 +242,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg(x_1: Obj) ->
 
 // Lean: CapDAG.Grade.ctorElim._redArg._boxed
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: formal/CapDAG/Query.lean:274:1
+// Source: formal/CapDAG/Query.lean:284:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dctorElim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -282,7 +282,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorIdx_d__boxed(x_1: Obj) -> O
 }
 
 // Lean: CapDAG.Grade.exact.elim
-// Source: formal/CapDAG/Query.lean:276:3
+// Source: formal/CapDAG/Query.lean:286:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -290,7 +290,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim(x_1: Obj, x_2: u8, 
 
 // Lean: CapDAG.Grade.exact.elim._boxed
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: formal/CapDAG/Query.lean:276:3
+// Source: formal/CapDAG/Query.lean:286:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dexact_delim(x_1, x_5, x_3, x_4);
@@ -300,7 +300,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__boxed(x_1: Obj, 
 
 // Lean: CapDAG.Grade.exact.elim._redArg
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: formal/CapDAG/Query.lean:276:3
+// Source: formal/CapDAG/Query.lean:286:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -308,7 +308,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg(x_1: Obj)
 
 // Lean: CapDAG.Grade.exact.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: formal/CapDAG/Query.lean:276:3
+// Source: formal/CapDAG/Query.lean:286:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dexact_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -316,7 +316,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg_d__boxed(
 }
 
 // Lean: CapDAG.Grade.guaranteed.elim
-// Source: formal/CapDAG/Query.lean:278:3
+// Source: formal/CapDAG/Query.lean:288:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -324,7 +324,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim(x_1: Obj, x_2:
 
 // Lean: CapDAG.Grade.guaranteed.elim._boxed
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: formal/CapDAG/Query.lean:278:3
+// Source: formal/CapDAG/Query.lean:288:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dguaranteed_delim(x_1, x_5, x_3, x_4);
@@ -334,7 +334,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__boxed(x_1: 
 
 // Lean: CapDAG.Grade.guaranteed.elim._redArg
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: formal/CapDAG/Query.lean:278:3
+// Source: formal/CapDAG/Query.lean:288:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -342,7 +342,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1:
 
 // Lean: CapDAG.Grade.guaranteed.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: formal/CapDAG/Query.lean:278:3
+// Source: formal/CapDAG/Query.lean:288:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -350,7 +350,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg_d__b
 }
 
 // Lean: CapDAG.Grade.none.elim
-// Source: formal/CapDAG/Query.lean:282:3
+// Source: formal/CapDAG/Query.lean:292:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -358,7 +358,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim(x_1: Obj, x_2: u8, x
 
 // Lean: CapDAG.Grade.none.elim._boxed
 // Compiled from: CapDAG.Grade.none.elim
-// Source: formal/CapDAG/Query.lean:282:3
+// Source: formal/CapDAG/Query.lean:292:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dnone_delim(x_1, x_5, x_3, x_4);
@@ -368,7 +368,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__boxed(x_1: Obj, x
 
 // Lean: CapDAG.Grade.none.elim._redArg
 // Compiled from: CapDAG.Grade.none.elim
-// Source: formal/CapDAG/Query.lean:282:3
+// Source: formal/CapDAG/Query.lean:292:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -376,7 +376,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg(x_1: Obj) 
 
 // Lean: CapDAG.Grade.none.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.none.elim
-// Source: formal/CapDAG/Query.lean:282:3
+// Source: formal/CapDAG/Query.lean:292:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dnone_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -431,7 +431,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dofNat_d__boxed(x_1: Obj) -> Obj
 }
 
 // Lean: CapDAG.Grade.possible.elim
-// Source: formal/CapDAG/Query.lean:280:3
+// Source: formal/CapDAG/Query.lean:290:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -439,7 +439,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim(x_1: Obj, x_2: u
 
 // Lean: CapDAG.Grade.possible.elim._boxed
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: formal/CapDAG/Query.lean:280:3
+// Source: formal/CapDAG/Query.lean:290:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dpossible_delim(x_1, x_5, x_3, x_4);
@@ -449,7 +449,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__boxed(x_1: Ob
 
 // Lean: CapDAG.Grade.possible.elim._redArg
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: formal/CapDAG/Query.lean:280:3
+// Source: formal/CapDAG/Query.lean:290:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -457,7 +457,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1: O
 
 // Lean: CapDAG.Grade.possible.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: formal/CapDAG/Query.lean:280:3
+// Source: formal/CapDAG/Query.lean:290:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -465,7 +465,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg_d__box
 }
 
 // Lean: CapDAG.Query.consuming
-// Source: formal/CapDAG/Query.lean:158:1
+// Source: formal/CapDAG/Query.lean:164:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dconsuming(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: Obj = rt::lean_alloc_ctor(2, 1, 0);
     rt::lean_ctor_set(x_3, 0, x_1);
@@ -480,7 +480,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dconsuming(x_1: Obj, x_2: Obj) -
 }
 
 // Lean: CapDAG.Query.exactly
-// Source: formal/CapDAG/Query.lean:291:1
+// Source: formal/CapDAG/Query.lean:301:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dexactly(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 0);
     let x_3: Obj = rt::lean_ctor_get(x_1, 1);
@@ -533,7 +533,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dexactly(x_1: Obj) -> Obj {
 }
 
 // Lean: CapDAG.Query.grade
-// Source: formal/CapDAG/Query.lean:294:1
+// Source: formal/CapDAG/Query.lean:304:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade(x_1: Obj, x_2: Obj) -> u8 {
     rt::lean_inc_ref(x_1);
     let x_3: Obj = l_CapDAG_dQuery_dexactly(x_1);
@@ -577,7 +577,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade(x_1: Obj, x_2: Obj) -> u8
 
 // Lean: CapDAG.Query.grade._boxed
 // Compiled from: CapDAG.Query.grade
-// Source: formal/CapDAG/Query.lean:294:1
+// Source: formal/CapDAG/Query.lean:304:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dQuery_dgrade(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -585,7 +585,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade_d__boxed(x_1: Obj, x_2: O
 }
 
 // Lean: CapDAG.Query.ofCall
-// Source: formal/CapDAG/Query.lean:133:1
+// Source: formal/CapDAG/Query.lean:135:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofCall(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 0);
     let x_3: Obj = rt::lean_ctor_get(x_1, 1);
@@ -640,7 +640,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofCall(x_1: Obj) -> Obj {
 }
 
 // Lean: CapDAG.Query.ofPattern
-// Source: formal/CapDAG/Query.lean:146:1
+// Source: formal/CapDAG/Query.lean:150:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofPattern(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 0);
     let x_3: Obj = rt::lean_ctor_get(x_1, 1);
@@ -726,7 +726,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofPattern(x_1: Obj) -> Obj {
 }
 
 // Lean: CapDAG.Query.ofRequest
-// Source: formal/CapDAG/Query.lean:138:1
+// Source: formal/CapDAG/Query.lean:141:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofRequest(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 0);
     let x_3: Obj = rt::lean_ctor_get(x_1, 1);
@@ -798,7 +798,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dofRequest(x_1: Obj) -> Obj {
 }
 
 // Lean: CapDAG.Query.producing
-// Source: formal/CapDAG/Query.lean:154:1
+// Source: formal/CapDAG/Query.lean:159:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dproducing(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: Obj = rt::lean_box(0);
     let x_4: Obj = rt::lean_alloc_ctor(1, 1, 0);
@@ -864,7 +864,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableAdmits_d__boxed(x_1: Obj,
 }
 
 // Lean: CapDAG.instDecidableAdmits_1
-// Source: formal/CapDAG/Query.lean:94:1
+// Source: formal/CapDAG/Query.lean:95:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableAdmits__1(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     rt::lean_inc(x_3);
@@ -920,7 +920,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableAdmits__1(x_1: Obj, x_2: 
 
 // Lean: CapDAG.instDecidableAdmits_1._boxed
 // Compiled from: CapDAG.instDecidableAdmits_1
-// Source: formal/CapDAG/Query.lean:94:1
+// Source: formal/CapDAG/Query.lean:95:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableAdmits__1_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dinstDecidableAdmits__1(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -1066,7 +1066,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqAsk_ddecEq_d__boxed(x_1
 }
 
 // Lean: CapDAG.instDecidableEqGrade
-// Source: formal/CapDAG/Query.lean:284:18
+// Source: formal/CapDAG/Query.lean:294:18
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade(x_1: u8, x_2: u8) -> u8 {
     let x_3: Obj = l_CapDAG_dGrade_dctorIdx(x_1);
     let x_4: Obj = l_CapDAG_dGrade_dctorIdx(x_2);
@@ -1078,7 +1078,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade(x_1: u8, x_2: u8)
 
 // Lean: CapDAG.instDecidableEqGrade._boxed
 // Compiled from: CapDAG.instDecidableEqGrade
-// Source: formal/CapDAG/Query.lean:284:18
+// Source: formal/CapDAG/Query.lean:294:18
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = rt::lean_unbox(x_1) as u8;
     let x_4: u8 = rt::lean_unbox(x_2) as u8;
@@ -1166,7 +1166,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqQuery_ddecEq_d__boxed(x
 }
 
 // Lean: CapDAG.instDecidableFits
-// Source: formal/CapDAG/Query.lean:175:1
+// Source: formal/CapDAG/Query.lean:185:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableFits(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = l_CapDAG_dQuery_dofPattern(x_1);
     let x_4: u8 = l_CapDAG_dinstDecidableAdmits__1(x_3, x_2);
@@ -1175,7 +1175,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableFits(x_1: Obj, x_2: Obj) 
 
 // Lean: CapDAG.instDecidableFits._boxed
 // Compiled from: CapDAG.instDecidableFits
-// Source: formal/CapDAG/Query.lean:175:1
+// Source: formal/CapDAG/Query.lean:185:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableFits_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dinstDecidableFits(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -1211,7 +1211,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayAdmit_d__boxed(x_1: Ob
 }
 
 // Lean: CapDAG.instDecidableMayAdmit_1
-// Source: formal/CapDAG/Query.lean:102:1
+// Source: formal/CapDAG/Query.lean:104:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayAdmit__1(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     rt::lean_inc(x_3);
@@ -1267,7 +1267,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayAdmit__1(x_1: Obj, x_2
 
 // Lean: CapDAG.instDecidableMayAdmit_1._boxed
 // Compiled from: CapDAG.instDecidableMayAdmit_1
-// Source: formal/CapDAG/Query.lean:102:1
+// Source: formal/CapDAG/Query.lean:104:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayAdmit__1_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dinstDecidableMayAdmit__1(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -1275,7 +1275,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayAdmit__1_d__boxed(x_1:
 }
 
 // Lean: CapDAG.instDecidableMayServe
-// Source: formal/CapDAG/Query.lean:170:1
+// Source: formal/CapDAG/Query.lean:179:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayServe(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = l_CapDAG_dQuery_dofRequest(x_2);
     let x_4: u8 = l_CapDAG_dinstDecidableMayAdmit__1(x_3, x_1);
@@ -1284,7 +1284,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayServe(x_1: Obj, x_2: O
 
 // Lean: CapDAG.instDecidableMayServe._boxed
 // Compiled from: CapDAG.instDecidableMayServe
-// Source: formal/CapDAG/Query.lean:170:1
+// Source: formal/CapDAG/Query.lean:179:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayServe_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dinstDecidableMayServe(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -1292,7 +1292,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableMayServe_d__boxed(x_1: Ob
 }
 
 // Lean: CapDAG.instDecidableServes
-// Source: formal/CapDAG/Query.lean:165:1
+// Source: formal/CapDAG/Query.lean:173:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableServes(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = l_CapDAG_dQuery_dofRequest(x_2);
     let x_4: u8 = l_CapDAG_dinstDecidableAdmits__1(x_3, x_1);
@@ -1301,7 +1301,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableServes(x_1: Obj, x_2: Obj
 
 // Lean: CapDAG.instDecidableServes._boxed
 // Compiled from: CapDAG.instDecidableServes
-// Source: formal/CapDAG/Query.lean:165:1
+// Source: formal/CapDAG/Query.lean:173:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableServes_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dinstDecidableServes(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -1682,7 +1682,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprAsk_drepr_d__closed__9() -> Obj {
 }
 
 // Lean: CapDAG.instReprGrade
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_d__closed__0();
@@ -1695,7 +1695,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade() -> Obj {
 
 // Lean: CapDAG.instReprGrade._closed_0
 // Compiled from: CapDAG.instReprGrade
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_alloc_closure(l_CapDAG_dinstReprGrade_drepr_d__boxed as *const (), 2, 0);
@@ -1707,7 +1707,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_d__closed__0() -> Obj {
 }
 
 // Lean: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr(x_1: u8, x_2: Obj) -> Obj {
     let mut x_4: Obj;
     'b3: {
@@ -1835,7 +1835,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr(x_1: u8, x_2: Obj)
 
 // Lean: CapDAG.instReprGrade.repr._boxed
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = rt::lean_unbox(x_1) as u8;
     let x_4: Obj = l_CapDAG_dinstReprGrade_drepr(x_3, x_2);
@@ -1845,7 +1845,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr_d__boxed(x_1: Obj,
 
 // Lean: CapDAG.instReprGrade.repr._closed_0
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.exact", 18);
@@ -1858,7 +1858,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__0() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_1
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__1: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__1__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__0();
@@ -1873,7 +1873,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__1() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_2
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__2: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__2__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.guaranteed", 23);
@@ -1886,7 +1886,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__2() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_3
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__3: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__3__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__2();
@@ -1901,7 +1901,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__3() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_4
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__4: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__4__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.possible", 21);
@@ -1914,7 +1914,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__4() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_5
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__5: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__5__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__4();
@@ -1929,7 +1929,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__5() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_6
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__6: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__6__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.none", 17);
@@ -1942,7 +1942,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__6() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_7
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: formal/CapDAG/Query.lean:284:12
+// Source: formal/CapDAG/Query.lean:294:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__7: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__7__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__6();
