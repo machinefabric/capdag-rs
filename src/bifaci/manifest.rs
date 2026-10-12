@@ -462,10 +462,10 @@ mod tests {
             vec!["extract-metadata".to_string()],
         );
         cap.add_arg(CapArg::new(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:ext=pdf".to_string(),
+                stdin: "media:document;ext=pdf".to_string(),
             }],
         ));
         cap.add_arg(CapArg::with_full_definition(
@@ -844,7 +844,7 @@ mod tests {
         let claiming = CapGroup {
             name: "default".to_string(),
             caps: Vec::new(),
-            adapter_urns: vec!["media:ext=pdf".to_string()],
+            adapter_urns: vec!["media:document;ext=pdf".to_string()],
         };
         let claiming_json = serde_json::to_value(&claiming).expect("group serializes");
         assert_eq!(

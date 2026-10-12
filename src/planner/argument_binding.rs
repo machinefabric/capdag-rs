@@ -20,7 +20,7 @@ use std::collections::HashMap;
 pub struct CapInputFile {
     /// Actual filesystem path to the file
     pub file_path: String,
-    /// Media URN describing the file type (e.g., "media:ext=pdf")
+    /// Media URN describing the file type (e.g., "media:document;ext=pdf")
     pub media_urn: String,
     /// Optional file metadata
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -622,11 +622,11 @@ mod tests {
     fn test7107_live_source_input_file_contract_and_roundtrip() {
         let live = CapInputFile::live_source(
             "media:audio;live;microphone",
-            "media:audio-frames;pcm",
+            "media:audio;audio-frames;pcm",
             r#"{"stop":{"duration_ms":5000}}"#,
         );
         assert_eq!(live.file_path, "", "a device input has NO file path");
-        assert_eq!(live.media_urn, "media:audio-frames;pcm", "media_urn is the CONTENT urn");
+        assert_eq!(live.media_urn, "media:audio;audio-frames;pcm", "media_urn is the CONTENT urn");
         assert_eq!(live.live_reference.as_deref(), Some("media:audio;live;microphone"));
         assert_eq!(
             live.live_selector.as_deref(),
@@ -654,9 +654,9 @@ mod tests {
     // Verifies new() initializes file_path, media_urn and leaves metadata/source_id as None
     #[test]
     fn test957_cap_input_file_new() {
-        let file = CapInputFile::new("/path/to/file.pdf".to_string(), "media:ext=pdf".to_string());
+        let file = CapInputFile::new("/path/to/file.pdf".to_string(), "media:document;ext=pdf".to_string());
         assert_eq!(file.file_path, "/path/to/file.pdf");
-        assert_eq!(file.media_urn, "media:ext=pdf");
+        assert_eq!(file.media_urn, "media:document;ext=pdf");
         assert!(file.metadata.is_none());
         assert!(file.source_id.is_none());
     }
@@ -665,7 +665,7 @@ mod tests {
     // Verifies from_listing() populates source_id and source_type as Listing
     #[test]
     fn test958_cap_input_file_from_listing() {
-        let file = CapInputFile::from_listing("listing-123", "/path/to/file.pdf", "media:ext=pdf");
+        let file = CapInputFile::from_listing("listing-123", "/path/to/file.pdf", "media:document;ext=pdf");
         assert_eq!(file.source_id, Some("listing-123".to_string()));
         assert_eq!(file.source_type, Some(SourceEntityType::Listing));
     }
@@ -676,7 +676,7 @@ mod tests {
     fn test959_cap_input_file_filename() {
         let file = CapInputFile::new(
             "/path/to/document.pdf".to_string(),
-            "media:ext=pdf".to_string(),
+            "media:document;ext=pdf".to_string(),
         );
         assert_eq!(file.filename(), Some("document.pdf"));
     }
@@ -769,7 +769,7 @@ mod tests {
     fn test796_resolve_input_file_path() {
         let files = vec![CapInputFile::new(
             "/path/to/file.pdf".to_string(),
-            "media:ext=pdf".to_string(),
+            "media:document;ext=pdf".to_string(),
         )];
         let prev_outputs = HashMap::new();
         let context = ArgumentResolutionContext {
@@ -843,7 +843,7 @@ mod tests {
     // Verifies single() wraps one file with Single cardinality and validates correctly
     #[test]
     fn test799_machine_input_single() {
-        let file = CapInputFile::new("/path/to/file.pdf".to_string(), "media:ext=pdf".to_string());
+        let file = CapInputFile::new("/path/to/file.pdf".to_string(), "media:document;ext=pdf".to_string());
         let input = StrandInput::single(file);
         assert_eq!(input.files.len(), 1);
         assert_eq!(input.cardinality, InputCardinality::Single);
@@ -855,10 +855,10 @@ mod tests {
     #[test]
     fn test800_machine_input_vector() {
         let files = vec![
-            CapInputFile::new("/path/1.pdf".to_string(), "media:ext=pdf".to_string()),
-            CapInputFile::new("/path/2.pdf".to_string(), "media:ext=pdf".to_string()),
+            CapInputFile::new("/path/1.pdf".to_string(), "media:document;ext=pdf".to_string()),
+            CapInputFile::new("/path/2.pdf".to_string(), "media:document;ext=pdf".to_string()),
         ];
-        let input = StrandInput::sequence(files, "media:ext=pdf".to_string());
+        let input = StrandInput::sequence(files, "media:document;ext=pdf".to_string());
         assert_eq!(input.files.len(), 2);
         assert_eq!(input.cardinality, InputCardinality::Sequence);
         assert!(input.is_valid());
@@ -871,7 +871,7 @@ mod tests {
         let json_str = r#"[
             {
                 "file_path": "/fixtures/aws_in_action.pdf",
-                "media_urn": "media:ext=pdf",
+                "media_urn": "media:document;ext=pdf",
                 "source_id": "1b964d3b-f409-4f51-8684-884348ec2501",
                 "source_type": "listing"
             }
@@ -891,7 +891,7 @@ mod tests {
     // Verifies deserialization through Value intermediate works correctly
     #[test]
     fn test802_cap_input_file_deserialization_via_value() {
-        let json_str = r#"[{"file_path": "/path/to/file.pdf","media_urn": "media:ext=pdf","source_id": "abc123","source_type": "listing"}]"#;
+        let json_str = r#"[{"file_path": "/path/to/file.pdf","media_urn": "media:document;ext=pdf","source_id": "abc123","source_type": "listing"}]"#;
         let value: serde_json::Value = serde_json::from_str(json_str).expect("Parse to Value");
         let result: std::result::Result<Vec<CapInputFile>, _> = serde_json::from_value(value);
         assert!(result.is_ok());
@@ -919,7 +919,7 @@ mod tests {
         let result = resolve_binding(
             &binding,
             &context,
-            "cap:in=\"media:ext=pdf\";resize;out=\"media:ext=pdf\"",
+            "cap:in=\"media:document;ext=pdf\";resize;out=\"media:document;ext=pdf\"",
             "step_0",
             None,
             true,
@@ -1012,12 +1012,12 @@ mod tests {
     #[test]
     fn test803_machine_input_invalid_single() {
         let files = vec![
-            CapInputFile::new("/path/1.pdf".to_string(), "media:ext=pdf".to_string()),
-            CapInputFile::new("/path/2.pdf".to_string(), "media:ext=pdf".to_string()),
+            CapInputFile::new("/path/1.pdf".to_string(), "media:document;ext=pdf".to_string()),
+            CapInputFile::new("/path/2.pdf".to_string(), "media:document;ext=pdf".to_string()),
         ];
         let input = StrandInput {
             files,
-            expected_media_urn: "media:ext=pdf".to_string(),
+            expected_media_urn: "media:document;ext=pdf".to_string(),
             cardinality: InputCardinality::Single,
         };
         assert!(!input.is_valid());
@@ -1027,7 +1027,7 @@ mod tests {
     // This is the core disambiguation scenario that step-index keying was designed to solve.
     #[test]
     fn test1105_two_steps_same_cap_urn_different_slot_values() {
-        let cap_urn = "cap:in=\"media:ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
         let slot_name = "media:enc=utf-8;list;question";
         let files = vec![];
         let prev_outputs = HashMap::new();
@@ -1076,7 +1076,7 @@ mod tests {
     // cap_settings are keyed by cap_urn (shared across steps), so both steps get the same value.
     #[test]
     fn test1106_slot_falls_through_to_cap_settings_shared() {
-        let cap_urn = "cap:in=\"media:ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
         let slot_name = "media:enc=utf-8;language";
         let files = vec![];
         let prev_outputs = HashMap::new();
@@ -1115,7 +1115,7 @@ mod tests {
     // Proves per-step override works while shared settings remain as fallback.
     #[test]
     fn test1107_slot_value_overrides_cap_settings_per_step() {
-        let cap_urn = "cap:in=\"media:ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
         let slot_name = "media:enc=utf-8;language";
         let files = vec![];
         let prev_outputs = HashMap::new();
@@ -1214,7 +1214,7 @@ mod tests {
     // TEST1109: Slot key uses node_id, NOT cap_urn — a slot_value keyed by cap_urn must not match.
     #[test]
     fn test1109_slot_key_uses_node_id_not_cap_urn() {
-        let cap_urn = "cap:in=\"media:ext=pdf\";resize;out=\"media:ext=pdf\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";resize;out=\"media:document;ext=pdf\"";
         let slot_name = "media:numeric;width";
         let files = vec![];
         let prev_outputs = HashMap::new();

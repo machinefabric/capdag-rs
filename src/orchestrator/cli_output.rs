@@ -325,7 +325,7 @@ mod tests {
 
         // 5. Extension derivation: ext= wins over fmt=; enc= alone ⇒ txt;
         //    no axis ⇒ bin.
-        assert_eq!(extension_for_media("media:ext=pdf;fmt=json"), "pdf");
+        assert_eq!(extension_for_media("media:document;ext=pdf;fmt=json"), "pdf");
         assert_eq!(extension_for_media("media:fmt=ndjson;record"), "ndjson");
         assert_eq!(extension_for_media("media:enc=utf-8;summary"), "txt");
         assert_eq!(extension_for_media("media:embedding-vector"), "bin");

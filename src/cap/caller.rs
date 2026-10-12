@@ -178,7 +178,7 @@ mod tests {
         let tracked_file_id = "tracked-file-123".to_string();
         let original_path = "/path/to/original.pdf".to_string();
         let security_bookmark = vec![0x62, 0x6f, 0x6f, 0x6b]; // "book"
-        let media_urn = "media:ext=pdf".to_string();
+        let media_urn = "media:document;ext=pdf".to_string();
 
         let source = StdinSource::FileReference {
             tracked_file_id: tracked_file_id.clone(),
@@ -252,7 +252,7 @@ mod tests {
             tracked_file_id: "test-id".to_string(),
             original_path: "/test/path.pdf".to_string(),
             security_bookmark: vec![1, 2, 3],
-            media_urn: "media:ext=pdf".to_string(),
+            media_urn: "media:document;ext=pdf".to_string(),
         };
         let cloned = source.clone();
 
@@ -291,7 +291,7 @@ mod tests {
             tracked_file_id: "test-id".to_string(),
             original_path: "/test/path.pdf".to_string(),
             security_bookmark: vec![],
-            media_urn: "media:ext=pdf".to_string(),
+            media_urn: "media:document;ext=pdf".to_string(),
         };
         let debug_str = format!("{:?}", file_source);
         assert!(debug_str.contains("FileReference"));
@@ -325,7 +325,7 @@ mod tests {
     // TEST277: Test CapArgumentValue::value_as_str fails for non-UTF-8 binary data
     #[test]
     fn test277_cap_argument_value_as_str_invalid_utf8() {
-        let arg = CapArgumentValue::new("media:ext=pdf", vec![0xFF, 0xFE, 0x80]);
+        let arg = CapArgumentValue::new("media:document;ext=pdf", vec![0xFF, 0xFE, 0x80]);
         assert!(arg.value_as_str().is_err(), "non-UTF-8 data must fail");
     }
 
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn test283_cap_argument_value_large_binary() {
         let data: Vec<u8> = (0u8..=255).cycle().take(10000).collect();
-        let arg = CapArgumentValue::new("media:ext=pdf", data.clone());
+        let arg = CapArgumentValue::new("media:document;ext=pdf", data.clone());
         assert_eq!(arg.value.len(), 10000);
         assert_eq!(arg.value, data);
     }

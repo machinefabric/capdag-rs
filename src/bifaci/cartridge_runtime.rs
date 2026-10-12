@@ -8354,7 +8354,7 @@ mod tests {
     // mislabeled stream.
     #[tokio::test]
     async fn test8138_main_input_fallback_content_mismatch_rejected() {
-        let (ctx, _overruns, _handles) = blind_live_feed_ctx("media:audio-frames;pcm");
+        let (ctx, _overruns, _handles) = blind_live_feed_ctx("media:audio;audio-frames;pcm");
         let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
         let rid = MessageId::new_uuid();
         send_live_reference(&raw_tx, &rid, "{}");
@@ -9179,7 +9179,7 @@ mod tests {
             ));
 
             registry.add_cap(create_test_cap(
-                r#"cap:in="media:ext=pdf";process;out=media:"#,
+                r#"cap:in="media:document;ext=pdf";process;out=media:"#,
                 "Process PDF",
                 "process",
                 vec![],
@@ -10005,7 +10005,7 @@ mod tests {
         let args = ciborium::Value::Array(vec![ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:ext=pdf".to_string()),
+                ciborium::Value::Text("media:document;ext=pdf".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -10017,7 +10017,7 @@ mod tests {
 
         let registry = MockRegistry::with_test_caps();
         let cap = registry
-            .get(r#"cap:in="media:ext=pdf";process;out=media:"#)
+            .get(r#"cap:in="media:document;ext=pdf";process;out=media:"#)
             .unwrap();
         let result = extract_effective_payload(
             &payload,
@@ -10068,7 +10068,7 @@ mod tests {
         std::fs::write(&test_file, b"PDF binary content 336").unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process PDF",
             "process",
             vec![CapArg::new(
@@ -10076,7 +10076,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -10091,7 +10091,7 @@ mod tests {
         let received_clone = Arc::clone(&received_payload);
 
         runtime.register_op(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             move || {
                 Box::new(ExtractValueOp {
                     received: Arc::clone(&received_clone),
@@ -10182,7 +10182,7 @@ mod tests {
         std::fs::write(&test_file, b"PDF via flag 338").unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
@@ -10190,7 +10190,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::CliFlag {
                         cli_flag: "--file".to_string(),
@@ -10271,7 +10271,7 @@ mod tests {
     #[test]
     fn test340_file_not_found_clear_error() {
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";test;out=\"media:void\"",
+            "cap:in=\"media:document;ext=pdf\";test;out=\"media:void\"",
             "Test",
             "test",
             vec![CapArg::new(
@@ -10279,7 +10279,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -10756,7 +10756,7 @@ mod tests {
         std::fs::write(&test_file, test_content).unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=\"media:enc=utf-8;result\"",
+            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf-8;result\"",
             "Process PDF",
             "process",
             vec![CapArg::new(
@@ -10764,7 +10764,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -10779,7 +10779,7 @@ mod tests {
         let received_clone = Arc::clone(&received_payload);
 
         runtime.register_op(
-            "cap:in=\"media:ext=pdf\";process;out=\"media:enc=utf-8;result\"",
+            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf-8;result\"",
             move || {
                 Box::new(ExtractValueOp {
                     received: Arc::clone(&received_clone),
@@ -11406,7 +11406,7 @@ mod tests {
         std::fs::write(&test_file, pdf_content).unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
@@ -11414,7 +11414,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -11448,7 +11448,7 @@ mod tests {
         };
 
         // Extract value from argument matching in_spec
-        let in_spec = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let in_spec = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let mut found_value = None;
         for arg in result_array {
             if let ciborium::Value::Map(map) = arg {
@@ -11501,7 +11501,7 @@ mod tests {
         std::fs::write(&test_file, pdf_content).unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
@@ -11509,7 +11509,7 @@ mod tests {
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:ext=pdf".to_string(),
+                        stdin: "media:document;ext=pdf".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -11551,14 +11551,14 @@ mod tests {
 
         // Create cap that accepts stdin
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf".to_string(),
+                    stdin: "media:document;ext=pdf".to_string(),
                 }],
             )],
         );
@@ -11604,7 +11604,7 @@ mod tests {
 
                     assert_eq!(
                         media_urn,
-                        Some("media:ext=pdf".to_string()),
+                        Some("media:document;ext=pdf".to_string()),
                         "Media URN matches cap in_spec"
                     );
                     assert_eq!(value, Some(pdf_content), "Binary content preserved exactly");
@@ -11626,14 +11626,14 @@ mod tests {
         let received_clone = Arc::clone(&received);
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf".to_string(),
+                    stdin: "media:document;ext=pdf".to_string(),
                 }],
             )],
         );
@@ -11651,7 +11651,7 @@ mod tests {
         let cbor_args = ciborium::Value::Array(vec![ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:ext=pdf".to_string()),
+                ciborium::Value::Text("media:document;ext=pdf".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11686,14 +11686,14 @@ mod tests {
         std::fs::write(&test_file, pdf_content).unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:ext=pdf\";process;out=media:void",
+            "cap:in=\"media:document;ext=pdf\";process;out=media:void",
             "Process",
             "process",
             vec![CapArg::new(
                 MEDIA_FILE_PATH,
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf".to_string(),
+                    stdin: "media:document;ext=pdf".to_string(),
                 }],
             )],
         );
@@ -11755,7 +11755,7 @@ mod tests {
                 }
                 assert_eq!(
                     media_urn,
-                    Some(&"media:ext=pdf".to_string()),
+                    Some(&"media:document;ext=pdf".to_string()),
                     "URN converted to expected input"
                 );
                 assert_eq!(
@@ -12481,7 +12481,7 @@ mod tests {
     fn test8126_derive_response_media_per_effect() {
         // effect=declared (default): the declared out=.
         assert_eq!(
-            derive_response_media("cap:extract;in=\"media:ext=pdf\";out=\"media:record\"")
+            derive_response_media("cap:extract;in=\"media:document;ext=pdf\";out=\"media:record\"")
                 .unwrap(),
             "media:record"
         );

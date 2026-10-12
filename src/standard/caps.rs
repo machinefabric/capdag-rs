@@ -1242,7 +1242,7 @@ mod tests {
         use crate::urn::cap_urn::CapUrn;
 
         let discard = CapUrn::from_string(CAP_DISCARD).expect("CAP_DISCARD must parse");
-        let specific = CapUrn::from_string("cap:in=\"media:ext=pdf\";shred;out=\"media:void\"")
+        let specific = CapUrn::from_string("cap:in=\"media:document;ext=pdf\";shred;out=\"media:void\"")
             .expect("specific cap must parse");
 
         // discard (pattern) accepts specific (instance)? No — discard has no op tag,
@@ -1256,7 +1256,7 @@ mod tests {
         );
 
         // But a cap with non-void output must NOT conform to discard
-        let non_void = CapUrn::from_string("cap:in=\"media:ext=pdf\";convert;out=\"media:string\"")
+        let non_void = CapUrn::from_string("cap:in=\"media:document;ext=pdf\";convert;out=\"media:string\"")
             .expect("non-void cap must parse");
         assert!(
             !discard.accepts(&non_void),

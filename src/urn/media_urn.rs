@@ -28,7 +28,7 @@ use tagged_urn::{TaggedUrn, TaggedUrnCoordinateDelta, TaggedUrnError};
 // - `record` marker: presence = has internal fields, absence = opaque (default)
 //
 // Examples:
-// - `media:ext=pdf` → scalar, opaque (no markers)
+// - `media:document;ext=pdf` → scalar, opaque (no markers)
 // - `media:enc=utf-8;list` → list, opaque (has list marker)
 // - `media:fmt=json;record` → scalar, record (has record marker)
 // - `media:fmt=json;list;record` → list of records (has both markers)
@@ -68,10 +68,18 @@ pub const MEDIA_OBJECT_LIST: &str = "media:list;record";
 // Semantic media types for specialized content
 /// Media URN for PNG image data
 pub const MEDIA_PNG: &str = "media:ext=png;image";
-/// Media URN for audio data (wav, mp3, flac, etc.)
-pub const MEDIA_AUDIO: &str = "media:audio;ext=wav";
-/// Media URN for video data (mp4, webm, mov, etc.)
+
+// The mediums. Each is the type every format of that medium conforms to
+// (`media:ext=png;image` is a `media:image`), and what an abstract cap over
+// per-format caps declares.
+/// Media URN for an image in any format (png, jpeg, webp, etc.)
+pub const MEDIA_IMAGE: &str = "media:image";
+/// Media URN for audio in any format (wav, mp3, flac, raw frames, etc.)
+pub const MEDIA_AUDIO: &str = "media:audio";
+/// Media URN for a video in any container (mp4, webm, mov, etc.)
 pub const MEDIA_VIDEO: &str = "media:video";
+/// Media URN for a document in any format (pdf, docx, epub, etc.)
+pub const MEDIA_DOCUMENT: &str = "media:document";
 
 // Image container formats. URN strings here match the canonical media-def
 // URNs published to the registry. Tagged-URN normalization makes the
@@ -114,9 +122,9 @@ pub const MEDIA_TEXTABLE_PAGE: &str = "media:enc=utf-8;ext=txt;page;plain-text";
 
 // Document types (PRIMARY naming - type IS the format)
 /// Media URN for PDF documents
-pub const MEDIA_PDF: &str = "media:ext=pdf";
+pub const MEDIA_PDF: &str = "media:document;ext=pdf";
 /// Media URN for EPUB documents
-pub const MEDIA_EPUB: &str = "media:ext=epub";
+pub const MEDIA_EPUB: &str = "media:document;ext=epub";
 
 // Text format types (PRIMARY naming - type IS the format)
 /// Media URN for Markdown text
@@ -290,7 +298,7 @@ pub const MEDIA_MODEL_SEARCH_RESPONSE: &str = "media:fmt=json;model-search-respo
 pub const MEDIA_MODEL_FILTER_RESOLUTION: &str = "media:fmt=json;model-filter-resolution;record";
 
 /// Helper to build a bare file media URN for a given extension — a file of the
-/// given type with no content-format or encoding claim (e.g. `media:ext=pdf`).
+/// given type with no content-format or encoding claim (e.g. `media:document;ext=pdf`).
 pub fn file_media_urn_for_ext(ext: &str) -> String {
     format!("media:ext={}", ext)
 }
@@ -522,8 +530,8 @@ impl MediaUrn {
     ///
     /// - Empty input → `media:` (universal type ⊤)
     /// - Single input → returned as-is
-    /// - `[media:ext=pdf, media:ext=pdf]` → `media:ext=pdf`
-    /// - `[media:ext=pdf, media:ext=png;image]` → `media:ext`
+    /// - `[media:document;ext=pdf, media:document;ext=pdf]` → `media:document;ext=pdf`
+    /// - `[media:document;ext=pdf, media:ext=png;image]` → `media:ext`
     /// - `[media:fmt=json;list, media:fmt=json]` → `media:fmt=json`
     pub fn least_upper_bound(urns: &[MediaUrn]) -> MediaUrn {
         if urns.is_empty() {
@@ -584,7 +592,7 @@ impl MediaUrn {
 
     /// Whether this media type and `other` COULD describe the same value:
     /// not a guarantee (`conforms_to`), and not excluded. `media:ext` meets
-    /// `media:ext=pdf`; `media:ext=pdf` does not meet `media:ext=png`.
+    /// `media:document;ext=pdf`; `media:document;ext=pdf` does not meet `media:ext=png`.
     pub fn meets(&self, other: &MediaUrn) -> Result<bool, MediaUrnError> {
         self.0.meets(&other.0).map_err(MediaUrnError::Match)
     }
@@ -593,8 +601,8 @@ impl MediaUrn {
     ///
     /// `conforms_to` compares two types, and a type that does not mention a
     /// key says nothing about it. A value that exists is complete: the tags
-    /// it does not have, it does not have. So a value tagged `media:ext=pdf`
-    /// satisfies `media:ext=pdf;!compressed`, which the TYPE `media:ext=pdf`
+    /// it does not have, it does not have. So a value tagged `media:document;ext=pdf`
+    /// satisfies `media:document;ext=pdf;!compressed`, which the TYPE `media:document;ext=pdf`
     /// does not conform to. Use this where the left side is the media of
     /// actual data — a stream that arrived, an output that was produced.
     pub fn satisfies(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
@@ -1137,9 +1145,9 @@ mod tests {
     #[test]
     fn test074_media_urn_matching() {
         // PDF listing conforms to PDF requirement (PRIMARY type naming)
-        // A more specific URN (media:ext=pdf) conforms to a less specific requirement (media:ext=pdf)
-        let pdf_listing = MediaUrn::from_string(MEDIA_PDF).unwrap(); // "media:ext=pdf"
-        let pdf_requirement = MediaUrn::from_string("media:ext=pdf").unwrap();
+        // A more specific URN (media:document;ext=pdf) conforms to a less specific requirement (media:document;ext=pdf)
+        let pdf_listing = MediaUrn::from_string(MEDIA_PDF).unwrap(); // "media:document;ext=pdf"
+        let pdf_requirement = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         assert!(pdf_listing
             .conforms_to(&pdf_requirement)
             .expect("MediaUrn prefix mismatch impossible"));
@@ -1294,7 +1302,7 @@ mod debug_tests {
         );
     }
 
-    // TEST546: is_image returns true only when image marker tag is present
+    // TEST546: is_image returns true only when image marker tag is present; a format conforms to its own medium and to no other
     #[test]
     fn test546_is_image() {
         assert!(MediaUrn::from_string(MEDIA_PNG).unwrap().is_image());
@@ -1309,6 +1317,20 @@ mod debug_tests {
         assert!(!MediaUrn::from_string(MEDIA_STRING).unwrap().is_image());
         assert!(!MediaUrn::from_string(MEDIA_AUDIO).unwrap().is_image());
         assert!(!MediaUrn::from_string(MEDIA_VIDEO).unwrap().is_image());
+
+        // The medium itself, and what its formats are to it.
+        let image = MediaUrn::from_string(MEDIA_IMAGE).unwrap();
+        let document = MediaUrn::from_string(MEDIA_DOCUMENT).unwrap();
+        let png = MediaUrn::from_string(MEDIA_PNG).unwrap();
+        let pdf = MediaUrn::from_string(MEDIA_PDF).unwrap();
+        assert!(image.is_image());
+        assert!(!document.is_image());
+        assert!(png.conforms_to(&image).unwrap());
+        assert!(pdf.conforms_to(&document).unwrap());
+        assert!(!png.conforms_to(&document).unwrap());
+        assert!(!pdf.conforms_to(&image).unwrap());
+        // The medium is wider than any one format of it.
+        assert!(!image.conforms_to(&png).unwrap());
     }
 
     // TEST547: is_audio returns true only when audio marker tag is present
@@ -1492,7 +1514,7 @@ mod debug_tests {
     // TEST852: LUB of identical URNs returns the same URN
     #[test]
     fn test852_lub_identical() {
-        let pdf = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone(), pdf.clone()]);
         assert!(lub.is_equivalent(&pdf).unwrap());
     }
@@ -1503,7 +1525,7 @@ mod debug_tests {
     // NOT the trivial `media:`. The `image` marker is only on one side → dropped.
     #[test]
     fn test853_lub_shared_key_promotes_to_wildcard() {
-        let pdf = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let png = MediaUrn::from_string("media:ext=png;image").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone(), png.clone()]);
         let expected = MediaUrn::from_string("media:ext").unwrap();
@@ -1573,7 +1595,7 @@ mod debug_tests {
     // TEST857: LUB of single input returns that input
     #[test]
     fn test857_lub_single() {
-        let pdf = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone()]);
         assert!(lub.is_equivalent(&pdf).unwrap());
     }
@@ -1659,7 +1681,7 @@ mod debug_tests {
         // a key=value tag like `reason=warmup`.
         let bad_inputs = [
             "media:void;text",
-            "media:ext=pdf;void",
+            "media:document;ext=pdf;void",
             "media:void;audio",
             "media:void;reason=warmup",
             "media:void;heartbeat",

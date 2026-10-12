@@ -950,19 +950,19 @@ mod tests {
         let caps = vec![
             make_test_cap(
                 "extract_metadata",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:enc=utf-8;file-metadata;record",
                 "Extract Metadata",
             )?,
             make_test_cap(
                 "extract_outline",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:document-outline;enc=utf-8;record",
                 "Extract Outline",
             )?,
             make_test_cap(
                 "disbind",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:disbound-pages;enc=utf-8;list",
                 "Disbind PDF",
             )?,
@@ -984,13 +984,13 @@ mod tests {
         let caps = vec![
             make_test_cap(
                 "disbind",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:disbound-pages;enc=utf-8;list",
                 "Disbind PDF",
             )?,
             make_test_cap(
                 "disbind",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:disbound-pages;enc=utf-8;list",
                 "Disbind PDF Again",
             )?,
@@ -1010,7 +1010,7 @@ mod tests {
             err_msg
         );
         assert!(
-            err_msg.contains("media:ext=pdf"),
+            err_msg.contains("media:document;ext=pdf"),
             "Error should contain the input spec: {}",
             err_msg
         );
@@ -1025,13 +1025,13 @@ mod tests {
         let caps = vec![
             make_test_cap(
                 "disbind",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:disbound-pages;enc=utf-8;list",
                 "Disbind",
             )?,
             make_test_cap(
                 "grind",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:disbound-pages;enc=utf-8;list",
                 "Grind",
             )?,
@@ -1051,7 +1051,7 @@ mod tests {
         let caps = vec![
             make_test_cap(
                 "extract_metadata",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:enc=utf-8;file-metadata;record",
                 "Extract PDF Metadata",
             )?,
@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn test994_input_arg_first_cap_auto_resolved_from_input() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution =
             builder.determine_resolution_with_io_check(in_spec, in_spec, out_spec, 0, true, &None);
@@ -1101,7 +1101,7 @@ mod tests {
     #[test]
     fn test995_input_arg_subsequent_cap_auto_resolved_from_previous() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
 
         let resolution =
@@ -1118,7 +1118,7 @@ mod tests {
     #[test]
     fn test996_output_arg_auto_resolved() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution =
             builder.determine_resolution_with_io_check(out_spec, in_spec, out_spec, 0, true, &None);
@@ -1130,7 +1130,7 @@ mod tests {
     #[test]
     fn test997_file_path_type_fallback_first_cap() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_FILE_PATH,
@@ -1148,7 +1148,7 @@ mod tests {
     #[test]
     fn test998_file_path_type_fallback_subsequent_cap() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_FILE_PATH,
@@ -1167,7 +1167,7 @@ mod tests {
     fn test1009_non_io_arg_with_default_has_default() {
         let builder = create_test_plan_builder();
         let default = Some(serde_json::json!(200));
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_INTEGER,
@@ -1185,7 +1185,7 @@ mod tests {
     #[test]
     fn test1012_non_io_arg_without_default_requires_user_input() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_STRING,
@@ -1204,7 +1204,7 @@ mod tests {
     fn test886_optional_non_io_arg_with_default_has_default() {
         let builder = create_test_plan_builder();
         let default = Some(serde_json::json!(300));
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_INTEGER,
@@ -1222,7 +1222,7 @@ mod tests {
     #[test]
     fn test1015_optional_non_io_arg_without_default_requires_user_input() {
         let builder = create_test_plan_builder();
-        let in_spec = "media:ext=pdf";
+        let in_spec = "media:document;ext=pdf";
         let out_spec = "media:ext=png;image";
         let resolution = builder.determine_resolution_with_io_check(
             crate::MEDIA_BOOLEAN,
@@ -1301,7 +1301,7 @@ mod tests {
     #[test]
     fn test768_path_argument_requirements_structure() {
         let requirements = PathArgumentRequirements {
-            source_media_urn: "media:ext=pdf".to_string(),
+            source_media_urn: "media:document;ext=pdf".to_string(),
             target_media_urn: "media:ext=png;image".to_string(),
             steps: vec![StepArgumentRequirements {
                 cap_urn: "cap:generate-thumbnail;in=pdf;out=png".to_string(),
@@ -1407,10 +1407,10 @@ mod tests {
     ) -> Result<(), crate::urn::cap_urn::CapUrnError> {
         // Create two CapUrns with different tag ordering in the output media URN
         let urn1 = CapUrn::from_string(
-            "cap:extract-metadata;in=\"media:ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
+            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
         )?;
         let urn2 = CapUrn::from_string(
-            "cap:extract-metadata;in=\"media:ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
+            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
         )?;
 
         // After normalization, both should produce the same canonical string
@@ -1440,10 +1440,10 @@ mod tests {
     fn test1103_is_dispatchable_uses_correct_directionality() {
         // A more specific candidate should be dispatchable for a general request
         let general_request =
-            CapUrn::from_string("cap:in=\"media:ext=pdf\";extract;out=media:text").unwrap();
+            CapUrn::from_string("cap:in=\"media:document;ext=pdf\";extract;out=media:text").unwrap();
 
         let specific_candidate =
-            CapUrn::from_string("cap:in=\"media:ext=pdf\";extract;out=media:text;version=2")
+            CapUrn::from_string("cap:in=\"media:document;ext=pdf\";extract;out=media:text;version=2")
                 .unwrap();
 
         // candidate.is_dispatchable(&request) should be true: specific candidate refines general request
@@ -1464,11 +1464,11 @@ mod tests {
     fn test1104_is_dispatchable_rejects_non_dispatchable() {
         // Request requires specific tag that candidate doesn't have
         let request =
-            CapUrn::from_string("cap:in=\"media:ext=pdf\";extract;out=media:text;required=yes")
+            CapUrn::from_string("cap:in=\"media:document;ext=pdf\";extract;out=media:text;required=yes")
                 .unwrap();
 
         let candidate = CapUrn::from_string(
-            "cap:in=\"media:ext=pdf\";extract;out=media:text", // missing required=yes
+            "cap:in=\"media:document;ext=pdf\";extract;out=media:text", // missing required=yes
         )
         .unwrap();
 
@@ -1495,7 +1495,7 @@ mod tests {
         // string order, and its slot URN differs from the stdin URN — only
         // tagged-URN equivalence against the stdin source identifies it.
         let urn = CapUrn::from_string(
-            r#"cap:in="media:doc;ext=pdf";summarize;out="media:enc=utf-8;summary""#,
+            r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8;summary""#,
         )
         .unwrap();
         let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
@@ -1506,7 +1506,7 @@ mod tests {
             false,
             false,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf;doc".to_string(),
+                    stdin: "media:ext=pdf;document".to_string(),
                 }],
                 Some("Document to summarize".to_string()),
                 None,
@@ -1583,7 +1583,7 @@ mod tests {
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![cap.clone()]);
         let builder = MachinePlanBuilder::new(Arc::new(registry));
-        let source = MediaUrn::from_string("media:doc;ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:enc=utf-8;summary").unwrap();
         let strand = Strand {
             steps: vec![StrandStep::new(

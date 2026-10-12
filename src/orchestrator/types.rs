@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test1142_resolved_graph_to_mermaid_renders_shapes_dedupes_edges_and_escapes() {
         let cap = make_test_cap(
-            r#"cap:in="media:ext=pdf";extract;out="media:enc=utf-8;ext=txt""#,
+            r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#,
             r#"Extract "Title" <One>\path"#,
         );
         let second_cap = make_test_cap(
@@ -204,7 +204,7 @@ mod tests {
 
         let graph = ResolvedGraph {
             nodes: HashMap::from([
-                ("input".to_string(), r#"media:ext=pdf"#.to_string()),
+                ("input".to_string(), r#"media:document;ext=pdf"#.to_string()),
                 (
                     "middle".to_string(),
                     r#"media:enc=utf-8;ext=txt"#.to_string(),
@@ -221,7 +221,7 @@ mod tests {
                     to: "middle".to_string(),
                     cap_urn: cap.urn.to_string(),
                     cap: cap.clone(),
-                    in_media: "media:ext=pdf".to_string(),
+                    in_media: "media:document;ext=pdf".to_string(),
                     out_media: "media:enc=utf-8;ext=txt".to_string(),
                 },
                 ResolvedEdge {
@@ -230,7 +230,7 @@ mod tests {
                     to: "middle".to_string(),
                     cap_urn: cap.urn.to_string(),
                     cap,
-                    in_media: "media:ext=pdf".to_string(),
+                    in_media: "media:document;ext=pdf".to_string(),
                     out_media: "media:enc=utf-8;ext=txt".to_string(),
                 },
                 ResolvedEdge {
@@ -249,7 +249,7 @@ mod tests {
         let mermaid = graph.to_mermaid();
 
         assert!(mermaid.starts_with("graph LR\n"));
-        assert!(mermaid.contains(r#"input(["input<br/><small>media:ext=pdf</small>"])"#));
+        assert!(mermaid.contains(r#"input(["input<br/><small>media:document;ext=pdf</small>"])"#));
         assert!(mermaid.contains(r#"middle["middle<br/><small>media:enc=utf-8;ext=txt</small>"]"#));
         assert!(
             mermaid.contains(r#"output((("output<br/><small>media:embedding;record</small>")))"#)

@@ -500,16 +500,16 @@ mod tests {
 
     fn test_cap() -> Cap {
         let urn = CapUrn::from_string(
-            r#"cap:in="media:ext=pdf";summarize;out="media:enc=utf-8;summary""#,
+            r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8;summary""#,
         )
         .unwrap();
         let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
         cap.args = vec![
             arg(
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf".to_string(),
+                    stdin: "media:document;ext=pdf".to_string(),
                 }],
                 None,
             ),
@@ -679,7 +679,7 @@ mod tests {
             classify_cap_token("pdf2summary").unwrap(),
             CapToken::Alias("pdf2summary".to_string())
         );
-        match classify_cap_token(r#"cap:in="media:ext=pdf";summarize;out="media:enc=utf-8""#)
+        match classify_cap_token(r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8""#)
             .unwrap()
         {
             CapToken::Urn(urn) => assert!(urn.contains("summarize")),
@@ -687,7 +687,7 @@ mod tests {
         }
         // ':' present but not a parseable cap URN — hard error, no alias
         // fall-through.
-        let err = classify_cap_token("media:ext=pdf").unwrap_err();
+        let err = classify_cap_token("media:document;ext=pdf").unwrap_err();
         assert!(err.contains("does not parse"), "{err}");
         let err = classify_cap_token("cap:no way this parses\u{7f}").unwrap_err();
         assert!(err.contains("does not parse"), "{err}");

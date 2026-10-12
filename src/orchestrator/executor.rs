@@ -4231,7 +4231,7 @@ mod tests {
             edge(
                 "in",
                 "A",
-                "cap:in=\"media:ext=pdf\";op-a;out=\"media:enc=utf-8\"",
+                "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"",
             ),
             edge(
                 "in2",
@@ -4263,7 +4263,7 @@ mod tests {
             edge(
                 "in",
                 "A",
-                "cap:in=\"media:ext=pdf\";op-a;out=\"media:enc=utf-8\"",
+                "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"",
             ),
             edge(
                 "A",

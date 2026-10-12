@@ -165,7 +165,7 @@ mod tests {
     }
 
     fn pages() -> CapUrn {
-        cap(r#"cap:disbind;in="media:ext=pdf";out="media:enc=utf-8;ext=txt;page""#)
+        cap(r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf-8;ext=txt;page""#)
     }
 
     fn to_jpeg() -> CapUrn {
@@ -173,7 +173,7 @@ mod tests {
     }
 
     fn some_image() -> CapUrn {
-        cap(r#"cap:render;in="media:ext=pdf";out="media:image""#)
+        cap(r#"cap:render;in="media:document;ext=pdf";out="media:image""#)
     }
 
     fn passes_through() -> CapUrn {
@@ -205,7 +205,7 @@ mod tests {
         assert!(!wants_image.admits(&passes_through()));
 
         // What can a pdf become? Whatever takes a pdf — or takes anything.
-        let has_pdf = CapQuery::consuming(&media("media:ext=pdf"), &no_tags());
+        let has_pdf = CapQuery::consuming(&media("media:document;ext=pdf"), &no_tags());
         assert!(has_pdf.admits(&pages()) && has_pdf.admits(&some_image()));
         assert!(has_pdf.admits(&passes_through()), "it takes anything, a pdf included");
         assert!(!has_pdf.admits(&to_jpeg()), "a png converter does not take a pdf");
@@ -213,7 +213,7 @@ mod tests {
 
         // Both sides stated is the typed call.
         let pdf_to_image =
-            CapQuery::between(&media("media:ext=pdf"), &media("media:image"), &no_tags());
+            CapQuery::between(&media("media:document;ext=pdf"), &media("media:image"), &no_tags());
         assert!(pdf_to_image.admits(&some_image()));
         assert!(!pdf_to_image.admits(&pages()) && !pdf_to_image.admits(&to_jpeg()));
     }

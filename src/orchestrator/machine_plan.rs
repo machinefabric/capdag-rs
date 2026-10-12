@@ -148,7 +148,7 @@ mod tests {
     async fn test1303_linear_machine_no_foreach() {
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:ext=pdf";extract;out="media:enc=utf-8;ext=txt""#,
+                r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#,
                 false,
             ),
             cap(
@@ -157,7 +157,7 @@ mod tests {
             ),
         ]);
         let notation = concat!(
-            r#"[extract cap:in="media:ext=pdf";extract;out="media:enc=utf-8;ext=txt"]"#,
+            r#"[extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]"#,
             r#"[summarize cap:in="media:enc=utf-8;ext=txt";summarize;out="media:enc=utf-8;summary"]"#,
             "[doc -> extract -> text]",
             "[text -> summarize -> summary]",
@@ -181,7 +181,7 @@ mod tests {
     async fn test1304_sequence_into_scalar_wraps_foreach() {
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:ext=pdf";render-page-image;out="media:ext=png;image""#,
+                r#"cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image""#,
                 true,
             ),
             cap(
@@ -190,7 +190,7 @@ mod tests {
             ),
         ]);
         let notation = concat!(
-            r#"[render cap:in="media:ext=pdf";render-page-image;out="media:ext=png;image"]"#,
+            r#"[render cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image"]"#,
             r#"[to_jpeg cap:in="media:ext=png;image";convert-image;out="media:ext=jpeg;image"]"#,
             "[input -> render -> thumbnail]",
             "[thumbnail -> to_jpeg -> output]",
@@ -215,7 +215,7 @@ mod tests {
     async fn test1305_multi_strand_yields_one_plan_each() {
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:ext=pdf";render-page-image;out="media:ext=png;image""#,
+                r#"cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image""#,
                 true,
             ),
             cap(
@@ -224,7 +224,7 @@ mod tests {
             ),
         ]);
         let notation = concat!(
-            r#"[render cap:in="media:ext=pdf";render-page-image;out="media:ext=png;image"]"#,
+            r#"[render cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image"]"#,
             r#"[to_jpeg cap:in="media:ext=png;image";convert-image;out="media:ext=jpeg;image"]"#,
             "[a_in -> render -> a_thumb]",
             "[a_thumb -> to_jpeg -> a_out]",
@@ -261,7 +261,7 @@ mod tests {
     async fn test1307_fan_in_gather_synthesizes_collect() {
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:ext=pdf";op-a;out="media:enc=utf-8;page""#,
+                r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page""#,
                 false,
             ),
             cap(
@@ -271,7 +271,7 @@ mod tests {
             seq_arg_cap(r#"cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt""#),
         ]);
         let notation = concat!(
-            r#"[a cap:in="media:ext=pdf";op-a;out="media:enc=utf-8;page"]"#,
+            r#"[a cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page"]"#,
             r#"[b cap:in="media:ext=md";op-b;out="media:enc=utf-8;page"]"#,
             r#"[cat cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt"]"#,
             "[doc_a -> a -> x]",
@@ -356,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn test1309_fold_after_mapped_region_closes_the_region() {
         let mut render = cap(
-            r#"cap:in="media:ext=pdf";render;out="media:ext=png;image""#,
+            r#"cap:in="media:document;ext=pdf";render;out="media:ext=png;image""#,
             true, // sequence of page images
         );
         render.output.as_mut().unwrap().is_sequence = true;
@@ -367,7 +367,7 @@ mod tests {
         let fold = seq_arg_cap(r#"cap:in="media:ext=png;image";animate;out="media:ext=gif;image""#);
         let reg = registry(vec![render, upscale, fold]);
         let notation = concat!(
-            r#"[render cap:in="media:ext=pdf";render;out="media:ext=png;image"]"#,
+            r#"[render cap:in="media:document;ext=pdf";render;out="media:ext=png;image"]"#,
             r#"[upscale cap:in="media:ext=png;image";upscale;out="media:ext=png;image;upscaled"]"#,
             r#"[animate cap:in="media:ext=png;image";animate;out="media:ext=gif;image"]"#,
             "[doc -> render -> pics]",
@@ -430,16 +430,16 @@ mod tests {
         // `merge` declares a single stdin; feeding it two sources cannot resolve to
         // one stdin, so notation resolution rejects it before we even build a plan.
         let reg = registry(vec![
-            cap(r#"cap:in="media:ext=pdf";a;out="media:enc=utf-8""#, false),
-            cap(r#"cap:in="media:ext=pdf";b;out="media:enc=utf-8""#, false),
+            cap(r#"cap:in="media:document;ext=pdf";a;out="media:enc=utf-8""#, false),
+            cap(r#"cap:in="media:document;ext=pdf";b;out="media:enc=utf-8""#, false),
             cap(
                 r#"cap:in="media:enc=utf-8";merge;out="media:enc=utf-8;merged""#,
                 false,
             ),
         ]);
         let notation = concat!(
-            r#"[a cap:in="media:ext=pdf";a;out="media:enc=utf-8"]"#,
-            r#"[b cap:in="media:ext=pdf";b;out="media:enc=utf-8"]"#,
+            r#"[a cap:in="media:document;ext=pdf";a;out="media:enc=utf-8"]"#,
+            r#"[b cap:in="media:document;ext=pdf";b;out="media:enc=utf-8"]"#,
             r#"[merge cap:in="media:enc=utf-8";merge;out="media:enc=utf-8;merged"]"#,
             "[doc_a -> a -> x]",
             "[doc_b -> b -> y]",
@@ -471,7 +471,7 @@ mod anchor_cardinality_tests {
         concat.args[0].is_sequence = true;
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:ext=pdf";op-a;out="media:enc=utf-8;page""#,
+                r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page""#,
                 false,
             ),
             cap(
@@ -481,7 +481,7 @@ mod anchor_cardinality_tests {
             concat,
         ]);
         let notation = concat!(
-            r#"[a cap:in="media:ext=pdf";op-a;out="media:enc=utf-8;page"]"#,
+            r#"[a cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page"]"#,
             r#"[b cap:in="media:ext=md";op-b;out="media:enc=utf-8;page"]"#,
             r#"[cat cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt"]"#,
             "[doc_a -> a -> x]",

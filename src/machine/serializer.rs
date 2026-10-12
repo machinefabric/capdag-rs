@@ -369,7 +369,7 @@ impl Machine {
     ///   "strands": [
     ///     {
     ///       "nodes": [
-    ///         {"id": "n0", "urn": "media:ext=pdf", "title": "PDF Document"},
+    ///         {"id": "n0", "urn": "media:document;ext=pdf", "title": "PDF Document"},
     ///         ...
     ///       ],
     ///       "edges": [
@@ -380,7 +380,7 @@ impl Machine {
     ///           "is_loop": false,
     ///           "assignment": [
     ///             {
-    ///               "cap_arg_media_urn": "media:ext=pdf",
+    ///               "cap_arg_media_urn": "media:document;ext=pdf",
     ///               "source_node": "n0"
     ///             }
     ///           ],
@@ -561,9 +561,9 @@ mod tests {
 
     fn extract_cap_def() -> crate::cap::definition::Cap {
         build_cap(
-            "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
             "extract",
-            &["media:ext=pdf"],
+            &["media:document;ext=pdf"],
             "media:enc=utf-8;ext=txt",
         )
     }
@@ -581,9 +581,9 @@ mod tests {
         strand_from_steps(
             vec![
                 cap_step(
-                    "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+                    "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
                     "extract",
-                    "media:ext=pdf",
+                    "media:document;ext=pdf",
                     "media:enc=utf-8;ext=txt",
                 ),
                 cap_step(
@@ -669,12 +669,12 @@ mod tests {
         // Two aliases on the extract cap; "ex" is shorter than "extract-pdf".
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "extract-pdf".to_string(),
-            target: "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
+            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
             version: 1,
         });
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "ex".to_string(),
-            target: "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
+            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
             version: 1,
         });
         // No alias for the embed cap → it must stay a raw URN.
@@ -727,7 +727,7 @@ mod tests {
         seed_media_titles(
             &registry,
             &[
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:enc=utf-8;ext=txt",
                 "media:vec;record",
             ],
@@ -747,7 +747,7 @@ mod tests {
         assert!(payload.contains("extract"));
         assert!(payload.contains("embed"));
         // Titles should appear on nodes and edges.
-        assert!(payload.contains("\"title\":\"Title for media:ext=pdf\""));
+        assert!(payload.contains("\"title\":\"Title for media:document;ext=pdf\""));
         assert!(payload.contains("\"title\":\"extract\""));
         assert!(payload.contains("\"title\":\"embed\""));
     }
@@ -776,9 +776,9 @@ mod tests {
 
         let extract_strand = strand_from_steps(
             vec![cap_step(
-                "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
                 "extract",
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:enc=utf-8;ext=txt",
             )],
             "extract strand",

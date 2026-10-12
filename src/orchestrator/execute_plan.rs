@@ -2087,12 +2087,12 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:audio-frames;pcm",
+            "media:audio;audio-frames;pcm",
             crate::planner::InputCardinality::Sequence,
         ));
         plan.add_node(MachineNode::cap(
             "encode",
-            "cap:encode-audio-frames;in=\"media:audio-frames;pcm\";out=\"media:audio;ext=wav\"",
+            "cap:encode-audio-frames;in=\"media:audio;audio-frames;pcm\";out=\"media:audio;ext=wav\"",
         ));
         plan.add_node(MachineNode::output("out", "result", "encode"));
         plan.add_edge(MachinePlanEdge::direct("input", "encode"));
@@ -2100,7 +2100,7 @@ mod tests {
 
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![test_cap(
-            "cap:encode-audio-frames;in=\"media:audio-frames;pcm\";out=\"media:audio;ext=wav\"",
+            "cap:encode-audio-frames;in=\"media:audio;audio-frames;pcm\";out=\"media:audio;ext=wav\"",
             false,
         )]);
         let registry = Arc::new(registry);
@@ -2675,12 +2675,12 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             crate::planner::InputCardinality::Single,
         ));
         plan.add_node(MachineNode::cap(
             "bridge",
-            "cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"",
+            "cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"",
         ));
         plan.add_node(MachineNode::cap(
             "mapper",
@@ -2701,7 +2701,7 @@ mod tests {
 
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![
-            test_cap("cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"", true),
+            test_cap("cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"", true),
             test_cap(
                 "cap:in=\"media:ext=png;image\";upscale;out=\"media:ext=png;image;up\"",
                 false,
@@ -2796,12 +2796,12 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             crate::planner::InputCardinality::Single,
         ));
         plan.add_node(MachineNode::cap(
             "bridge",
-            "cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"",
+            "cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"",
         ));
         plan.add_node(MachineNode::cap(
             "mapper",
@@ -2822,7 +2822,7 @@ mod tests {
 
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![
-            test_cap("cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"", true),
+            test_cap("cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"", true),
             test_cap(
                 "cap:in=\"media:ext=png;image\";upscale;out=\"media:ext=png;image;up\"",
                 false,
@@ -2936,12 +2936,12 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             crate::planner::InputCardinality::Single,
         ));
         plan.add_node(MachineNode::cap(
             "bridge",
-            "cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"",
+            "cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"",
         ));
         plan.add_node(MachineNode::cap(
             "mapper",
@@ -2962,7 +2962,7 @@ mod tests {
 
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![
-            test_cap("cap:frames;in=\"media:ext=pdf\";out=\"media:ext=png;image\"", true),
+            test_cap("cap:frames;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\"", true),
             test_cap(
                 "cap:in=\"media:ext=png;image\";upscale;out=\"media:ext=png;image;up\"",
                 false,
@@ -3021,12 +3021,12 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             crate::planner::InputCardinality::Single,
         ));
         plan.add_node(MachineNode::cap(
             "render",
-            "cap:in=\"media:ext=pdf\";render;out=\"media:ext=png;image\"",
+            "cap:in=\"media:document;ext=pdf\";render;out=\"media:ext=png;image\"",
         ));
         plan.add_node(MachineNode::cap(
             "mapper",
@@ -3045,7 +3045,7 @@ mod tests {
         ));
         plan.add_node(MachineNode::cap(
             "meta",
-            "cap:in=\"media:ext=pdf\";meta;out=\"media:enc=utf-8;record\"",
+            "cap:in=\"media:document;ext=pdf\";meta;out=\"media:enc=utf-8;record\"",
         ));
         plan.add_node(MachineNode::output("out_gif", "result", "fold"));
         plan.add_node(MachineNode::output("out_meta", "result", "meta"));
@@ -3110,7 +3110,7 @@ mod tests {
         let registry = FabricRegistry::new_for_test();
         registry.add_caps_to_cache(vec![
             test_cap(
-                "cap:in=\"media:ext=pdf\";render;out=\"media:ext=png;image\"",
+                "cap:in=\"media:document;ext=pdf\";render;out=\"media:ext=png;image\"",
                 true,
             ),
             test_cap(
@@ -3122,7 +3122,7 @@ mod tests {
                 false,
             ),
             test_cap(
-                "cap:in=\"media:ext=pdf\";meta;out=\"media:enc=utf-8;record\"",
+                "cap:in=\"media:document;ext=pdf\";meta;out=\"media:enc=utf-8;record\"",
                 false,
             ),
         ]);

@@ -49,7 +49,7 @@ use crate::urn::media_urn::{MediaUrn, MediaUrnError, MEDIA_IDENTITY, MEDIA_OBJEC
 /// - `cap:in=media:void;out=media:model-artifact;warm` — Source
 /// - `cap:in="media:fmt=json";out="media:ext=log";void` — Sink
 /// - `cap:in=media:void;out=media:void;ping` — Effect (health check)
-/// - `cap:in=media:ext=pdf;out="media:enc=utf-8";extract` — Transform
+/// - `cap:in=media:document;ext=pdf;out="media:enc=utf-8";extract` — Transform
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CapKind {
     /// `media:` → `media:` with `effect=none` and no other tags.
@@ -1994,7 +1994,7 @@ mod tests {
 
         // Different direction specs: neither accepts the other
         let cap5 = CapUrn::from_string(&format!(
-            "cap:in=\"media:ext=pdf\";out=\"{}\";generate",
+            "cap:in=\"media:document;ext=pdf\";out=\"{}\";generate",
             MEDIA_OBJECT
         ))
         .unwrap();
@@ -2413,14 +2413,14 @@ mod tests {
     // TEST890: Semantic direction matching - generic candidate matches specific request
     #[test]
     fn test890_direction_semantic_matching() {
-        // A cap accepting media: (generic wildcard) should match a request with media:ext=pdf (specific)
-        // because media:ext=pdf has the media: wildcard pattern (accepts everything)
+        // A cap accepting media: (generic wildcard) should match a request with media:document;ext=pdf (specific)
+        // because media:document;ext=pdf has the media: wildcard pattern (accepts everything)
         let generic_cap = CapUrn::from_string(
             "cap:generate_thumbnail;in=media:;out=\"media:ext=png;image;thumbnail\"",
         )
         .unwrap();
         let pdf_request = CapUrn::from_string(
-            "cap:generate_thumbnail;in=\"media:ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
+            "cap:generate_thumbnail;in=\"media:document;ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
         )
         .unwrap();
         assert!(
@@ -2441,7 +2441,7 @@ mod tests {
         // Reverse: specific cap does NOT match generic request
         // A pdf-only handler cannot accept arbitrary bytes
         let pdf_cap = CapUrn::from_string(
-            "cap:generate_thumbnail;in=\"media:ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
+            "cap:generate_thumbnail;in=\"media:document;ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
         )
         .unwrap();
         let generic_request = CapUrn::from_string(
@@ -2495,7 +2495,7 @@ mod tests {
         )
         .unwrap();
         let specific_cap = CapUrn::from_string(
-            "cap:generate_thumbnail;in=\"media:ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
+            "cap:generate_thumbnail;in=\"media:document;ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
         )
         .unwrap();
 
@@ -2507,10 +2507,10 @@ mod tests {
         assert_eq!(generic_cap.specificity(), 10_000 * 8 + 100 * 0 + 2);
         // specific:
         //   out=media:ext=png;image;thumbnail -> 8
-        //   in=media:ext=pdf              -> 4 (ext=pdf is an exact-value tag, not a bare marker)
+        //   in=media:document;ext=pdf              -> 6 (ext=pdf is an exact-value tag: 4; document is a marker: 2)
         //   y: generate_thumbnail marker  -> 2
-        //   spec_C = 10_000*8 + 100*4 + 2 = 80402
-        assert_eq!(specific_cap.specificity(), 10_000 * 8 + 100 * 4 + 2);
+        //   spec_C = 10_000*8 + 100*6 + 2 = 80602
+        assert_eq!(specific_cap.specificity(), 10_000 * 8 + 100 * 6 + 2);
 
         assert!(
             specific_cap.specificity() > generic_cap.specificity(),
@@ -2519,14 +2519,14 @@ mod tests {
 
         // CapMatcher should prefer the more specific cap when both match
         let pdf_request = CapUrn::from_string(
-            "cap:generate_thumbnail;in=\"media:ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
+            "cap:generate_thumbnail;in=\"media:document;ext=pdf\";out=\"media:ext=png;image;thumbnail\"",
         )
         .unwrap();
         let caps = vec![generic_cap.clone(), specific_cap.clone()];
         let best = CapMatcher::find_best_match(&caps, &pdf_request).unwrap();
         assert_eq!(
             best.in_spec(),
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "CapMatcher must prefer the more specific pdf candidate"
         );
     }
@@ -2724,7 +2724,7 @@ fn test652_wildcard_014_cap_identity_constant_works() {
 #[test]
 fn test653_effect_none_illegal_declaration_rejected() {
     assert!(matches!(
-        CapUrn::from_string("cap:in=\"media:ext=pdf\";out=\"media:enc=utf-8\";effect=none"),
+        CapUrn::from_string("cap:in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\";effect=none"),
         Err(CapUrnError::IllegalDeclaration(_))
     ));
 }
@@ -2734,7 +2734,7 @@ fn test653_effect_none_illegal_declaration_rejected() {
 fn test0125_effect_none_preserves_runtime_media() {
     let decimate = CapUrn::from_string("cap:decimate-sequence;effect=none").unwrap();
     let png = MediaUrn::from_string("media:ext=png;image").unwrap();
-    let pdf = MediaUrn::from_string("media:ext=pdf").unwrap();
+    let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
     assert_eq!(
         decimate
             .infer_runtime_output_media(&png)
@@ -2766,7 +2766,7 @@ fn test0126_effect_declared_uses_declared_output() {
 #[test]
 fn test0127_invalid_effect_none_fails_hard() {
     assert!(matches!(
-        CapUrn::from_string("cap:in=\"media:ext=pdf\";out=\"media:enc=utf-8\";effect=none"),
+        CapUrn::from_string("cap:in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\";effect=none"),
         Err(CapUrnError::IllegalDeclaration(_))
     ));
 }
@@ -2785,8 +2785,8 @@ fn test0128_effect_dispatch_requires_explicit_wildcard() {
 // specific emission, rejects a more generic one
 #[test]
 fn test8121_effect_conformance_declared_asymmetry() {
-    let cap = CapUrn::from_string("cap:extract;in=\"media:ext=pdf\";out=\"media:record\"").unwrap();
-    let input = MediaUrn::from_string("media:ext=pdf").unwrap();
+    let cap = CapUrn::from_string("cap:extract;in=\"media:document;ext=pdf\";out=\"media:record\"").unwrap();
+    let input = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
     // Emitting exactly the declared out is conformant.
     let declared = MediaUrn::from_string("media:record").unwrap();
@@ -2838,7 +2838,7 @@ fn test8122_effect_conformance_none_requires_equivalence() {
     // upstream contract break, surfaced as an error — not as `false`.
     let strict = CapUrn::from_string("cap:effect=none;in=\"media:image\";out=\"media:image\"")
         .unwrap();
-    let non_image = MediaUrn::from_string("media:ext=pdf").unwrap();
+    let non_image = MediaUrn::from_string("media:document;ext=pdf").unwrap();
     assert!(strict
         .is_conformant_runtime_output(&non_image, &non_image)
         .is_err());
@@ -2915,14 +2915,14 @@ mod tier_tests {
 
         // Chain both
         let changed_both = cap
-            .with_in_spec("media:ext=pdf".to_string())
+            .with_in_spec("media:document;ext=pdf".to_string())
             .with_out_spec("media:enc=utf-8;ext=txt".to_string());
-        assert_eq!(changed_both.in_spec(), "media:ext=pdf");
+        assert_eq!(changed_both.in_spec(), "media:document;ext=pdf");
         assert_eq!(changed_both.out_spec(), "media:enc=utf-8;ext=txt");
 
         let identity = CapUrn::from_string("cap:effect=none").unwrap();
         let illegal =
-            std::panic::catch_unwind(|| identity.with_out_spec("media:ext=pdf".to_string()));
+            std::panic::catch_unwind(|| identity.with_out_spec("media:document;ext=pdf".to_string()));
         assert!(
             illegal.is_err(),
             "with_out_spec must revalidate admissibility"
@@ -2933,7 +2933,7 @@ mod tier_tests {
     #[test]
     fn test561_in_out_media_urn() {
         let cap =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;ext=txt""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;ext=txt""#)
                 .unwrap();
 
         let in_urn = cap
@@ -3107,10 +3107,10 @@ mod tier_tests {
     #[test]
     fn test823_dispatch_exact_match() {
         let candidate =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         let request =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(candidate.is_dispatchable(&request));
     }
@@ -3121,7 +3121,7 @@ mod tier_tests {
         let candidate =
             CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf-8;record""#).unwrap();
         let request =
-            CapUrn::from_string(r#"cap:analyze;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:analyze;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(candidate.is_dispatchable(&request));
     }
@@ -3142,7 +3142,7 @@ mod tier_tests {
     #[test]
     fn test825_dispatch_request_unconstrained_input() {
         let pdf_only =
-            CapUrn::from_string(r#"cap:analyze;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:analyze;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         let accepts_anything =
             CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf-8;record""#).unwrap();
@@ -3166,10 +3166,10 @@ mod tier_tests {
     #[test]
     fn test826_dispatch_covariant_output() {
         let candidate =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         let request =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8""#).unwrap();
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8""#).unwrap();
         assert!(
             candidate.is_dispatchable(&request),
             "Candidate output enc=utf-8;record conforms to request output enc=utf-8"
@@ -3180,9 +3180,9 @@ mod tier_tests {
     #[test]
     fn test827_dispatch_generic_output_fails() {
         let candidate =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out=media:"#).unwrap();
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out=media:"#).unwrap();
         let request =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(
             !candidate.is_dispatchable(&request),
@@ -3264,7 +3264,7 @@ mod tier_tests {
         let broad =
             CapUrn::from_string(r#"cap:in=media:;out="media:enc=utf-8;record";process"#).unwrap();
         let narrow =
-            CapUrn::from_string(r#"cap:in="media:ext=pdf";out="media:enc=utf-8";process"#).unwrap();
+            CapUrn::from_string(r#"cap:in="media:document;ext=pdf";out="media:enc=utf-8";process"#).unwrap();
         // broad candidate CAN dispatch narrow request:
         //   input:  candidate in=media: accepts anything → OK
         //   output: candidate out=media:enc=utf-8;record conforms to request out=media:enc=utf-8 → OK
@@ -3280,9 +3280,9 @@ mod tier_tests {
     #[test]
     fn test833_comparable_symmetric() {
         let a =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8""#).unwrap();
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8""#).unwrap();
         let b =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(a.is_comparable(&b));
         assert!(b.is_comparable(&a));
@@ -3292,7 +3292,7 @@ mod tier_tests {
     #[test]
     fn test834_comparable_unrelated() {
         let a =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8""#).unwrap();
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8""#).unwrap();
         let b =
             CapUrn::from_string(r#"cap:in=media:audio;out="media:enc=utf-8;record";transcribe"#)
                 .unwrap();
@@ -3304,10 +3304,10 @@ mod tier_tests {
     #[test]
     fn test835_equivalent_identical() {
         let a =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         let b =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(a.is_equivalent(&b));
         assert!(b.is_equivalent(&a));
@@ -3317,9 +3317,9 @@ mod tier_tests {
     #[test]
     fn test836_equivalent_non_equivalent() {
         let a =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8""#).unwrap();
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8""#).unwrap();
         let b =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert!(a.is_comparable(&b));
         assert!(!a.is_equivalent(&b));
@@ -3329,10 +3329,10 @@ mod tier_tests {
     #[test]
     fn test837_dispatch_op_mismatch() {
         let candidate =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         let request =
-            CapUrn::from_string(r#"cap:in="media:ext=pdf";out="media:enc=utf-8;record";summarize"#)
+            CapUrn::from_string(r#"cap:in="media:document;ext=pdf";out="media:enc=utf-8;record";summarize"#)
                 .unwrap();
         assert!(!candidate.is_dispatchable(&request));
     }
@@ -3341,9 +3341,9 @@ mod tier_tests {
     #[test]
     fn test838_dispatch_request_wildcard_output() {
         let candidate =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
-        let request = CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out=media:"#).unwrap();
+        let request = CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out=media:"#).unwrap();
         assert!(
             candidate.is_dispatchable(&request),
             "Request out=media: is unconstrained — any candidate output accepted"
@@ -3440,7 +3440,7 @@ mod tier_tests {
     #[test]
     fn test1804_kind_transform_for_normal_data_processors() {
         let extract =
-            CapUrn::from_string(r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8;record""#)
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8;record""#)
                 .unwrap();
         assert_eq!(extract.kind().unwrap(), CapKind::Transform);
 
@@ -3467,8 +3467,8 @@ mod tier_tests {
             ),
             // Transform — quoted vs unquoted single-tag media URN.
             (
-                "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8\"",
-                r#"cap:extract;in="media:ext=pdf";out="media:enc=utf-8""#,
+                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"",
+                r#"cap:extract;in="media:document;ext=pdf";out="media:enc=utf-8""#,
                 CapKind::Transform,
             ),
             // Source — segment order at parse time must not change kind.
@@ -3824,7 +3824,7 @@ mod tier_tests {
         let big_out = CapUrn::from_string("cap:in=media:;out=\"media:enc=utf-8;record\"").unwrap();
         // out=2 (record), in=2 (pdf), y=15 (loaded y axis)
         let big_in_and_y = CapUrn::from_string(
-            "cap:in=\"media:ext=pdf\";out=media:record;!constrained;?target;extract;stage!=alpha;target2=metadata;ver?=draft",
+            "cap:in=\"media:document;ext=pdf\";out=media:record;!constrained;?target;extract;stage!=alpha;target2=metadata;ver?=draft",
         )
         .unwrap();
         assert!(
@@ -3837,7 +3837,7 @@ mod tier_tests {
     #[test]
     fn test1845_axis_weighting_in_dominates_y() {
         // out=2 (record), in=2 (pdf), y=0
-        let big_in = CapUrn::from_string("cap:in=\"media:ext=pdf\";out=media:record").unwrap();
+        let big_in = CapUrn::from_string("cap:in=\"media:document;ext=pdf\";out=media:record").unwrap();
         // out=2 (record), in=0 (media:), y=15 (loaded y axis)
         let big_y = CapUrn::from_string(
             "cap:in=media:;out=media:record;!constrained;?target;extract;stage!=alpha;target2=metadata;ver?=draft",

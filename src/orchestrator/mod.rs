@@ -11,7 +11,7 @@
 //! use capdag::FabricRegistry;
 //!
 //! let route = r#"
-//!     [extract cap:in="media:bytes;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
+//!     [extract cap:in="media:bytes;document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
 //!     [A -> extract -> B]
 //! "#;
 //!

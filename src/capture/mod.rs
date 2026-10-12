@@ -40,7 +40,7 @@ pub use synthetic::MEDIA_FEED_FRAMES;
 /// feature — content pairing must be answerable in every build).
 pub const MICROPHONE_REFERENCE: &str = "media:audio;live;microphone";
 /// The content a resolved microphone feed delivers.
-pub const MICROPHONE_CONTENT: &str = "media:audio-frames;pcm";
+pub const MICROPHONE_CONTENT: &str = "media:audio;audio-frames;pcm";
 /// The webcam reference family.
 pub const WEBCAM_REFERENCE: &str = "media:image;live;webcam";
 /// The content a resolved webcam feed delivers.

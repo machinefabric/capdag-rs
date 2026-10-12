@@ -32,6 +32,8 @@ pub use crate::urn::media_urn::{
     MEDIA_AAC,
     MEDIA_AIFF,
     MEDIA_AUDIO,
+    MEDIA_DOCUMENT,
+    MEDIA_IMAGE,
     MEDIA_AUDIO_SPEECH,
     MEDIA_BMP,
     MEDIA_BOOLEAN,

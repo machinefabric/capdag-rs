@@ -2,7 +2,7 @@
 //! device-reference transport resolution).
 //!
 //! Resolves `media:audio;live;microphone`; delivers
-//! `media:audio-frames;pcm` items: raw signed 16-bit little-endian
+//! `media:audio;audio-frames;pcm` items: raw signed 16-bit little-endian
 //! interleaved PCM, one item per decoded capture buffer, with `pts_us`
 //! from the device stream's timebase. Capture goes through the vendored
 //! ffmpeg's avdevice input formats (`alsa` on Linux, `avfoundation` on

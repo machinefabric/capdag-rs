@@ -1515,7 +1515,7 @@ mod tests {
         // Absent → false; serialize omits it. (The URN's media-spec quotes are
         // JSON-escaped as \" so the wire body is valid JSON.)
         let concrete: Cap = serde_json::from_str(
-            r#"{"urn":"cap:disbind;in=\"media:ext=pdf\";out=\"media:enc=utf-8\"","title":"Disbind PDF","aliases":["disbind-pdf"]}"#,
+            r#"{"urn":"cap:disbind;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"","title":"Disbind PDF","aliases":["disbind-pdf"]}"#,
         )
         .expect("concrete cap must deserialize");
         assert!(!concrete.is_abstract());
@@ -1679,10 +1679,10 @@ mod tests {
             "media:enc=utf-8;file-path",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:ext=pdf".to_string(),
+                stdin: "media:document;ext=pdf".to_string(),
             }],
         );
-        assert_eq!(arg.stream_urn(), "media:ext=pdf");
+        assert_eq!(arg.stream_urn(), "media:document;ext=pdf");
         assert_ne!(
             arg.stream_urn(),
             arg.media_urn,
@@ -1714,8 +1714,8 @@ mod tests {
     /// equivalence, never a string comparison.
     #[test]
     fn test7102_is_main_input_by_tagged_urn_equivalence_not_strings() {
-        let in_spec = MediaUrn::from_string("media:doc;ext=pdf").unwrap();
-        let stdin_urn = "media:ext=pdf;doc";
+        let in_spec = MediaUrn::from_string("media:document;ext=pdf").unwrap();
+        let stdin_urn = "media:ext=pdf;document";
         assert_ne!(
             stdin_urn,
             in_spec.to_string(),
@@ -1739,10 +1739,10 @@ mod tests {
     /// NOT equivalent to the cap's `in=` spec.
     #[test]
     fn test7103_is_main_input_false_without_matching_stdin() {
-        let in_spec = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let in_spec = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
         let flag_only = CapArg::new(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             true,
             vec![ArgSource::CliFlag {
                 cli_flag: "--input".to_string(),
@@ -1754,7 +1754,7 @@ mod tests {
         );
 
         let position_only = CapArg::new(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             true,
             vec![ArgSource::Position { position: 0 }],
         );

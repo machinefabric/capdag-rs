@@ -507,6 +507,24 @@ impl Strand {
 // IMPLEMENTATION
 // =============================================================================
 
+
+/// What a rebuild of the graph made of the caps it was given.
+///
+/// The counts were kept in three locals and thrown away, so nothing could say,
+/// afterwards, whether a search that found one path had walked a graph of
+/// eighty caps or of three.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncOutcome {
+    /// How many cap URNs the cartridges advertised.
+    pub advertised: usize,
+    /// How many of them are edges of the graph now.
+    pub in_the_graph: usize,
+    /// How many were identity caps, which are no edge.
+    pub identity: usize,
+    /// How many were left out: unparseable, or with no definition cached yet.
+    pub dropped: usize,
+}
+
 impl LiveCapFab {
     /// Create a new empty capability graph.
     pub fn new() -> Self {
@@ -602,7 +620,7 @@ impl LiveCapFab {
         cap_urns: &[String],
         registry: &Arc<FabricRegistry>,
         bookend_urns: &HashSet<MediaUrn>,
-    ) {
+    ) -> SyncOutcome {
         self.clear();
 
         // Get all cached caps from registry
@@ -613,7 +631,7 @@ impl LiveCapFab {
                     error = %e,
                     "[LiveCapFab] Failed to get cached caps from registry"
                 );
-                return;
+                return SyncOutcome { advertised: cap_urns.len(), ..SyncOutcome::default() };
             }
         };
 
@@ -631,6 +649,7 @@ impl LiveCapFab {
                         error = %e,
                         "[LiveCapFab] Cartridge reported invalid cap URN - this is a bug in the cartridge"
                     );
+                    rejected_count += 1;
                     continue;
                 }
             };
@@ -687,9 +706,14 @@ impl LiveCapFab {
             }
         }
 
-        let _ = (matched_count, identity_count, rejected_count);
-
         self.refresh_bookends(bookend_urns);
+
+        SyncOutcome {
+            advertised: cap_urns.len(),
+            in_the_graph: matched_count,
+            identity: identity_count,
+            dropped: rejected_count,
+        }
     }
 
     /// Add a capability as an edge in the graph.
@@ -1684,7 +1708,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         let cap = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:digitized-text",
             "extract_text",
             "Extract Text",
@@ -1695,7 +1719,7 @@ mod tests {
         assert_eq!(graph.edges.len(), 1);
         assert_eq!(graph.nodes.len(), 2);
 
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let targets = graph.get_reachable_targets(&source, false, 5);
 
         // Reachable targets include only media:digitized-text
@@ -1731,7 +1755,7 @@ mod tests {
 
         // Add cap: pdf -> result (singular)
         let cap1 = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:analysis-result",
             "analyze",
             "Analyze PDF",
@@ -1740,14 +1764,14 @@ mod tests {
 
         // Add cap: pdf -> result;list (plural)
         let cap2 = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:analysis-result;list",
             "analyze_multi",
             "Analyze PDF Multi",
         );
         graph.add_cap(&cap2);
 
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
         // Query for EXACT target: singular result
         // Two valid paths exist:
@@ -1795,7 +1819,7 @@ mod tests {
 
         // pdf -> digitized-text
         let cap1 = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:digitized-text",
             "extract",
             "Extract",
@@ -1811,7 +1835,7 @@ mod tests {
         graph.add_cap(&cap1);
         graph.add_cap(&cap2);
 
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:summary-text").unwrap();
 
         let paths = graph.find_paths_to_exact_target(&source, &target, false, 5, 10);
@@ -1829,13 +1853,13 @@ mod tests {
 
         // Two paths to the same target with different specificities
         let cap1 = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:digitized-text",
             "extract_a",
             "Extract A",
         );
         let cap2 = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:digitized-text",
             "extract_b",
             "Extract B",
@@ -1844,7 +1868,7 @@ mod tests {
         graph.add_cap(&cap1);
         graph.add_cap(&cap2);
 
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:digitized-text").unwrap();
 
         // Run multiple times - should always get the same order
@@ -1875,7 +1899,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         let caps = vec![
-            make_test_cap("media:ext=pdf", "media:digitized-text", "op1", "Op1"),
+            make_test_cap("media:document;ext=pdf", "media:digitized-text", "op1", "Op1"),
             make_test_cap("media:digitized-text", "media:summary-text", "op2", "Op2"),
         ];
 
@@ -2001,7 +2025,7 @@ mod tests {
 
         // Only add PDF->text cap
         let pdf_to_text = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8",
             "pdf2text",
             "PDF to Text",
@@ -2036,7 +2060,7 @@ mod tests {
         graph.add_cap(&png_to_thumb);
 
         // Try to find path from PDF (not PNG)
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:thumbnail").unwrap();
 
         let paths = graph.find_paths_to_exact_target(&source, &target, false, 5, 10);
@@ -2054,7 +2078,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         let pdf_to_text = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8",
             "pdf2text",
             "PDF to Text",
@@ -2089,7 +2113,7 @@ mod tests {
         );
 
         // PDF should reach text (cap target) but NOT thumbnail (PNG-only cap)
-        let pdf_source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let pdf_source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let pdf_targets = graph.get_reachable_targets(&pdf_source, false, 5);
         assert!(
             pdf_targets
@@ -2139,7 +2163,7 @@ mod tests {
         assert_eq!(png_paths[0].steps.len(), 2, "Path should have 2 steps");
 
         // PDF should NOT find path to thumbnail (no PDF->resized-png cap)
-        let pdf_source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let pdf_source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let pdf_paths = graph.find_paths_to_exact_target(&pdf_source, &thumb_target, false, 5, 10);
         assert!(
             pdf_paths.is_empty(),
@@ -2157,7 +2181,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         let disbind = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8;page",
             "disbind",
             "Disbind PDF",
@@ -2179,7 +2203,7 @@ mod tests {
             "Graph should contain exactly 2 Cap edges"
         );
 
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:decision;fmt=json;record").unwrap();
 
         // Scalar input: no ForEach, direct path disbind → choose
@@ -2220,7 +2244,7 @@ mod tests {
         // Create a registry with test caps
         let registry = FabricRegistry::new_for_test();
         let disbind = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8;page",
             "disbind",
             "Disbind PDF",
@@ -2254,6 +2278,38 @@ mod tests {
         );
     }
 
+    // TEST12672: a rebuild of the graph says what it made of the caps it was
+    // given — how many are edges now, how many were identity, how many it left
+    // out. The three counts were computed and discarded, so a search that
+    // found one path could not be told from a graph that held one cap.
+    #[tokio::test]
+    async fn test12672_a_rebuild_says_what_it_kept_and_what_it_left_out() {
+        let registry = FabricRegistry::new_for_test();
+        let disbind = make_test_cap("media:document;ext=pdf", "media:enc=utf-8;page", "disbind", "Disbind PDF");
+        let choose = make_test_cap("media:enc=utf-8", "media:decision;fmt=json;record", "choose", "Make a Decision");
+        let unknown = make_test_cap("media:ext=wav", "media:enc=utf-8", "transcribe", "Transcribe");
+        // Only two of the three are in the registry: the third is advertised
+        // by a cartridge and has no definition cached.
+        registry.add_caps_to_cache(vec![disbind.clone(), choose.clone()]);
+        let advertised: Vec<String> = vec![
+            disbind.urn.to_string(),
+            crate::standard::caps::identity_urn().to_string(),
+            unknown.urn.to_string(),
+            choose.urn.to_string(),
+            "not a cap urn at all".to_string(),
+        ];
+        let bookends = all_bookends(&[disbind.clone(), choose.clone()]);
+        let mut graph = LiveCapFab::new();
+        let outcome = graph.sync_from_cap_urns(&advertised, &Arc::new(registry), &bookends).await;
+
+        assert_eq!(
+            outcome,
+            SyncOutcome { advertised: 5, in_the_graph: 2, identity: 1, dropped: 2 },
+            "two edges, the identity cap, and two left out: one with no definition, one that is not a URN"
+        );
+        assert_eq!(graph.edges.len(), outcome.in_the_graph, "what it says is in the graph is what is in it");
+    }
+
     // TEST790: Tests identity_urn is specific and doesn't match everything
     #[test]
     fn test790_identity_urn_is_specific() {
@@ -2265,7 +2321,7 @@ mod tests {
 
         // A specific cap should NOT be equivalent to identity
         let specific_cap = crate::CapUrn::from_string(
-            r#"cap:disbind;in="media:ext=pdf";out="media:disbound-page;enc=utf-8""#,
+            r#"cap:disbind;in="media:document;ext=pdf";out="media:disbound-page;enc=utf-8""#,
         )
         .unwrap();
 
@@ -2279,7 +2335,7 @@ mod tests {
     #[test]
     fn test789_cap_from_json_has_valid_specs() {
         let json = r#"{
-            "urn": "cap:disbind;in=\"media:ext=pdf\";out=\"media:disbound-page;enc=utf-8\"",
+            "urn": "cap:disbind;in=\"media:document;ext=pdf\";out=\"media:disbound-page;enc=utf-8\"",
             "aliases": ["disbind"],
             "title": "Disbind PDF",
             "args": [],
@@ -2293,7 +2349,7 @@ mod tests {
 
         assert!(!in_spec.is_empty(), "in_spec should not be empty");
         assert!(!out_spec.is_empty(), "out_spec should not be empty");
-        assert_eq!(in_spec, "media:ext=pdf");
+        assert_eq!(in_spec, "media:document;ext=pdf");
         assert!(
             out_spec.contains("disbound-page"),
             "out_spec should contain disbound-page: {}",
@@ -2343,7 +2399,7 @@ mod tests {
                 StrandStep::new(
                     StrandStepType::Cap {
                         cap_urn: CapUrn::from_string(
-                            r#"cap:disbind;in="media:ext=pdf";out="media:enc=utf-8;page""#,
+                            r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf-8;page""#,
                         )
                         .unwrap(),
                         title: "Disbind PDF Into Pages".to_string(),
@@ -2351,11 +2407,11 @@ mod tests {
                         input_is_sequence: false,
                         output_is_sequence: true,
                         inputs: vec![CapInput {
-                            arg_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+                            arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                             source: ArgSourceRef::StrandInput,
                         }],
                     },
-                    MediaUrn::from_string("media:ext=pdf").unwrap(),
+                    MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                     MediaUrn::from_string("media:enc=utf-8;page").unwrap(),
                 ),
                 StrandStep::new(
@@ -2366,7 +2422,7 @@ mod tests {
                     MediaUrn::from_string("media:enc=utf-8;page").unwrap(),
                 ),
             ],
-            source_media_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+            source_media_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
             target_media_urn: MediaUrn::from_string("media:enc=utf-8;page").unwrap(),
             total_steps: 2,
             cap_step_count: 1,
@@ -2390,14 +2446,14 @@ mod tests {
             "distinct steps get distinct token_ids",
         );
 
-        let expected_source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let expected_source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let expected_target = MediaUrn::from_string("media:enc=utf-8;page").unwrap();
         assert!(
             recovered
                 .source_media_urn
                 .is_equivalent(&expected_source)
                 .expect("URN equivalence check"),
-            "source_media_urn must round-trip structurally as media:ext=pdf"
+            "source_media_urn must round-trip structurally as media:document;ext=pdf"
         );
         assert!(
             recovered
@@ -2504,7 +2560,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         let disbind = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8;page",
             "disbind",
             "Disbind PDF",
@@ -2519,7 +2575,7 @@ mod tests {
         graph.sync_from_caps(__caps, &all_bookends(__caps));
 
         // Scalar path: pdf → disbind → enc=utf-8;page → summarize → enc=utf-8;summary
-        let source = MediaUrn::from_string("media:ext=pdf").unwrap();
+        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let target = MediaUrn::from_string("media:enc=utf-8;summary").unwrap();
 
         let paths = graph.find_paths_to_exact_target(&source, &target, false, 10, 20);
@@ -2534,7 +2590,7 @@ mod tests {
 
         let caps = vec![
             make_test_cap(
-                "media:ext=pdf",
+                "media:document;ext=pdf",
                 "media:enc=utf-8;page",
                 "disbind",
                 "Disbind",
@@ -2763,7 +2819,7 @@ mod tests {
         use crate::cap::registry::FabricRegistry;
 
         let cap = make_test_cap_with_arg(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8;ext=txt",
             "extract",
             "Extract",
@@ -2772,7 +2828,7 @@ mod tests {
         registry.add_caps_to_cache(vec![cap]);
 
         let cap_urn =
-            CapUrn::from_string("cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"")
+            CapUrn::from_string("cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"")
                 .unwrap();
         let strand = Strand {
             steps: vec![StrandStep::new(
@@ -2783,14 +2839,14 @@ mod tests {
                     input_is_sequence: false,
                     output_is_sequence: false,
                     inputs: vec![CapInput {
-                        arg_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+                        arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                         source: ArgSourceRef::StrandInput,
                     }],
                 },
-                MediaUrn::from_string("media:ext=pdf").unwrap(),
+                MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                 MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
             )],
-            source_media_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+            source_media_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
             target_media_urn: MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
             total_steps: 1,
             cap_step_count: 1,
@@ -2823,7 +2879,7 @@ mod tests {
         // Note: no caps added to the registry.
 
         let cap_urn =
-            CapUrn::from_string("cap:ghost;in=\"media:ext=pdf\";out=\"media:enc=utf-8;ext=txt\"")
+            CapUrn::from_string("cap:ghost;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"")
                 .unwrap();
         let strand = Strand {
             steps: vec![StrandStep::new(
@@ -2834,14 +2890,14 @@ mod tests {
                     input_is_sequence: false,
                     output_is_sequence: false,
                     inputs: vec![CapInput {
-                        arg_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+                        arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                         source: ArgSourceRef::StrandInput,
                     }],
                 },
-                MediaUrn::from_string("media:ext=pdf").unwrap(),
+                MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                 MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
             )],
-            source_media_urn: MediaUrn::from_string("media:ext=pdf").unwrap(),
+            source_media_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
             target_media_urn: MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
             total_steps: 1,
             cap_step_count: 1,
@@ -3157,7 +3213,7 @@ mod tests {
 
         // A concrete cap in the same family DOES become a runnable edge.
         let concrete = make_test_cap(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "media:enc=utf-8;ext=txt;page;plain-text",
             "disbind",
             "Disbind PDF",

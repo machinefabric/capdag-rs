@@ -4489,13 +4489,19 @@ impl RelaySwitch {
         let bookend_urns = self.fabric_registry.bookend_urns();
 
         let mut graph = self.live_cap_fab.write().await;
-        graph
+        let outcome = graph
             .sync_from_cap_urns(&all_caps, &self.fabric_registry, &bookend_urns)
             .await;
-        tracing::debug!(
+        // Said at info, with what it kept: the graph every path search walks
+        // is replaced here, and a rebuild that kept less than the one before
+        // it is the difference between a wizard offering thirty paths and one.
+        tracing::info!(
             target: "relay_switch",
-            cap_count = all_caps.len(),
             reason = reason,
+            advertised = outcome.advertised,
+            in_the_graph = outcome.in_the_graph,
+            identity = outcome.identity,
+            dropped = outcome.dropped,
             "[RelaySwitch] LiveCapFab rebuilt from current capabilities"
         );
     }
@@ -5880,7 +5886,7 @@ mod tests {
     // TEST437: find_master_for_cap with preferred_cap routes to generic handler
     //
     // With is_dispatchable semantics:
-    // - Generic candidate (in=media:) CAN dispatch specific request (in="media:ext=pdf")
+    // - Generic candidate (in=media:) CAN dispatch specific request (in="media:document;ext=pdf")
     //   because media: (wildcard) accepts any input type
     // - Preference routes to preferred among dispatchable candidates
     #[tokio::test]
@@ -5901,7 +5907,7 @@ mod tests {
 
         // Master 1: specific thumbnail handler (like pdfcartridge)
         let specific_cap =
-            "cap:in=\"media:ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:document;ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
         tokio::spawn(async move {
             slave_notify_with_identity(
                 slave_sock1,
@@ -5920,7 +5926,7 @@ mod tests {
 
         // Specific request for PDF thumbnail
         let request =
-            "cap:in=\"media:ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:document;ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
 
         // Without preference: routes to master 1 (specific, closest-specificity)
         assert_eq!(switch.find_master_for_cap(request, None).await, Some(1));
@@ -5948,7 +5954,7 @@ mod tests {
 
         // Master 0: only has a specific cap
         let registered =
-            "cap:in=\"media:ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:document;ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
         tokio::spawn(async move {
             slave_notify_with_identity(
                 slave_sock,
@@ -5966,7 +5972,7 @@ mod tests {
         .unwrap();
 
         let request =
-            "cap:in=\"media:ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:document;ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
 
         // Preference for an unrelated cap — no equivalent match, falls back to closest-specificity
         let unrelated =
@@ -5981,7 +5987,7 @@ mod tests {
     //          (but only matches if no more specific candidate exists)
     //
     // With is_dispatchable: generic candidate (in=media:) CAN handle specific
-    // request (in="media:ext=pdf") because media: accepts any input type.
+    // request (in="media:document;ext=pdf") because media: accepts any input type.
     // With preference, can route to generic even when more specific exists.
     #[tokio::test]
     async fn test439_generic_candidate_can_dispatch_specific_request() {
@@ -6008,7 +6014,7 @@ mod tests {
         // Specific PDF request — generic handler CAN dispatch it
         // because candidate's wildcard input (media:) accepts any input type
         let request =
-            "cap:in=\"media:ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:document;ext=pdf\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
         assert_eq!(
             switch.find_master_for_cap(request, None).await,
             Some(0),

@@ -3162,10 +3162,10 @@ mod alias_tests {
             aliases: vec!["test://cap".to_string()],
             is_abstract: false,
             args: vec![CapArg::new(
-                "media:ext=pdf".to_string(),
+                "media:document;ext=pdf".to_string(),
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf".to_string(),
+                    stdin: "media:document;ext=pdf".to_string(),
                 }],
             )],
             output: Some(CapOutput::new(
@@ -3232,15 +3232,18 @@ mod alias_tests {
 
     // TEST8063: narrow_abstract_cap resolves an abstract cap + detected input to
     // the unique concrete cap via is_dispatchable — the CLI's dispatch step.
-    // Exercises all three outcomes: unique (fixed-output disbind), ambiguous
-    // (convert-image jpeg with no --to), and no-handler.
+    // The abstract caps are typed as the fabric types them (`convert-image` is
+    // image → image, `disbind` takes a document). Exercises all three outcomes:
+    // unique (fixed-output disbind), ambiguous (convert-image jpeg with no
+    // --to), and no-handler — for an image no converter reads, and for a file
+    // that is not an image at all, where the refusal names the declared type.
     #[tokio::test]
     async fn test8063_narrow_abstract_cap() {
         use crate::MediaUrn;
         let registry = FabricRegistry::new_for_test();
         let disbind_pdf = Cap::new(
             CapUrn::from_string(
-                r#"cap:disbind;in="media:ext=pdf";out="media:enc=utf-8;ext=txt;page;plain-text""#,
+                r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf-8;ext=txt;page;plain-text""#,
             )
             .unwrap(),
             "Disbind PDF".to_string(),
@@ -3266,9 +3269,11 @@ mod alias_tests {
 
         // disbind has a fixed output → a pdf input narrows uniquely, no --to.
         let disbind_abstract =
-            CapUrn::from_string(r#"cap:disbind;out="media:enc=utf-8;ext=txt;page;plain-text""#)
-                .unwrap();
-        let pdf = MediaUrn::from_string("media:ext=pdf").unwrap();
+            CapUrn::from_string(
+                r#"cap:disbind;in="media:document";out="media:enc=utf-8;ext=txt;page;plain-text""#,
+            )
+            .unwrap();
+        let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let concrete = registry
             .narrow_abstract_cap(&disbind_abstract, &pdf, None)
             .await
@@ -3276,7 +3281,8 @@ mod alias_tests {
         assert!(concrete.to_string().contains("ext=pdf"));
 
         // convert-image with jpeg but no target is AMBIGUOUS (png or webp).
-        let convert_abstract = CapUrn::from_string("cap:convert-image").unwrap();
+        let convert_abstract =
+            CapUrn::from_string(r#"cap:convert-image;in="media:image";out="media:image""#).unwrap();
         let jpeg = MediaUrn::from_string("media:ext=jpeg;image").unwrap();
         assert!(
             matches!(
@@ -3306,6 +3312,26 @@ mod alias_tests {
             ),
             "a gif input has no convert-image handler here → NoHandler"
         );
+
+        // A file that is not an image: the same rule refuses it, and the
+        // message carries what the abstract cap declares and what it was given.
+        let text = MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap();
+        let refused = registry
+            .narrow_abstract_cap(&convert_abstract, &text, Some(&png))
+            .await
+            .expect_err("a text file is not an image");
+        assert!(matches!(refused, CapNarrowError::NoHandler { .. }));
+        let said = refused.to_string();
+        assert!(said.contains("in=media:image"), "{said}");
+        assert!(said.contains("media:enc=utf-8;ext=txt"), "{said}");
+
+        // Nor does an image go to the document umbrella's handler.
+        assert!(matches!(
+            registry
+                .narrow_abstract_cap(&disbind_abstract, &jpeg, None)
+                .await,
+            Err(CapNarrowError::NoHandler { .. })
+        ));
     }
 
     // TEST1889: resolve_alias_typed enforces the expected kind. A media
@@ -3343,7 +3369,7 @@ mod alias_tests {
     #[tokio::test]
     async fn test1890_get_cap_via_alias_and_type_mismatch() {
         let registry = FabricRegistry::new_for_test();
-        let cap_urn = "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8\"";
+        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"";
         let cap = cap_with_urn(cap_urn);
         let canonical = cap.urn_string();
         registry.add_caps_to_cache(vec![cap]);
@@ -3390,7 +3416,7 @@ mod alias_tests {
         assert_eq!(spec.urn, "media:fmt=json;record");
 
         // A cap alias at the media boundary → hard error.
-        let cap_urn = "cap:extract;in=\"media:ext=pdf\";out=\"media:enc=utf-8\"";
+        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"";
         let cap = cap_with_urn(cap_urn);
         let canonical = cap.urn_string();
         registry.add_caps_to_cache(vec![cap]);
@@ -3524,7 +3550,7 @@ mod parity_port_tests {
         );
         // A real URN with no alias → None.
         assert_eq!(
-            registry.display_alias_for_urn("media:enc=utf-8;ext=pdf"),
+            registry.display_alias_for_urn("media:document;enc=utf-8;ext=pdf"),
             None
         );
         // A non-URN (no cap:/media: prefix) → None, never a panic.
@@ -3640,7 +3666,7 @@ mod parity_port_tests {
     fn test608_media_urns_for_extension_populated() {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_media_def_for_test(spec_with_ext(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "PDF Document",
             "application/pdf",
             &["pdf"],
@@ -3657,13 +3683,13 @@ mod parity_port_tests {
     fn test609_get_extension_mappings() {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_media_def_for_test(spec_with_ext(
-            "media:ext=pdf",
+            "media:document;ext=pdf",
             "PDF",
             "application/octet-stream",
             &["pdf"],
         ));
         registry.insert_cached_media_def_for_test(spec_with_ext(
-            "media:ext=epub",
+            "media:document;ext=epub",
             "EPUB",
             "application/octet-stream",
             &["epub"],
@@ -3697,11 +3723,11 @@ mod parity_port_tests {
     // TEST616: Verify StoredMediaDef converts to MediaDef preserving all fields
     #[test]
     fn test616_stored_media_def_to_def() {
-        let mut s = spec_with_ext("media:ext=pdf", "PDF Document", "application/pdf", &["pdf"]);
+        let mut s = spec_with_ext("media:document;ext=pdf", "PDF Document", "application/pdf", &["pdf"]);
         s.profile_uri = Some("https://capdag.com/schema/pdf".to_string());
         s.description = Some("PDF document data".to_string());
         let def = s.to_media_def_def();
-        assert_eq!(def.urn, "media:ext=pdf");
+        assert_eq!(def.urn, "media:document;ext=pdf");
         assert_eq!(def.media_type, "application/pdf");
         assert_eq!(def.title, "PDF Document");
         assert_eq!(def.description.as_deref(), Some("PDF document data"));
@@ -3792,11 +3818,11 @@ mod parity_port_tests {
     // TEST138: Test parsing registry JSON with stdin args verifies stdin media URN extraction
     #[test]
     fn test138_parse_registry_json_with_stdin() {
-        let json = r#"{"urn":"cap:in=\"media:ext=pdf\";disbind;out=\"media:enc=utf-8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:ext=pdf","required":true,"sources":[{"stdin":"media:ext=pdf"}]}]}"#;
+        let json = r#"{"urn":"cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:document;ext=pdf","required":true,"sources":[{"stdin":"media:document;ext=pdf"}]}]}"#;
         let cap: Cap = serde_json::from_str(json).expect("cap parses");
         assert_eq!(cap.title, "Disbind PDF");
         assert!(cap.accepts_stdin());
-        assert_eq!(cap.get_stdin_media_urn(), Some("media:ext=pdf"));
+        assert_eq!(cap.get_stdin_media_urn(), Some("media:document;ext=pdf"));
     }
 
     // TEST6382: Test parsing registry JSON without stdin args verifies cap structure
@@ -3939,11 +3965,11 @@ mod parity_port_tests {
             version: 1,
             media_type: "application/x-live-feed-reference".to_string(),
             title: "Microphone Feed Reference".to_string(),
-            metadata: Some(serde_json::json!({ "content": "media:audio-frames;pcm" })),
+            metadata: Some(serde_json::json!({ "content": "media:audio;audio-frames;pcm" })),
             ..Default::default()
         });
         registry.insert_cached_media_def_for_test(StoredMediaDef {
-            urn: "media:audio-frames;pcm".to_string(),
+            urn: "media:audio;audio-frames;pcm".to_string(),
             version: 1,
             media_type: "audio/x-raw".to_string(),
             title: "PCM Audio Frames".to_string(),
@@ -3955,7 +3981,7 @@ mod parity_port_tests {
             defs,
             vec![(
                 "media:audio;live;microphone".to_string(),
-                "media:audio-frames;pcm".to_string(),
+                "media:audio;audio-frames;pcm".to_string(),
                 "Microphone Feed Reference".to_string()
             )],
             "exactly the live def, with its pairing — content defs are not live sources"
@@ -3970,7 +3996,7 @@ mod parity_port_tests {
                 .live_source_content_urn(&reordered)
                 .await
                 .expect("lookup succeeds"),
-            Some("media:audio-frames;pcm".to_string())
+            Some("media:audio;audio-frames;pcm".to_string())
         );
     }
 

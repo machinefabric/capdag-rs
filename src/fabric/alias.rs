@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn test1881_token_urn_vs_alias_detection() {
         assert!(token_is_urn(
-            "cap:in=\"media:ext=pdf\";extract;out=\"media:enc=utf-8\""
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8\""
         ));
         assert!(token_is_urn("media:fmt=json;record"));
         assert!(!token_is_urn("pdf2text"));

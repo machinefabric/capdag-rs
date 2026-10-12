@@ -1738,7 +1738,7 @@ mod tests {
         let rid = MessageId::new_uuid();
         let mut req = Frame::req(
             rid.clone(),
-            "cap:in=\"media:ext=pdf\";unknown;out=\"media:text\"",
+            "cap:in=\"media:document;ext=pdf\";unknown;out=\"media:text\"",
             vec![],
             "application/cbor",
         );
@@ -1759,7 +1759,7 @@ mod tests {
     // TEST6751: InProcessCartridgeHost manifest includes identity cap and handler caps
     #[test]
     fn test6751_manifest_includes_all_caps() {
-        let cap_urn = "cap:in=\"media:ext=pdf\";thumbnail;out=\"media:ext=png;image\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"";
         let cap = make_test_cap(cap_urn);
         let host = InProcessCartridgeHost::new(
             InProcessHostIdentity::for_test("thumb-host"),
@@ -1918,7 +1918,7 @@ mod tests {
     // TEST660: InProcessCartridgeHost closest-specificity routing prefers specific over identity
     #[test]
     fn test660_closest_specificity_routing() {
-        let specific_urn = "cap:in=\"media:ext=pdf\";thumbnail;out=\"media:ext=png;image\"";
+        let specific_urn = "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"";
         let generic_urn = "cap:in=\"media:image\";thumbnail;out=\"media:ext=png;image\"";
 
         let specific_cap = make_test_cap(specific_urn);
@@ -1969,7 +1969,7 @@ mod tests {
         // Request for pdf thumbnail should match specific (pdf, specificity 3) over generic (image, specificity 2)
         let result = InProcessCartridgeHost::find_handler_for_cap(
             &cap_table,
-            "cap:in=\"media:ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
+            "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
         );
         let (idx, registered) = result.expect("specific handler must match");
         assert_eq!(idx, 1); // specific handler

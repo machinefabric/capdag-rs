@@ -256,7 +256,7 @@ impl MediaValidation {
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaDef {
-    /// The media URN identifier (e.g., "media:binary;ext=pdf")
+    /// The media URN identifier (e.g., "media:binary;document;ext=pdf")
     pub urn: String,
     /// The MIME media type (e.g., "application/json", "text/plain")
     pub media_type: String,

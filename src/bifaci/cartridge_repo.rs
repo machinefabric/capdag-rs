@@ -1813,7 +1813,7 @@ mod tests {
     #[test]
     fn test633_deserialize_rich_registry_cap() {
         let json = r#"{
-            "urn": "cap:in=\"media:ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+            "urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
             "title": "Disbind PDF",
             "aliases": ["disbind"],
             "cap_description": "Extract each PDF page as plain page text.",
@@ -1822,7 +1822,7 @@ mod tests {
                     "media_urn": "media:enc=utf-8;file-path",
                     "required": true,
                     "is_sequence": false,
-                    "sources": [{"stdin": "media:ext=pdf"}, {"position": 0}],
+                    "sources": [{"stdin": "media:document;ext=pdf"}, {"position": 0}],
                     "arg_description": "Path to the PDF file to process"
                 }
             ],
@@ -1841,7 +1841,7 @@ mod tests {
         let args = cap.args.unwrap();
         assert_eq!(args.len(), 1);
         assert_eq!(args[0].media_urn, "media:enc=utf-8;file-path");
-        assert_eq!(args[0].sources[0].stdin.as_deref(), Some("media:ext=pdf"));
+        assert_eq!(args[0].sources[0].stdin.as_deref(), Some("media:document;ext=pdf"));
         assert_eq!(args[0].sources[1].position, Some(0));
         let output = cap.output.unwrap();
         assert_eq!(output.media_urn, "media:enc=utf-8;page");
@@ -1856,12 +1856,12 @@ mod tests {
             "caps": [
                 {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]}
             ],
-            "adapter_urns": ["media:ext=pdf"]
+            "adapter_urns": ["media:document;ext=pdf"]
         }"#;
         let group: RegistryCapGroup = serde_json::from_str(json).unwrap();
         assert_eq!(group.name, "pdf-formats");
         assert_eq!(group.caps.len(), 1);
-        assert_eq!(group.adapter_urns, vec!["media:ext=pdf".to_string()]);
+        assert_eq!(group.adapter_urns, vec!["media:document;ext=pdf".to_string()]);
     }
 
     // TEST635: CartridgeInfo deserializes the wire shape exactly as
@@ -1884,9 +1884,9 @@ mod tests {
                     "name": "pdf-formats",
                     "caps": [
                         {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]},
-                        {"urn": "cap:in=\"media:ext=pdf\";disbind;out=\"media:enc=utf-8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"]}
+                        {"urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"]}
                     ],
-                    "adapter_urns": ["media:ext=pdf"]
+                    "adapter_urns": ["media:document;ext=pdf"]
                 }
             ],
             "categories": [],
@@ -1951,7 +1951,7 @@ mod tests {
                             "caps": [
                                 {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]}
                             ],
-                            "adapter_urns": ["media:ext=pdf"]
+                            "adapter_urns": ["media:document;ext=pdf"]
                         }
                     ],
                     "categories": [],
@@ -1974,7 +1974,7 @@ mod tests {
                         {
                             "name": "image-formats",
                             "caps": [
-                                {"urn": "cap:in=\"media:convert-image;image;jpeg;png\";out=\"media:image\"", "title": "Convert JPEG to PNG", "aliases": ["convert-image"]}
+                                {"urn": "cap:convert-image;in=\"media:ext=jpeg;image\";out=\"media:ext=png;image\"", "title": "Convert JPEG to PNG", "aliases": ["convert-image-jpeg-to-png"]}
                             ],
                             "adapter_urns": ["media:ext=bmp;image", "media:ext=jpeg;image", "media:ext=png;image", "media:ext=tiff;image", "media:ext=webp;image", "media:ext=gif;image"]
                         }
@@ -2627,7 +2627,7 @@ mod tests {
             vec![build_cap_group(
                 "pdf",
                 vec![build_cap(
-                    "cap:in=\"media:ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
                     "Disbind PDF",
                     "disbind",
                 )],
@@ -2693,11 +2693,11 @@ mod tests {
     #[test]
     fn test329_cartridge_repo_server_get_by_cap() {
         let declared_urn =
-            "cap:in=\"media:ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
         // Same cap URN with the in/out spec tags in a different declared
         // order. Tagged-URN normalization treats them as identical.
         let request_urn =
-            "cap:in=\"media:ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
 
         let entry = build_registry_entry(
             "PDF Cartridge",
@@ -2780,9 +2780,9 @@ mod tests {
     async fn test331_cartridge_repo_client_get_suggestions() {
         let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
         let declared_urn =
-            "cap:in=\"media:ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
         let request_urn =
-            "cap:in=\"media:ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
 
         let registry = CartridgeRegistryResponse {
             cartridges: vec![{
@@ -2867,7 +2867,7 @@ mod tests {
     #[tokio::test]
     async fn test333_cartridge_repo_client_get_all_caps() {
         let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
-        let cap1 = "cap:in=\"media:ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+        let cap1 = "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
         let cap2 =
             "cap:in=\"media:enc=utf-8;ext=txt\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
 
