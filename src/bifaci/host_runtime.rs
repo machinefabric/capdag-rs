@@ -60,6 +60,59 @@ const RETIRE_DRAIN_TIMEOUT: Duration = Duration::from_secs(600);
 /// Maximum time to wait for a heartbeat response before considering a cartridge unhealthy.
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often a killed cartridge's process is asked whether it has exited, and
+/// how long it is asked for.
+const REAP_POLL: Duration = Duration::from_millis(20);
+const REAP_LIMIT: Duration = Duration::from_secs(10);
+
+/// Kill a cartridge's process and collect its exit — by ASKING for it.
+///
+/// `Child::kill().await` sends the signal and then waits to be TOLD the process
+/// has gone: on unix that telling is SIGCHLD. Every kill in this file is made
+/// from inside the host's one event loop, so a telling that does not come
+/// parks the loop — no frame routed, no heartbeat sent, nothing failed, for
+/// every cartridge the host has. That is what a wedged cartridge did to the
+/// engine: the frozen process was killed, was a zombie under the engine for as
+/// long as anyone looked, and the request it had been serving was never
+/// failed; once, the loop came back six minutes later, when some other child
+/// exited and its SIGCHLD stood in for the one that had not come.
+///
+/// A killed process cannot refuse to die, and whether it has is a question the
+/// kernel answers at once (`try_wait`). So it is asked, a few times a second,
+/// and the loop never depends on being told. A process that has still not
+/// exited after `REAP_LIMIT` is one the kernel cannot end; that is said, and
+/// the loop goes on — the `Child` is dropped by its owner and reaped whenever
+/// it does go.
+async fn kill_and_reap(child: &mut tokio::process::Child) {
+    let pid = child.id();
+    if let Err(error) = child.start_kill() {
+        // Already gone and already collected is the ordinary way for this to
+        // fail; `try_wait` below says which it was.
+        tracing::debug!(target: "host_runtime", ?pid, %error, "a cartridge process could not be signalled");
+    }
+    let asked_from = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(target: "host_runtime", ?pid, %error, "a killed cartridge process cannot be asked whether it has exited");
+                return;
+            }
+        }
+        if asked_from.elapsed() >= REAP_LIMIT {
+            tracing::error!(
+                target: "host_runtime",
+                ?pid,
+                "a cartridge process was killed and has not exited after {}s — going on without it",
+                REAP_LIMIT.as_secs()
+            );
+            return;
+        }
+        tokio::time::sleep(REAP_POLL).await;
+    }
+}
+
 // =============================================================================
 // CARTRIDGE HOST OBSERVER — Lifecycle callbacks for spawn/death
 // =============================================================================
@@ -2040,7 +2093,7 @@ impl CartridgeHostRuntime {
                         self.cartridges[cartridge_idx].shutdown_reason =
                             Some(ShutdownReason::Cancelled(reason.clone()));
                         if let Some(ref mut child) = self.cartridges[cartridge_idx].process {
-                            let _ = child.kill().await;
+                            kill_and_reap(child).await;
                         }
                     } else {
                         // Cooperative cancel: forward Cancel frame to the cartridge
@@ -2398,7 +2451,7 @@ impl CartridgeHostRuntime {
                     }
                     Ok(None) => {
                         // Still running — kill it
-                        let _ = child.kill().await;
+                        kill_and_reap(child).await;
                         exit_info = "still running (killed)".to_string();
                     }
                     Err(e) => {
@@ -2694,7 +2747,7 @@ impl CartridgeHostRuntime {
                 if let Some(idx) = cartridge_idx {
                     self.cartridges[idx].shutdown_reason = Some(ShutdownReason::OomKill);
                     if let Some(ref mut child) = self.cartridges[idx].process {
-                        let _ = child.kill().await;
+                        kill_and_reap(child).await;
                     }
                     // Death event will arrive via the reader task; handle_cartridge_death
                     // will do the full cleanup.
@@ -2767,7 +2820,7 @@ impl CartridgeHostRuntime {
         self.cartridges[cartridge_idx].retiring_since = None;
         self.cartridges[cartridge_idx].shutdown_reason = Some(ShutdownReason::RosterRetired);
         if let Some(ref mut child) = self.cartridges[cartridge_idx].process {
-            let _ = child.kill().await;
+            kill_and_reap(child).await;
         }
     }
 
@@ -3057,7 +3110,7 @@ impl CartridgeHostRuntime {
                     CartridgeAttachmentErrorKind::HandshakeFailed,
                     msg.clone(),
                 );
-                let _ = child.kill().await;
+                kill_and_reap(&mut child).await;
                 return Err(AsyncHostError::Handshake(msg));
             }
             Err(_) => {
@@ -3071,7 +3124,7 @@ impl CartridgeHostRuntime {
                     CartridgeAttachmentErrorKind::HandshakeFailed,
                     msg.clone(),
                 );
-                let _ = child.kill().await;
+                kill_and_reap(&mut child).await;
                 return Err(AsyncHostError::Handshake(msg));
             }
         };
@@ -3093,7 +3146,7 @@ impl CartridgeHostRuntime {
                     inner
                 );
                 self.cartridges[cartridge_idx].record_attachment_error(kind, msg.clone());
-                let _ = child.kill().await;
+                kill_and_reap(&mut child).await;
                 return Err(inner);
             }
         };
@@ -3135,7 +3188,7 @@ impl CartridgeHostRuntime {
                     CartridgeAttachmentErrorKind::IdentityRejected,
                     msg.clone(),
                 );
-                let _ = child.kill().await;
+                kill_and_reap(&mut child).await;
                 return Err(AsyncHostError::Protocol(msg));
             }
             Err(_) => {
@@ -3153,7 +3206,7 @@ impl CartridgeHostRuntime {
                     CartridgeAttachmentErrorKind::IdentityRejected,
                     msg.clone(),
                 );
-                let _ = child.kill().await;
+                kill_and_reap(&mut child).await;
                 return Err(AsyncHostError::Protocol(msg));
             }
         }
@@ -3603,7 +3656,7 @@ impl CartridgeHostRuntime {
 
             cartridge.shutdown_reason = Some(ShutdownReason::AppExit);
             if let Some(ref mut child) = cartridge.process {
-                let _ = child.kill().await;
+                kill_and_reap(child).await;
             }
             cartridge.process = None;
             cartridge.running = false;
@@ -7253,6 +7306,51 @@ mod tests {
             Some(&2),
             "a cold cartridge keeps the values queued for the attach-time probe"
         );
+    }
+
+    /// TEST12667: a killed cartridge process is collected by asking, not by
+    /// waiting to be told.
+    ///
+    /// The process here is stopped first, as a wedged cartridge is when its
+    /// heartbeat expires. The judge is the operating system: after the kill
+    /// the pid names nothing — not a running process and not a zombie still
+    /// waiting to be collected, which is what the engine was left holding.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test12667_a_killed_process_is_collected_by_asking() {
+        let mut child = crate::bifaci::launch::tokio_command(std::path::Path::new("/bin/sleep"))
+            .arg("300")
+            .kill_on_drop(true)
+            .spawn()
+            .expect("sleep starts");
+        let pid = child.id().expect("a running child has a pid") as libc::pid_t;
+        // SAFETY: signals to a process this test started.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0, "the child is stopped");
+
+        let began = std::time::Instant::now();
+        kill_and_reap(&mut child).await;
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(5),
+            "a stopped process is collected promptly: {:?}",
+            began.elapsed()
+        );
+        // Signal 0 delivers nothing; it asks whether the pid names a process.
+        // A zombie still answers yes.
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "pid {pid} still names a process after it was killed and collected"
+        );
+        assert!(
+            matches!(child.try_wait(), Ok(Some(_))),
+            "and the handle knows its exit"
+        );
+
+        // A process that has already exited and been collected is not waited
+        // for again, and not an error.
+        let again = std::time::Instant::now();
+        kill_and_reap(&mut child).await;
+        assert!(again.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[tokio::test]
