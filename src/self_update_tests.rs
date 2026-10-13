@@ -147,7 +147,7 @@ fn archive(scratch: &Path, root: &str, version: &str, with_cartridges: bool) -> 
         std::fs::write(bundle.join(CARTRIDGES).join("txtcartridge").join("of"), version).unwrap();
     }
     let out = tree.join("bundle.tar.gz");
-    let made = std::process::Command::new("tar")
+    let made = crate::bifaci::launch::command(Path::new("tar"))
         .arg("-czf")
         .arg(&out)
         .arg("-C")
@@ -220,7 +220,7 @@ fn installed(scratch: &Path, version: &str) -> PathBuf {
 }
 
 fn says(executable: &Path) -> String {
-    let out = std::process::Command::new(executable).arg("--version").output().unwrap();
+    let out = crate::bifaci::launch::command(executable).arg("--version").output().unwrap();
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 

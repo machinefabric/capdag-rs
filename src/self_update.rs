@@ -545,7 +545,8 @@ fn install(
     // The system's tar reads both forms a bundle is published in (a .tar.gz,
     // and on Windows a .zip), and what it unpacks here has just been held to
     // the digest a signed manifest lists.
-    let unpacked = std::process::Command::new("tar")
+    // Started the way every process of this crate is: through the launcher.
+    let unpacked = crate::bifaci::launch::command(Path::new("tar"))
         .arg("-xf")
         .arg(&file)
         .arg("-C")
@@ -572,7 +573,7 @@ fn install(
         )));
     }
     // It must run, and be the release it was published as.
-    let said = std::process::Command::new(&new)
+    let said = crate::bifaci::launch::command(&new)
         .arg("--version")
         .output()
         .map_err(|e| {
