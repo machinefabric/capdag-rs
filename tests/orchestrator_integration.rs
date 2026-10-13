@@ -519,6 +519,36 @@ async fn test12798_a_map_inside_a_map_and_a_fold_per_outer_item() {
     assert_eq!(ran.texts("e"), vec!["a|a", "b|b", "c|c", "d|d", "e|e"]);
 }
 
+// TEST12831: where a step runs follows what it is given. A step given two
+// values made for the same item — the word, and the word in capitals — runs
+// in the one map that made them and is given both for that item. A step
+// given what a map made, and a second sequence the map does not iterate,
+// does not run for every pair: the two are zipped, item with item.
+#[tokio::test]
+async fn test12831_values_of_one_item_stay_together_and_sequences_zip() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!("{}[doc -> words -> w][w -> shout -> loud][(w, right=loud) -> pair -> p]", dag_headers()),
+            &[("doc", Given::One(b"one two three"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.texts("p"), vec!["one|ONE", "two|TWO", "three|THREE"]);
+
+    let ran = machines
+        .run(
+            &format!(
+                "{}[a -> words -> xs][b -> words -> ys][xs -> shout -> loud][(loud, right=ys) -> pair -> p]",
+                dag_headers()
+            ),
+            &[("a", Given::One(b"one two three")), ("b", Given::One(b"x y z"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.texts("p"), vec!["ONE|x", "TWO|y", "THREE|z"]);
+}
+
 // TEST12799: an output that may not fire and does not leaves what needs it
 // skipped: the step wired to it does not run and is reported skipped, a
 // gather it is a member of holds one member fewer, and a machine output

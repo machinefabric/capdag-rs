@@ -1094,6 +1094,113 @@ async fn test12814_a_run_of_a_map_is_given_the_item_and_the_whole_sequence() {
     assert_eq!(runtime.runs_of("among").len(), 3);
 }
 
+// TEST12828: sequences whose lengths are known and differ are refused when
+// the map is set up, before an item of either is read: nothing can have been
+// run on them. Equal known lengths are taken.
+#[tokio::test]
+async fn test12828_known_unequal_lengths_are_refused_before_an_item_is_read() {
+    let source = |known: usize| {
+        // Nothing is ever sent: a zip that waited for an item would wait for ever.
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        (
+            tx,
+            RegionItemSource {
+                rx,
+                known_total: Some(known),
+                feed_handle: None,
+            },
+        )
+    };
+    let token: StepToken = "zip-known".parse().unwrap();
+    let nodes = || vec!["a".to_string(), "b".to_string()];
+    let ((_keep_a, a), (_keep_b, b)) = (source(3), source(2));
+    match ZippedSources::new(token.clone(), nodes(), vec![a, b]) {
+        Err(ExecutionError::ZipLengthMismatch { sources, foreach_token_id }) => {
+            assert_eq!(sources, vec![("a".to_string(), 3), ("b".to_string(), 2)]);
+            assert_eq!(foreach_token_id, token);
+        }
+        Err(other) => panic!("expected ZipLengthMismatch, got {other}"),
+        Ok(_) => panic!("sequences of 3 and 2 items cannot be zipped"),
+    }
+    let ((_keep_a, a), (_keep_b, b)) = (source(2), source(2));
+    let zipped = ZippedSources::new(token, nodes(), vec![a, b]).expect("equal lengths zip");
+    assert_eq!(zipped.known_total(), Some(2));
+}
+
+// TEST12829: sequences read as they arrive, with no length known ahead, are
+// zipped item by item. When one ends while another still gives an item, that
+// is a length mismatch, reported with what each gave; when they end together
+// the zip ends.
+#[tokio::test]
+async fn test12829_a_sequence_that_ends_early_is_a_mismatch_found_while_reading() {
+    async fn arriving(items: &[&str]) -> RegionItemSource {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        for item in items {
+            tx.send(Ok(RegionItemDelivery {
+                bytes: item.as_bytes().to_vec(),
+                preview: None,
+                byte_count: item.len() as u64,
+            }))
+            .await
+            .unwrap();
+        }
+        RegionItemSource {
+            rx,
+            known_total: None,
+            feed_handle: None,
+        }
+    }
+    let token: StepToken = "zip-arriving".parse().unwrap();
+    let nodes = || vec!["a".to_string(), "b".to_string()];
+    let bytes = |items: Vec<RegionItemDelivery>| -> Vec<Vec<u8>> { items.into_iter().map(|d| d.bytes).collect() };
+
+    let mut zipped =
+        ZippedSources::new(token.clone(), nodes(), vec![arriving(&["a0", "a1"]).await, arriving(&["b0"]).await])
+            .expect("nothing is known ahead");
+    assert_eq!(zipped.known_total(), None);
+    let first = zipped.next().await.unwrap().expect("item 0 of each");
+    assert_eq!(bytes(first), vec![b"a0".to_vec(), b"b0".to_vec()]);
+    match zipped.next().await {
+        Err(ExecutionError::ZipLengthMismatch { sources, .. }) => {
+            assert_eq!(sources, vec![("a".to_string(), 2), ("b".to_string(), 1)]);
+        }
+        Err(other) => panic!("expected ZipLengthMismatch, got {other}"),
+        Ok(_) => panic!("`b` ended while `a` still gave an item"),
+    }
+
+    let mut even =
+        ZippedSources::new(token, nodes(), vec![arriving(&["a0"]).await, arriving(&["b0"]).await]).unwrap();
+    assert!(even.next().await.unwrap().is_some());
+    assert!(even.next().await.unwrap().is_none(), "both ended together");
+}
+
+// TEST12830: a map over a sequence that is absent runs nothing, and what it
+// would have produced is absent — not an empty sequence. The machine's output
+// behind it is reported not produced. When the sequence is there, the same
+// machine maps it.
+#[tokio::test]
+async fn test12830_a_map_over_an_absent_sequence_produces_nothing_at_all() {
+    let built = build(
+        "[doc -> route -> (kept, rejected=no)][no -> split -> words][words -> upper -> out]",
+        &[],
+    )
+    .await;
+    // `route` rejects what starts with an 'x': this is kept, so `no` is absent.
+    let runtime = Scripted::new();
+    let result = run(&built, &runtime, &[("doc", Given::One("plain words"))]).await.unwrap();
+    assert!(runtime.runs_of("split").is_empty());
+    assert!(runtime.runs_of("upper").is_empty());
+    assert!(
+        matches!(result.terminal(&built.output("out")).unwrap(), PlanTerminal::NotProduced { .. }),
+        "an absent sequence is not an empty one"
+    );
+    assert_eq!(produced(&result, &built, "kept"), (texts(&["plain words"]), false));
+
+    let runtime = Scripted::new();
+    let result = run(&built, &runtime, &[("doc", Given::One("x a b"))]).await.unwrap();
+    assert_eq!(produced(&result, &built, "out"), (texts(&["X", "A", "B"]), true));
+}
+
 // TEST12777: steps that map over the same sequence run in one map, so a
 // step given what each produced is given both FOR THE SAME ITEM — and stays
 // so when a run is filtered out: an item whose value is absent runs nothing

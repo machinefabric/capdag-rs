@@ -506,7 +506,7 @@ mod tests {
         let plan = plan_with_bound_arguments();
         let mut initial = HashMap::new();
         initial.insert("tok_a".to_string(), vec![value("media:numeric;height", b"9")]);
-        let ledger = RunArgumentLedger::new(&plan, initial).unwrap();
+        let ledger = RunArgumentLedger::new(&plan, initial.clone()).unwrap();
         let snapshot = ledger.dispatch_steps(&["tok_a", "tok_b"]);
         let mut a = snapshot["tok_a"].clone();
         a.sort();
@@ -520,6 +520,13 @@ mod tests {
             ]
         );
         assert!(snapshot.get("tok_b").map_or(true, |v| v.is_empty()), "tok_b has no constant");
+
+        // A dispatch returns the values of the steps it dispatches, and no
+        // other step's: what `tok_a` holds is not handed to `tok_b`'s chain.
+        let ledger = RunArgumentLedger::new(&plan, initial).unwrap();
+        let of_b = ledger.dispatch_steps(&["tok_b"]);
+        assert!(!of_b.contains_key("tok_a"), "{of_b:?}");
+        assert_eq!(ledger.dispatch_steps(&["tok_a"])["tok_a"].len(), 3);
     }
 
     // TEST12745: an argument the machine binds takes no value from the run —
