@@ -167,3 +167,312 @@ pub fn testcartridge_bin(tag: &str) -> PathBuf {
         })
         .clone()
 }
+
+// =============================================================================
+// Running machines on the test cartridge
+// =============================================================================
+
+/// The cap definitions the test cartridge serves: its own manifest, as its
+/// binary prints it. The tests resolve machines against exactly what the
+/// cartridge they run says of itself — a registry built by hand beside it
+/// drifts from it.
+#[allow(dead_code)]
+pub fn testcartridge_caps(tag: &str) -> Vec<capdag::Cap> {
+    let bin = testcartridge_bin(tag);
+    let output = std::process::Command::new(&bin)
+        .arg("manifest")
+        .output()
+        .expect("Failed to run the test cartridge for its manifest");
+    assert!(
+        output.status.success(),
+        "`testcartridge manifest` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest = capdag::CapManifest::from_advertised(&output.stdout)
+        .expect("the test cartridge prints a manifest of valid cap definitions");
+    manifest.all_caps().into_iter().cloned().collect()
+}
+
+/// A fabric registry holding the test cartridge's caps, plus `extra` — and a
+/// media definition for every arg of them, which is what a constant written
+/// in a machine is held to.
+#[allow(dead_code)]
+pub fn testcartridge_registry(tag: &str, extra: Vec<capdag::Cap>) -> std::sync::Arc<capdag::FabricRegistry> {
+    let registry = capdag::FabricRegistry::new_for_test();
+    let mut caps = testcartridge_caps(tag);
+    caps.extend(extra);
+    for cap in &caps {
+        for arg in cap.get_args() {
+            registry.insert_cached_media_def_for_test(capdag::StoredMediaDef {
+                version: 0,
+                urn: arg.media_urn.clone(),
+                media_type: "application/octet-stream".to_string(),
+                title: arg.name.clone(),
+                profile_uri: None,
+                schema: None,
+                description: None,
+                documentation: None,
+                validation: None,
+                metadata: None,
+                extensions: Vec::new(),
+            });
+        }
+    }
+    registry.add_caps_to_cache(caps);
+    std::sync::Arc::new(registry)
+}
+
+/// What a machine input is given.
+#[allow(dead_code)]
+pub enum Given<'a> {
+    One(&'a [u8]),
+    Many(&'a [&'a [u8]]),
+    Live { reference_urn: &'a str, selector: &'a [u8] },
+}
+
+/// What one run of a machine came to.
+#[allow(dead_code)]
+pub struct Ran {
+    pub result: capdag::PipelineResult,
+    /// What was produced at each output, by the name the notation gives it:
+    /// its items and whether it is a sequence — `None` when it was not
+    /// produced.
+    pub outputs: std::collections::HashMap<String, Option<(Vec<Vec<u8>>, bool)>>,
+    /// The plan that ran.
+    pub plan: capdag::planner::MachinePlan,
+}
+
+#[allow(dead_code)]
+impl Ran {
+    /// The one value produced at output `name`, as text.
+    pub fn text(&self, name: &str) -> String {
+        let (items, is_sequence) = self.produced(name);
+        assert!(!is_sequence, "output '{name}' is a sequence: {} items", items.len());
+        assert_eq!(items.len(), 1, "output '{name}' holds {} items", items.len());
+        String::from_utf8(items[0].clone()).expect("output is text")
+    }
+
+    /// The sequence produced at output `name`, as text.
+    pub fn texts(&self, name: &str) -> Vec<String> {
+        let (items, is_sequence) = self.produced(name);
+        assert!(is_sequence, "output '{name}' is one value, not a sequence");
+        items
+            .into_iter()
+            .map(|item| String::from_utf8(item).expect("output is text"))
+            .collect()
+    }
+
+    pub fn produced(&self, name: &str) -> (Vec<Vec<u8>>, bool) {
+        self.outputs
+            .get(name)
+            .unwrap_or_else(|| panic!("the machine has no output '{name}': {:?}", self.outputs.keys()))
+            .clone()
+            .unwrap_or_else(|| panic!("output '{name}' was not produced"))
+    }
+
+    pub fn was_produced(&self, name: &str) -> bool {
+        self.outputs
+            .get(name)
+            .unwrap_or_else(|| panic!("the machine has no output '{name}'"))
+            .is_some()
+    }
+}
+
+/// Runs machines on the test cartridge by the path a machine takes outside
+/// the tests: notation → plan → `execute_plan` on a [`capdag::CliRuntime`]
+/// hosting the real cartridge process. Nothing is mocked.
+#[allow(dead_code)]
+pub struct Machines {
+    pub registry: std::sync::Arc<capdag::FabricRegistry>,
+    tag: String,
+    dir: tempfile::TempDir,
+    /// Every log record of every run, as `(cap urn, level, message)`.
+    pub logs: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>,
+    /// Every overall progress value of every run.
+    pub progress: std::sync::Arc<std::sync::Mutex<Vec<f32>>>,
+}
+
+#[allow(dead_code)]
+impl Machines {
+    pub fn new(tag: &str) -> Self {
+        Self::with_caps(tag, Vec::new())
+    }
+
+    /// With `extra` caps in the registry beside the cartridge's own.
+    pub fn with_caps(tag: &str, extra: Vec<capdag::Cap>) -> Self {
+        Self {
+            registry: testcartridge_registry(tag, extra),
+            tag: tag.to_string(),
+            dir: tempfile::TempDir::new().expect("Failed to create temp dir"),
+            logs: Default::default(),
+            progress: Default::default(),
+        }
+    }
+
+    /// Run the one-strand machine `notation`, giving its inputs — by the
+    /// names the notation wrote — what `inputs` says.
+    pub async fn run(
+        &self,
+        notation: &str,
+        inputs: &[(&str, Given<'_>)],
+    ) -> Result<Ran, capdag::ExecutionError> {
+        self.run_with(notation, inputs, &[]).await
+    }
+
+    /// [`run`](Self::run), also giving values to args the machine leaves
+    /// unbound: `(cap URN of the step, arg media URN, value)`.
+    pub async fn run_with(
+        &self,
+        notation: &str,
+        inputs: &[(&str, Given<'_>)],
+        arguments: &[(&str, &str, &[u8])],
+    ) -> Result<Ran, capdag::ExecutionError> {
+        use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput, ResolvedNotation};
+        use std::collections::{HashMap, HashSet};
+        use std::sync::Arc;
+
+        let resolved = ResolvedNotation::resolve(notation, self.registry.clone())
+            .await
+            .unwrap_or_else(|e| panic!("the notation does not resolve: {e}\n{notation}"));
+        assert_eq!(resolved.strand_count(), 1, "these tests run one strand");
+        let sequences: HashSet<String> = inputs
+            .iter()
+            .filter(|(_, given)| matches!(given, Given::Many(_) | Given::Live { .. }))
+            .map(|(name, _)| name.to_string())
+            .collect();
+        let strand = resolved
+            .plan(0, &sequences)
+            .await
+            .unwrap_or_else(|e| panic!("the machine does not plan: {e}"));
+
+        let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
+        let mut flags: HashMap<String, bool> = HashMap::new();
+        for (name, given) in inputs {
+            let slot = strand
+                .input_slots
+                .get(*name)
+                .unwrap_or_else(|| panic!("the machine has no input '{name}': {:?}", strand.input_slots.keys()))
+                .clone();
+            let (input, is_sequence) = match given {
+                Given::One(bytes) => (PlanInput::Bytes(bytes.to_vec()), false),
+                Given::Many(items) => {
+                    let items: Vec<Vec<u8>> = items.iter().map(|item| item.to_vec()).collect();
+                    (
+                        PlanInput::Bytes(
+                            capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(&items)
+                                .expect("items wrap as a sequence"),
+                        ),
+                        true,
+                    )
+                }
+                Given::Live { reference_urn, selector } => (
+                    PlanInput::LiveReference {
+                        reference_urn: reference_urn.to_string(),
+                        selector: selector.to_vec(),
+                    },
+                    true,
+                ),
+            };
+            initial_inputs.insert(slot.clone(), input);
+            flags.insert(slot, is_sequence);
+        }
+
+        // Argument values are keyed by the step's plan node: the one step
+        // that runs the cap named.
+        let mut cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
+        for (cap, arg, value) in arguments {
+            let wanted = capdag::CapUrn::from_string(cap).expect("a cap URN");
+            let steps: Vec<&String> = strand
+                .plan
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.cap_urn().is_some_and(|urn| {
+                        capdag::CapUrn::from_string(urn).unwrap().is_equivalent(&wanted)
+                    })
+                })
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(steps.len(), 1, "expected one step running {cap}, found {}", steps.len());
+            cap_arguments
+                .entry(steps[0].clone())
+                .or_default()
+                .push((arg.to_string(), value.to_vec()));
+        }
+
+        // A run of its own: its own cartridge directory, its own output
+        // directory, its own cartridge process.
+        let run_dir = self.dir.path().join(format!("run-{}", uuid::Uuid::new_v4()));
+        let cartridge_dir = run_dir.join("cartridges");
+        let persist_dir = run_dir.join("outputs");
+        std::fs::create_dir_all(&cartridge_dir).expect("Failed to create cartridge dir");
+        let runtime: Arc<dyn EngineRuntime> = Arc::new(CliRuntime::new(
+            cartridge_dir,
+            None, // no registry URL — dev binaries only, no network
+            capdag::CartridgeChannel::Release,
+            capdag::FABRIC_MANIFEST_VERSION,
+            vec![testcartridge_bin(&self.tag)],
+            None,
+            self.registry.clone(),
+            None,
+            persist_dir,
+        ));
+
+        let logs = self.logs.clone();
+        let progress = self.progress.clone();
+        let log_progress = self.logs.clone();
+        let callbacks = capdag::RunCallbacks {
+            progress: Some(Arc::new(move |p: f32, cap_urn: &str, message: &str| {
+                progress.lock().unwrap().push(p);
+                log_progress.lock().unwrap().push((
+                    cap_urn.to_string(),
+                    "progress".to_string(),
+                    message.to_string(),
+                ));
+            })),
+            log: Some(Arc::new(move |record: capdag::PipelineLogRecord| {
+                logs.lock().unwrap().push((
+                    record.cap_urn.clone().unwrap_or_default(),
+                    record.level.clone(),
+                    record.message.clone(),
+                ));
+            })),
+            ..Default::default()
+        };
+        let ledger = Arc::new(
+            capdag::RunArgumentLedger::new(&strand.plan, cap_arguments)
+                .unwrap_or_else(|e| panic!("the argument values are refused: {e}")),
+        );
+        let result =
+            execute_plan(&strand.plan, runtime, initial_inputs, flags, ledger, callbacks).await?;
+
+        // What the CLI runtime persisted, read back: one file for a single
+        // value, one per item for a sequence.
+        let mut outputs = HashMap::new();
+        for terminal in &result.terminals {
+            let name = strand
+                .output_names
+                .get(terminal.output_node_id())
+                .unwrap_or_else(|| panic!("terminal '{}' has no name", terminal.output_node_id()))
+                .clone();
+            let value = terminal.produced().map(|produced| {
+                let mut items: Vec<Vec<u8>> =
+                    produced.items.iter().map(|item| item.data.clone()).collect();
+                for writer in &produced.writer_results {
+                    for path in &writer.saved_paths {
+                        items.push(std::fs::read(path).unwrap_or_else(|e| {
+                            panic!("a persisted output cannot be read back ({path}): {e}")
+                        }));
+                    }
+                }
+                (items, produced.is_sequence)
+            });
+            outputs.insert(name, value);
+        }
+        Ok(Ran {
+            result,
+            outputs,
+            plan: strand.plan,
+        })
+    }
+}

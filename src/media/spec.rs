@@ -167,6 +167,61 @@ pub struct MediaValidation {
 }
 
 impl MediaValidation {
+    /// The first of these rules `value` breaks, described, or `None` when it
+    /// breaks none. `Err` when a rule itself cannot be applied (a pattern that
+    /// is not a regular expression): a defect in the media definition, not in
+    /// the value.
+    ///
+    /// A rule applies to the values it is about and passes the rest: `min` and
+    /// `max` to numbers, the length rules to strings and arrays, `pattern` and
+    /// `allowed_values` to strings. This is the one decision of whether a value
+    /// satisfies a media definition's validation — what an argument value is
+    /// held to at run time and what a constant written in a machine is held to
+    /// when the machine is resolved.
+    pub fn violation(&self, value: &serde_json::Value) -> Result<Option<String>, String> {
+        if let (Some(min), Some(num)) = (self.min, value.as_f64()) {
+            if num < min {
+                return Ok(Some(format!("minimum value {}", min)));
+            }
+        }
+        if let (Some(max), Some(num)) = (self.max, value.as_f64()) {
+            if num > max {
+                return Ok(Some(format!("maximum value {}", max)));
+            }
+        }
+        // Length, for strings and arrays.
+        let length = match (value.as_str(), value.as_array()) {
+            (Some(s), _) => Some((s.len(), "")),
+            (_, Some(arr)) => Some((arr.len(), "array ")),
+            _ => None,
+        };
+        if let Some((len, kind)) = length {
+            if let Some(min_length) = self.min_length {
+                if len < min_length {
+                    return Ok(Some(format!("minimum {}length {}", kind, min_length)));
+                }
+            }
+            if let Some(max_length) = self.max_length {
+                if len > max_length {
+                    return Ok(Some(format!("maximum {}length {}", kind, max_length)));
+                }
+            }
+        }
+        if let (Some(pattern), Some(text)) = (&self.pattern, value.as_str()) {
+            let regex = regex::Regex::new(pattern)
+                .map_err(|e| format!("Invalid regex pattern '{}': {}", pattern, e))?;
+            if !regex.is_match(text) {
+                return Ok(Some(format!("pattern '{}'", pattern)));
+            }
+        }
+        if let (Some(allowed_values), Some(text)) = (&self.allowed_values, value.as_str()) {
+            if !allowed_values.iter().any(|allowed| allowed == text) {
+                return Ok(Some(format!("allowed values: {:?}", allowed_values)));
+            }
+        }
+        Ok(None)
+    }
+
     /// Check if all validation fields are empty/None
     pub fn is_empty(&self) -> bool {
         self.min.is_none()

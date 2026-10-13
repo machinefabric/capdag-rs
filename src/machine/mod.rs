@@ -30,30 +30,34 @@
 
 pub mod error;
 pub mod graph;
+pub mod iteration;
 pub mod notation_ast;
 pub mod parser;
-pub mod realize;
 pub mod resolve;
 pub mod serializer;
+pub mod syntax;
 
 #[cfg(test)]
 pub(crate) mod test_fixtures;
+#[cfg(test)]
+mod notation_tests;
 
 pub use error::{MachineAbstractionError, MachineParseError, MachineSyntaxError};
 pub use graph::{
-    EdgeAssignmentBinding, Machine, MachineEdge, MachineRun, MachineRunStatus, MachineStrand,
-    NodeId,
+    BindingSource, EdgeAssignmentBinding, EdgeOutput, Machine, MachineEdge, MachineRun,
+    MachineRunStatus, MachineStrand, NodeId,
 };
 pub use notation_ast::{
     build_editor_model, byte_offset_to_position, emit_semantic_tokens, get_completion_context,
     parse_notation_ast, CompletionContextType, NotationAST, NotationEntityInfo, NotationEntityKind,
     NotationGraphElementInfo, NotationGraphElementKind, NotationPosition, NotationSpan,
-    ParsedHeader, ParsedStatement, ParsedWiring, SemanticTokenInfo, SemanticTokenType,
+    ParsedHeader, ParsedMachineHeader, ParsedMember, ParsedStatement, ParsedTarget, ParsedValue,
+    ParsedWiring, SemanticTokenInfo, SemanticTokenType,
 };
 pub use parser::{
     parse_machine, parse_machine_async, parse_machine_with_node_names,
     parse_machine_with_node_names_async, StrandNodeNames,
 };
-pub use realize::{realize_strand, realize_strand_with_anchor_sources};
 pub use resolve::assign_sources_to_anchors;
 pub use serializer::NotationFormat;
+pub use syntax::{OnError, StepPolicy};

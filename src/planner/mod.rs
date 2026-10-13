@@ -61,12 +61,12 @@ pub use live_cap_fab::{
     StrandStepType,
 };
 pub use plan::{
-    BodyOutcome, EdgeType, ExecutionNodeType, MachineNode, MachinePlan, MachinePlanEdge,
-    MachineResult, MergeStrategy, NodeExecutionResult, NodeId,
+    BodyOutcome, EdgeType, ExecutionNodeType, ForEachSource, MachineNode, MachinePlan,
+    MachinePlanEdge, MachineResult, MapRun, NodeExecutionResult, NodeId,
 };
 pub use plan_analysis::{
-    derive_collected_media_urn, derive_foreach_media_urns, derive_output_media_urn,
-    derive_output_producing_cap_urn, find_collect_for_foreach, resolve_plan_output,
+    derive_foreach_media_urns, derive_output_media_urn, derive_output_producing_cap_urn,
+    resolve_plan_output,
 };
 pub use plan_builder::{
     ArgumentInfo, ArgumentResolution, MachinePlanBuilder, PathArgumentRequirements,

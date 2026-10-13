@@ -3,9 +3,9 @@
 //! Unlike the orchestrator's `ResolvedGraph::to_mermaid` (a FLAT cap-to-cap
 //! view that cannot express fan-out/fan-in), this renders the full
 //! [`MachinePlan`] the planner produces — so every construct machine notation
-//! can model appears: `Cap` steps, `ForEach` fan-out, `Collect`/`Merge`
-//! fan-in, `Split`, `InputSlot`s and `Output`s, plus every typed edge
-//! (`Direct`, `Arg`, `JsonField`, `JsonPath`, `Iteration`, `Collection`).
+//! can model appears: `Cap` steps and the outputs they are taken by, `ForEach`
+//! maps and their items, `Collect` gathers, `InputSlot`s and `Output`s, plus
+//! every typed edge (`Direct`, `Arg`, `Iteration`, `Collection`).
 //! A machine can compile to several strands, so a list of plans renders as one
 //! diagram with one labelled subgraph per plan.
 
@@ -26,9 +26,9 @@ enum NodeRole {
     Output,
     Cap,
     ForEach,
+    Item,
     Collect,
-    Merge,
-    Split,
+    CapOutput,
 }
 
 /// Human-readable label lines and role for a node, independent of backend.
@@ -51,20 +51,21 @@ fn describe_node(node: &MachineNode) -> (Vec<String>, NodeRole) {
         ),
         ExecutionNodeType::Collect {
             output_media_urn, ..
-        } => {
-            let mut lines = vec![node.id.clone(), "Collect".to_string()];
-            if let Some(urn) = output_media_urn {
-                lines.push(urn.clone());
-            }
-            (lines, NodeRole::Collect)
-        }
-        ExecutionNodeType::Merge { merge_strategy, .. } => (
-            vec![node.id.clone(), format!("Merge ({merge_strategy:?})")],
-            NodeRole::Merge,
+        } => (
+            vec![node.id.clone(), "Collect".to_string(), output_media_urn.clone()],
+            NodeRole::Collect,
         ),
-        ExecutionNodeType::Split { output_count, .. } => (
-            vec![node.id.clone(), format!("Split ×{output_count}")],
-            NodeRole::Split,
+        ExecutionNodeType::Item { media_urn, .. } => (
+            vec![node.id.clone(), "item".to_string(), media_urn.clone()],
+            NodeRole::Item,
+        ),
+        ExecutionNodeType::CapOutput {
+            output_name,
+            output_media_urn,
+            ..
+        } => (
+            vec![output_name.clone(), output_media_urn.clone()],
+            NodeRole::CapOutput,
         ),
         ExecutionNodeType::InputSlot {
             slot_name,
@@ -89,8 +90,6 @@ fn edge_label(edge_type: &EdgeType) -> String {
     match edge_type {
         EdgeType::Direct => String::new(),
         EdgeType::Arg { arg_urn } => format!("arg: {arg_urn}"),
-        EdgeType::JsonField { field } => format!(".{field}"),
-        EdgeType::JsonPath { path } => path.clone(),
         EdgeType::Iteration => "each".to_string(),
         EdgeType::Collection => "collect".to_string(),
     }
@@ -147,8 +146,8 @@ pub fn plans_to_mermaid(plans: &[MachinePlan]) -> String {
                 NodeRole::Input => ("([\"", "\"])"),
                 NodeRole::Output => ("(((\"", "\")))"),
                 NodeRole::ForEach => ("{{\"", "\"}}"),
-                NodeRole::Collect | NodeRole::Merge => ("[[\"", "\"]]"),
-                NodeRole::Split => ("{\"", "\"}"),
+                NodeRole::Collect => ("[[\"", "\"]]"),
+                NodeRole::Item | NodeRole::CapOutput => ("(\"", "\")"),
                 NodeRole::Cap => ("[\"", "\"]"),
             };
             out.push_str(&format!("    {}{}{}{}\n", rn.id, open, label, close));
@@ -217,8 +216,8 @@ pub fn plans_to_dot(plans: &[MachinePlan]) -> String {
                 NodeRole::Input => "ellipse",
                 NodeRole::Output => "doublecircle",
                 NodeRole::ForEach => "hexagon",
-                NodeRole::Collect | NodeRole::Merge => "box3d",
-                NodeRole::Split => "diamond",
+                NodeRole::Collect => "box3d",
+                NodeRole::Item | NodeRole::CapOutput => "oval",
                 NodeRole::Cap => "box",
             };
             out.push_str(&format!(

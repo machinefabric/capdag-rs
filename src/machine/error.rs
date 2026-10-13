@@ -83,6 +83,99 @@ pub enum MachineAbstractionError {
         reason: String,
     },
 
+    /// A member names an arg the step's cap does not declare. A name is the
+    /// label the definition gives an arg; nothing else is one.
+    #[error("strand {strand_index}: cap '{cap_urn}' declares no arg named '{name}' (it declares: {})", declared.join(", "))]
+    UnknownArgName {
+        strand_index: usize,
+        cap_urn: String,
+        name: String,
+        declared: Vec<String>,
+    },
+
+    /// A target names an output the step's cap does not declare.
+    #[error("strand {strand_index}: cap '{cap_urn}' declares no output named '{name}' (it declares: {})", declared.join(", "))]
+    UnknownOutputName {
+        strand_index: usize,
+        cap_urn: String,
+        name: String,
+        declared: Vec<String>,
+    },
+
+    /// A named member's URN does not conform to the type that arg accepts.
+    #[error("strand {strand_index}: cap '{cap_urn}' arg '{name}' accepts '{accepts}', and its source is '{source_urn}'")]
+    SourceDoesNotConformToArg {
+        strand_index: usize,
+        cap_urn: String,
+        name: String,
+        accepts: String,
+        source_urn: String,
+    },
+
+    /// A constant does not satisfy the validation of the arg it is bound to.
+    #[error("strand {strand_index}: cap '{cap_urn}' arg '{name}' refuses the constant {constant}: {reason}")]
+    ConstantFailsValidation {
+        strand_index: usize,
+        cap_urn: String,
+        name: String,
+        constant: String,
+        reason: String,
+    },
+
+    /// An arg that takes a single value is named by two members. Only an arg
+    /// that takes a sequence gathers several.
+    #[error("strand {strand_index}: cap '{cap_urn}' arg '{name}' takes one value and is named by {count} members")]
+    ArgBoundTwice {
+        strand_index: usize,
+        cap_urn: String,
+        name: String,
+        count: usize,
+    },
+
+    /// A step whose cap takes an input is given no member for it.
+    #[error("strand {strand_index}: cap '{cap_urn}' takes an input ('{main_input}') and no member of the wiring is bound to it")]
+    MainInputUnbound {
+        strand_index: usize,
+        cap_urn: String,
+        main_input: String,
+    },
+
+    /// Two targets of one wiring take the same output.
+    #[error("strand {strand_index}: cap '{cap_urn}' output '{output}' is taken twice in one wiring")]
+    OutputTakenTwice {
+        strand_index: usize,
+        cap_urn: String,
+        output: String,
+    },
+
+    /// An unnamed target takes the main output of a step whose cap has none
+    /// (`out=media:void`).
+    #[error("strand {strand_index}: cap '{cap_urn}' has no main output to take (its out= is media:void)")]
+    NoMainOutput {
+        strand_index: usize,
+        cap_urn: String,
+    },
+
+    /// A wiring holds an unnamed member that nothing produces and whose arg
+    /// nothing decides: a second such member, or one beside a named member
+    /// that bound the main input. Nothing says which arg an unnamed input of
+    /// the machine is for, except that a step's one data input is its main one.
+    #[error("statement {position}: cap '{cap_urn}' is given unnamed machine inputs whose arg nothing decides ({}) — name them", members.join(", "))]
+    UntypedMachineInput {
+        position: usize,
+        cap_urn: String,
+        members: Vec<String>,
+    },
+
+    /// The wirings that touch a node give it URNs that are not on one
+    /// specialization chain.
+    #[error("node '{node}' is given media URNs that are not on one specialization chain: '{first}' and '{second}'")]
+    NodeMediaConflict {
+        node: String,
+        first: String,
+        second: String,
+    },
+
     /// A cap does not declare its input: no argument declares a `Stdin` source whose
     /// URN is the cap's `in=`. The main input is the value piped in on stdin, so the
     /// main arg always declares a stdin source carrying `in=` (its declared slot URN
@@ -92,16 +185,6 @@ pub enum MachineAbstractionError {
     CapDoesNotDeclareInput {
         strand_index: usize,
         cap_urn: String,
-    },
-
-    /// The resolver's source-to-arg assignment for a cap edge has no binding feeding
-    /// the cap's stdin argument. The primary (main-input) source is missing — the
-    /// wiring cannot be realized into a data-flow step.
-    #[error("strand {strand_index}: cap '{cap_urn}' has no wiring source bound to its stdin argument '{stdin_arg}'")]
-    NoStdinBinding {
-        strand_index: usize,
-        cap_urn: String,
-        stdin_arg: String,
     },
 
     /// A non-primary (convergence) wiring source is NOT another cap's output. Only a
@@ -264,6 +347,38 @@ pub enum MachineSyntaxError {
     /// PEG parse error from the pest grammar.
     #[error("parse error: {details}")]
     ParseError { details: String },
+
+    /// A machine header names another machine, and the notation is being read
+    /// with nothing to resolve the reference against.
+    #[error("machine header '{alias}' refers to \"{reference}\", and no machine source was given to resolve it")]
+    MachineReferenceWithoutSource { alias: String, reference: String },
+
+    /// A constant appears as a member without a name. A constant has no type
+    /// to be matched by: it says which arg it is for.
+    #[error("constant {constant} in statement {position} names no arg — write it as name={constant}")]
+    UnnamedConstant { constant: String, position: usize },
+
+    /// A node is named `true`, `false` or `null`: the words the notation
+    /// reads as constants.
+    #[error("'{name}' in statement {position} is a constant, not a node name")]
+    ReservedNodeName { name: String, position: usize },
+
+    /// More than one target of a wiring is unnamed. The unnamed target takes
+    /// the step's main output, and a step has one.
+    #[error("statement {position} has several unnamed targets ({}) — only the main output is taken without a name", targets.join(", "))]
+    SeveralUnnamedTargets {
+        position: usize,
+        targets: Vec<String>,
+    },
+
+    /// A step policy has an unknown key, a repeated key, or a value outside
+    /// the table.
+    #[error("invalid policy on step '{step}' in statement {position}: {details}")]
+    InvalidPolicy {
+        step: String,
+        position: usize,
+        details: String,
+    },
 }
 
 /// Combined error returned by `Machine::from_string`.

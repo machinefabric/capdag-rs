@@ -7,10 +7,13 @@
 //! - Anything else (sequence output, several terminals, or an explicit
 //!   `--output`) → each item is written as a FILE in the output directory
 //!   (default: the current directory), named
-//!   `{input_stem}.{output_node_id}[.{index}].{ext}`, and every written
-//!   absolute path is printed to stdout, one per line.
+//!   `{input_stem}.{node}[.{index}].{ext}` — `{node}` being the name the
+//!   machine's notation gives the output — and every written absolute path
+//!   is printed to stdout, one per line.
 //! - An existing file is a hard error unless `--force` — silent overwrites
 //!   destroy user data.
+//! - A terminal that was not produced writes nothing here: it is not an empty
+//!   file. The caller says so, from the result.
 //!
 //! The extension derives deterministically from the terminal's media URN —
 //! `ext=<v>` wins (the declared file type), else `fmt=<v>` (serialization),
@@ -21,7 +24,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::orchestrator::execute_plan::PipelineResult;
+use crate::orchestrator::execute_plan::{PipelineResult, ProducedTerminal};
 use crate::urn::media_urn::MediaUrn;
 
 /// Options for [`emit_terminals`].
@@ -33,6 +36,11 @@ pub struct EmitOptions {
     pub force: bool,
     /// Stem for produced file names — the input file's stem, or `stdin`.
     pub input_stem: String,
+    /// The name the notation gives each output, by plan `Output` node id: the
+    /// `{node}` of a produced file's name. Every terminal of the result must
+    /// have one — a file is never named after a plan's internal node id,
+    /// which changes whenever the machine is edited.
+    pub output_names: std::collections::HashMap<String, String>,
 }
 
 /// File extension for a terminal's media URN, per the naming scheme above.
@@ -64,8 +72,14 @@ pub fn emit_terminals(
     // The item may be in memory or a single persisted part-file (the CLI's disk
     // writer, L16) — persisted, its bytes stream to stdout and the part is
     // removed, so the pipe contract is identical either way.
-    if options.output_dir.is_none() && result.terminals.len() == 1 {
-        let terminal = &result.terminals[0];
+    let produced: Vec<&ProducedTerminal> = result
+        .terminals
+        .iter()
+        .filter_map(|terminal| terminal.produced())
+        .collect();
+    if let (None, 1, [terminal]) =
+        (&options.output_dir, result.terminals.len(), produced.as_slice())
+    {
         if !terminal.is_sequence {
             if terminal.writer_results.is_empty() && terminal.items.len() == 1 {
                 stdout
@@ -105,8 +119,7 @@ pub fn emit_terminals(
 
     // Every persisted part-file in processing order — so a refusal mid-emit can
     // sweep the not-yet-renamed parts instead of littering the output dir.
-    let all_parts: Vec<String> = result
-        .terminals
+    let all_parts: Vec<String> = produced
         .iter()
         .flat_map(|t| t.writer_results.iter())
         .flat_map(|w| w.saved_paths.iter().cloned())
@@ -120,18 +133,26 @@ pub fn emit_terminals(
     };
 
     let mut written: Vec<PathBuf> = Vec::new();
-    for terminal in &result.terminals {
+    for terminal in produced {
         let ext = extension_for_media(&terminal.media_urn);
+        let node = options.output_names.get(&terminal.output_node_id).ok_or_else(|| {
+            // Nothing was written yet for this terminal; parts of the others
+            // not yet renamed are swept like any refusal.
+            for part in &all_parts[parts_done..] {
+                let _ = std::fs::remove_file(part);
+            }
+            format!(
+                "output '{}' has no name to write it under",
+                terminal.output_node_id
+            )
+        })?;
         if terminal.writer_results.is_empty() {
             let multi_item = terminal.is_sequence || terminal.items.len() > 1;
             for item in &terminal.items {
                 let name = if multi_item {
-                    format!(
-                        "{}.{}.{}.{}",
-                        options.input_stem, terminal.output_node_id, item.index, ext
-                    )
+                    format!("{}.{}.{}.{}", options.input_stem, node, item.index, ext)
                 } else {
-                    format!("{}.{}.{}", options.input_stem, terminal.output_node_id, ext)
+                    format!("{}.{}.{}", options.input_stem, node, ext)
                 };
                 let path = dir.join(&name);
                 if path.exists() && !options.force {
@@ -156,12 +177,9 @@ pub fn emit_terminals(
             let multi_item = terminal.is_sequence || parts.len() > 1;
             for (index, part) in parts.iter().enumerate() {
                 let name = if multi_item {
-                    format!(
-                        "{}.{}.{}.{}",
-                        options.input_stem, terminal.output_node_id, index, ext
-                    )
+                    format!("{}.{}.{}.{}", options.input_stem, node, index, ext)
                 } else {
-                    format!("{}.{}.{}", options.input_stem, terminal.output_node_id, ext)
+                    format!("{}.{}.{}", options.input_stem, node, ext)
                 };
                 let path = dir.join(&name);
                 if path.exists() && !options.force {
@@ -195,10 +213,10 @@ fn absolutize(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orchestrator::execute_plan::{OutputItem, TerminalOutput};
+    use crate::orchestrator::execute_plan::{OutputItem, PlanTerminal, RunVerdict};
 
-    fn terminal(node: &str, media: &str, is_sequence: bool, items: Vec<&[u8]>) -> TerminalOutput {
-        TerminalOutput {
+    fn terminal(node: &str, media: &str, is_sequence: bool, items: Vec<&[u8]>) -> PlanTerminal {
+        PlanTerminal::Produced(ProducedTerminal {
             output_node_id: node.to_string(),
             items: items
                 .into_iter()
@@ -211,13 +229,24 @@ mod tests {
             is_sequence,
             media_urn: media.to_string(),
             writer_results: Vec::new(),
-        }
+        })
     }
 
-    fn result_of(terminals: Vec<TerminalOutput>) -> PipelineResult {
+    /// The names the test machines give their outputs: each node id here is
+    /// its own name.
+    fn names() -> std::collections::HashMap<String, String> {
+        ["output", "kept", "rejected", "thumb", "text"]
+            .into_iter()
+            .map(|name| (name.to_string(), name.to_string()))
+            .collect()
+    }
+
+    fn result_of(terminals: Vec<PlanTerminal>) -> PipelineResult {
         PipelineResult {
             terminals,
             body_outcomes: Vec::new(),
+            steps: Vec::new(),
+            verdict: RunVerdict::Completed,
         }
     }
 
@@ -241,6 +270,7 @@ mod tests {
                 output_dir: None,
                 force: false,
                 input_stem: "doc".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -264,6 +294,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "doc".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -289,6 +320,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "doc".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -306,6 +338,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "doc".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -318,6 +351,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: true,
                 input_stem: "doc".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -338,8 +372,8 @@ mod tests {
         media: &str,
         is_sequence: bool,
         parts: Vec<String>,
-    ) -> TerminalOutput {
-        TerminalOutput {
+    ) -> PlanTerminal {
+        PlanTerminal::Produced(ProducedTerminal {
             output_node_id: node.to_string(),
             items: Vec::new(),
             is_sequence,
@@ -352,7 +386,85 @@ mod tests {
                 stream_meta: None,
                 item_metas: Vec::new(),
             }],
-        }
+        })
+    }
+
+    // TEST12792: a produced file is named for the name the notation gives the
+    // output, not for the plan's node id; and a terminal with no name is
+    // refused rather than written under an id nobody chose.
+    #[test]
+    fn test12792_a_file_is_named_for_the_outputs_written_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = result_of(vec![
+            terminal("output_7", "media:enc=utf-8;ext=md", false, vec![b"# summary"]),
+            terminal("output_3", "media:ext=png;image", true, vec![b"p0", b"p1"]),
+        ]);
+        let options = |output_names: &[(&str, &str)]| EmitOptions {
+            output_dir: Some(dir.path().to_path_buf()),
+            force: false,
+            input_stem: "doc".to_string(),
+            output_names: output_names
+                .iter()
+                .map(|(id, name)| (id.to_string(), name.to_string()))
+                .collect(),
+        };
+        let mut stdout: Vec<u8> = Vec::new();
+        let written = emit_terminals(
+            &result,
+            &options(&[("output_7", "summary"), ("output_3", "pages")]),
+            &mut stdout,
+        )
+        .unwrap();
+        let mut names: Vec<String> = written
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["doc.pages.0.png", "doc.pages.1.png", "doc.summary.md"]);
+
+        let other = tempfile::tempdir().unwrap();
+        let mut unnamed = options(&[("output_7", "summary")]);
+        unnamed.output_dir = Some(other.path().to_path_buf());
+        let error = emit_terminals(&result, &unnamed, &mut Vec::new()).unwrap_err();
+        assert_eq!(error, "output 'output_3' has no name to write it under");
+    }
+
+    // TEST12761: a terminal that was not produced writes nothing — no file,
+    // no bytes on stdout — and is not what makes a result "one terminal": a
+    // produced terminal beside it still goes to a file, by its contract name.
+    #[test]
+    fn test12761_a_terminal_not_produced_writes_nothing() {
+        let absent = || PlanTerminal::NotProduced {
+            output_node_id: "rejected".to_string(),
+            media_urn: "media:enc=utf-8".to_string(),
+        };
+        let options = |dir: Option<&Path>| EmitOptions {
+            output_dir: dir.map(Path::to_path_buf),
+            force: false,
+            input_stem: "doc".to_string(),
+            output_names: names(),
+        };
+
+        // Alone: nothing at all.
+        let mut stdout: Vec<u8> = Vec::new();
+        let written = emit_terminals(&result_of(vec![absent()]), &options(None), &mut stdout).unwrap();
+        assert!(written.is_empty());
+        assert!(stdout.is_empty(), "nothing was produced, so nothing is printed");
+
+        // Beside a produced scalar: the result has two terminals, so the
+        // produced one is a file — not the stdout pipe case.
+        let dir = tempfile::tempdir().unwrap();
+        let result = result_of(vec![
+            terminal("kept", "media:enc=utf-8;ext=txt", false, vec![b"kept text"]),
+            absent(),
+        ]);
+        let mut stdout: Vec<u8> = Vec::new();
+        let written = emit_terminals(&result, &options(Some(dir.path())), &mut stdout).unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].file_name().unwrap(), "doc.kept.txt");
+        assert_eq!(std::fs::read(&written[0]).unwrap(), b"kept text");
+        let listed: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(listed.len(), 1, "no file for the terminal that was not produced");
     }
 
     fn write_part(dir: &Path, name: &str, data: &[u8]) -> String {
@@ -387,6 +499,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "cam".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -419,6 +532,7 @@ mod tests {
                 output_dir: None,
                 force: false,
                 input_stem: "mic".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -443,6 +557,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "mic".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )
@@ -472,6 +587,7 @@ mod tests {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
                 input_stem: "mic".to_string(),
+                output_names: names(),
             },
             &mut stdout,
         )

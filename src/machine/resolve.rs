@@ -68,7 +68,11 @@ use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
 use super::error::MachineAbstractionError;
-use super::graph::{EdgeAssignmentBinding, MachineEdge, MachineStrand, NodeId};
+use super::graph::{
+    BindingSource, EdgeAssignmentBinding, EdgeOutput, MachineEdge, MachineStrand, NodeId,
+};
+use super::iteration::{IterationStructure, MemberShape, StepShape};
+use super::syntax::StepPolicy;
 
 /// One wiring after the caller has pre-interned its source and
 /// target slots into `NodeId`s against a parallel
@@ -96,13 +100,30 @@ pub struct PreInternedWiring {
     /// the identity only if fabric cardinality proves that a loop is required.
     pub foreach_identity: ForEachIdentity,
     pub cap_urn: CapUrn,
-    /// Source NodeIds in the order the upstream layer wrote
-    /// them. Position carries no semantics — the matching
-    /// algorithm assigns each source slot to a cap arg by
-    /// minimum-cost bipartite matching, not by index.
+    /// Members that say which arg they are for, by the arg's NAME in the cap
+    /// definition, in the order written. They bind first. A name written more
+    /// than once gathers, and only a sequence arg may be gathered into.
+    pub named_sources: Vec<(String, BindingSource)>,
+    /// Source NodeIds that name no arg, in the order the upstream layer wrote
+    /// them. Position carries no semantics — the matching algorithm assigns
+    /// each to a cap arg no named member bound, by minimum-cost bipartite
+    /// matching, not by index.
     pub source_node_ids: Vec<NodeId>,
-    /// Target NodeId.
-    pub target_node_id: NodeId,
+    /// The outputs taken: the output's NAME in the cap definition, or `None`
+    /// for the main output, and the node it goes to. Empty: a sink.
+    pub targets: Vec<(Option<String>, NodeId)>,
+    /// What the step does when it fails.
+    pub policy: StepPolicy,
+}
+
+impl PreInternedWiring {
+    /// Every node this wiring consumes.
+    fn source_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.named_sources
+            .iter()
+            .filter_map(|(_, source)| source.node())
+            .chain(self.source_node_ids.iter().copied())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -205,8 +226,11 @@ pub fn resolve_strand(
                     token_id: step.token_id.clone(),
                     foreach_identity: ForEachIdentity::Exact(pending_foreach_token_id.take()),
                     cap_urn: cap_urn.clone(),
+                    named_sources: Vec::new(),
                     source_node_ids,
-                    target_node_id: target_id,
+                    // A strand step produces its cap's main output.
+                    targets: vec![(None, target_id)],
+                    policy: StepPolicy::default(),
                 });
 
                 producer_node.insert(step.token_id.clone(), target_id);
@@ -282,33 +306,74 @@ pub fn resolve_pre_interned(
         return Err(MachineAbstractionError::NoCapabilitySteps);
     }
 
-    // Cardinality of every node, derived from the single canonical rule
-    // (`Cap::sequence_shape`): a node holds a sequence iff the cap that PRODUCES it
-    // has a sequence output. Root-node shape is supplied by an exact explicit
-    // ForEach boundary when the strand was resolved for a sequence run; notation
-    // has no run shape and therefore treats roots as scalar. This is
-    // exactly the `is_sequence` state `live_cap_fab::get_outgoing_edges` threads
-    // through a path (its line 706: outgoing `is_sequence == output_is_sequence`),
-    // evaluated over the resolved graph so `is_loop` is DERIVED from cardinality,
-    // never authored. It replaces the retired `LOOP` keyword.
+    // Step 0: the outputs each wiring takes, by the names its targets wrote,
+    // and with them the cardinality of every node.
+    //
+    // A node holds a sequence, IN THE SCOPE IT LIVES IN, iff the output that
+    // produces it is declared a sequence: one run of the step yields a
+    // sequence. (A node a mapped step produces has one such value per item;
+    // what it is from outside the map is `IterationStructure`'s to say.) An
+    // input of the machine is one value: notation has no run shape.
     let mut node_is_sequence = vec![false; nodes.len()];
+    let mut wiring_outputs: Vec<Vec<EdgeOutput>> = Vec::with_capacity(wirings.len());
     for wiring in wirings {
         let cap = registry
             .get_cached_cap(&wiring.cap_urn.to_string())
             .ok_or_else(|| MachineAbstractionError::UnknownCap {
                 cap_urn: wiring.cap_urn.to_string(),
             })?;
-
-        let (_input_is_sequence, output_is_sequence) = cap.sequence_shape();
-        node_is_sequence[wiring.target_node_id as usize] = output_is_sequence;
+        let mut outputs: Vec<EdgeOutput> = Vec::with_capacity(wiring.targets.len());
+        for (name, node) in &wiring.targets {
+            let output = match name {
+                // The unnamed target takes the main output.
+                None => cap
+                    .main_output()
+                    .ok_or_else(|| MachineAbstractionError::NoMainOutput {
+                        strand_index,
+                        cap_urn: wiring.cap_urn.to_string(),
+                    })?,
+                Some(name) => cap.output_named(name).ok_or_else(|| {
+                    MachineAbstractionError::UnknownOutputName {
+                        strand_index,
+                        cap_urn: wiring.cap_urn.to_string(),
+                        name: name.clone(),
+                        declared: cap.get_outputs().iter().map(|o| o.name.clone()).collect(),
+                    }
+                })?,
+            };
+            let output_media_urn = MediaUrn::from_string(&output.media_urn)
+                .expect("cap registry invariant: every output media_urn is a valid MediaUrn");
+            if outputs.iter().any(|taken| {
+                taken
+                    .output_media_urn
+                    .is_equivalent(&output_media_urn)
+                    .unwrap_or(false)
+            }) {
+                return Err(MachineAbstractionError::OutputTakenTwice {
+                    strand_index,
+                    cap_urn: wiring.cap_urn.to_string(),
+                    output: output.name.clone(),
+                });
+            }
+            node_is_sequence[*node as usize] = output.is_sequence;
+            outputs.push(EdgeOutput {
+                output_media_urn,
+                output_name: output.name.clone(),
+                node: *node,
+            });
+        }
+        // Canonical order, like the assignment's.
+        outputs.sort_by(|a, b| a.output_media_urn.cmp(&b.output_media_urn));
+        wiring_outputs.push(outputs);
     }
 
-    // Step 1: per-wiring source-to-cap-arg matching. The
-    // matching is computed against the URNs of the source
-    // NodeIds (looked up from the `nodes` table); the result
-    // is a sorted assignment of cap-arg → NodeId pairs.
-    let mut indexed_edges: Vec<MachineEdge> = Vec::with_capacity(wirings.len());
-    for wiring in wirings {
+    // Step 1: per-wiring binding of sources to cap args. Named members bind
+    // first; the rest are matched by type over the args no name bound. The
+    // result is a sorted assignment of cap-arg → source pairs.
+    let mut shapes: Vec<StepShape> = Vec::with_capacity(wirings.len());
+    let mut bound: Vec<(&PreInternedWiring, Vec<EdgeAssignmentBinding>, Vec<EdgeOutput>, bool)> =
+        Vec::with_capacity(wirings.len());
+    for (wiring, outputs) in wirings.iter().zip(wiring_outputs) {
         let cap = registry
             .get_cached_cap(&wiring.cap_urn.to_string())
             .ok_or_else(|| MachineAbstractionError::UnknownCap {
@@ -345,101 +410,120 @@ pub fn resolve_pre_interned(
             )
         };
 
-        // Build the list of data-flow input slots for this cap.
-        //
-        // Each cap arg may declare any of three sources:
-        //   - `Stdin { stdin: <media URN> }` — runtime delivers
-        //     the named-typed data to the arg slot via the
-        //     bifaci stdin stream. THIS is the data-flow input.
-        //   - `Position { ... }` — positional CLI argument.
-        //   - `CliFlag { ... }` — named CLI flag.
-        //
-        // Args with NO stdin source are CLI / positional config
-        // only — they receive their values at execution time
-        // from cap_settings, slot_values, or default_value.
-        // They are never matched against a wiring's source
-        // URNs.
-        //
-        // For args that DO have a stdin source, the URN that
-        // matters for matching is the stdin source's inner
-        // type (e.g. `media:ext=png;image`), NOT the arg's outer
-        // `media_urn` (e.g. `media:enc=utf-8;file-path`). The
-        // outer is the slot identity that cartridge_runtime uses
-        // to label the stream and to drive file-path
-        // auto-conversion; the inner is the type the runtime
-        // actually delivers into the slot. The resolver
-        // matches against the inner type because that is what
-        // upstream caps actually produce.
-        //
-        // We build two parallel vecs: `stdin_arg_urns` (the
-        // URNs to match against, in the order they appear in
-        // `cap.args`) and `stdin_arg_slot_urns` (the
-        // corresponding slot identities the bindings will
-        // record).
-        // Wiring sources are matched against EVERY arg by its stream URN (its Stdin
-        // source URN if it declares one, else its declared URN — a cap may have no
-        // stdin at all). ALL args are producer-feedable: a producer is anything that
-        // supplies a value (a prior cap's output, config, a literal, …), so every arg
-        // is a candidate. The Hungarian matcher assigns each source to the arg it
-        // conforms to; args no source matches take their value from config/defaults;
-        // genuine ambiguity is a hard failure (in `match_sources_to_args`). `stdin_*`
-        // names are historical — these are the per-arg stream and slot URNs.
-        let mut stdin_arg_urns: Vec<MediaUrn> = Vec::new();
-        let mut stdin_arg_slot_urns: Vec<MediaUrn> = Vec::new();
-        let mut stdin_arg_is_sequence: Vec<bool> = Vec::new();
-        for arg in &cap.args {
-            let stream_urn = MediaUrn::from_string(arg.stream_urn())
-                .expect("cap registry invariant: every arg stream URN is a valid MediaUrn");
-            let slot_urn = MediaUrn::from_string(&arg.media_urn)
-                .expect("cap registry invariant: every cap arg media_urn is a valid MediaUrn");
-            stdin_arg_urns.push(stream_urn);
-            stdin_arg_slot_urns.push(slot_urn);
-            stdin_arg_is_sequence.push(arg.is_sequence);
+        // Every arg, by what it ACCEPTS (the type a source must conform to:
+        // its stdin source URN for the main input, its `accepts` when it gives
+        // one, its own URN otherwise) and by its SLOT (its `media_urn`, the
+        // identity a binding records and the URN its stream is delivered
+        // under). How an arg is supplied on a command line plays no part: every
+        // arg can be bound by a wiring.
+        let arg_accepts: Vec<MediaUrn> = cap
+            .args
+            .iter()
+            .map(|arg| {
+                MediaUrn::from_string(arg.accepted_urn())
+                    .expect("cap registry invariant: every arg accepts a valid MediaUrn")
+            })
+            .collect();
+        let arg_slots: Vec<MediaUrn> = cap
+            .args
+            .iter()
+            .map(|arg| {
+                MediaUrn::from_string(&arg.media_urn)
+                    .expect("cap registry invariant: every cap arg media_urn is a valid MediaUrn")
+            })
+            .collect();
+
+        // Named members bind first.
+        let mut bindings: Vec<EdgeAssignmentBinding> =
+            Vec::with_capacity(wiring.named_sources.len() + wiring.source_node_ids.len());
+        let mut named_count = vec![0usize; cap.args.len()];
+        for (name, source) in &wiring.named_sources {
+            let index = cap.args.iter().position(|arg| arg.name == *name).ok_or_else(|| {
+                MachineAbstractionError::UnknownArgName {
+                    strand_index,
+                    cap_urn: wiring.cap_urn.to_string(),
+                    name: name.clone(),
+                    declared: cap.args.iter().map(|arg| arg.name.clone()).collect(),
+                }
+            })?;
+            match source {
+                BindingSource::Node(id) => {
+                    let source_urn = &nodes[*id as usize];
+                    if !source_urn.conforms_to(&arg_accepts[index]).unwrap_or(false) {
+                        return Err(MachineAbstractionError::SourceDoesNotConformToArg {
+                            strand_index,
+                            cap_urn: wiring.cap_urn.to_string(),
+                            name: name.clone(),
+                            accepts: arg_accepts[index].to_string(),
+                            source_urn: source_urn.to_string(),
+                        });
+                    }
+                }
+                BindingSource::Constant(value) => {
+                    check_constant(registry, &wiring.cap_urn, &cap.args[index], value, strand_index)?
+                }
+            }
+            named_count[index] += 1;
+            bindings.push(EdgeAssignmentBinding {
+                cap_arg_media_urn: arg_slots[index].clone(),
+                arg_name: cap.args[index].name.clone(),
+                source: source.clone(),
+            });
+        }
+        for (index, count) in named_count.iter().enumerate() {
+            if *count > 1 && !cap.args[index].is_sequence {
+                return Err(MachineAbstractionError::ArgBoundTwice {
+                    strand_index,
+                    cap_urn: wiring.cap_urn.to_string(),
+                    name: cap.args[index].name.clone(),
+                    count: *count,
+                });
+            }
         }
 
+        // The unnamed members are matched by type over the args no name bound.
+        // The Hungarian matcher assigns each source to the arg it conforms to;
+        // genuine ambiguity is a hard failure (in `match_sources_to_args`).
+        let free: Vec<usize> = (0..cap.args.len()).filter(|i| named_count[*i] == 0).collect();
+        let free_accepts: Vec<MediaUrn> = free.iter().map(|i| arg_accepts[*i].clone()).collect();
+        let free_slots: Vec<MediaUrn> = free.iter().map(|i| arg_slots[*i].clone()).collect();
+        let free_is_sequence: Vec<bool> = free.iter().map(|i| cap.args[*i].is_sequence).collect();
+
         // Pull the source URNs out of the nodes table for
-        // this wiring's source NodeIds.
+        // this wiring's unnamed source NodeIds.
         let source_urns: Vec<MediaUrn> = wiring
             .source_node_ids
             .iter()
             .map(|id| nodes[*id as usize].clone())
             .collect();
 
-        // Run the bipartite minimum-cost matching against
-        // the stdin URNs. The matching returns
-        // `(matched_arg_urn, source_urn)` pairs where
-        // `matched_arg_urn` is the stdin URN that the source
-        // was assigned to. We then translate each matched
-        // stdin URN back to its slot identity for the binding.
-        let sorted_assignment = match_sources_to_args(
-            &source_urns,
-            &stdin_arg_urns,
-            &stdin_arg_is_sequence,
-            &wiring.cap_urn,
-            strand_index,
-        )?;
+        // The matching returns `(accepted URN, source URN)` pairs; each
+        // accepted URN is translated back to its slot identity for the binding.
+        let sorted_assignment = if source_urns.is_empty() {
+            Vec::new()
+        } else {
+            match_sources_to_args(
+                &source_urns,
+                &free_accepts,
+                &free_is_sequence,
+                // The main input, when no named member bound it.
+                primary_arg_index.and_then(|main| free.iter().position(|arg| *arg == main)),
+                &wiring.cap_urn,
+                strand_index,
+            )?
+        };
 
-        // Build the bindings. The `cap_arg_media_urn` field
-        // on each binding records the **slot identity**
-        // (the cap arg's outer `media_urn`), since that is
-        // the canonical identifier per RULE1. We look up the
-        // slot identity by matching the assignment's stdin
-        // URN back to the position in `stdin_arg_urns`.
-        //
-        // We also map each source URN back to its NodeId
-        // position in `wiring.source_node_ids`, walking the
-        // unconsumed positions to handle the case where two
-        // source NodeIds happen to share a URN.
-        let mut bindings: Vec<EdgeAssignmentBinding> = Vec::with_capacity(sorted_assignment.len());
+        // We also map each source URN back to its NodeId position in
+        // `wiring.source_node_ids`, walking the unconsumed positions to handle
+        // the case where two source NodeIds happen to share a URN.
         let mut consumed_positions: Vec<bool> = vec![false; wiring.source_node_ids.len()];
-        for (matched_stdin_urn, source_urn) in &sorted_assignment {
-            // Find the slot identity for this matched stdin URN.
-            let slot_urn = stdin_arg_urns
+        for (matched_accepts, source_urn) in &sorted_assignment {
+            let matched = free_accepts
                 .iter()
-                .zip(stdin_arg_slot_urns.iter())
-                .find(|(stdin, _)| stdin.is_equivalent(matched_stdin_urn).unwrap_or(false))
-                .map(|(_, slot)| slot.clone())
-                .expect("matching returned a stdin URN that isn't in the cap's stdin args list");
+                .position(|accepts| accepts.is_equivalent(matched_accepts).unwrap_or(false))
+                .expect("matching returned an accepted URN that isn't in the cap's free args");
+            let slot_urn = free_slots[matched].clone();
+            let arg_name = cap.args[free[matched]].name.clone();
 
             // Find the source NodeId position by URN equivalence.
             let mut chosen_pos: Option<usize> = None;
@@ -459,63 +543,99 @@ pub fn resolve_pre_interned(
                 "matching returned a source URN that doesn't appear in the wiring's source positions",
             );
             consumed_positions[pos] = true;
-            bindings.push(EdgeAssignmentBinding {
-                cap_arg_media_urn: slot_urn,
-                source: wiring.source_node_ids[pos],
-            });
+            bindings.push(EdgeAssignmentBinding::from_node(
+                slot_urn,
+                arg_name,
+                wiring.source_node_ids[pos],
+            ));
         }
 
-        // The bindings vec is currently in the order produced by
-        // `sorted_assignment` (sorted by stdin URN, source-order-stable within
-        // one arg). To keep the canonical equivalence comparison stable,
-        // re-sort by slot identity (`cap_arg_media_urn`); the sort is stable,
-        // so several bindings gathered onto one arg keep their source
-        // declaration order — the gathered sequence's item order.
+        // The bindings are in the order they were made: the named ones as
+        // written, then the matched ones sorted by accepted URN. To keep the
+        // canonical equivalence comparison stable, re-sort by slot identity
+        // (`cap_arg_media_urn`); the sort is stable, so several bindings
+        // gathered onto one arg keep their declaration order — the gathered
+        // sequence's item order.
         bindings.sort_by(|a, b| a.cap_arg_media_urn.cmp(&b.cap_arg_media_urn));
 
-        // A slot with several bindings is the implicit Collect: the matcher only
-        // produces it for a sequence arg. Members may be scalar or sequence —
-        // execution flattens deterministically: each member contributes its
-        // item(s) to the gathered sequence in binding (source-declaration)
-        // order (a scalar member contributes one item, a sequence member its
-        // items). No further validation is needed here.
+        // A cap that takes an input is given it.
+        if let Some(index) = primary_arg_index {
+            let bound = bindings
+                .iter()
+                .any(|b| b.cap_arg_media_urn.is_equivalent(&arg_slots[index]).unwrap_or(false));
+            if !bound {
+                return Err(MachineAbstractionError::MainInputUnbound {
+                    strand_index,
+                    cap_urn: wiring.cap_urn.to_string(),
+                    main_input: cap.args[index].name.clone(),
+                });
+            }
+        }
 
-        // Derive `is_loop` from cardinality — the single ForEach rule
-        // (`Cap::needs_foreach`, mirroring `get_outgoing_edges` line 673): the
-        // primary data input (the arg whose stdin matches `in=`) carries a sequence but this cap
-        // consumes it as a scalar, so it maps per-item. The primary stdin source node
-        // is the binding feeding the main arg's slot; a GATHER on the primary
-        // arg (several bindings) forms a sequence by construction. A cap with no
-        // stdin arg (config-only) never loops.
-        let primary_stdin_sources: Vec<&EdgeAssignmentBinding> = primary_arg_index
+        // A slot with several bindings is the implicit Collect: only a sequence
+        // arg takes it. Members may be scalar or sequence — execution flattens
+        // deterministically: each member contributes its item(s) to the
+        // gathered sequence in binding (declaration) order.
+
+        // What the step is given, as far as iteration is concerned: each node
+        // and whether the arg it is bound to takes a sequence. A constant is
+        // one value wherever the step runs.
+        let arg_of = |binding: &EdgeAssignmentBinding| {
+            arg_slots
+                .iter()
+                .position(|slot| slot.is_equivalent(&binding.cap_arg_media_urn).unwrap_or(false))
+                .expect("every binding names a slot of the cap")
+        };
+        let members: Vec<MemberShape> = bindings
+            .iter()
+            .filter_map(|binding| {
+                binding.node().map(|node| MemberShape {
+                    node,
+                    arg_is_sequence: cap.args[arg_of(binding)].is_sequence,
+                })
+            })
+            .collect();
+        // The run's shape can make a machine INPUT a sequence the definition
+        // knows nothing of: an exact ForEach boundary on the main input's one
+        // source, when that source is an input of the strand.
+        let primary_sources: Vec<NodeId> = primary_arg_index
             .map(|index| {
-                let primary_slot = &stdin_arg_slot_urns[index];
                 bindings
                     .iter()
-                    .filter(|binding| {
-                        binding
-                            .cap_arg_media_urn
-                            .is_equivalent(primary_slot)
-                            .unwrap_or(false)
-                    })
+                    .filter(|binding| arg_of(binding) == index)
+                    .filter_map(|binding| binding.node())
                     .collect()
             })
             .unwrap_or_default();
-        let primary_stdin_source_is_sequence = match primary_stdin_sources.as_slice() {
-            [] => false,
-            [primary] => node_is_sequence[primary.source as usize],
-            // Gathered: N scalar producers form one sequence.
-            _ => true,
-        };
         let primary_stdin_source_is_anchor = matches!(
-            primary_stdin_sources.as_slice(),
+            primary_sources.as_slice(),
             [primary]
                 if !wirings
                     .iter()
-                    .any(|candidate| candidate.target_node_id == primary.source)
+                    .any(|candidate| candidate.targets.iter().any(|(_, node)| node == primary))
         );
-        let derived_is_loop = cap.needs_foreach(primary_stdin_source_is_sequence);
+        shapes.push(StepShape {
+            members,
+            outputs: outputs
+                .iter()
+                .map(|output| (output.node, node_is_sequence[output.node as usize]))
+                .collect(),
+        });
+        bound.push((wiring, bindings, outputs, primary_stdin_source_is_anchor));
+    }
 
+    // Which steps map. Iteration is DERIVED from cardinality, never authored
+    // (docs 09 §Iteration); `IterationStructure` is the one place the rule is
+    // computed, and the plan builder reads the same structure for a run.
+    // Notation has no run, so an input of the machine is one value here.
+    let iteration = IterationStructure::of(&shapes, |_| false)
+        .map_err(|_| MachineAbstractionError::CyclicMachineStrand { strand_index })?;
+
+    let mut indexed_edges: Vec<MachineEdge> = Vec::with_capacity(wirings.len());
+    for (index, (wiring, bindings, outputs, primary_stdin_source_is_anchor)) in
+        bound.into_iter().enumerate()
+    {
+        let derived_is_loop = iteration.steps()[index].map.is_some();
         let (is_loop, foreach_token_id) = match &wiring.foreach_identity {
             ForEachIdentity::Exact(Some(token_id))
                 if derived_is_loop || primary_stdin_source_is_anchor =>
@@ -542,7 +662,8 @@ pub fn resolve_pre_interned(
             foreach_token_id,
             cap_urn: wiring.cap_urn.clone(),
             assignment: bindings,
-            target: wiring.target_node_id,
+            outputs,
+            policy: wiring.policy,
             is_loop,
         });
     }
@@ -562,10 +683,8 @@ pub fn resolve_pre_interned(
     let mut produced_node_ids: std::collections::HashSet<NodeId> = Default::default();
     let mut consumed_node_ids: std::collections::HashSet<NodeId> = Default::default();
     for e in &edges {
-        produced_node_ids.insert(e.target);
-        for b in &e.assignment {
-            consumed_node_ids.insert(b.source);
-        }
+        produced_node_ids.extend(e.output_nodes());
+        consumed_node_ids.extend(e.source_nodes());
     }
 
     let mut input_anchor_ids: Vec<NodeId> = (0..nodes.len() as NodeId)
@@ -600,7 +719,61 @@ pub fn resolve_pre_interned(
         edges,
         input_anchor_ids,
         output_anchor_ids,
+        node_is_sequence,
     ))
+}
+
+/// Hold a constant to the validation of the arg it is bound to: the rules and
+/// the schema the arg's media definition declares. A constant is a value like
+/// any other the arg is given; it is known when the machine is resolved, so
+/// that is when it is checked.
+fn check_constant(
+    registry: &FabricRegistry,
+    cap_urn: &CapUrn,
+    arg: &crate::cap::definition::CapArg,
+    value: &serde_json::Value,
+    strand_index: usize,
+) -> Result<(), MachineAbstractionError> {
+    let refused = |reason: String| MachineAbstractionError::ConstantFailsValidation {
+        strand_index,
+        cap_urn: cap_urn.to_string(),
+        name: arg.name.clone(),
+        constant: value.to_string(),
+        reason,
+    };
+    // Without the definition there is nothing to hold the constant to, and a
+    // constant nobody checked is not bound.
+    let definition = registry.get_cached_media_def(&arg.media_urn).ok_or_else(|| {
+        refused(format!(
+            "the media definition of '{}' is not available, so the constant cannot be validated",
+            arg.media_urn
+        ))
+    })?;
+    if let Some(validation) = &definition.validation {
+        match validation.violation(value) {
+            Ok(None) => {}
+            Ok(Some(rule)) => return Err(refused(format!("it breaks the rule: {rule}"))),
+            Err(issue) => return Err(refused(issue)),
+        }
+    }
+    if let Some(schema) = &definition.schema {
+        let compiled = jsonschema::JSONSchema::compile(schema).map_err(|e| {
+            refused(format!(
+                "the schema of '{}' does not compile: {}",
+                arg.media_urn, e
+            ))
+        })?;
+        let details: Vec<String> = match compiled.validate(value) {
+            Ok(()) => Vec::new(),
+            Err(errors) => errors
+                .map(|e| format!("{}: {}", e.instance_path, e))
+                .collect(),
+        };
+        if !details.is_empty() {
+            return Err(refused(format!("it does not match the schema: {}", details.join("; "))));
+        }
+    }
+    Ok(())
 }
 
 // =============================================================================
@@ -641,6 +814,7 @@ fn match_sources_to_args(
     sources: &[MediaUrn],
     args: &[MediaUrn],
     arg_is_sequence: &[bool],
+    must_bind: Option<usize>,
     cap_urn: &CapUrn,
     strand_index: usize,
 ) -> Result<Vec<(MediaUrn, MediaUrn)>, MachineAbstractionError> {
@@ -701,6 +875,16 @@ fn match_sources_to_args(
         }
     }
 
+    // An assignment binds the arg that MUST be bound — the cap's main input,
+    // when these sources are what can feed it. A cap that takes an input is
+    // given it, so a way of placing the sources that leaves the main input
+    // out is not an assignment at all; it does not tie with one that is. This
+    // is what makes `series -> compare -> result` resolve when `compare` has a
+    // second arg that accepts a series: the lone source is the main input. It
+    // is a constraint, not a tiebreak: two sources that both fit the main
+    // input and the other arg still tie.
+    let must_bind = must_bind.filter(|arg| cost.iter().any(|row| row[*arg].is_some()));
+
     // ── Phase 1: product — brute-force enumeration of injections. ──
     //
     // For each ordered injection f: [0..n_sources) ↣ [0..n_args)
@@ -721,6 +905,7 @@ fn match_sources_to_args(
         enumerate_assignments(
             &cost,
             &all_scalar_capacity,
+            must_bind,
             0,
             &mut current,
             &mut used,
@@ -762,6 +947,7 @@ fn match_sources_to_args(
     enumerate_assignments(
         &cost,
         arg_is_sequence,
+        must_bind,
         0,
         &mut current,
         &mut used,
@@ -859,6 +1045,7 @@ pub fn assign_sources_to_anchors(
     enumerate_assignments(
         &cost,
         &all_scalar,
+        None,
         0,
         &mut current,
         &mut used,
@@ -893,6 +1080,7 @@ pub fn assign_sources_to_anchors(
 fn enumerate_assignments(
     cost: &[Vec<Option<i64>>],
     arg_can_gather: &[bool],
+    must_bind: Option<usize>,
     s_idx: usize,
     current: &mut Vec<usize>,
     used: &mut Vec<bool>,
@@ -901,6 +1089,11 @@ fn enumerate_assignments(
 ) {
     let n_sources = cost.len();
     if s_idx == n_sources {
+        // A placement that leaves out the arg that must be bound is not an
+        // assignment.
+        if must_bind.is_some_and(|arg| !current.contains(&arg)) {
+            return;
+        }
         // Compute total cost of `current`.
         let total: i64 = (0..n_sources)
             .map(|s| cost[s][current[s]].expect("assignments filter on Some(_)"))
@@ -937,6 +1130,7 @@ fn enumerate_assignments(
         enumerate_assignments(
             cost,
             arg_can_gather,
+            must_bind,
             s_idx + 1,
             current,
             used,
@@ -976,7 +1170,9 @@ fn topo_sort(
     // letting the cycle / unmatched checks catch.)
     let mut producers_of: HashMap<NodeId, Vec<usize>> = HashMap::new();
     for (idx, e) in edges.iter().enumerate() {
-        producers_of.entry(e.target).or_default().push(idx);
+        for node in e.output_nodes() {
+            producers_of.entry(node).or_default().push(idx);
+        }
     }
 
     // Edge B's predecessors: any edge whose target is the
@@ -992,8 +1188,8 @@ fn topo_sort(
     let mut indegree: Vec<usize> = vec![0; n];
     let mut successors: Vec<Vec<usize>> = vec![Vec::new(); n];
     for (b_idx, b) in edges.iter().enumerate() {
-        for binding in &b.assignment {
-            if let Some(producers) = producers_of.get(&binding.source) {
+        for source in b.source_nodes() {
+            if let Some(producers) = producers_of.get(&source) {
                 for &a_idx in producers {
                     successors[a_idx].push(b_idx);
                     indegree[b_idx] += 1;
@@ -1049,7 +1245,19 @@ fn sort_ready(ready: &mut Vec<usize>, edges: &[MachineEdge], nodes: &[MediaUrn])
                 std::cmp::Ordering::Equal => {}
                 ord => return ord,
             }
-            match nodes[ba.source as usize].cmp(&nodes[bb.source as usize]) {
+            // A node source orders by its URN; a constant by its text, after
+            // every node.
+            let ord = match (&ba.source, &bb.source) {
+                (BindingSource::Node(na), BindingSource::Node(nb)) => {
+                    nodes[*na as usize].cmp(&nodes[*nb as usize])
+                }
+                (BindingSource::Node(_), BindingSource::Constant(_)) => std::cmp::Ordering::Less,
+                (BindingSource::Constant(_), BindingSource::Node(_)) => std::cmp::Ordering::Greater,
+                (BindingSource::Constant(ca), BindingSource::Constant(cb)) => {
+                    ca.to_string().cmp(&cb.to_string())
+                }
+            };
+            match ord {
                 std::cmp::Ordering::Equal => {}
                 ord => return ord,
             }
@@ -1058,7 +1266,17 @@ fn sort_ready(ready: &mut Vec<usize>, edges: &[MachineEdge], nodes: &[MediaUrn])
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
-        match nodes[ea.target as usize].cmp(&nodes[eb.target as usize]) {
+        for (oa, ob) in ea.outputs.iter().zip(eb.outputs.iter()) {
+            match oa.output_media_urn.cmp(&ob.output_media_urn) {
+                std::cmp::Ordering::Equal => {}
+                ord => return ord,
+            }
+            match nodes[oa.node as usize].cmp(&nodes[ob.node as usize]) {
+                std::cmp::Ordering::Equal => {}
+                ord => return ord,
+            }
+        }
+        match ea.outputs.len().cmp(&eb.outputs.len()) {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
@@ -1077,6 +1295,7 @@ mod tests {
         PreInternedWiring,
     };
     use crate::machine::error::MachineAbstractionError;
+    use crate::machine::StepPolicy;
     use crate::machine::test_fixtures::{
         build_cap, build_cap_with_slot_stdin_pairs, cap, cap_step, collect_step, for_each_step,
         media, registry_with, strand_from_steps,
@@ -1095,7 +1314,7 @@ mod tests {
         let sources = vec![media("media:document;ext=pdf")];
         let args = vec![media("media:document;ext=pdf")];
         let cap_urn = cap("cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
             .expect("trivial single-source match must succeed");
         assert_eq!(pairs.len(), 1);
         assert!(pairs[0].0.is_equivalent(&media("media:document;ext=pdf")).unwrap());
@@ -1113,7 +1332,7 @@ mod tests {
         let args = vec![media("media:enc=utf-8")];
         let cap_urn =
             cap("cap:in=\"media:enc=utf-8\";make-decision;out=\"media:decision;enc=utf-8\"");
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
             .expect("more-specific source must be matched to its arg");
         assert!(pairs[0].0.is_equivalent(&media("media:enc=utf-8")).unwrap());
         assert!(pairs[0]
@@ -1131,7 +1350,7 @@ mod tests {
         let sources = vec![media("media:numeric")];
         let args = vec![media("media:enc=utf-8")];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 7)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 7)
             .unwrap_err();
         match err {
             MachineAbstractionError::UnmatchedSourceInCapArgs {
@@ -1172,7 +1391,7 @@ mod tests {
             "cap:in=\"media:ext=png;image\";describe;out=\"media:enc=utf-8;image-description\"",
         );
         let pairs =
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 0).unwrap();
+            match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0).unwrap();
         assert_eq!(pairs.len(), 2);
         // Pairs are sorted by cap_arg_media_urn structurally.
         // image;png and enc=utf-8: structural Ord places
@@ -1208,7 +1427,7 @@ mod tests {
         let sources = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
         let args = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 0)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
             .unwrap_err();
         assert!(
             matches!(
@@ -1230,7 +1449,7 @@ mod tests {
         ];
         let args = vec![media("media:document;ext=pdf"), media("media:document;ext=pdf")];
         let cap_urn = cap("cap:in=\"media:document;ext=pdf\";t;out=\"media:document;ext=pdf\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], &cap_urn, 0)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
             .unwrap_err();
         assert!(matches!(
             err,
@@ -1269,7 +1488,7 @@ mod tests {
             .cap_arg_media_urn
             .is_equivalent(&media("media:document;ext=pdf"))
             .unwrap());
-        let src_urn = resolved.node_urn(binding.source);
+        let src_urn = resolved.node_urn(binding.node().expect("a node binding"));
         assert!(src_urn.is_equivalent(&media("media:document;ext=pdf")).unwrap());
         // Anchors: input is media:document;ext=pdf, output is media:enc=utf-8;ext=txt.
         let inputs = resolved.input_anchors();
@@ -1332,8 +1551,8 @@ mod tests {
 
         // The first edge's target NodeId must equal the second
         // edge's primary source NodeId.
-        let extract_target = resolved.edges()[0].target;
-        let embed_source = resolved.edges()[1].assignment[0].source;
+        let extract_target = resolved.edges()[0].main_target().expect("the main output is taken");
+        let embed_source = resolved.edges()[1].assignment[0].node().expect("a node binding");
         assert_eq!(
             extract_target, embed_source,
             "intermediate data position must be one shared NodeId"
@@ -1418,8 +1637,8 @@ mod tests {
         // make_decision declares in=media:enc=utf-8 (less
         // specific, but on the same specialization chain).
         // Positional interning collapses them.
-        let disbind_target = disbind_edge.target;
-        let decision_source = decision_edge.assignment[0].source;
+        let disbind_target = disbind_edge.main_target().expect("the main output is taken");
+        let decision_source = decision_edge.assignment[0].node().expect("a node binding");
         assert_eq!(
             disbind_target, decision_source,
             "disbind target and make_decision source must share the same NodeId (positional interning)"
@@ -1559,8 +1778,8 @@ mod tests {
         assert_eq!(resolved.edges().len(), 2);
         // coerce_int's target (intermediate) is shared with
         // coerce_num's source — same positional boundary.
-        let int_target = resolved.edges()[0].target;
-        let num_source = resolved.edges()[1].assignment[0].source;
+        let int_target = resolved.edges()[0].main_target().expect("the main output is taken");
+        let num_source = resolved.edges()[1].assignment[0].node().expect("a node binding");
         assert_eq!(int_target, num_source);
     }
 
@@ -1620,7 +1839,7 @@ mod tests {
         // The source NodeId must point at a node whose URN is
         // `media:document;ext=pdf` — the data-type URN, what the planner
         // sees flowing on the wire.
-        let source_urn = resolved.node_urn(binding.source);
+        let source_urn = resolved.node_urn(binding.node().expect("a node binding"));
         assert!(
             source_urn.is_equivalent(&media("media:document;ext=pdf")).unwrap(),
             "source node URN must be media:document;ext=pdf (the data-type URN), got: {}",
@@ -1658,7 +1877,9 @@ mod tests {
             foreach_identity: ForEachIdentity::MintIfRequired,
             cap_urn,
             source_node_ids: vec![0, 1], // pdf first, enc=utf-8 second
-            target_node_id: 2,
+            named_sources: Vec::new(),
+            targets: vec![(None, 2)],
+            policy: StepPolicy::default(),
         }];
 
         let strand = resolve_pre_interned(nodes, &wirings, &registry, 0).unwrap();
@@ -1699,14 +1920,18 @@ mod tests {
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(urn_a).unwrap(),
                 source_node_ids: vec![0],
-                target_node_id: 1,
+                named_sources: Vec::new(),
+                targets: vec![(None, 1)],
+                policy: StepPolicy::default(),
             },
             PreInternedWiring {
                 token_id: "tok-3".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(urn_b).unwrap(),
                 source_node_ids: vec![1],
-                target_node_id: 0,
+                named_sources: Vec::new(),
+                targets: vec![(None, 0)],
+                policy: StepPolicy::default(),
             },
         ];
 
@@ -1734,7 +1959,7 @@ mod tests {
         let args = vec![media("media:enc=utf-8")];
         let arg_seq = vec![true];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0)
             .expect("three sources must gather into the sequence arg");
         assert_eq!(pairs.len(), 3, "one binding per gathered source");
         for (arg, src) in &pairs {
@@ -1756,7 +1981,7 @@ mod tests {
         let arg_seq = vec![false, true];
         let cap_urn =
             cap("cap:in=\"media:enc=utf-8;page\";compose;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0)
             .expect("unique injection must resolve");
         assert_eq!(pairs.len(), 2);
         // The page source must claim the scalar page arg (injection), NOT be
@@ -1798,7 +2023,7 @@ mod tests {
         ];
         let arg_seq = vec![true, true];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &arg_seq, &cap_urn, 0).unwrap_err();
+        let err = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -1851,7 +2076,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![0],
-                target_node_id: 2,
+                named_sources: Vec::new(),
+                targets: vec![(None, 2)],
+                policy: StepPolicy::default(),
             },
             PreInternedWiring {
                 token_id: "tok-b".parse().unwrap(),
@@ -1861,7 +2088,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![1],
-                target_node_id: 3,
+                named_sources: Vec::new(),
+                targets: vec![(None, 3)],
+                policy: StepPolicy::default(),
             },
             PreInternedWiring {
                 token_id: "tok-concat".parse().unwrap(),
@@ -1871,7 +2100,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![2, 3],
-                target_node_id: 4,
+                named_sources: Vec::new(),
+                targets: vec![(None, 4)],
+                policy: StepPolicy::default(),
             },
         ];
 
@@ -1893,8 +2124,8 @@ mod tests {
             .is_equivalent(&concat_edge.assignment[1].cap_arg_media_urn)
             .unwrap());
         // Deterministic gather order = source declaration order (node 2 then 3).
-        assert_eq!(concat_edge.assignment[0].source, 2);
-        assert_eq!(concat_edge.assignment[1].source, 3);
+        assert_eq!(concat_edge.assignment[0].node(), Some(2));
+        assert_eq!(concat_edge.assignment[1].node(), Some(3));
         // The gathered value IS the sequence the arg consumes — no ForEach.
         assert!(
             !concat_edge.is_loop,
@@ -1951,7 +2182,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![0],
-                target_node_id: 2,
+                named_sources: Vec::new(),
+                targets: vec![(None, 2)],
+                policy: StepPolicy::default(),
             },
             PreInternedWiring {
                 token_id: "tok-b".parse().unwrap(),
@@ -1961,7 +2194,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![1],
-                target_node_id: 3,
+                named_sources: Vec::new(),
+                targets: vec![(None, 3)],
+                policy: StepPolicy::default(),
             },
             PreInternedWiring {
                 token_id: "tok-concat".parse().unwrap(),
@@ -1971,7 +2206,9 @@ mod tests {
                 )
                 .unwrap(),
                 source_node_ids: vec![2, 3],
-                target_node_id: 4,
+                named_sources: Vec::new(),
+                targets: vec![(None, 4)],
+                policy: StepPolicy::default(),
             },
         ];
 
@@ -1993,12 +2230,11 @@ mod tests {
         );
     }
 
-    // TEST7122: Knitting and re-realizing a strand preserves the ForEach boundary
-    // identity independently from its body-entry cap. This is the complete route
-    // used by machine execution and catches the identity loss that made persisted
-    // body coordinates fail realized-path validation.
+    // TEST7122: Knitting a strand into a machine preserves the ForEach boundary
+    // identity independently from its body-entry cap: the machine is what a run's
+    // plan is built from, so an identity lost here is lost to the run.
     #[test]
-    fn test7122_foreach_identity_survives_knit_and_realize() {
+    fn test7122_foreach_identity_survives_knit() {
         let cap_urn =
             "cap:constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8;ext=txt;plain-text\";summarize";
         let cap = build_cap(
@@ -2017,7 +2253,6 @@ mod tests {
             "media:enc=utf-8;ext=txt;plain-text",
         );
         body.token_id = "tok-cap".parse().unwrap();
-        let source = media("media:enc=utf-8;page");
         let strand = strand_from_steps(vec![boundary, body], "foreach identity");
 
         let machine_strand = resolve_strand(&strand, &registry, 0).unwrap();
@@ -2026,15 +2261,11 @@ mod tests {
             machine_strand.edges()[0].foreach_token_id.as_deref(),
             Some("tok-foreach")
         );
-
-        let realized =
-            crate::machine::realize::realize_strand(&machine_strand, &registry, &source, 0)
-                .unwrap();
-        assert_eq!(realized.steps[0].token_id, "tok-foreach");
-        assert!(matches!(
-            realized.steps[0].step_type,
-            crate::planner::StrandStepType::ForEach { .. }
-        ));
-        assert_eq!(realized.steps[1].token_id, "tok-cap");
+        assert!(machine_strand.edges()[0].is_loop);
+        assert_ne!(
+            machine_strand.edges()[0].foreach_token_id.as_deref(),
+            Some("tok-cap"),
+            "the boundary and its body-entry cap are separate identities"
+        );
     }
 }

@@ -99,10 +99,50 @@ pub type NodeId = u32;
 #[derive(Debug, Clone)]
 pub struct EdgeAssignmentBinding {
     pub cap_arg_media_urn: MediaUrn,
-    pub source: NodeId,
+    /// The arg's name in the cap definition: the label notation writes the
+    /// binding under. It is carried so a machine can be written back without
+    /// the definitions, and it is NOT identity — `cap_arg_media_urn` is, and
+    /// equivalence never reads this.
+    pub arg_name: String,
+    pub source: BindingSource,
+}
+
+/// What feeds one cap argument of a step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BindingSource {
+    /// A data position of the strand.
+    Node(NodeId),
+    /// A constant written in the machine: any JSON value. It is part of the
+    /// binding, not a node — nothing else can consume it.
+    Constant(serde_json::Value),
+}
+
+impl BindingSource {
+    /// The node, when the source is one.
+    pub fn node(&self) -> Option<NodeId> {
+        match self {
+            BindingSource::Node(id) => Some(*id),
+            BindingSource::Constant(_) => None,
+        }
+    }
 }
 
 impl EdgeAssignmentBinding {
+    /// A binding of `source` (a node of the strand) to the arg
+    /// `cap_arg_media_urn` identifies and the definition names `arg_name`.
+    pub fn from_node(cap_arg_media_urn: MediaUrn, arg_name: impl Into<String>, source: NodeId) -> Self {
+        Self {
+            cap_arg_media_urn,
+            arg_name: arg_name.into(),
+            source: BindingSource::Node(source),
+        }
+    }
+
+    /// The node this binding takes its value from, when it takes it from one.
+    pub fn node(&self) -> Option<NodeId> {
+        self.source.node()
+    }
+
     fn is_equivalent_with(
         &self,
         other: &EdgeAssignmentBinding,
@@ -117,8 +157,29 @@ impl EdgeAssignmentBinding {
         {
             return false;
         }
-        node_map.bind(self.source, other.source, self_strand, other_strand)
+        match (&self.source, &other.source) {
+            (BindingSource::Node(a), BindingSource::Node(b)) => {
+                node_map.bind(*a, *b, self_strand, other_strand)
+            }
+            // Two machines that give an arg different constants behave differently.
+            (BindingSource::Constant(a), BindingSource::Constant(b)) => a == b,
+            _ => false,
+        }
     }
+}
+
+/// One output of a step that its wiring takes, and the node it goes to.
+///
+/// `output_media_urn` is the output's identity per the cap definition
+/// (RULE20: unique among a cap's outputs). `MachineEdge::outputs` holds these
+/// sorted by `output_media_urn`, a canonical form like the assignment's.
+#[derive(Debug, Clone)]
+pub struct EdgeOutput {
+    pub output_media_urn: MediaUrn,
+    /// The output's name in the cap definition: a label, carried like
+    /// `EdgeAssignmentBinding::arg_name` and never compared.
+    pub output_name: String,
+    pub node: NodeId,
 }
 
 /// One resolved cap-step inside a `MachineStrand`.
@@ -133,7 +194,12 @@ impl EdgeAssignmentBinding {
 pub struct MachineEdge {
     pub cap_urn: CapUrn,
     pub assignment: Vec<EdgeAssignmentBinding>,
-    pub target: NodeId,
+    /// The outputs the wiring takes, sorted by output media URN. An output the
+    /// cap declares and no entry names is discarded; an empty list is a sink.
+    pub outputs: Vec<EdgeOutput>,
+    /// What the step does when it fails. Part of what the machine is: two
+    /// machines that differ in it behave differently.
+    pub policy: super::syntax::StepPolicy,
     pub is_loop: bool,
     /// Stable identity of the cardinality boundary that maps this edge over a
     /// sequence. Present exactly when `is_loop` is true. This is distinct from
@@ -150,6 +216,26 @@ pub struct MachineEdge {
 }
 
 impl MachineEdge {
+    /// The node the step's MAIN output goes to: the taken output whose URN is
+    /// the cap URN's `out=`. `None` when the wiring does not take it.
+    pub fn main_target(&self) -> Option<NodeId> {
+        let out = self.cap_urn.out_media_urn().ok()?;
+        self.outputs
+            .iter()
+            .find(|o| o.output_media_urn.is_equivalent(&out).unwrap_or(false))
+            .map(|o| o.node)
+    }
+
+    /// Every node this step produces.
+    pub fn output_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.outputs.iter().map(|o| o.node)
+    }
+
+    /// Every node this step consumes. A constant is not a node.
+    pub fn source_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.assignment.iter().filter_map(|b| b.node())
+    }
+
     fn is_equivalent_with(
         &self,
         other: &MachineEdge,
@@ -158,6 +244,9 @@ impl MachineEdge {
         other_strand: &MachineStrand,
     ) -> bool {
         if self.is_loop != other.is_loop {
+            return false;
+        }
+        if self.policy != other.policy {
             return false;
         }
         if !self.cap_urn.is_equivalent(&other.cap_urn) {
@@ -174,8 +263,21 @@ impl MachineEdge {
                 return false;
             }
         }
-        if !node_map.bind(self.target, other.target, self_strand, other_strand) {
+        if self.outputs.len() != other.outputs.len() {
             return false;
+        }
+        // Sorted by output media URN at construction time, like the assignment.
+        for (self_o, other_o) in self.outputs.iter().zip(other.outputs.iter()) {
+            if !self_o
+                .output_media_urn
+                .is_equivalent(&other_o.output_media_urn)
+                .unwrap_or(false)
+            {
+                return false;
+            }
+            if !node_map.bind(self_o.node, other_o.node, self_strand, other_strand) {
+                return false;
+            }
         }
         true
     }
@@ -186,18 +288,27 @@ impl fmt::Display for MachineEdge {
         let assignments: Vec<String> = self
             .assignment
             .iter()
-            .map(|b| format!("{}<-#{}", b.cap_arg_media_urn, b.source))
+            .map(|b| match &b.source {
+                BindingSource::Node(id) => format!("{}<-#{}", b.cap_arg_media_urn, id),
+                BindingSource::Constant(value) => format!("{}<-{}", b.cap_arg_media_urn, value),
+            })
+            .collect();
+        let outputs: Vec<String> = self
+            .outputs
+            .iter()
+            .map(|o| format!("{}->#{}", o.output_media_urn, o.node))
             .collect();
         // Debug-only marker for a per-item map edge. Not notation syntax (the `LOOP`
         // keyword is retired); `is_loop` is a derived cardinality property.
         let loop_prefix = if self.is_loop { "map " } else { "" };
         write!(
             f,
-            "{}{} ({}) -> #{}",
+            "{}{}{} ({}) -> ({})",
             loop_prefix,
             self.cap_urn,
+            self.policy.to_notation(),
             assignments.join(", "),
-            self.target
+            outputs.join(", ")
         )
     }
 }
@@ -232,6 +343,11 @@ pub struct MachineStrand {
     /// strand consumes via any assignment binding). Sorted by
     /// canonical `MediaUrn` order, ties broken by `NodeId`.
     output_anchor_ids: Vec<NodeId>,
+    /// Whether each node holds a sequence, as its producer's output declares
+    /// (a node nothing produces is a single value here: what a run gives it
+    /// is the run's to say). Indexed by `NodeId`. A sequence bound to an arg
+    /// that takes a single value is what makes a step run once per item.
+    node_is_sequence: Vec<bool>,
 }
 
 impl MachineStrand {
@@ -243,13 +359,25 @@ impl MachineStrand {
         edges: Vec<MachineEdge>,
         input_anchor_ids: Vec<NodeId>,
         output_anchor_ids: Vec<NodeId>,
+        node_is_sequence: Vec<bool>,
     ) -> Self {
+        assert_eq!(
+            nodes.len(),
+            node_is_sequence.len(),
+            "every node of a strand has a cardinality"
+        );
         Self {
             nodes,
             edges,
             input_anchor_ids,
             output_anchor_ids,
+            node_is_sequence,
         }
+    }
+
+    /// Whether node `id` holds a sequence (see the field's documentation).
+    pub fn node_is_sequence(&self, id: NodeId) -> bool {
+        self.node_is_sequence[id as usize]
     }
 
     /// All distinct data positions in this strand, indexed by `NodeId`.
@@ -320,33 +448,24 @@ impl MachineStrand {
 
         let mut node_map = NodeBijection::new(self.nodes.len(), other.nodes.len());
 
-        // Anchor URNs are sorted multisets — same length,
-        // pair-wise equivalence on the sorted form.
-        for (self_id, other_id) in self
-            .input_anchor_ids
-            .iter()
-            .zip(other.input_anchor_ids.iter())
-        {
-            if !node_map.bind(*self_id, *other_id, self, other) {
-                return false;
-            }
-        }
-        for (self_id, other_id) in self
-            .output_anchor_ids
-            .iter()
-            .zip(other.output_anchor_ids.iter())
-        {
-            if !node_map.bind(*self_id, *other_id, self, other) {
-                return false;
-            }
-        }
-
+        // The edges decide which node is which: every node is a source or an
+        // output of some edge, and an edge says what each of its nodes is FOR
+        // (which arg it feeds, which output it is). Two inputs of one type are
+        // told apart by that and by nothing else — not by the order they were
+        // first written in, which is not part of what a machine is.
         for (self_edge, other_edge) in self.edges.iter().zip(other.edges.iter()) {
             if !self_edge.is_equivalent_with(other_edge, &mut node_map, self, other) {
                 return false;
             }
         }
-        true
+
+        // Under that correspondence the anchors are the same nodes.
+        let same_nodes = |mine: &[NodeId], theirs: &[NodeId]| {
+            mine.iter()
+                .all(|id| node_map.other_of(*id).is_some_and(|other_id| theirs.contains(&other_id)))
+        };
+        same_nodes(&self.input_anchor_ids, &other.input_anchor_ids)
+            && same_nodes(&self.output_anchor_ids, &other.output_anchor_ids)
     }
 }
 
@@ -375,6 +494,11 @@ impl NodeBijection {
             self_to_other: vec![None; self_len],
             other_to_self: vec![None; other_len],
         }
+    }
+
+    /// The node of `other` that `self_id` corresponds to, once bound.
+    fn other_of(&self, self_id: NodeId) -> Option<NodeId> {
+        self.self_to_other[self_id as usize]
     }
 
     fn bind(

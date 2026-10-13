@@ -9,6 +9,7 @@
 //! - Fan-out (ForEach) for sequence -> single transitions
 //! - Fan-in (Collect) for gathering results back into sequences
 
+use crate::machine::StepPolicy;
 use super::argument_binding::ArgumentBindings;
 use super::cardinality::InputCardinality;
 use super::live_cap_fab::{StepToken, Strand, StrandStep, StrandStepType};
@@ -42,54 +43,71 @@ pub enum ExecutionNodeType {
         /// When absent, standard `accepts` + closest-specificity routing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preferred_cap: Option<String>,
+        /// What the step does when it fails: how many further attempts a
+        /// retryable failure gets, and whether a failure that stands leaves
+        /// the step's outputs absent instead of failing the run. The default
+        /// is to fail at once.
+        #[serde(default, skip_serializing_if = "StepPolicy::is_default")]
+        policy: StepPolicy,
     },
 
-    /// Fan-out: run downstream path for each item in input sequence
+    /// One output of a step other than its main one, as a node of its own.
     ///
-    /// Auto-inserted when sequence feeds into single-input cap.
-    /// Creates parallel execution branches for each input item.
+    /// A step's main output is the step's node. Every other output something
+    /// takes is one of these: what consumes it wires from this node, and its
+    /// value in a run is stored under this node's id.
+    CapOutput {
+        /// The step whose output this is.
+        cap_node: NodeId,
+        /// The output's media URN in the cap's definition: its identity, and
+        /// what its response stream names.
+        output_media_urn: String,
+        /// The output's name in the cap's definition (a label; unique per cap).
+        output_name: String,
+        /// The output carries the step's input, type unchanged, rather than
+        /// its own URN (a router's outputs).
+        #[serde(default)]
+        carries_input: bool,
+    },
+
+    /// A map: its body runs once per item of its sources, zipped.
+    ///
+    /// Opened where a sequence is bound to an arg that takes one value
+    /// (docs 09 §Iteration). Run `i` of the body is given item `i` of every
+    /// source; sources of unequal length fail the run. What a body node
+    /// produces is, from outside the map, the sequence of it over the runs in
+    /// item order — one flat sequence when the map is inside another.
     ForEach {
-        /// Stable per-step identity (the ForEach `StrandStep.token_id`). The run's
-        /// aggregate per-item progress is reported under this identity so it maps to
-        /// the exact ForEach graph element the client rendered.
+        /// Stable identity of the map. The run's aggregate per-item progress is
+        /// reported under it, so it maps to the graph element a client renders.
         token_id: StepToken,
-        /// Node that provides the input sequence
-        input_node: NodeId,
-        /// Entry point of the per-item sub-graph
-        body_entry: NodeId,
-        /// Exit point of the per-item sub-graph (where results are collected)
-        body_exit: NodeId,
+        /// The sequences the map zips, each with the node the body is given
+        /// its item as. At least one.
+        sources: Vec<ForEachSource>,
+        /// Every node that runs once per item: the item nodes, the steps, the
+        /// outputs and gathers that belong to them, and the maps opened inside
+        /// this one (whose own bodies are theirs, not listed here).
+        body: Vec<NodeId>,
     },
 
-    /// Fan-in: collect outputs from parallel ForEach branches into sequence
-    ///
-    /// Auto-inserted to gather results after fan-out.
+    /// What one run of a map's body is given of one of the map's sources.
+    Item {
+        /// The map this is an item of.
+        foreach: NodeId,
+        /// The source node whose item it is.
+        source: NodeId,
+        /// The item's media URN: the element type of the source sequence.
+        media_urn: String,
+    },
+
+    /// A gather: several values delivered to one sequence arg as one
+    /// sequence, in order. A single value contributes one item, a sequence its
+    /// items; a member that is absent contributes none.
     Collect {
-        /// Nodes whose outputs should be collected
+        /// The nodes gathered, in the order they are delivered.
         input_nodes: Vec<NodeId>,
-        /// Output media URN for the collected sequence
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output_media_urn: Option<String>,
-    },
-
-    /// Merge: combine outputs from parallel branches
-    ///
-    /// User-designed node for combining outputs from parallel paths.
-    Merge {
-        /// Nodes whose outputs should be merged
-        input_nodes: Vec<NodeId>,
-        /// Strategy for merging
-        merge_strategy: MergeStrategy,
-    },
-
-    /// Split: route input to multiple downstream paths
-    ///
-    /// User-designed node for parallel processing.
-    Split {
-        /// Node that provides the input
-        input_node: NodeId,
-        /// Number of output branches
-        output_count: usize,
+        /// The element type of the gathered sequence.
+        output_media_urn: String,
     },
 
     /// Input slot: entry point for user-provided files
@@ -111,24 +129,13 @@ pub enum ExecutionNodeType {
     },
 }
 
-/// Strategy for merging outputs from parallel branches
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MergeStrategy {
-    /// Concatenate all outputs into a sequence
-    Concat,
-    /// Zip outputs together (requires same length)
-    ZipWith,
-    /// Take first successful output
-    FirstSuccess,
-    /// Take all successful outputs
-    AllSuccessful,
-}
-
-impl Default for MergeStrategy {
-    fn default() -> Self {
-        Self::Concat
-    }
+/// One sequence a map iterates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForEachSource {
+    /// The node that holds the sequence, as the map's own scope sees it.
+    pub node: NodeId,
+    /// The [`ExecutionNodeType::Item`] node the body is given each item as.
+    pub item: NodeId,
 }
 
 /// A node in the execution DAG
@@ -158,6 +165,7 @@ impl MachineNode {
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: ArgumentBindings::new(),
                 preferred_cap: None,
+                policy: StepPolicy::default(),
             },
             description: None,
         }
@@ -175,6 +183,7 @@ impl MachineNode {
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: bindings,
                 preferred_cap: None,
+                policy: StepPolicy::default(),
             },
             description: None,
         }
@@ -198,6 +207,7 @@ impl MachineNode {
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: bindings,
                 preferred_cap: None,
+                policy: StepPolicy::default(),
             },
             description: None,
         }
@@ -217,55 +227,78 @@ impl MachineNode {
                 cap_urn: cap_urn.to_string(),
                 arg_bindings: bindings,
                 preferred_cap,
+                policy: StepPolicy::default(),
             },
             description: None,
         }
     }
 
-    /// Create a ForEach (fan-out) node.
-    ///
-    /// Mints a fresh `token_id`. The run path uses
-    /// [`MachineNode::for_each_token`] to preserve the originating ForEach step's
-    /// identity so its aggregate progress maps to the client's graph element.
-    pub fn for_each(id: &str, input_node: &str, body_entry: &str, body_exit: &str) -> Self {
-        Self::for_each_token(
-            id,
-            input_node,
-            body_entry,
-            body_exit,
-            StepToken::mint(),
-        )
+    /// Create a map node. Mints a fresh `token_id`; a run whose progress must
+    /// map back to a rendered strand uses [`MachineNode::for_each_token`].
+    pub fn for_each(id: &str, sources: Vec<ForEachSource>, body: Vec<NodeId>) -> Self {
+        Self::for_each_token(id, sources, body, StepToken::mint())
     }
 
-    /// Create a ForEach (fan-out) node, preserving the originating step's identity.
+    /// Create a map node, preserving the originating step's identity.
     pub fn for_each_token(
         id: &str,
-        input_node: &str,
-        body_entry: &str,
-        body_exit: &str,
+        sources: Vec<ForEachSource>,
+        body: Vec<NodeId>,
         token_id: StepToken,
     ) -> Self {
         Self {
             id: id.to_string(),
             node_type: ExecutionNodeType::ForEach {
                 token_id,
-                input_node: input_node.to_string(),
-                body_entry: body_entry.to_string(),
-                body_exit: body_exit.to_string(),
+                sources,
+                body,
             },
-            description: Some("Fan-out: process each item in vector".to_string()),
+            description: Some("Map: run the body once per item".to_string()),
         }
     }
 
-    /// Create a Collect (fan-in) node
-    pub fn collect(id: &str, input_nodes: Vec<String>) -> Self {
+    /// Create the node a map's body is given one source's item as.
+    pub fn item(id: &str, foreach: &str, source: &str, media_urn: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            node_type: ExecutionNodeType::Item {
+                foreach: foreach.to_string(),
+                source: source.to_string(),
+                media_urn: media_urn.to_string(),
+            },
+            description: Some(format!("Item of {source}")),
+        }
+    }
+
+    /// Create the node of an output of `cap_node` other than its main one.
+    pub fn cap_output(
+        id: &str,
+        cap_node: &str,
+        output_media_urn: &str,
+        output_name: &str,
+        carries_input: bool,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            node_type: ExecutionNodeType::CapOutput {
+                cap_node: cap_node.to_string(),
+                output_media_urn: output_media_urn.to_string(),
+                output_name: output_name.to_string(),
+                carries_input,
+            },
+            description: Some(format!("Output: {output_name}")),
+        }
+    }
+
+    /// Create a gather node.
+    pub fn collect(id: &str, input_nodes: Vec<String>, output_media_urn: &str) -> Self {
         Self {
             id: id.to_string(),
             node_type: ExecutionNodeType::Collect {
                 input_nodes,
-                output_media_urn: None,
+                output_media_urn: output_media_urn.to_string(),
             },
-            description: Some("Fan-in: collect results into vector".to_string()),
+            description: Some("Gather: several values into one sequence".to_string()),
         }
     }
 
@@ -335,19 +368,15 @@ impl MachineNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeType {
-    /// Direct data flow into the target cap's MAIN (stdin) input.
+    /// Into a step: its MAIN input. Into any other node: what that node is
+    /// of — a map's source, an output node's step, a plan output's source.
     Direct,
-    /// Data flow into a specific NON-main argument of the target cap, identified by
-    /// that argument's media URN. This is convergence: another cap's output routed
-    /// into a named arg. The runtime delivers it as its own stream, keyed by `arg_urn`.
+    /// Into a specific NON-main argument of the target step, identified by the
+    /// URN that argument's stream is delivered under.
     Arg { arg_urn: String },
-    /// Extract field from JSON output
-    JsonField { field: String },
-    /// Extract via JSONPath
-    JsonPath { path: String },
-    /// Iteration edge (from ForEach to body)
+    /// From a map to one of its item nodes.
     Iteration,
-    /// Collection edge (from body to Collect)
+    /// From a gathered node into its gather.
     Collection,
 }
 
@@ -405,28 +434,6 @@ impl MachinePlanEdge {
             to_node: to.to_string(),
             edge_type: EdgeType::Arg {
                 arg_urn: arg_urn.to_string(),
-            },
-        }
-    }
-
-    /// Create a JSON field extraction edge
-    pub fn json_field(from: &str, to: &str, field: &str) -> Self {
-        Self {
-            from_node: from.to_string(),
-            to_node: to.to_string(),
-            edge_type: EdgeType::JsonField {
-                field: field.to_string(),
-            },
-        }
-    }
-
-    /// Create a JSON path extraction edge
-    pub fn json_path(from: &str, to: &str, path: &str) -> Self {
-        Self {
-            from_node: from.to_string(),
-            to_node: to.to_string(),
-            edge_type: EdgeType::JsonPath {
-                path: path.to_string(),
             },
         }
     }
@@ -534,7 +541,133 @@ impl MachinePlan {
             }
         }
 
+        // What a node names must be there, and be what it is named as.
+        let known = |owner: &str, what: &str, id: &str| {
+            if self.nodes.contains_key(id) {
+                Ok(())
+            } else {
+                Err(PlannerError::Internal(format!(
+                    "node '{owner}' names {what} '{id}', which is not in the plan"
+                )))
+            }
+        };
+        let mut in_body: HashMap<&str, &str> = HashMap::new();
+        // In node-id order, so the same plan is refused the same way every time.
+        let mut ids: Vec<&NodeId> = self.nodes.keys().collect();
+        ids.sort();
+        for id in ids {
+            let node = &self.nodes[id];
+            match &node.node_type {
+                ExecutionNodeType::Cap { .. } | ExecutionNodeType::InputSlot { .. } => {}
+                ExecutionNodeType::Output { source_node, .. } => {
+                    known(id, "source", source_node)?;
+                }
+                ExecutionNodeType::Collect { input_nodes, .. } => {
+                    for input in input_nodes {
+                        known(id, "gathered node", input)?;
+                    }
+                }
+                ExecutionNodeType::CapOutput { cap_node, .. } => {
+                    known(id, "step", cap_node)?;
+                    if !self.nodes[cap_node].is_cap() {
+                        return Err(PlannerError::Internal(format!(
+                            "output node '{id}' names '{cap_node}' as its step, which is not a step"
+                        )));
+                    }
+                }
+                ExecutionNodeType::Item { foreach, source, .. } => {
+                    known(id, "map", foreach)?;
+                    let listed = match &self.nodes[foreach].node_type {
+                        ExecutionNodeType::ForEach { sources, .. } => sources
+                            .iter()
+                            .any(|s| &s.item == id && &s.node == source),
+                        _ => false,
+                    };
+                    if !listed {
+                        return Err(PlannerError::Internal(format!(
+                            "item node '{id}' names map '{foreach}' and source '{source}', and \
+                             that map does not list it so"
+                        )));
+                    }
+                }
+                ExecutionNodeType::ForEach { sources, body, .. } => {
+                    if sources.is_empty() {
+                        return Err(PlannerError::Internal(format!(
+                            "map '{id}' iterates nothing"
+                        )));
+                    }
+                    for source in sources {
+                        known(id, "source", &source.node)?;
+                        known(id, "item", &source.item)?;
+                        let is_item = matches!(
+                            &self.nodes[&source.item].node_type,
+                            ExecutionNodeType::Item { foreach, source: of, .. }
+                                if foreach == id && of == &source.node
+                        );
+                        if !is_item {
+                            return Err(PlannerError::Internal(format!(
+                                "map '{id}' lists '{}' as its item of '{}', which is not that",
+                                source.item, source.node
+                            )));
+                        }
+                        if !body.contains(&source.item) {
+                            return Err(PlannerError::Internal(format!(
+                                "map '{id}' does not list its item '{}' in its body",
+                                source.item
+                            )));
+                        }
+                    }
+                    for member in body {
+                        known(id, "body node", member)?;
+                        if member == id {
+                            return Err(PlannerError::Internal(format!(
+                                "map '{id}' lists itself in its body"
+                            )));
+                        }
+                        if let Some(other) = in_body.insert(member.as_str(), id.as_str()) {
+                            return Err(PlannerError::Internal(format!(
+                                "node '{member}' is in the body of two maps ('{other}' and '{id}')"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// The map each node runs in: node id → the id of the map whose body
+    /// lists it. A node of the machine itself has no entry.
+    pub fn enclosing_maps(&self) -> HashMap<&str, &str> {
+        let mut enclosing: HashMap<&str, &str> = HashMap::new();
+        for (id, node) in &self.nodes {
+            if let ExecutionNodeType::ForEach { body, .. } = &node.node_type {
+                for member in body {
+                    enclosing.insert(member.as_str(), id.as_str());
+                }
+            }
+        }
+        enclosing
+    }
+
+    /// Every node inside map `foreach_id`: its body, and the bodies of the
+    /// maps opened inside it.
+    pub fn map_members(&self, foreach_id: &str) -> HashSet<String> {
+        let mut members: HashSet<String> = HashSet::new();
+        let mut pending: Vec<&str> = vec![foreach_id];
+        while let Some(id) = pending.pop() {
+            if let Some(ExecutionNodeType::ForEach { body, .. }) =
+                self.nodes.get(id).map(|n| &n.node_type)
+            {
+                for member in body {
+                    if members.insert(member.clone()) {
+                        pending.push(member.as_str());
+                    }
+                }
+            }
+        }
+        members
     }
 
     /// Get topological ordering of nodes
@@ -613,33 +746,39 @@ impl MachinePlan {
         let mut boundaries: Vec<(usize, StepToken, StepToken)> = Vec::new();
         for node in self.nodes.values() {
             let ExecutionNodeType::ForEach {
-                token_id,
-                body_entry,
-                ..
+                token_id, sources, ..
             } = &node.node_type
             else {
                 continue;
             };
-            let body_node = self.nodes.get(body_entry).ok_or_else(|| {
+            // The step a map's item is given to is where the map begins on
+            // the strand: the earliest such step, when several take it.
+            let mut entry: Option<(usize, &StepToken)> = None;
+            for edge in &self.edges {
+                if !sources.iter().any(|source| source.item == edge.from_node) {
+                    continue;
+                }
+                let Some(ExecutionNodeType::Cap {
+                    token_id: cap_token_id,
+                    ..
+                }) = self.nodes.get(&edge.to_node).map(|n| &n.node_type)
+                else {
+                    continue;
+                };
+                let position = *cap_positions.get(cap_token_id.as_str()).ok_or_else(|| {
+                    PlannerError::InvalidPath(format!(
+                        "ForEach '{}' body-entry cap '{}' is absent from the resolved strand",
+                        token_id, cap_token_id
+                    ))
+                })?;
+                if entry.map_or(true, |(best, _)| position < best) {
+                    entry = Some((position, cap_token_id));
+                }
+            }
+            let (position, cap_token_id) = entry.ok_or_else(|| {
                 PlannerError::InvalidPath(format!(
-                    "ForEach '{}' references missing body-entry node '{}'",
-                    token_id, body_entry
-                ))
-            })?;
-            let ExecutionNodeType::Cap {
-                token_id: cap_token_id,
-                ..
-            } = &body_node.node_type
-            else {
-                return Err(PlannerError::InvalidPath(format!(
-                    "ForEach '{}' body-entry '{}' is not a capability step",
-                    token_id, body_entry
-                )));
-            };
-            let position = *cap_positions.get(cap_token_id.as_str()).ok_or_else(|| {
-                PlannerError::InvalidPath(format!(
-                    "ForEach '{}' body-entry cap '{}' is absent from the resolved strand",
-                    token_id, cap_token_id
+                    "ForEach '{}' gives its item to no capability step",
+                    token_id
                 ))
             })?;
             boundaries.push((position, token_id.clone(), cap_token_id.clone()));
@@ -744,10 +883,10 @@ impl MachinePlan {
     ///   Token ids are minted per step and unique across a machine; a collision is a
     ///   hard error, never renamed.
     /// - **Every non-cap node id is namespaced** with an `s{index}_` prefix (input
-    ///   slots, outputs, ForEach, Collect, …): those ids are synthesized per strand
-    ///   from strand-local indices and WOULD collide across strands. All references
-    ///   (edges, output lists, ForEach body extents, Collect members, Output sources)
-    ///   are rewritten consistently.
+    ///   slots, outputs, maps and their items, gathers, output nodes): those ids are
+    ///   synthesized per strand and WOULD collide across strands. All references
+    ///   (edges, output lists, map sources and bodies, gather members, output
+    ///   sources) are rewritten consistently.
     ///
     /// A single plan passes through unchanged (only renamed to `name`).
     pub fn merge_disjoint(name: &str, plans: Vec<MachinePlan>) -> Result<Self, PlannerError> {
@@ -786,24 +925,28 @@ impl MachinePlan {
                 }
                 node.id = new_id;
                 match &mut node.node_type {
-                    ExecutionNodeType::ForEach {
-                        input_node,
-                        body_entry,
-                        body_exit,
-                        ..
-                    } => {
-                        *input_node = map_id(input_node);
-                        *body_entry = map_id(body_entry);
-                        *body_exit = map_id(body_exit);
+                    ExecutionNodeType::ForEach { sources, body, .. } => {
+                        for source in sources.iter_mut() {
+                            source.node = map_id(&source.node);
+                            source.item = map_id(&source.item);
+                        }
+                        for member in body.iter_mut() {
+                            *member = map_id(member);
+                        }
                     }
-                    ExecutionNodeType::Collect { input_nodes, .. }
-                    | ExecutionNodeType::Merge { input_nodes, .. } => {
+                    ExecutionNodeType::Item {
+                        foreach, source, ..
+                    } => {
+                        *foreach = map_id(foreach);
+                        *source = map_id(source);
+                    }
+                    ExecutionNodeType::Collect { input_nodes, .. } => {
                         for n in input_nodes.iter_mut() {
                             *n = map_id(n);
                         }
                     }
-                    ExecutionNodeType::Split { input_node, .. } => {
-                        *input_node = map_id(input_node);
+                    ExecutionNodeType::CapOutput { cap_node, .. } => {
+                        *cap_node = map_id(cap_node);
                     }
                     ExecutionNodeType::Output { source_node, .. } => {
                         *source_node = map_id(source_node);
@@ -868,334 +1011,11 @@ impl MachinePlan {
         plan
     }
 
-    /// Find the first ForEach node in the plan, if any.
-    /// Returns the node ID of the ForEach node.
-    pub fn find_first_foreach(&self) -> Option<&NodeId> {
-        // Use topological order to find the first ForEach node in execution order
-        let topo = self.topological_order().ok()?;
-        for node in topo {
-            if matches!(node.node_type, ExecutionNodeType::ForEach { .. }) {
-                return Some(&node.id);
-            }
-        }
-        None
-    }
-
-    /// Check whether this plan contains any ForEach nodes (requiring decomposition).
-    ///
-    /// ForEach nodes require special handling: the plan is decomposed into
-    /// prefix/body/suffix, and the body is executed per-item. Standalone Collect
-    /// nodes (scalar→list without ForEach) are pass-throughs handled by
-    /// plan_converter and do NOT require decomposition.
+    /// Whether this plan contains a map.
     pub fn has_foreach(&self) -> bool {
         self.nodes
             .values()
             .any(|n| matches!(n.node_type, ExecutionNodeType::ForEach { .. }))
-    }
-
-    /// Check whether this plan contains any Collect nodes paired with ForEach.
-    ///
-    /// A Collect node following a ForEach marks the re-assembly point.
-    /// Standalone Collect nodes (no ForEach) are pass-throughs.
-    pub fn has_foreach_collect_pair(&self) -> bool {
-        let has_foreach = self
-            .nodes
-            .values()
-            .any(|n| matches!(n.node_type, ExecutionNodeType::ForEach { .. }));
-        let has_collect = self
-            .nodes
-            .values()
-            .any(|n| matches!(n.node_type, ExecutionNodeType::Collect { .. }));
-        has_foreach && has_collect
-    }
-
-    /// Extract a sub-plan containing all nodes from entry points up to (and including)
-    /// the specified target node. The target node becomes the source of a synthetic Output node.
-    ///
-    /// Used to extract the "prefix" before a ForEach node — everything needed to produce the
-    /// list that the ForEach will iterate over.
-    ///
-    /// The resulting plan has the same InputSlot(s) as the original and a new Output node
-    /// connected to `target_node_id`.
-    pub fn extract_prefix_to(&self, target_node_id: &str) -> Result<Self, PlannerError> {
-        if !self.nodes.contains_key(target_node_id) {
-            return Err(PlannerError::Internal(format!(
-                "Target node '{}' not found in plan",
-                target_node_id
-            )));
-        }
-
-        // BFS backward from target to find all ancestor nodes (including target)
-        let mut ancestors = std::collections::HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(target_node_id.to_string());
-        ancestors.insert(target_node_id.to_string());
-
-        // Build reverse adjacency: to_node -> [from_node]
-        let mut reverse_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for edge in &self.edges {
-            reverse_adj
-                .entry(edge.to_node.as_str())
-                .or_default()
-                .push(edge.from_node.as_str());
-        }
-
-        while let Some(node_id) = queue.pop_front() {
-            if let Some(parents) = reverse_adj.get(node_id.as_str()) {
-                for &parent in parents {
-                    if ancestors.insert(parent.to_string()) {
-                        queue.push_back(parent.to_string());
-                    }
-                }
-            }
-        }
-
-        // Build the sub-plan with only ancestor nodes
-        let mut sub_plan =
-            MachinePlan::new(&format!("{} [prefix to {}]", self.name, target_node_id));
-
-        for node_id in &ancestors {
-            if let Some(node) = self.nodes.get(node_id) {
-                // Skip Output nodes from the original plan — we'll add our own
-                if matches!(node.node_type, ExecutionNodeType::Output { .. }) {
-                    continue;
-                }
-                sub_plan.add_node(node.clone());
-            }
-        }
-
-        // Add edges where both endpoints are in the ancestor set and not Output nodes
-        for edge in &self.edges {
-            if ancestors.contains(&edge.from_node) && ancestors.contains(&edge.to_node) {
-                let from_is_output = self.nodes.get(&edge.from_node).map_or(false, |n| {
-                    matches!(n.node_type, ExecutionNodeType::Output { .. })
-                });
-                let to_is_output = self.nodes.get(&edge.to_node).map_or(false, |n| {
-                    matches!(n.node_type, ExecutionNodeType::Output { .. })
-                });
-                if !from_is_output && !to_is_output {
-                    sub_plan.add_edge(edge.clone());
-                }
-            }
-        }
-
-        // Add synthetic Output node connected to the target
-        let output_id = format!("{}_prefix_output", target_node_id);
-        sub_plan.add_node(MachineNode::output(
-            &output_id,
-            "prefix_result",
-            target_node_id,
-        ));
-        sub_plan.add_edge(MachinePlanEdge::direct(target_node_id, &output_id));
-
-        sub_plan.validate()?;
-        Ok(sub_plan)
-    }
-
-    /// Extract the ForEach body as a standalone execution plan.
-    ///
-    /// Creates a new plan with:
-    /// - A synthetic InputSlot with `item_media_urn` (the per-item type, without list tag)
-    /// - All nodes between `body_entry` and `body_exit` (inclusive)
-    /// - A synthetic Output connected to `body_exit`
-    ///
-    /// The result can be converted to a ResolvedGraph and executed independently per item.
-    pub fn extract_foreach_body(
-        &self,
-        foreach_node_id: &str,
-        item_media_urn: &str,
-    ) -> Result<Self, PlannerError> {
-        let foreach_node = self.nodes.get(foreach_node_id).ok_or_else(|| {
-            PlannerError::Internal(format!("ForEach node '{}' not found", foreach_node_id))
-        })?;
-
-        let (body_entry, body_exit) = match &foreach_node.node_type {
-            ExecutionNodeType::ForEach {
-                body_entry,
-                body_exit,
-                ..
-            } => (body_entry.clone(), body_exit.clone()),
-            _ => {
-                return Err(PlannerError::Internal(format!(
-                    "Node '{}' is not a ForEach node",
-                    foreach_node_id
-                )));
-            }
-        };
-
-        // BFS forward from body_entry to find all reachable body nodes
-        // Stop at: Output nodes, Collect nodes, and nodes outside the body
-        let mut body_nodes = std::collections::HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(body_entry.clone());
-        body_nodes.insert(body_entry.clone());
-
-        // Build forward adjacency: from_node -> [(to_node, edge)]
-        let mut forward_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for edge in &self.edges {
-            forward_adj
-                .entry(edge.from_node.as_str())
-                .or_default()
-                .push(edge.to_node.as_str());
-        }
-
-        while let Some(node_id) = queue.pop_front() {
-            // Don't traverse past body_exit
-            if node_id == body_exit && node_id != body_entry {
-                continue;
-            }
-            if let Some(children) = forward_adj.get(node_id.as_str()) {
-                for &child in children {
-                    // Don't include Output or Collect nodes from the original plan
-                    if let Some(child_node) = self.nodes.get(child) {
-                        if matches!(
-                            child_node.node_type,
-                            ExecutionNodeType::Output { .. } | ExecutionNodeType::Collect { .. }
-                        ) {
-                            // Include body_exit but stop here
-                            if child == body_exit {
-                                body_nodes.insert(child.to_string());
-                            }
-                            continue;
-                        }
-                    }
-                    if body_nodes.insert(child.to_string()) {
-                        queue.push_back(child.to_string());
-                    }
-                }
-            }
-        }
-
-        // Ensure body_exit is included
-        body_nodes.insert(body_exit.clone());
-
-        // Build the body sub-plan
-        let mut body_plan =
-            MachinePlan::new(&format!("{} [foreach body {}]", self.name, foreach_node_id));
-
-        // Add synthetic InputSlot for the per-item input
-        let input_id = format!("{}_body_input", foreach_node_id);
-        body_plan.add_node(MachineNode::input_slot(
-            &input_id,
-            "item_input",
-            item_media_urn,
-            InputCardinality::Single,
-        ));
-
-        // Add body nodes
-        for node_id in &body_nodes {
-            if let Some(node) = self.nodes.get(node_id) {
-                body_plan.add_node(node.clone());
-            }
-        }
-
-        // Add edge from synthetic input to body_entry
-        body_plan.add_edge(MachinePlanEdge::direct(&input_id, &body_entry));
-
-        // Add edges where both endpoints are body nodes
-        for edge in &self.edges {
-            if body_nodes.contains(&edge.from_node) && body_nodes.contains(&edge.to_node) {
-                // Skip iteration/collection edges — they connect to ForEach/Collect, not body internals
-                if matches!(edge.edge_type, EdgeType::Iteration | EdgeType::Collection) {
-                    continue;
-                }
-                body_plan.add_edge(edge.clone());
-            }
-        }
-
-        // Add synthetic Output connected to body_exit
-        let output_id = format!("{}_body_output", foreach_node_id);
-        body_plan.add_node(MachineNode::output(&output_id, "item_result", &body_exit));
-        body_plan.add_edge(MachinePlanEdge::direct(&body_exit, &output_id));
-
-        body_plan.validate()?;
-        Ok(body_plan)
-    }
-
-    /// Extract a sub-plan from the specified source node to all reachable Output nodes.
-    ///
-    /// Used to extract the "suffix" after a Collect node — everything needed to process
-    /// the collected results into final output.
-    ///
-    /// The resulting plan has a synthetic InputSlot connected to `source_node_id` and
-    /// preserves the original Output nodes.
-    pub fn extract_suffix_from(
-        &self,
-        source_node_id: &str,
-        source_media_urn: &str,
-    ) -> Result<Self, PlannerError> {
-        if !self.nodes.contains_key(source_node_id) {
-            return Err(PlannerError::Internal(format!(
-                "Source node '{}' not found in plan",
-                source_node_id
-            )));
-        }
-
-        // BFS forward from source to find all descendants (including source)
-        let mut descendants = std::collections::HashSet::new();
-        let mut queue = VecDeque::new();
-        queue.push_back(source_node_id.to_string());
-        descendants.insert(source_node_id.to_string());
-
-        let mut forward_adj: HashMap<&str, Vec<&str>> = HashMap::new();
-        for edge in &self.edges {
-            forward_adj
-                .entry(edge.from_node.as_str())
-                .or_default()
-                .push(edge.to_node.as_str());
-        }
-
-        while let Some(node_id) = queue.pop_front() {
-            if let Some(children) = forward_adj.get(node_id.as_str()) {
-                for &child in children {
-                    if descendants.insert(child.to_string()) {
-                        queue.push_back(child.to_string());
-                    }
-                }
-            }
-        }
-
-        let mut sub_plan =
-            MachinePlan::new(&format!("{} [suffix from {}]", self.name, source_node_id));
-
-        // Add synthetic InputSlot to feed into source_node
-        let input_id = format!("{}_suffix_input", source_node_id);
-        sub_plan.add_node(MachineNode::input_slot(
-            &input_id,
-            "collected_input",
-            source_media_urn,
-            InputCardinality::Single,
-        ));
-
-        // Add descendant nodes (skip the source node itself if it's a Collect —
-        // it's being replaced by the InputSlot)
-        for node_id in &descendants {
-            if node_id == source_node_id {
-                continue; // replaced by synthetic InputSlot
-            }
-            if let Some(node) = self.nodes.get(node_id) {
-                // Skip InputSlot nodes from the original plan
-                if matches!(node.node_type, ExecutionNodeType::InputSlot { .. }) {
-                    continue;
-                }
-                sub_plan.add_node(node.clone());
-            }
-        }
-
-        // Connect synthetic input to the successors of source_node
-        for edge in &self.edges {
-            if edge.from_node == source_node_id && descendants.contains(&edge.to_node) {
-                sub_plan.add_edge(MachinePlanEdge::direct(&input_id, &edge.to_node));
-            } else if descendants.contains(&edge.from_node)
-                && descendants.contains(&edge.to_node)
-                && edge.from_node != source_node_id
-            {
-                sub_plan.add_edge(edge.clone());
-            }
-        }
-
-        sub_plan.validate()?;
-        Ok(sub_plan)
     }
 
     /// Create a linear chain of caps (each output feeds into next input).
@@ -1291,6 +1111,15 @@ pub struct NodeExecutionResult {
     pub duration_ms: u64,
 }
 
+/// One run of a map's body: which map, and which of its runs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MapRun {
+    /// Stable identity of the map.
+    pub foreach_token_id: StepToken,
+    /// Index of the run within the map (0-based, item order).
+    pub body_index: usize,
+}
+
 /// Outcome of a single ForEach body execution.
 ///
 /// Tracks what happened to each body: which caps were in the pathway,
@@ -1306,6 +1135,12 @@ pub struct BodyOutcome {
     pub foreach_token_id: Option<StepToken>,
     /// Index of this body within the ForEach (0-based). 0 for linear pipelines.
     pub body_index: usize,
+    /// The runs this body is inside, when its map is opened inside another's
+    /// body: outermost first. Empty for a map of the machine itself, and for
+    /// a linear pipeline. A body index alone does not name a run of a nested
+    /// map — it recurs under every run of the map around it.
+    #[serde(default)]
+    pub enclosing: Vec<MapRun>,
     /// Whether this body completed successfully.
     pub success: bool,
     /// Cap URNs in the body's execution pathway (in execution order).
@@ -1346,6 +1181,8 @@ struct BodyOutcomeWire {
     #[serde(deserialize_with = "deserialize_required_nullable_token")]
     foreach_token_id: Option<StepToken>,
     body_index: usize,
+    #[serde(default)]
+    enclosing: Vec<MapRun>,
     success: bool,
     cap_urns: Vec<String>,
     #[serde(deserialize_with = "deserialize_required_nullable_token")]
@@ -1374,12 +1211,16 @@ impl TryFrom<BodyOutcomeWire> for BodyOutcome {
         if wire.foreach_token_id.is_none() && wire.body_index != 0 {
             return Err("a linear BodyOutcome must use body_index 0".to_string());
         }
+        if wire.foreach_token_id.is_none() && !wire.enclosing.is_empty() {
+            return Err("a linear BodyOutcome is inside no map".to_string());
+        }
         if wire.failed_arg_urn.as_deref() == Some("") {
             return Err("BodyOutcome.failed_arg_urn must be null or non-empty".to_string());
         }
         Ok(Self {
             foreach_token_id: wire.foreach_token_id,
             body_index: wire.body_index,
+            enclosing: wire.enclosing,
             success: wire.success,
             cap_urns: wire.cap_urns,
             failed_token_id: wire.failed_token_id,
@@ -1589,19 +1430,26 @@ mod tests {
         assert!(!cap_node.is_fan_in());
         assert_eq!(cap_node.cap_urn(), Some("cap:test"));
 
-        let foreach_node = MachineNode::for_each("foreach", "input", "body", "body");
+        let foreach_node = MachineNode::for_each(
+            "foreach",
+            vec![ForEachSource {
+                node: "input".to_string(),
+                item: "item".to_string(),
+            }],
+            vec!["item".to_string(), "body".to_string()],
+        );
         assert!(!foreach_node.is_cap());
         assert!(foreach_node.is_fan_out());
         assert!(!foreach_node.is_fan_in());
         assert_eq!(foreach_node.cap_urn(), None);
 
-        let collect_node = MachineNode::collect("collect", vec!["a".to_string()]);
+        let collect_node = MachineNode::collect("collect", vec!["a".to_string()], "media:");
         assert!(!collect_node.is_cap());
         assert!(!collect_node.is_fan_out());
         assert!(collect_node.is_fan_in());
     }
 
-    // TEST729: Tests creation and classification of different edge types (Direct, Iteration, Collection, JsonField)
+    // TEST729: Tests creation and classification of different edge types (Direct, Iteration, Collection, Arg)
     // Verifies that edge constructors produce correct EdgeType variants
     #[test]
     fn test729_edge_types() {
@@ -1614,8 +1462,8 @@ mod tests {
         let collection = MachinePlanEdge::collection("body", "collect");
         assert!(matches!(collection.edge_type, EdgeType::Collection));
 
-        let json_field = MachinePlanEdge::json_field("a", "b", "data");
-        assert!(matches!(json_field.edge_type, EdgeType::JsonField { field } if field == "data"));
+        let arg = MachinePlanEdge::arg("a", "b", "media:data");
+        assert!(matches!(arg.edge_type, EdgeType::Arg { arg_urn } if arg_urn == "media:data"));
     }
 
     // TEST927: Tests MachineResult structure for successful execution outcomes
@@ -1875,7 +1723,7 @@ mod tests {
     }
 
     // TEST742: Tests EdgeType enum serialization and deserialization to/from JSON
-    // Verifies that edge types like Direct and JsonField correctly round-trip through serde_json
+    // Verifies that edge types like Direct and Arg correctly round-trip through serde_json
     #[test]
     fn test742_edge_type_serialization() {
         let direct = EdgeType::Direct;
@@ -1885,12 +1733,17 @@ mod tests {
         let deserialized: EdgeType = serde_json::from_str(&json).unwrap();
         assert!(matches!(deserialized, EdgeType::Direct));
 
-        let json_field = EdgeType::JsonField {
-            field: "data".to_string(),
+        let arg = EdgeType::Arg {
+            arg_urn: "media:data".to_string(),
         };
-        let json = serde_json::to_string(&json_field).unwrap();
-        assert!(json.contains("json_field"));
-        assert!(json.contains("data"));
+        let json = serde_json::to_string(&arg).unwrap();
+        assert_eq!(json, r#"{"arg":{"arg_urn":"media:data"}}"#);
+        assert!(matches!(
+            serde_json::from_str::<EdgeType>(&json).unwrap(),
+            EdgeType::Arg { arg_urn } if arg_urn == "media:data"
+        ));
+        // An edge type nothing produces is not read.
+        assert!(serde_json::from_str::<EdgeType>(r#"{"json_field":{"field":"data"}}"#).is_err());
     }
 
     // TEST743: Tests ExecutionNodeType enum serialization and deserialization to/from JSON
@@ -1902,6 +1755,7 @@ mod tests {
             cap_urn: "cap:test".to_string(),
             arg_bindings: ArgumentBindings::new(),
             preferred_cap: None,
+            policy: StepPolicy::default(),
         };
         let json = serde_json::to_string(&cap_node).unwrap();
         assert!(json.contains("cap"));
@@ -1914,12 +1768,43 @@ mod tests {
 
         let foreach_node = ExecutionNodeType::ForEach {
             token_id: "tok-foreach".parse().unwrap(),
-            input_node: "input".to_string(),
-            body_entry: "body".to_string(),
-            body_exit: "body".to_string(),
+            sources: vec![ForEachSource {
+                node: "input".to_string(),
+                item: "item".to_string(),
+            }],
+            body: vec!["item".to_string(), "body".to_string()],
         };
-        let json = serde_json::to_string(&foreach_node).unwrap();
-        assert!(json.contains("for_each"));
+        let json: serde_json::Value = serde_json::to_value(&foreach_node).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "node_type": "for_each",
+                "token_id": "tok-foreach",
+                "sources": [{"node": "input", "item": "item"}],
+                "body": ["item", "body"],
+            })
+        );
+        let output_node = ExecutionNodeType::CapOutput {
+            cap_node: "tok-cap-test".to_string(),
+            output_media_urn: "media:residuals".to_string(),
+            output_name: "residuals".to_string(),
+            carries_input: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&output_node).unwrap(),
+            serde_json::json!({
+                "node_type": "cap_output",
+                "cap_node": "tok-cap-test",
+                "output_media_urn": "media:residuals",
+                "output_name": "residuals",
+                "carries_input": false,
+            })
+        );
+        // A node type nothing produces is not read.
+        assert!(serde_json::from_value::<ExecutionNodeType>(serde_json::json!({
+            "node_type": "merge", "input_nodes": ["a"], "merge_strategy": "concat"
+        }))
+        .is_err());
     }
 
     // TEST744: Tests MachinePlan serialization and deserialization to/from JSON
@@ -1943,19 +1828,6 @@ mod tests {
         assert_eq!(deserialized.edges.len(), plan.edges.len());
     }
 
-    // TEST745: Tests MergeStrategy enum serialization to JSON
-    // Verifies that merge strategies like Concat and ZipWith serialize to correct string values
-    #[test]
-    fn test745_merge_strategy_serialization() {
-        let concat = MergeStrategy::Concat;
-        let json = serde_json::to_string(&concat).unwrap();
-        assert_eq!(json, "\"concat\"");
-
-        let zip = MergeStrategy::ZipWith;
-        let json = serde_json::to_string(&zip).unwrap();
-        assert_eq!(json, "\"zip_with\"");
-    }
-
     // TEST746: Tests creation of Output node type that references a source node
     // Verifies that MachineNode::output() correctly constructs an Output node with name and source
     #[test]
@@ -1970,58 +1842,6 @@ mod tests {
                 assert_eq!(source_node, "source");
             }
             _ => panic!("Expected Output node type"),
-        }
-    }
-
-    // TEST747: Tests creation and validation of Merge node that combines multiple inputs
-    // Verifies that Merge nodes with multiple input nodes and a strategy can be added to plans
-    #[test]
-    fn test747_cap_node_merge() {
-        let mut plan = MachinePlan::new("merge_test");
-
-        // Create merge node manually
-        let merge_node = MachineNode {
-            id: "merge".to_string(),
-            node_type: ExecutionNodeType::Merge {
-                input_nodes: vec!["a".to_string(), "b".to_string()],
-                merge_strategy: MergeStrategy::Concat,
-            },
-            description: Some("Merge outputs".to_string()),
-        };
-
-        plan.nodes
-            .insert("a".to_string(), MachineNode::cap("a", "cap:a"));
-        plan.nodes
-            .insert("b".to_string(), MachineNode::cap("b", "cap:b"));
-        plan.nodes.insert("merge".to_string(), merge_node);
-        plan.edges.push(MachinePlanEdge::direct("a", "merge"));
-        plan.edges.push(MachinePlanEdge::direct("b", "merge"));
-
-        assert!(plan.validate().is_ok());
-    }
-
-    // TEST748: Tests creation of Split node that distributes input to multiple outputs
-    // Verifies that Split nodes correctly specify an input node and output count
-    #[test]
-    fn test748_cap_node_split() {
-        let split_node = MachineNode {
-            id: "split".to_string(),
-            node_type: ExecutionNodeType::Split {
-                input_node: "input".to_string(),
-                output_count: 3,
-            },
-            description: Some("Split input".to_string()),
-        };
-
-        match &split_node.node_type {
-            ExecutionNodeType::Split {
-                input_node,
-                output_count,
-            } => {
-                assert_eq!(input_node, "input");
-                assert_eq!(*output_count, 3);
-            }
-            _ => panic!("Expected Split node type"),
         }
     }
 
@@ -2042,12 +1862,11 @@ mod tests {
         assert!(plan.get_node("nonexistent").is_none());
     }
 
-    // Helper: build a plan with ForEach (closed with Collect)
-    // Topology: input_slot → cap_0(disbind) → foreach → body_cap_0 → body_cap_1 → collect → cap_post → output
-    fn build_foreach_plan_with_collect() -> MachinePlan {
+    /// A plan with a map and a fold after it:
+    /// input_slot → cap_0 (a sequence) → map over it [ body_cap_0 → body_cap_1 ] → cap_post
+    /// (takes the sequence of body_cap_1 over the runs) → output.
+    fn build_foreach_plan() -> MachinePlan {
         let mut plan = MachinePlan::new("ForEach test plan");
-
-        // input_slot → cap_0 → foreach --iteration--> body_cap_0 → body_cap_1 --collection--> collect → cap_post → output
         plan.add_node(MachineNode::input_slot(
             "input_slot",
             "input",
@@ -2057,12 +1876,24 @@ mod tests {
         plan.add_node(MachineNode::cap(
             "cap_0",
             "cap:in=\"media:document;ext=pdf\";out=\"media:pdf-page;list\"",
-        )); // disbind
+        ));
         plan.add_node(MachineNode::for_each(
             "foreach_0",
+            vec![ForEachSource {
+                node: "cap_0".to_string(),
+                item: "foreach_0_item_0".to_string(),
+            }],
+            vec![
+                "foreach_0_item_0".to_string(),
+                "body_cap_0".to_string(),
+                "body_cap_1".to_string(),
+            ],
+        ));
+        plan.add_node(MachineNode::item(
+            "foreach_0_item_0",
+            "foreach_0",
             "cap_0",
-            "body_cap_0",
-            "body_cap_1",
+            "media:pdf-page",
         ));
         plan.add_node(MachineNode::cap(
             "body_cap_0",
@@ -2072,10 +1903,6 @@ mod tests {
             "body_cap_1",
             "cap:in=\"media:enc=utf-8;text\";out=\"media:decision;fmt=json;record\"",
         ));
-        plan.add_node(MachineNode::collect(
-            "collect_0",
-            vec!["body_cap_1".to_string()],
-        ));
         plan.add_node(MachineNode::cap(
             "cap_post",
             "cap:in=\"media:decision;fmt=json;record\";out=\"media:fmt=json\"",
@@ -2084,78 +1911,20 @@ mod tests {
 
         plan.add_edge(MachinePlanEdge::direct("input_slot", "cap_0"));
         plan.add_edge(MachinePlanEdge::direct("cap_0", "foreach_0"));
-        plan.add_edge(MachinePlanEdge::iteration("foreach_0", "body_cap_0"));
+        plan.add_edge(MachinePlanEdge::iteration("foreach_0", "foreach_0_item_0"));
+        plan.add_edge(MachinePlanEdge::direct("foreach_0_item_0", "body_cap_0"));
         plan.add_edge(MachinePlanEdge::direct("body_cap_0", "body_cap_1"));
-        plan.add_edge(MachinePlanEdge::collection("body_cap_1", "collect_0"));
-        plan.add_edge(MachinePlanEdge::direct("collect_0", "cap_post"));
+        plan.add_edge(MachinePlanEdge::direct("body_cap_1", "cap_post"));
         plan.add_edge(MachinePlanEdge::direct("cap_post", "output"));
-
         plan
     }
 
-    // Helper: build a plan with unclosed ForEach (no Collect)
-    // Topology: input_slot → cap_0(disbind) → foreach → body_cap_0 → output
-    fn build_foreach_plan_unclosed() -> MachinePlan {
-        let mut plan = MachinePlan::new("Unclosed ForEach test plan");
-
-        plan.add_node(MachineNode::input_slot(
-            "input_slot",
-            "input",
-            "media:document;ext=pdf",
-            InputCardinality::Single,
-        ));
-        plan.add_node(MachineNode::cap(
-            "cap_0",
-            "cap:in=\"media:document;ext=pdf\";out=\"media:pdf-page;list\"",
-        ));
-        plan.add_node(MachineNode::for_each(
-            "foreach_0",
-            "cap_0",
-            "body_cap_0",
-            "body_cap_0",
-        ));
-        plan.add_node(MachineNode::cap(
-            "body_cap_0",
-            "cap:in=media:pdf-page;out=\"media:decision;fmt=json;record\"",
-        ));
-        plan.add_node(MachineNode::output("output", "result", "body_cap_0"));
-
-        plan.add_edge(MachinePlanEdge::direct("input_slot", "cap_0"));
-        plan.add_edge(MachinePlanEdge::direct("cap_0", "foreach_0"));
-        plan.add_edge(MachinePlanEdge::iteration("foreach_0", "body_cap_0"));
-        plan.add_edge(MachinePlanEdge::direct("body_cap_0", "output"));
-
-        plan
-    }
-
-    // TEST934: find_first_foreach detects ForEach in a plan
-    #[test]
-    fn test934_find_first_foreach() {
-        let plan = build_foreach_plan_with_collect();
-        let foreach_id = plan.find_first_foreach();
-        assert_eq!(foreach_id, Some(&"foreach_0".to_string()));
-    }
-
-    // TEST935: find_first_foreach returns None for linear plans
-    #[test]
-    fn test935_find_first_foreach_linear() {
-        let plan = MachinePlan::linear_chain(
-            &["cap:a", "cap:b"],
-            "media:document;ext=pdf",
-            "media:ext=png;image",
-            &["input_a", "input_b"],
-        );
-        assert_eq!(plan.find_first_foreach(), None);
-    }
-
-    // TEST936: has_foreach detects ForEach nodes
+    // TEST936: has_foreach detects a map, and a gather alone is not one.
     #[test]
     fn test936_has_foreach() {
-        let foreach_plan = build_foreach_plan_with_collect();
-        assert!(
-            foreach_plan.has_foreach(),
-            "Plan with ForEach+Collect should detect ForEach"
-        );
+        let foreach_plan = build_foreach_plan();
+        foreach_plan.validate().expect("the fixture is a valid plan");
+        assert!(foreach_plan.has_foreach());
 
         let linear_plan = MachinePlan::linear_chain(
             &["cap:a"],
@@ -2163,257 +1932,162 @@ mod tests {
             "media:ext=png;image",
             &["input_a"],
         );
-        assert!(
-            !linear_plan.has_foreach(),
-            "Linear plan should not detect ForEach"
-        );
+        assert!(!linear_plan.has_foreach());
 
-        // Standalone Collect (no ForEach) should NOT trigger has_foreach
-        let mut standalone_collect_plan = MachinePlan::new("collect_only");
-        standalone_collect_plan.add_node(MachineNode::input_slot(
+        let mut gather_plan = MachinePlan::new("gather_only");
+        gather_plan.add_node(MachineNode::input_slot(
             "input",
             "input",
             "media:enc=utf-8",
             crate::planner::cardinality::InputCardinality::Single,
         ));
-        standalone_collect_plan.add_node(MachineNode::cap(
+        gather_plan.add_node(MachineNode::cap(
             "cap_0",
             "cap:in=\"media:enc=utf-8\";summarize;out=media:summary",
         ));
-        let mut collect_node = MachineNode::collect("collect_0", vec!["cap_0".to_string()]);
-        collect_node.node_type = ExecutionNodeType::Collect {
-            input_nodes: vec!["cap_0".to_string()],
-            output_media_urn: Some("media:list;summary".to_string()),
-        };
-        standalone_collect_plan.add_node(collect_node);
-        standalone_collect_plan.add_node(MachineNode::output("output", "result", "collect_0"));
-        assert!(
-            !standalone_collect_plan.has_foreach(),
-            "Plan with standalone Collect (no ForEach) should NOT trigger has_foreach"
-        );
+        gather_plan.add_node(MachineNode::collect(
+            "collect_0",
+            vec!["cap_0".to_string()],
+            "media:summary",
+        ));
+        gather_plan.add_node(MachineNode::output("output", "result", "collect_0"));
+        gather_plan.validate().expect("valid");
+        assert!(!gather_plan.has_foreach());
     }
 
-    // TEST937: extract_prefix_to extracts input_slot -> cap_0 as a standalone plan
+    // TEST12753: a plan says which map each node runs in — the map whose body
+    // lists it — and which nodes are inside a map at any depth.
     #[test]
-    fn test937_extract_prefix_to() {
-        let plan = build_foreach_plan_with_collect();
-
-        // Extract prefix up to cap_0 (the disbind cap that produces the list)
-        let prefix = plan.extract_prefix_to("cap_0").unwrap();
-
-        // Should have: input_slot, cap_0, and a synthetic output
-        assert_eq!(prefix.nodes.len(), 3);
-        assert!(prefix.get_node("input_slot").is_some());
-        assert!(prefix.get_node("cap_0").is_some());
-        assert!(prefix.get_node("cap_0_prefix_output").is_some());
-        assert_eq!(prefix.entry_nodes.len(), 1);
-        assert_eq!(prefix.output_nodes.len(), 1);
-        assert!(prefix.validate().is_ok());
-
-        // Verify topological order works (no cycles)
-        let order = prefix.topological_order().unwrap();
-        assert_eq!(order.len(), 3);
-    }
-
-    // TEST754: extract_prefix_to with nonexistent node returns error
-    #[test]
-    fn test754_extract_prefix_nonexistent() {
-        let plan = build_foreach_plan_with_collect();
-        let result = plan.extract_prefix_to("nonexistent");
-        assert!(result.is_err());
-    }
-
-    // TEST755: extract_foreach_body extracts body as standalone plan
-    #[test]
-    fn test755_extract_foreach_body() {
-        let plan = build_foreach_plan_with_collect();
-
-        let body = plan
-            .extract_foreach_body("foreach_0", "media:pdf-page")
-            .unwrap();
-
-        // Should have: synthetic input, body_cap_0, body_cap_1, synthetic output
-        assert_eq!(body.nodes.len(), 4);
-        assert!(body.get_node("foreach_0_body_input").is_some());
-        assert!(body.get_node("body_cap_0").is_some());
-        assert!(body.get_node("body_cap_1").is_some());
-        assert!(body.get_node("foreach_0_body_output").is_some());
-        assert_eq!(body.entry_nodes.len(), 1);
-        assert_eq!(body.output_nodes.len(), 1);
-        assert!(body.validate().is_ok());
-
-        // Verify it does NOT contain ForEach or Collect nodes
-        assert!(!body.has_foreach());
-
-        // Verify the synthetic InputSlot has the item media URN
-        if let Some(input_node) = body.get_node("foreach_0_body_input") {
-            match &input_node.node_type {
-                ExecutionNodeType::InputSlot {
-                    expected_media_urn,
-                    cardinality,
-                    ..
-                } => {
-                    assert_eq!(expected_media_urn, "media:pdf-page");
-                    assert!(matches!(cardinality, InputCardinality::Single));
-                }
-                _ => panic!("Expected InputSlot node"),
-            }
+    fn test12753_a_plan_says_which_map_a_node_runs_in() {
+        let mut plan = build_foreach_plan();
+        let enclosing = plan.enclosing_maps();
+        assert_eq!(enclosing.get("body_cap_0"), Some(&"foreach_0"));
+        assert_eq!(enclosing.get("body_cap_1"), Some(&"foreach_0"));
+        assert_eq!(enclosing.get("foreach_0_item_0"), Some(&"foreach_0"));
+        for outside in ["input_slot", "cap_0", "foreach_0", "cap_post", "output"] {
+            assert_eq!(enclosing.get(outside), None, "{outside} is the machine's own");
         }
 
-        // Verify topological order
-        let order = body.topological_order().unwrap();
-        assert_eq!(order.len(), 4);
+        // A map opened inside the body: its nodes are inside the outer map,
+        // and the outer body lists the inner map, not the inner body.
+        plan.add_node(MachineNode::for_each(
+            "foreach_1",
+            vec![ForEachSource {
+                node: "body_cap_0".to_string(),
+                item: "foreach_1_item_0".to_string(),
+            }],
+            vec!["foreach_1_item_0".to_string(), "inner_cap".to_string()],
+        ));
+        plan.add_node(MachineNode::item(
+            "foreach_1_item_0",
+            "foreach_1",
+            "body_cap_0",
+            "media:enc=utf-8;text",
+        ));
+        plan.add_node(MachineNode::cap("inner_cap", "cap:in=\"media:enc=utf-8;text\";out=media:word"));
+        if let ExecutionNodeType::ForEach { body, .. } =
+            &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
+        {
+            body.push("foreach_1".to_string());
+        }
+        plan.validate().expect("valid");
+        let enclosing = plan.enclosing_maps();
+        assert_eq!(enclosing.get("inner_cap"), Some(&"foreach_1"));
+        assert_eq!(enclosing.get("foreach_1"), Some(&"foreach_0"));
+        let inside: HashSet<String> = plan.map_members("foreach_0");
+        for id in ["body_cap_0", "body_cap_1", "foreach_0_item_0", "foreach_1", "foreach_1_item_0", "inner_cap"] {
+            assert!(inside.contains(id), "{id} is inside the outer map");
+        }
+        assert!(!inside.contains("cap_post") && !inside.contains("foreach_0"));
+        assert_eq!(plan.map_members("foreach_1").len(), 2);
     }
 
-    // TEST756: extract_foreach_body for unclosed ForEach (single body cap)
+    // TEST12754: a plan whose nodes name what is not there, or name it as what
+    // it is not, is refused: a map that iterates nothing, an item its map does
+    // not list, a node in two bodies, an output node of something that is not
+    // a step, a gather of a missing node.
     #[test]
-    fn test756_extract_foreach_body_unclosed() {
-        let plan = build_foreach_plan_unclosed();
-
-        let body = plan
-            .extract_foreach_body("foreach_0", "media:pdf-page")
-            .unwrap();
-
-        // Should have: synthetic input, body_cap_0, synthetic output
-        assert_eq!(body.nodes.len(), 3);
-        assert!(body.get_node("foreach_0_body_input").is_some());
-        assert!(body.get_node("body_cap_0").is_some());
-        assert!(body.get_node("foreach_0_body_output").is_some());
-        assert!(body.validate().is_ok());
-        assert!(!body.has_foreach());
-    }
-
-    // TEST757: extract_foreach_body fails for non-ForEach node
-    #[test]
-    fn test757_extract_foreach_body_wrong_type() {
-        let plan = build_foreach_plan_with_collect();
-        let result = plan.extract_foreach_body("cap_0", "media:pdf-page");
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not a ForEach node"), "got: {}", err);
-    }
-
-    // TEST758: extract_suffix_from extracts collect → cap_post → output
-    #[test]
-    fn test758_extract_suffix_from() {
-        let plan = build_foreach_plan_with_collect();
-
-        let suffix = plan
-            .extract_suffix_from("collect_0", "media:decision;fmt=json;record")
-            .unwrap();
-
-        // Should have: synthetic input, cap_post, output
-        assert_eq!(suffix.nodes.len(), 3);
-        assert!(suffix.get_node("collect_0_suffix_input").is_some());
-        assert!(suffix.get_node("cap_post").is_some());
-        assert!(suffix.get_node("output").is_some());
-        assert_eq!(suffix.entry_nodes.len(), 1);
-        assert_eq!(suffix.output_nodes.len(), 1);
-        assert!(suffix.validate().is_ok());
-
-        // Should not contain ForEach/Collect
-        assert!(!suffix.has_foreach());
-    }
-
-    // TEST759: extract_suffix_from fails for nonexistent node
-    #[test]
-    fn test759_extract_suffix_nonexistent() {
-        let plan = build_foreach_plan_with_collect();
-        let result = plan.extract_suffix_from("nonexistent", "media:whatever");
-        assert!(result.is_err());
-    }
-
-    // TEST760: Full decomposition roundtrip — prefix + body + suffix cover all cap nodes
-    #[test]
-    fn test760_decomposition_covers_all_caps() {
-        let plan = build_foreach_plan_with_collect();
-
-        // Get all original cap node IDs
-        let original_caps: std::collections::HashSet<String> = plan
-            .nodes
-            .values()
-            .filter(|n| n.is_cap())
-            .map(|n| n.id.clone())
-            .collect();
-        assert_eq!(original_caps.len(), 4); // cap_0, body_cap_0, body_cap_1, cap_post
-
-        let prefix = plan.extract_prefix_to("cap_0").unwrap();
-        let body = plan
-            .extract_foreach_body("foreach_0", "media:pdf-page")
-            .unwrap();
-        let suffix = plan
-            .extract_suffix_from("collect_0", "media:decision;fmt=json;record")
-            .unwrap();
-
-        // Collect cap nodes from each sub-plan
-        let prefix_caps: std::collections::HashSet<String> = prefix
-            .nodes
-            .values()
-            .filter(|n| n.is_cap())
-            .map(|n| n.id.clone())
-            .collect();
-        let body_caps: std::collections::HashSet<String> = body
-            .nodes
-            .values()
-            .filter(|n| n.is_cap())
-            .map(|n| n.id.clone())
-            .collect();
-        let suffix_caps: std::collections::HashSet<String> = suffix
-            .nodes
-            .values()
-            .filter(|n| n.is_cap())
-            .map(|n| n.id.clone())
-            .collect();
-
-        // Union of all sub-plan caps should equal original caps
-        let mut all_caps = prefix_caps;
-        all_caps.extend(body_caps);
-        all_caps.extend(suffix_caps);
-        assert_eq!(
-            all_caps,
-            original_caps,
-            "Decomposition should cover all cap nodes. Missing: {:?}",
-            original_caps.difference(&all_caps).collect::<Vec<_>>()
+    fn test12754_a_plan_that_names_what_is_not_there_is_refused() {
+        let refused = |change: &dyn Fn(&mut MachinePlan), expect: &str| {
+            let mut plan = build_foreach_plan();
+            change(&mut plan);
+            let error = plan.validate().expect_err(expect).to_string();
+            assert!(error.contains(expect), "expected '{expect}' in: {error}");
+        };
+        refused(
+            &|plan| {
+                if let ExecutionNodeType::ForEach { sources, .. } =
+                    &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
+                {
+                    sources.clear();
+                }
+            },
+            "map 'foreach_0' iterates nothing",
         );
-    }
-
-    // TEST761: Prefix sub-plan can be topologically sorted (is a valid DAG)
-    #[test]
-    fn test761_prefix_is_dag() {
-        let plan = build_foreach_plan_with_collect();
-        let prefix = plan.extract_prefix_to("cap_0").unwrap();
-        assert!(prefix.topological_order().is_ok());
-    }
-
-    // TEST762: Body sub-plan can be topologically sorted (is a valid DAG)
-    #[test]
-    fn test762_body_is_dag() {
-        let plan = build_foreach_plan_with_collect();
-        let body = plan
-            .extract_foreach_body("foreach_0", "media:pdf-page")
-            .unwrap();
-        assert!(body.topological_order().is_ok());
-    }
-
-    // TEST763: Suffix sub-plan can be topologically sorted (is a valid DAG)
-    #[test]
-    fn test763_suffix_is_dag() {
-        let plan = build_foreach_plan_with_collect();
-        let suffix = plan
-            .extract_suffix_from("collect_0", "media:decision;fmt=json;record")
-            .unwrap();
-        assert!(suffix.topological_order().is_ok());
-    }
-
-    // TEST764: extract_prefix_to with InputSlot as target (trivial prefix)
-    #[test]
-    fn test764_extract_prefix_to_input_slot() {
-        let plan = build_foreach_plan_with_collect();
-        let prefix = plan.extract_prefix_to("input_slot").unwrap();
-
-        // Should have: input_slot + synthetic output
-        assert_eq!(prefix.nodes.len(), 2);
-        assert!(prefix.validate().is_ok());
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::for_each("lonely", Vec::new(), Vec::new()));
+            },
+            "map 'lonely' iterates nothing",
+        );
+        refused(
+            &|plan| {
+                if let ExecutionNodeType::ForEach { sources, .. } =
+                    &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
+                {
+                    sources[0].item = "body_cap_0".to_string();
+                }
+            },
+            "which is not that",
+        );
+        refused(
+            &|plan| {
+                if let ExecutionNodeType::ForEach { body, .. } =
+                    &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
+                {
+                    body.retain(|id| id != "foreach_0_item_0");
+                }
+            },
+            "does not list its item 'foreach_0_item_0' in its body",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::for_each(
+                    "second",
+                    vec![ForEachSource {
+                        node: "cap_0".to_string(),
+                        item: "second_item".to_string(),
+                    }],
+                    vec!["second_item".to_string(), "body_cap_1".to_string()],
+                ));
+                plan.add_node(MachineNode::item("second_item", "second", "cap_0", "media:pdf-page"));
+            },
+            "node 'body_cap_1' is in the body of two maps",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::cap_output("o", "input_slot", "media:x", "x", false));
+            },
+            "names 'input_slot' as its step, which is not a step",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::collect("g", vec!["nowhere".to_string()], "media:"));
+            },
+            "node 'g' names gathered node 'nowhere', which is not in the plan",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::output("o2", "result", "nowhere"));
+            },
+            "node 'o2' names source 'nowhere', which is not in the plan",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::item("stray", "foreach_0", "cap_0", "media:pdf-page"));
+            },
+            "item node 'stray' names map 'foreach_0'",
+        );
     }
 
     fn one_cap_strand(prefix: Option<&str>) -> Strand {
@@ -2458,6 +2132,35 @@ mod tests {
         }
     }
 
+    /// A map over the plan's one input, giving its item to `cap`.
+    fn add_map_over_input(plan: &mut MachinePlan, cap: &str, foreach_token: &str) {
+        plan.add_node(MachineNode::input_slot(
+            "input_slot_0",
+            "input",
+            "media:enc=utf-8;page",
+            InputCardinality::Sequence,
+        ));
+        plan.add_node(MachineNode::for_each_token(
+            "foreach_0",
+            vec![ForEachSource {
+                node: "input_slot_0".to_string(),
+                item: "foreach_0_item_0".to_string(),
+            }],
+            vec!["foreach_0_item_0".to_string(), cap.to_string()],
+            foreach_token.parse().unwrap(),
+        ));
+        plan.add_node(MachineNode::item(
+            "foreach_0_item_0",
+            "foreach_0",
+            "input_slot_0",
+            "media:enc=utf-8;page",
+        ));
+        plan.add_edge(MachinePlanEdge::direct("input_slot_0", "foreach_0"));
+        plan.add_edge(MachinePlanEdge::iteration("foreach_0", "foreach_0_item_0"));
+        plan.add_edge(MachinePlanEdge::direct("foreach_0_item_0", cap));
+        plan.validate().expect("valid");
+    }
+
     // TEST7120: A runtime-cardinality ForEach is part of the executed graph, so
     // persistence receives the exact plan token rather than a cap token or a
     // separately minted render-only token.
@@ -2470,13 +2173,7 @@ mod tests {
             ArgumentBindings::new(),
             "tok-cap".parse().unwrap(),
         ));
-        plan.add_node(MachineNode::for_each_token(
-            "foreach_0",
-            "input_slot_0",
-            "tok-cap",
-            "tok-cap",
-            "tok-foreach".parse().unwrap(),
-        ));
+        add_map_over_input(&mut plan, "tok-cap", "tok-foreach");
 
         let executed = plan.executed_strand(&one_cap_strand(None)).unwrap();
         assert_eq!(executed.steps.len(), 2);
@@ -2500,13 +2197,7 @@ mod tests {
             ArgumentBindings::new(),
             "tok-cap".parse().unwrap(),
         ));
-        plan.add_node(MachineNode::for_each_token(
-            "foreach_0",
-            "input_slot_0",
-            "tok-cap",
-            "tok-cap",
-            "tok-plan-foreach".parse().unwrap(),
-        ));
+        add_map_over_input(&mut plan, "tok-cap", "tok-plan-foreach");
 
         let error = plan
             .executed_strand(&one_cap_strand(Some("tok-strand-foreach")))
@@ -2521,6 +2212,7 @@ mod tests {
         let outcome = BodyOutcome {
             foreach_token_id: None,
             body_index: 0,
+            enclosing: vec![],
             success: true,
             cap_urns: vec![],
             failed_token_id: None,

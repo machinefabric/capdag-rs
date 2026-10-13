@@ -19,7 +19,7 @@
 //! ```
 
 use super::stream_io::{PipelineLogFn, PipelineLogRecord, PipelineProgressTracker, TerminalMeta};
-use super::types::{ResolvedEdge, ResolvedGraph};
+use super::types::{ResolvedGraph, ResolvedStep, StepSource};
 use crate::{
     handshake, Cap, CapManifest, CapUrn, CartridgeHostRuntime, CartridgeRepo, FabricRegistry,
     Frame, FrameReader, FrameType, FrameWriter, Limits, MessageId, RelayNotifyCapabilitiesPayload,
@@ -281,6 +281,36 @@ pub enum ExecutionError {
 
     #[error("Registry error: {0}")]
     FabricRegistryError(String),
+
+    /// The sequences a map zips are of different lengths (15.2 §Maps): run
+    /// `i` of the map is given item `i` of each, so there is no run to give
+    /// the items one has and another lacks. Each source is named with how
+    /// many items it gave. The run's data is what is wrong: `input`.
+    #[error("{}", zip_length_mismatch_message(foreach_token_id, sources))]
+    ZipLengthMismatch {
+        foreach_token_id: StepToken,
+        /// `(source node, items it gave)`, in the map's source order.
+        sources: Vec<(String, usize)>,
+    },
+
+    /// This step did not fail: it was stopped because another did. Carries
+    /// the class of the failure it is the collateral of, and what failed.
+    #[error("stopped as collateral: {detail}")]
+    Collateral {
+        class: crate::failure::AttributionClass,
+        detail: String,
+    },
+}
+
+fn zip_length_mismatch_message(foreach_token_id: &StepToken, sources: &[(String, usize)]) -> String {
+    let lengths: Vec<String> = sources
+        .iter()
+        .map(|(node, items)| format!("'{node}' gave {items}"))
+        .collect();
+    format!(
+        "map {foreach_token_id} zips sequences of different lengths: {}",
+        lengths.join(", ")
+    )
 }
 
 impl ExecutionError {
@@ -294,6 +324,8 @@ impl ExecutionError {
         match self {
             ExecutionError::StepFailed { source, .. } => source.attribution_class(),
             ExecutionError::CartridgeExecutionFailed { class, .. } => *class,
+            ExecutionError::Collateral { class, .. } => *class,
+            ExecutionError::ZipLengthMismatch { .. } => AttributionClass::Input,
             ExecutionError::CartridgeNotFound { .. }
             | ExecutionError::CartridgeDownloadFailed(_)
             | ExecutionError::CartridgeUnavailable { .. }
@@ -355,7 +387,17 @@ impl ExecutionError {
         }
     }
 
-    fn at_step(self, step_token_id: &StepToken) -> Self {
+    /// Whether this is not a failure of its own but the end of something
+    /// stopped because another step failed.
+    pub fn is_collateral(&self) -> bool {
+        match self {
+            ExecutionError::StepFailed { source, .. } => source.is_collateral(),
+            ExecutionError::Collateral { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn at_step(self, step_token_id: &StepToken) -> Self {
         if matches!(self, ExecutionError::StepFailed { .. }) {
             self
         } else {
@@ -368,138 +410,177 @@ impl ExecutionError {
 }
 
 // =============================================================================
-// Node Data (public API — resolved to raw bytes internally)
+// Ending a run's other work when a step fails
 // =============================================================================
 
-/// Runtime data associated with a DAG node.
-#[derive(Debug, Clone)]
-pub enum NodeData {
-    /// Raw binary data
-    Bytes(Vec<u8>),
-    /// Text data
-    Text(String),
-    /// File path — read into bytes before execution
-    FilePath(PathBuf),
+/// What a stopped step is the collateral of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollateralCause {
+    /// The class of the failure that ended the run: what is stopped because
+    /// of it is attributed to what it was attributed to.
+    pub class: crate::failure::AttributionClass,
+    /// The step that failed and why, for the cancelled requests' record.
+    pub detail: String,
 }
 
-impl NodeData {
-    /// Resolve to raw bytes. FilePath reads the file, Text converts to UTF-8 bytes.
-    async fn into_bytes(self) -> Result<Vec<u8>, ExecutionError> {
-        match self {
-            NodeData::Bytes(b) => Ok(b),
-            NodeData::Text(t) => Ok(t.into_bytes()),
-            NodeData::FilePath(path) => tokio::fs::read(&path).await.map_err(|e| {
-                ExecutionError::HostError(format!(
-                    "Failed to read file '{}': {}",
-                    path.display(),
-                    e
-                ))
-            }),
+impl CollateralCause {
+    /// The cause a failure is, for everything stopped because of it.
+    pub fn of(failure: &ExecutionError) -> Self {
+        Self {
+            class: failure.attribution_class(),
+            detail: format!(
+                "step {} ({}) failed: {}",
+                failure
+                    .step_token_id()
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                failure.failure_cap_urn().unwrap_or("?"),
+                failure.failure_reason()
+            ),
         }
     }
 }
 
-// =============================================================================
-// Edge Grouping — fan-in detection
-// =============================================================================
-
-/// A group of edges that share the same `(to, cap_urn)`.
+/// The signal that something has failed for good and what runs beside it is
+/// to end as its collateral (15.2 §Scheduling).
 ///
-/// Single-edge groups are standard single-input cap invocations.
-/// Multi-edge groups are fan-in: all edges' inputs are sent as separate streams
-/// in ONE cap invocation so the handler can consume them together.
-#[derive(Debug, Clone)]
-pub struct EdgeGroup {
-    /// Destination node (same for all edges in the group)
-    pub to: String,
-    /// Cap URN (same for all edges in the group)
-    pub cap_urn: String,
-    /// Stable per-step identity of this cap invocation, carried from the
-    /// originating `StrandStep.token_id`. A group is exactly one cap step, so all
-    /// its edges share this identity; the group's `to` node produced it.
-    pub token_id: StepToken,
-    /// All edges in this group (one or more)
-    pub edges: Vec<ResolvedEdge>,
+/// A run has one for the machine, and one more for every run of a map's body
+/// ([`child`](Self::child)). A failure raises the signal of the scope it
+/// happened in: that ends everything in the scope and in every scope inside
+/// it. Whether it goes further is decided where the scope's failure is
+/// received — a map whose host drops a failed item stops there; anything
+/// else raises the signal of the scope around it, and so on out to the
+/// machine.
+///
+/// A signal is raised once: the first failure is the cause, later ones are
+/// consequences.
+#[derive(Clone)]
+pub struct RunCancel {
+    tx: Arc<tokio::sync::watch::Sender<Option<CollateralCause>>>,
+    /// The signal of the scope around this one. Raised there, raised here.
+    parent: Option<Arc<RunCancel>>,
 }
 
-/// Group DAG edges by `(to, cap_urn)`.
-///
-/// Edges that share the same destination node and cap URN form a fan-in group
-/// and will be sent as multiple streams in a single cap invocation.
-fn build_edge_groups(edges: &[ResolvedEdge]) -> Vec<EdgeGroup> {
-    // Preserve insertion order for determinism
-    let mut order: Vec<(String, String)> = Vec::new();
-    let mut map: HashMap<(String, String), Vec<ResolvedEdge>> = HashMap::new();
+impl Default for RunCancel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    for edge in edges {
-        let key = (edge.to.clone(), edge.cap_urn.clone());
-        if !map.contains_key(&key) {
-            order.push(key.clone());
+impl RunCancel {
+    pub fn new() -> Self {
+        Self {
+            tx: Arc::new(tokio::sync::watch::channel(None).0),
+            parent: None,
         }
-        map.entry(key).or_default().push(edge.clone());
     }
 
-    order
-        .into_iter()
-        .map(|key| {
-            let edges = map.remove(&key).unwrap();
-            // A group is exactly one cap step; every edge in it shares the step's
-            // identity. Take the first edge's token_id as the group's identity
-            // (insertion order is preserved above, so this is deterministic).
-            let token_id = edges
-                .first()
-                .expect("edge group is built from a non-empty edge list")
-                .token_id
-                .clone();
-            EdgeGroup {
-                to: key.0,
-                cap_urn: key.1,
-                token_id,
-                edges,
+    /// The signal of a scope inside this one: raised when this is, and
+    /// raised on its own without raising this.
+    pub fn child(&self) -> Self {
+        Self {
+            tx: Arc::new(tokio::sync::watch::channel(None).0),
+            parent: Some(Arc::new(self.clone())),
+        }
+    }
+
+    /// Say that this scope has failed, and of what. The first cause stands.
+    pub fn raise(&self, cause: CollateralCause) {
+        self.tx.send_if_modified(|current| {
+            if current.is_some() {
+                return false;
+            }
+            *current = Some(cause);
+            true
+        });
+    }
+
+    /// The cause, if this scope or one around it has failed: the outermost
+    /// one's, which is what everything inside is the collateral of.
+    pub fn cause(&self) -> Option<CollateralCause> {
+        self.parent
+            .as_ref()
+            .and_then(|parent| parent.cause())
+            .or_else(|| self.tx.borrow().clone())
+    }
+
+    /// Resolves when this scope or one around it has failed, with the cause.
+    /// Never resolves for a scope that does not fail.
+    pub fn raised(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = CollateralCause> + Send + '_>> {
+        Box::pin(async move {
+            let own = async {
+                let mut rx = self.tx.subscribe();
+                loop {
+                    if let Some(cause) = rx.borrow_and_update().clone() {
+                        return cause;
+                    }
+                    if rx.changed().await.is_err() {
+                        // Unreachable while `self` holds the sender.
+                        std::future::pending::<()>().await;
+                    }
+                }
+            };
+            match &self.parent {
+                None => own.await,
+                Some(parent) => tokio::select! {
+                    biased;
+                    cause = parent.raised() => cause,
+                    cause = own => cause,
+                },
             }
         })
-        .collect()
+    }
 }
 
-/// Topological sort of edge groups.
-///
-/// A group can execute when all groups that produce its `from` nodes have completed.
-/// Returns group indices in execution order.
-fn topological_sort_groups(groups: &[EdgeGroup]) -> Result<Vec<usize>, ExecutionError> {
-    let n = groups.len();
+// =============================================================================
+// Step ordering and chains
+// =============================================================================
 
-    // Map each produced node to the group index that produces it
+/// The step that produces each node of a graph: a step produces its own node
+/// (its main output) and the node of every other output of it something takes.
+fn producers_of(steps: &[ResolvedStep]) -> HashMap<&str, usize> {
     let mut produced_by: HashMap<&str, usize> = HashMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        produced_by.insert(g.to.as_str(), i);
+    for (index, step) in steps.iter().enumerate() {
+        for node in step.produced_nodes() {
+            produced_by.insert(node.as_str(), index);
+        }
     }
+    produced_by
+}
 
-    // Compute in-degree for each group and reverse-dependency map
+/// Topological sort of steps.
+///
+/// A step can run when every step that produces a node it reads has
+/// completed. Returns step indices in an order that respects that, the same
+/// for the same graph every time; a cycle is refused.
+pub(crate) fn topological_sort_steps(steps: &[ResolvedStep]) -> Result<Vec<usize>, ExecutionError> {
+    let n = steps.len();
+    let produced_by = producers_of(steps);
+
     let mut in_degree: Vec<usize> = vec![0; n];
-    // dependents[i] = set of group indices that depend on group i completing first
-    let mut dependents: Vec<HashSet<usize>> = (0..n).map(|_| HashSet::new()).collect();
-
-    for (i, g) in groups.iter().enumerate() {
-        let mut seen: HashSet<usize> = HashSet::new();
-        for edge in &g.edges {
-            if let Some(&dep) = produced_by.get(edge.from.as_str()) {
-                if dep != i && seen.insert(dep) {
+    // dependents[i] = the steps that wait on step i.
+    let mut dependents: Vec<std::collections::BTreeSet<usize>> =
+        (0..n).map(|_| std::collections::BTreeSet::new()).collect();
+    for (i, step) in steps.iter().enumerate() {
+        for source in step.source_nodes() {
+            if let Some(&dep) = produced_by.get(source.as_str()) {
+                // A step that reads what it produces waits on itself: a cycle.
+                if dependents[dep].insert(i) {
                     in_degree[i] += 1;
-                    dependents[dep].insert(i);
                 }
             }
         }
     }
 
-    let mut queue: Vec<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+    let mut ready: std::collections::VecDeque<usize> =
+        (0..n).filter(|&i| in_degree[i] == 0).collect();
     let mut sorted: Vec<usize> = Vec::with_capacity(n);
-
-    while let Some(i) = queue.pop() {
+    while let Some(i) = ready.pop_front() {
         sorted.push(i);
         for &j in &dependents[i] {
             in_degree[j] -= 1;
             if in_degree[j] == 0 {
-                queue.push(j);
+                ready.push_back(j);
             }
         }
     }
@@ -516,6 +597,95 @@ fn topological_sort_groups(groups: &[EdgeGroup]) -> Result<Vec<usize>, Execution
     }
 
     Ok(sorted)
+}
+
+/// Decompose topologically-ordered steps into maximal PIPELINED chains (lists
+/// of indices into `steps`).
+///
+/// Inside a chain every step's response streams live into the next step's
+/// main input: nothing of it is held. That is only right for a hop where
+/// nothing else needs what the producer emits and nothing about the hop can
+/// change once it has begun. A step continues its producer's chain iff:
+///
+/// - it has exactly one input stream, and that is the producer's MAIN output
+///   as it is (not a gather, not another output of it);
+/// - nothing else in the graph reads anything the producer produces, the
+///   producer has no other output that something takes, and its main output
+///   is not in `keep` (what something outside this graph reads);
+/// - the producer's main output is not `optional` — an output that may not
+///   fire is absent or present only once its request ends, so the consumer
+///   is opened only then (15.2 §Absent values and skipped steps);
+/// - neither step has a policy — a step that may be attempted again, or
+///   whose failure is tolerated, runs alone: nothing it emits is forwarded
+///   before an attempt has ended, and what it is given must be there to give
+///   again (15.2 §Error handling).
+///
+/// Every other step heads a chain, and is fed from materialised values.
+/// Chains are returned in head-topological order, so every chain's head
+/// inputs are produced by an earlier chain's last step.
+pub(crate) fn decompose_step_chains(
+    steps: &[ResolvedStep],
+    step_order: &[usize],
+    keep: &HashSet<String>,
+) -> Vec<Vec<usize>> {
+    let n = steps.len();
+    let produced_by = producers_of(steps);
+
+    // readers[i] = how many input streams in the graph read something step i
+    // produces (a gather member counts).
+    let mut readers: Vec<usize> = vec![0; n];
+    for step in steps {
+        for source in step.source_nodes() {
+            if let Some(&src) = produced_by.get(source.as_str()) {
+                readers[src] += 1;
+            }
+        }
+    }
+
+    // The step whose chain `i` continues, if it continues one.
+    let continues: Vec<Option<usize>> = (0..n)
+        .map(|i| {
+            let step = &steps[i];
+            let [input] = step.inputs.as_slice() else {
+                return None;
+            };
+            let StepSource::Node(from) = &input.source else {
+                return None;
+            };
+            let src = *produced_by.get(from.as_str())?;
+            let producer = &steps[src];
+            let pipelined = src != i
+                && producer.node == *from
+                && readers[src] == 1
+                && producer.outputs.is_empty()
+                && !keep.contains(&producer.node)
+                && !producer.cap.main_output().is_some_and(|output| output.optional)
+                && producer.policy.is_default()
+                && step.policy.is_default();
+            pipelined.then_some(src)
+        })
+        .collect();
+    let mut continued_by: Vec<Option<usize>> = vec![None; n];
+    for (i, src) in continues.iter().enumerate() {
+        if let Some(src) = src {
+            continued_by[*src] = Some(i);
+        }
+    }
+
+    let mut chains: Vec<Vec<usize>> = Vec::new();
+    for &start in step_order {
+        if continues[start].is_some() {
+            continue;
+        }
+        let mut chain = vec![start];
+        let mut tail = start;
+        while let Some(next) = continued_by[tail] {
+            chain.push(next);
+            tail = next;
+        }
+        chains.push(chain);
+    }
+    chains
 }
 
 // =============================================================================
@@ -1785,22 +1955,33 @@ impl ExecutionContext {
 // DAG Executor
 // =============================================================================
 
-/// Run one resolved DAG (a single ForEach-free linear chain, possibly with a
-/// fan-in head) on an already-built [`ExecutionContext`]. This is THE segment
-/// executor, shared by the reference [`execute_dag`] (dev-bin cartridges) and
-/// the engine's `EngineHostRuntime::run_segment` (relay-switch cartridges).
+/// Run one resolved graph on an already-built [`ExecutionContext`]. This is
+/// THE segment executor, behind [`EngineRuntime::run_segment`] for every
+/// backend.
 ///
-/// All cap invocations open up front; frames stream cap→cap live (downstream
-/// consumes upstream chunks before END exists) with credit flowing per hop
-/// (L9–L15); the terminal cap's output is collected — to disk via `writer` when
-/// present, else accumulated and CBOR-decoded in memory. `observer` correlates
-/// each invocation's request id to its strand step for the run's flow snapshots
-/// (the reference path passes `None`).
+/// The graph's steps are decomposed into pipelined chains
+/// ([`decompose_step_chains`]) and the chains run in dependency order. Inside
+/// a chain all invocations open up front and frames stream cap→cap live
+/// (downstream consumes upstream chunks before END exists) with credit
+/// flowing per hop (L9–L15). At a chain's end every output of its last step
+/// that is kept — the main one, and each other output something takes — is
+/// collected on its own: to disk through a writer for a persisted sink, to a
+/// spool file when it turns out unbounded, in memory otherwise; an output
+/// that may not fire and did not is recorded absent. A step nothing is wired
+/// into is sent its argument values and END.
 ///
-/// Returns `(node_data, terminal_is_sequence, writer_result, terminal_meta)`.
-/// `node_data` holds each input node's raw bytes as a single-element vec and the
-/// terminal node's CBOR-transport-stripped items (empty when a writer persisted
-/// them to disk).
+/// `execute_plan` hands this one chain at a time and runs independent chains
+/// at once; a graph of several chains is run chain after chain. Either way a
+/// pipelined intermediate is never materialised, so the graph given must be
+/// one whose intermediates nothing else needs.
+///
+/// `observer` correlates each invocation's request id to its strand step for
+/// the run's flow snapshots. `cancel` is the run's failure signal: a chain
+/// that is running when it is raised cancels its requests as the collateral
+/// of that failure and ends with [`ExecutionError::Collateral`]; one about to
+/// start does not start.
+///
+/// [`EngineRuntime::run_segment`]: super::execute_plan::EngineRuntime::run_segment
 #[allow(clippy::too_many_arguments)]
 pub async fn run_dag_on_context(
     ctx: &mut ExecutionContext,
@@ -1823,15 +2004,15 @@ pub async fn run_dag_on_context(
     on_transient: Option<
         &(dyn Fn(&super::transient::TransientArtifact) -> Result<(), ExecutionError> + Sync),
     >,
+    cancel: Option<&RunCancel>,
 ) -> Result<DagOutput, ExecutionError> {
     let body_index = body_coordinate
         .as_ref()
         .map(|coordinate| coordinate.body_index);
-    let groups = build_edge_groups(&graph.edges);
-    let group_order = topological_sort_groups(&groups)?;
-    let n_groups = group_order.len();
+    let steps = &graph.steps;
+    let step_order = topological_sort_steps(steps)?;
 
-    // Seed the outputs with every already-materialised node (the initial inputs).
+    // Seed the outputs with every already-materialised node (the graph's inputs).
     let mut node_data: HashMap<String, Vec<Vec<u8>>> = ctx
         .node_data()
         .iter()
@@ -1841,27 +2022,19 @@ pub async fn run_dag_on_context(
     let mut writer_results: HashMap<String, Vec<super::execute_plan::WriterResult>> =
         HashMap::new();
     let mut terminal_meta: HashMap<String, TerminalMeta> = HashMap::new();
+    let mut absent: HashSet<String> = HashSet::new();
 
-    if n_groups == 0 {
+    if steps.is_empty() {
         return Ok(DagOutput {
             node_data,
             node_is_sequence,
             writer_results,
             terminal_meta,
             node_spool: HashMap::new(),
+            absent,
         });
     }
 
-    // Decompose the topologically-ordered cap groups into maximal LINEAR chains.
-    // A group is a linear continuation of a single producer that feeds ONLY it;
-    // every other group heads a chain. Fan-out (a producer feeding >1 group) and
-    // fan-in (a group whose stdin/args come from >1 producer group) both break
-    // chains, so every non-linear junction is resolved by materialising the
-    // producer's output into node_data and feeding the downstream chain head from
-    // it. A single linear machine yields exactly one structural chain before the
-    // capacity partition below. Persisted terminal sinks each get their own writer
-    // from the factory (fan-out ⇒ several); intermediate sinks stay in memory.
-    //
     // A materialisation boundary is ALSO forced between two ADJACENT caps
     // that resolve to the SAME capacity-bounded cartridge: opening both
     // invocations before feeding the chain head deadlocks — the first
@@ -1878,46 +2051,46 @@ pub async fn run_dag_on_context(
     // pools — comparing master indices there would split every junction
     // and break live pipelines. Two same-cartridge caps in disjoint
     // bounded pools likewise share no permit and must NOT split.
-    let linear_chains = decompose_group_chains(&groups, &group_order);
+    let linear_chains = decompose_step_chains(steps, &step_order, &HashSet::new());
     let mut cap_admission: HashMap<
         String,
         Vec<(crate::bifaci::request_state::PoolKey, usize)>,
     > = HashMap::new();
-    let mut group_chain: Vec<Vec<(crate::bifaci::request_state::PoolKey, usize)>> =
-        Vec::with_capacity(groups.len());
-    for group in groups.iter() {
-        let admission_chain = if let Some(cached) = cap_admission.get(&group.cap_urn) {
+    let mut step_admission: Vec<Vec<(crate::bifaci::request_state::PoolKey, usize)>> =
+        Vec::with_capacity(steps.len());
+    for step in steps.iter() {
+        let admission_chain = if let Some(cached) = cap_admission.get(&step.cap_urn) {
             cached.clone()
         } else {
             if ctx
                 .switch()
-                .wait_for_cap(&group.cap_urn, CAP_DISPATCH_READY_TIMEOUT)
+                .wait_for_cap(&step.cap_urn, CAP_DISPATCH_READY_TIMEOUT)
                 .await
                 .is_none()
             {
                 return Err(ExecutionError::HostError(format!(
                     "resolve admission capacity for cap '{}': no master advertised a cap \
                      dispatchable for this request within {}s",
-                    group.cap_urn,
+                    step.cap_urn,
                     CAP_DISPATCH_READY_TIMEOUT.as_secs(),
                 )));
             }
             let target = ctx
                 .switch()
-                .admission_target_for_cap(&group.cap_urn)
+                .admission_target_for_cap(&step.cap_urn)
                 .await
                 .map_err(|error| {
                     ExecutionError::HostError(format!(
                         "resolve admission capacity for cap '{}': {}",
-                        group.cap_urn, error
+                        step.cap_urn, error
                     ))
                 })?;
-            cap_admission.insert(group.cap_urn.clone(), target.clone());
+            cap_admission.insert(step.cap_urn.clone(), target.clone());
             target
         };
-        group_chain.push(admission_chain);
+        step_admission.push(admission_chain);
     }
-    // The declared stream shape of every group's cap (15.2 §Streaming
+    // The declared stream shape of every step's cap (15.2 §Streaming
     // Contracts): the output contract every receipt point audits against,
     // and the main input's `streaming` flag the hop rule reads. Resolved
     // from the fabric definition the plan was built on; a cap the plan names
@@ -1925,36 +2098,36 @@ pub async fn run_dag_on_context(
     // fails here, before anything is dispatched.
     let mut cap_shapes: HashMap<String, (CapStreamShape, super::stream_io::ResponseContract)> =
         HashMap::new();
-    let mut group_shapes: Vec<CapStreamShape> = Vec::with_capacity(groups.len());
-    // What each group's response is held to: every output its cap declares.
-    let mut group_contracts: Vec<super::stream_io::ResponseContract> =
-        Vec::with_capacity(groups.len());
-    for group in groups.iter() {
-        let (shape, contract) = if let Some(cached) = cap_shapes.get(&group.cap_urn) {
+    let mut step_shapes: Vec<CapStreamShape> = Vec::with_capacity(steps.len());
+    // What each step's response is held to: every output its cap declares.
+    let mut step_contracts: Vec<super::stream_io::ResponseContract> =
+        Vec::with_capacity(steps.len());
+    for step in steps.iter() {
+        let (shape, contract) = if let Some(cached) = cap_shapes.get(&step.cap_urn) {
             cached.clone()
         } else {
             let cap = ctx
                 .switch()
                 .fabric_registry()
-                .get_cap(&group.cap_urn)
+                .get_cap(&step.cap_urn)
                 .await
                 .map_err(|e| {
                     ExecutionError::FabricRegistryError(format!(
                         "resolve stream contract for cap '{}': {}",
-                        group.cap_urn, e
+                        step.cap_urn, e
                     ))
                 })?;
             let shape = CapStreamShape::of(&cap);
             let contract = super::stream_io::ResponseContract::of(&cap)
                 .map_err(|e| ExecutionError::HostError(e.to_string()))?;
-            cap_shapes.insert(group.cap_urn.clone(), (shape, contract.clone()));
+            cap_shapes.insert(step.cap_urn.clone(), (shape, contract.clone()));
             (shape, contract)
         };
-        group_shapes.push(shape);
-        group_contracts.push(contract);
+        step_shapes.push(shape);
+        step_contracts.push(contract);
     }
-    let chains = split_chains_at_shared_bounded_pool(linear_chains, &group_chain);
-    let chains = split_chains_at_streaming_boundary(chains, &group_shapes);
+    let chains = split_chains_at_shared_bounded_pool(linear_chains, &step_admission);
+    let chains = split_chains_at_streaming_boundary(chains, &step_shapes);
     let n_chains = chains.len();
 
     // Spool files created for unbounded intermediates this segment; consumed
@@ -1972,53 +2145,83 @@ pub async fn run_dag_on_context(
     let mut node_spool: HashMap<String, std::path::PathBuf> = HashMap::new();
 
     for (ci, chain_idxs) in chains.iter().enumerate() {
-        let chain_groups: Vec<EdgeGroup> =
-            chain_idxs.iter().map(|&gi| groups[gi].clone()).collect();
-        let sink = chain_groups
-            .last()
-            .expect("a chain has at least one group")
-            .to
-            .clone();
+        // A run that has already failed starts nothing more.
+        if let Some(cause) = cancel.and_then(|cancel| cancel.cause()) {
+            return Err(ExecutionError::Collateral {
+                class: cause.class,
+                detail: cause.detail,
+            });
+        }
 
-        // This sink persists to disk iff it is a plan terminal AND a writer factory
-        // was supplied (the engine persists; the reference/in-memory path does not).
-        // The writer is owned here, handed by borrow to the collect step, and
-        // finalised into a per-sink `WriterResult` after.
-        let mut writer: Option<Box<dyn super::stream_io::IncrementalWriter>> = match writer_factory
-        {
-            Some(f) if persist_sinks.contains(&sink) => Some(f(&sink, body_coordinate.clone())),
-            _ => None,
-        };
-        let has_writer = writer.is_some();
+        let chain_steps: Vec<&ResolvedStep> = chain_idxs.iter().map(|&i| &steps[i]).collect();
+        let last_idx = *chain_idxs.last().expect("a chain has at least one step");
+        let last = &steps[last_idx];
+        let last_contract = &step_contracts[last_idx];
 
-        // An INTERMEDIATE sink (not a plan terminal) gets a lazy disk spool:
-        // the collector engages it only if the stream declares UNBOUNDED, so
-        // a mandatory split boundary never buffers unbounded data in memory
-        // (L16) and never refuses a legitimate machine. Terminals keep the
-        // strict contract: unbounded without a persisted sink is refused.
-        let mut spool: Option<super::stream_io::SpoolWriter> = if persist_sinks.contains(&sink) {
-            None
-        } else {
-            Some(super::stream_io::SpoolWriter::new(std::env::temp_dir().join(
-                format!(
-                    "capdag-spool-{}-{}",
-                    std::process::id(),
-                    uuid::Uuid::new_v4()
-                ),
-            )))
+        // Every output of the chain's last step that is kept: its main one,
+        // stored at the step's node, and each other output something takes,
+        // stored at that output's node. One sink each.
+        //
+        // A sink persists to disk iff its node is a plan terminal AND a writer
+        // factory was supplied (the engine persists; the in-memory path does
+        // not). Any other sink gets a lazy disk spool: the collector engages
+        // it only if the stream declares UNBOUNDED, so a materialisation
+        // boundary never buffers unbounded data in memory (L16) and never
+        // refuses a legitimate machine. Terminals keep the strict contract:
+        // unbounded without a persisted sink is refused.
+        let mut slots: Vec<SinkSlot> = Vec::with_capacity(1 + last.outputs.len());
+        let slot = |node: &str, media_urn: &str, declared: usize| SinkSlot {
+            node: node.to_string(),
+            media_urn: media_urn.to_string(),
+            declared,
+            writer: match writer_factory {
+                Some(f) if persist_sinks.contains(node) => Some(f(node, body_coordinate.clone())),
+                _ => None,
+            },
+            spool: if persist_sinks.contains(node) {
+                None
+            } else {
+                Some(super::stream_io::SpoolWriter::new(std::env::temp_dir().join(
+                    format!(
+                        "capdag-spool-{}-{}",
+                        std::process::id(),
+                        uuid::Uuid::new_v4()
+                    ),
+                )))
+            },
         };
+        if let Some(main) = last_contract.outputs().iter().position(|o| o.main) {
+            slots.push(slot(&last.node, &last.out_media, main));
+        }
+        for output in &last.outputs {
+            let urn = crate::MediaUrn::from_string(&output.output_media_urn).map_err(|e| {
+                ExecutionError::HostError(format!(
+                    "step '{}' takes output '{}' of cap '{}', which is not a media URN: {e}",
+                    last.node, output.output_media_urn, last.cap_urn
+                ))
+            })?;
+            let declared = last_contract
+                .outputs()
+                .iter()
+                .position(|o| !o.main && o.urn.is_equivalent(&urn).unwrap_or(false))
+                .ok_or_else(|| {
+                    ExecutionError::HostError(format!(
+                        "step '{}' takes output '{}', which cap '{}' does not declare beside \
+                         its main one",
+                        last.node, output.output_media_urn, last.cap_urn
+                    ))
+                })?;
+            slots.push(slot(&output.node, &output.output_media_urn, declared));
+        }
 
         let progress_base = ci as f32 / n_chains as f32;
         let progress_span = 1.0 / n_chains as f32;
 
-        let chain_shapes: Vec<CapStreamShape> =
-            chain_idxs.iter().map(|&gi| group_shapes[gi]).collect();
         let chain_contracts: Vec<super::stream_io::ResponseContract> =
-            chain_idxs.iter().map(|&gi| group_contracts[gi].clone()).collect();
-        let chain_result = run_group_chain(
+            chain_idxs.iter().map(|&i| step_contracts[i].clone()).collect();
+        let chain_result = run_step_chain(
             ctx,
-            &chain_groups,
-            &chain_shapes,
+            &chain_steps,
             &chain_contracts,
             cap_arguments,
             progress_fn,
@@ -2028,128 +2231,139 @@ pub async fn run_dag_on_context(
             log_fn,
             body_index,
             stall_tracker.clone(),
-            writer
-                .as_mut()
-                .map(|w| w.as_mut() as &mut dyn super::stream_io::IncrementalWriter),
-            spool.as_mut(),
+            &mut slots,
             activity_timeout_secs,
             observer,
+            cancel,
         )
         .await;
-        let (items, is_seq, meta) = match chain_result {
+        let results = match chain_result {
             Ok(v) => v,
             Err(e) => {
-                // A failed chain's engaged spool is already on disk — remove
-                // it here; later chains' spools are handled by the Drop guard.
-                if let Some(sp) = &spool {
-                    if sp.engaged() {
-                        let _ = std::fs::remove_file(sp.path());
+                // Nothing a failed chain wrote stands: a terminal's writer
+                // discards what it took, and an engaged spool is removed.
+                // Later chains' spools are handled by the Drop guard.
+                for slot in slots {
+                    if let Some(writer) = slot.writer {
+                        writer.abort();
+                    }
+                    if let Some(sp) = slot.spool {
+                        if sp.engaged() {
+                            let _ = std::fs::remove_file(sp.path());
+                        }
                     }
                 }
                 return Err(e);
             }
         };
 
-        if let Some(w) = writer {
-            writer_results
-                .entry(sink.clone())
-                .or_default()
-                .push(w.finish());
-        }
-
         let capture_transients = body_coordinate.is_none();
-        let sink_out_media = chain_groups
-            .last()
-            .expect("a chain has at least one group")
-            .edges
-            .first()
-            .expect("an edge group is non-empty by construction")
-            .out_media
-            .clone();
-        let spool_engaged = spool.as_ref().is_some_and(|s| s.engaged());
-        if spool_engaged {
-            let sp = spool.take().expect("engaged spool exists");
-            let path = sp.path().to_path_buf();
-            if let Some(m) = sp.stream_meta() {
-                ctx.set_node_meta(sink.clone(), m.clone());
+        for (slot, result) in slots.into_iter().zip(results) {
+            let SinkSlot {
+                node,
+                media_urn,
+                writer,
+                spool,
+                ..
+            } = slot;
+            // An output that may not fire and did not: the node is absent —
+            // which is not empty, and not a value of any cardinality.
+            if !result.fired {
+                absent.insert(node);
+                continue;
             }
-            ctx.set_node_is_sequence(sink.clone(), sp.is_sequence());
-            match transient_root {
-                Some(root) if capture_transients => {
-                    // The spool IS the artifact: adopt it under the transient
-                    // root — downstream chains and region drivers read the
-                    // adopted path; the TTL reaper owns its lifetime, so it
-                    // is NOT registered for segment-end deletion.
-                    let artifact = super::transient::adopt_spool_as_transient(
+            let has_writer = writer.is_some();
+            if let Some(w) = writer {
+                writer_results.entry(node.clone()).or_default().push(w.finish());
+            }
+
+            let spool_engaged = spool.as_ref().is_some_and(|s| s.engaged());
+            if spool_engaged {
+                let sp = spool.expect("engaged spool exists");
+                let path = sp.path().to_path_buf();
+                if let Some(m) = sp.stream_meta() {
+                    ctx.set_node_meta(node.clone(), m.clone());
+                }
+                ctx.set_node_is_sequence(node.clone(), sp.is_sequence());
+                match transient_root {
+                    Some(root) if capture_transients => {
+                        // The spool IS the artifact: adopt it under the transient
+                        // root — downstream chains and region drivers read the
+                        // adopted path; the TTL reaper owns its lifetime, so it
+                        // is NOT registered for segment-end deletion.
+                        let artifact = super::transient::adopt_spool_as_transient(
+                            root,
+                            &node,
+                            &media_urn,
+                            &path,
+                            sp.is_sequence(),
+                        )?;
+                        ctx.set_node_spool(node.clone(), artifact.data_path.clone());
+                        node_spool.insert(node.clone(), artifact.data_path.clone());
+                        if let Some(publish) = on_transient {
+                            publish(&artifact)?;
+                        }
+                    }
+                    _ => {
+                        ctx.set_node_spool(node.clone(), path.clone());
+                        spool_files.0.push(path.clone());
+                        node_spool.insert(node.clone(), path);
+                    }
+                }
+            }
+
+            // Materialise this sink so later chains' heads can read it (via
+            // send_step_input from node_data). When persisted to a writer there
+            // are no in-memory items and nothing downstream reads it; a
+            // spool-engaged sink's data is on disk and downstream feeds stream
+            // from the file. Sequences re-assemble to the CBOR sequence the
+            // next head will re-split.
+            if !has_writer && !spool_engaged {
+                // Sequence node_data is an RFC 8742 CBOR sequence of self-delimiting
+                // values; `items` are the raw, unwrapped item bytes from
+                // `decode_terminal_output`, so each must be re-encoded as a `CBOR::Bytes`
+                // value here (scalar node_data stays raw — `send_one_stream` wraps it at
+                // send). Dropping this re-encode is what broke sequence chains: raw PNG /
+                // JSON bytes are not themselves CBOR.
+                let bytes = if result.is_sequence {
+                    crate::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(&result.items)
+                        .map_err(|e| {
+                            ExecutionError::HostError(format!(
+                                "materialise chain output '{node}': {e}"
+                            ))
+                        })?
+                } else {
+                    result.items.first().cloned().unwrap_or_default()
+                };
+                ctx.set_node_data(node.clone(), bytes);
+                ctx.set_node_is_sequence(node.clone(), result.is_sequence);
+                if let (Some(root), true) = (transient_root, capture_transients) {
+                    // A bounded intermediate: one write, and the mid-strand node
+                    // becomes inspectable while later chains still run.
+                    let artifact = super::transient::capture_memory_intermediate(
                         root,
-                        &sink,
-                        &sink_out_media,
-                        &path,
-                        sp.is_sequence(),
+                        &node,
+                        &media_urn,
+                        &result.items,
+                        result.is_sequence,
                     )?;
-                    ctx.set_node_spool(sink.clone(), artifact.data_path.clone());
-                    node_spool.insert(sink.clone(), artifact.data_path.clone());
                     if let Some(publish) = on_transient {
                         publish(&artifact)?;
                     }
                 }
-                _ => {
-                    ctx.set_node_spool(sink.clone(), path.clone());
-                    spool_files.0.push(path.clone());
-                    node_spool.insert(sink.clone(), path);
-                }
             }
-        }
 
-        // Materialise this chain's sink so downstream chains' heads can read it (via
-        // send_group_input from node_data). When persisted to a writer there are no
-        // in-memory items and nothing downstream reads it; a spool-engaged sink's
-        // data is on disk and downstream feeds stream from the file. Sequences
-        // re-assemble to the CBOR sequence the next head will re-split.
-        if !has_writer && !spool_engaged {
-            // Sequence node_data is an RFC 8742 CBOR sequence of self-delimiting
-            // values; `items` are the raw, unwrapped item bytes from
-            // `decode_terminal_output`, so each must be re-encoded as a `CBOR::Bytes`
-            // value here (scalar node_data stays raw — `send_one_stream` wraps it at
-            // send). Dropping this re-encode is what broke sequence chains: raw PNG /
-            // JSON bytes are not themselves CBOR.
-            let bytes = if is_seq {
-                crate::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(&items).map_err(
-                    |e| {
-                        ExecutionError::HostError(format!("materialise chain output '{sink}': {e}"))
-                    },
-                )?
-            } else {
-                items.first().cloned().unwrap_or_default()
-            };
-            ctx.set_node_data(sink.clone(), bytes);
-            ctx.set_node_is_sequence(sink.clone(), is_seq);
-            if let (Some(root), true) = (transient_root, capture_transients) {
-                // A bounded intermediate: one write, and the mid-strand node
-                // becomes inspectable while later chains still run.
-                let artifact = super::transient::capture_memory_intermediate(
-                    root,
-                    &sink,
-                    &sink_out_media,
-                    &items,
-                    is_seq,
-                )?;
-                if let Some(publish) = on_transient {
-                    publish(&artifact)?;
-                }
+            node_is_sequence.insert(node.clone(), result.is_sequence);
+            terminal_meta.insert(node.clone(), result.meta);
+            // A spool-engaged sink's data lives ON DISK (`node_spool`) — the
+            // in-memory `items` is only the pre-spool remainder. Recording it
+            // here would present an (empty) in-memory value for a node that
+            // produced a full stream, and any consumer that prefers memory over
+            // spool (the ForEach region driver) would silently run on nothing.
+            // One node, one truth: memory OR spool, never both.
+            if !spool_engaged {
+                node_data.insert(node, result.items);
             }
-        }
-
-        node_is_sequence.insert(sink.clone(), is_seq);
-        terminal_meta.insert(sink.clone(), meta);
-        // A spool-engaged sink's data lives ON DISK (`node_spool`) — the
-        // in-memory `items` is only the pre-spool remainder. Recording it
-        // here would present an (empty) in-memory value for a node that
-        // produced a full stream, and any consumer that prefers memory over
-        // spool (the ForEach region driver) would silently run on nothing.
-        // One node, one truth: memory OR spool, never both.
-        if !spool_engaged {
-            node_data.insert(sink, items);
         }
     }
 
@@ -2166,13 +2380,39 @@ pub async fn run_dag_on_context(
         writer_results,
         terminal_meta,
         node_spool,
+        absent,
     })
 }
 
-/// Output of running a resolved DAG on a context: every node's decoded output items,
-/// each node's cardinality, and — for persisted terminal sinks — the writer results
-/// and per-sink terminal metadata. A fan-out DAG produces several sinks; each appears
-/// here.
+/// One output of a chain's last step that is kept: where its value is stored
+/// and how it is taken as it arrives.
+struct SinkSlot {
+    /// The node the value is stored at.
+    node: String,
+    /// The output's media URN in the cap's definition.
+    media_urn: String,
+    /// Its index among the outputs the cap declares.
+    declared: usize,
+    /// Streams it to disk, when its node is a persisted plan terminal.
+    writer: Option<Box<dyn super::stream_io::IncrementalWriter>>,
+    /// Engaged if the stream turns out unbounded, when it is not persisted.
+    spool: Option<super::stream_io::SpoolWriter>,
+}
+
+/// What a chain's last step produced on one kept output.
+struct SinkResult {
+    /// Decoded items: one for a single value, any number for a sequence.
+    /// Empty when a writer or the spool took the stream.
+    items: Vec<Vec<u8>>,
+    is_sequence: bool,
+    meta: TerminalMeta,
+    /// False only for an optional output that did not fire.
+    fired: bool,
+}
+
+/// Output of running a resolved graph on a context: every materialised node's
+/// decoded output items, each node's cardinality, and — for persisted
+/// terminal sinks — the writer results and per-sink terminal metadata.
 pub struct DagOutput {
     /// Node id → decoded output items (one for a scalar, N for a sequence). Persisted
     /// terminal sinks carry an empty vec (their data is on disk, in `writer_results`).
@@ -2188,84 +2428,9 @@ pub struct DagOutput {
     /// owns the files (a ForEach region driver streams items from them) and
     /// removes them when the plan completes.
     pub node_spool: HashMap<String, std::path::PathBuf>,
-}
-
-/// Decompose topologically-ordered cap groups into maximal linear chains (lists of
-/// indices into `groups`), mirroring `execute_plan::linear_chains` at the edge-group
-/// level. A group folds into its producer's chain iff it has exactly one producer
-/// group and that producer feeds ONLY it; otherwise it heads a new chain. Chains are
-/// returned in head-topological order, so every chain's head inputs are materialised
-/// by an earlier chain (a producer feeding a downstream chain head necessarily
-/// fans out, so it is that earlier chain's sink).
-fn decompose_group_chains(groups: &[EdgeGroup], group_order: &[usize]) -> Vec<Vec<usize>> {
-    let n = groups.len();
-
-    // node → the group index that produces it (a group produces its `to` node).
-    let mut produced_by: HashMap<&str, usize> = HashMap::new();
-    for (i, g) in groups.iter().enumerate() {
-        produced_by.insert(g.to.as_str(), i);
-    }
-
-    // input_sources[i] = distinct producer groups feeding group i's input edges.
-    // consumers[i] = groups that consume group i's output.
-    let mut input_sources: Vec<HashSet<usize>> = (0..n).map(|_| HashSet::new()).collect();
-    let mut consumers: Vec<HashSet<usize>> = (0..n).map(|_| HashSet::new()).collect();
-    for (i, g) in groups.iter().enumerate() {
-        for edge in &g.edges {
-            if let Some(&src) = produced_by.get(edge.from.as_str()) {
-                if src != i {
-                    input_sources[i].insert(src);
-                    consumers[src].insert(i);
-                }
-            }
-        }
-    }
-
-    // A group continues its producer's chain iff it is a SINGLE-edge group with
-    // exactly one producer group that feeds only this group. A multi-edge group
-    // (fan-in: several args, or a gather of several producers into one sequence
-    // arg) always heads a chain — mid-chain streaming forwards exactly one
-    // producer stream, so a multi-input invocation must be fed from
-    // materialised node_data via `send_group_input`. This also covers the group
-    // whose extra input is an InputSlot (not a producer group): counting only
-    // producer groups would otherwise misclassify it as a linear continuation
-    // and silently drop the slot's stream.
-    let continues_producer = |i: usize| -> bool {
-        if groups[i].edges.len() == 1 && input_sources[i].len() == 1 {
-            let src = *input_sources[i].iter().next().unwrap();
-            return consumers[src].len() == 1;
-        }
-        false
-    };
-
-    let mut assigned: HashSet<usize> = HashSet::new();
-    let mut chains: Vec<Vec<usize>> = Vec::new();
-    for &start in group_order {
-        if assigned.contains(&start) || continues_producer(start) {
-            continue;
-        }
-        let mut chain = vec![start];
-        assigned.insert(start);
-        let mut tail = start;
-        // Extend while the tail feeds exactly one consumer that is its linear
-        // continuation (a single-edge group whose only producer is the tail —
-        // a multi-edge group heads its own chain, see `continues_producer`).
-        while consumers[tail].len() == 1 {
-            let next = *consumers[tail].iter().next().unwrap();
-            if groups[next].edges.len() == 1
-                && input_sources[next].len() == 1
-                && input_sources[next].contains(&tail)
-            {
-                chain.push(next);
-                assigned.insert(next);
-                tail = next;
-            } else {
-                break;
-            }
-        }
-        chains.push(chain);
-    }
-    chains
+    /// The nodes of outputs that may not fire and did not. A node here is in
+    /// none of the maps above: it is absent, which is not empty.
+    pub absent: HashSet<String>,
 }
 
 /// Split each linear chain at the permit-deadlock boundary: between two
@@ -2361,15 +2526,6 @@ fn split_chains_at_shared_bounded_pool<K: PartialEq>(
     split
 }
 
-/// Execute ONE linear chain of cap groups as a live pipeline: the head's inputs are
-/// read from `ctx`'s materialised node_data (a fan-in head sends N streams via
-/// [`send_group_input`]), intermediate edges stream cap-to-cap through
-/// [`forward_frames`] with per-hop credit, and the sink's output is collected.
-/// Returns the sink's decoded items (empty when a `writer` persisted them to disk),
-/// its cardinality, and terminal meta. Progress is scaled into
-/// `[progress_base, progress_base + progress_span]`.
-#[allow(clippy::too_many_arguments)]
-
 /// Send an upstream CREDIT grant, tolerating exactly one failure mode: the
 /// request no longer existing because it TERMINATED while the grant was being
 /// prepared. Credits for a finished request are moot — failing the body for
@@ -2403,10 +2559,17 @@ async fn send_upstream_credit(
     }
 }
 
-async fn run_group_chain(
+/// Execute ONE pipelined chain of steps as a live pipeline: the head's inputs
+/// are read from `ctx`'s materialised node_data ([`send_step_input`] sends
+/// one stream per input — none for a step nothing is wired into),
+/// intermediate hops stream cap-to-cap through [`forward_frames`] with
+/// per-hop credit, and every kept output of the last step is collected into
+/// its sink in `slots`. Returns one [`SinkResult`] per slot. Progress is
+/// scaled into `[progress_base, progress_base + progress_span]`.
+#[allow(clippy::too_many_arguments)]
+async fn run_step_chain(
     ctx: &ExecutionContext,
-    chain: &[EdgeGroup],
-    shapes: &[CapStreamShape],
+    chain: &[&ResolvedStep],
     contracts: &[super::stream_io::ResponseContract],
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     progress_fn: Option<&CapProgressFn>,
@@ -2416,24 +2579,18 @@ async fn run_group_chain(
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
     stall_tracker: Option<Arc<PipelineProgressTracker>>,
-    writer: Option<&mut dyn super::stream_io::IncrementalWriter>,
-    mut spool: Option<&mut super::stream_io::SpoolWriter>,
+    slots: &mut [SinkSlot],
     activity_timeout_secs: u64,
     observer: Option<&dyn super::stream_io::FlowObserver>,
-) -> Result<(Vec<Vec<u8>>, bool, TerminalMeta), ExecutionError> {
+    cancel: Option<&RunCancel>,
+) -> Result<Vec<SinkResult>, ExecutionError> {
     use tokio::sync::mpsc;
 
-    // Whether the terminal is being persisted to disk by the caller's writer. The
-    // writer itself is a borrow we hand to the collect step; the caller owns it
-    // and finalizes it after we return.
-    let has_writer = writer.is_some();
-
     let n = chain.len();
-    let ordered_groups: Vec<&EdgeGroup> = chain.iter().collect();
 
-    // Per-group progress base within this chain, scaled into the chain's span.
-    let group_base = |i: usize| progress_base + progress_span * (i as f32 / n as f32);
-    let group_weight = progress_span / n as f32;
+    // Per-step progress base within this chain, scaled into the chain's span.
+    let step_base = |i: usize| progress_base + progress_span * (i as f32 / n as f32);
+    let step_weight = progress_span / n as f32;
 
     let switch = ctx.switch().clone();
     let max_chunk = ctx.max_chunk();
@@ -2446,8 +2603,8 @@ async fn run_group_chain(
     let mut invocations: Vec<(MessageId, mpsc::UnboundedReceiver<Frame>, String)> =
         Vec::with_capacity(n);
     let mut credit_routers: Vec<crate::bifaci::credit::CreditRouter> = Vec::with_capacity(n);
-    for group in &ordered_groups {
-        let cap_urn = &group.cap_urn;
+    for step in chain {
+        let cap_urn = &step.cap_urn;
         // Cap registration is async: a freshly attached cartridge host's
         // RelayNotify (its real cap_groups) arrives some time after `add_master`
         // returns. Poll until some master advertises a cap this request CONFORMS
@@ -2467,7 +2624,8 @@ async fn run_group_chain(
                  identity probe failed, or no candidate conforms to this cap",
                 cap_urn,
                 CAP_DISPATCH_READY_TIMEOUT.as_secs(),
-            )));
+            ))
+            .at_step(&step.token_id));
         }
         let (rid, rx) = switch
             .execute_cap(cap_urn, vec![], "application/cbor")
@@ -2484,11 +2642,12 @@ async fn run_group_chain(
                 other => {
                     ExecutionError::HostError(format!("execute_cap '{}': {}", cap_urn, other))
                 }
-            })?;
+            })
+            .map_err(|e| e.at_step(&step.token_id))?;
         // Correlate this invocation to its strand step for the run's live flow
         // snapshots (L8): the only point where both ids exist.
         if let Some(obs) = observer {
-            obs.record(&rid, &group.token_id);
+            obs.record(&rid, &step.token_id);
         }
         invocations.push((rid, rx, cap_urn.clone()));
         credit_routers.push(crate::bifaci::credit::CreditRouter::new());
@@ -2500,11 +2659,9 @@ async fn run_group_chain(
     // exactly these taps (non-force Cancel → close-tap → drain, 15.2 §Runs
     // Stop) without touching other requests.
     if let Some(obs) = observer {
-        let head_group = ordered_groups[0];
-        if head_group
-            .edges
-            .iter()
-            .any(|edge| ctx.node_live_reference().contains_key(&edge.from))
+        if chain[0]
+            .source_nodes()
+            .any(|node| ctx.node_live_reference().contains_key(node))
         {
             obs.record_feed_bearing(&invocations[0].0);
         }
@@ -2543,12 +2700,12 @@ async fn run_group_chain(
     let (chain_fault_tx, mut chain_fault_rx) =
         mpsc::unbounded_channel::<(usize, ExecutionError)>();
 
-    // ── Step 3: Feed first group's input CONCURRENTLY (L15) ──
+    // ── Step 3: Feed the first step's input CONCURRENTLY (L15) ──
     let send_task = {
         let switch = switch.clone();
         let fault_tx = chain_fault_tx.clone();
         let first_rid = invocations[0].0.clone();
-        let first_group = (*ordered_groups[0]).clone();
+        let first_step = chain[0].clone();
         let cap_arguments = cap_arguments.clone();
         let node_data = ctx.node_data().clone();
         let node_meta = ctx.node_meta().clone();
@@ -2557,10 +2714,10 @@ async fn run_group_chain(
         let node_spool = ctx.node_spool().clone();
         let router = credit_routers[0].clone();
         tokio::spawn(async move {
-            let result = send_group_input(
+            let result = send_step_input(
                 &switch,
                 &first_rid,
-                &first_group,
+                &first_step,
                 &cap_arguments,
                 &node_data,
                 &node_meta,
@@ -2583,37 +2740,31 @@ async fn run_group_chain(
         })
     };
 
-    // ── Step 4: Spawn forwarding tasks for intermediate groups ──
+    // ── Step 4: Spawn forwarding tasks for intermediate steps ──
     let mut forwarding_handles: Vec<tokio::task::JoinHandle<Result<(), ()>>> = Vec::new();
     for i in 0..(n - 1) {
         let next_rid = invocations[i + 1].0.clone();
-        let next_group = ordered_groups[i + 1];
+        let next = chain[i + 1];
         let prev_cap_urn = invocations[i].2.clone();
         let prev_contract = contracts[i].clone();
 
         // The downstream cap demuxes input streams by arg URN equivalence
         // (spec 13.2) — every stream the orchestrator sends is labeled with
-        // the edge's declared input media URN (`send_group_input` does this
-        // for chain heads). The pipelined hop must do the same: find the
-        // edge this forwarding serves so STREAM_START can be relabeled from
-        // the producer's (richer) output URN to the declared arg URN.
-        let prev_to = &ordered_groups[i].to;
-        let mut feeding_edges = next_group.edges.iter().filter(|e| &e.from == prev_to);
-        let next_in_media = match (feeding_edges.next(), feeding_edges.next()) {
-            (Some(edge), None) => edge.in_media.clone(),
-            (Some(a), Some(b)) => {
-                return Err(ExecutionError::HostError(format!(
-                    "pipelined forward: node '{}' feeds cap '{}' through multiple \
-                     edges (args '{}' and '{}') — a single forwarded stream cannot \
-                     be split into two args",
-                    prev_to, next_group.cap_urn, a.in_media, b.in_media
-                )));
+        // the input's declared stream URN (`send_step_input` does this for
+        // chain heads). The pipelined hop must do the same: a step inside a
+        // chain has ONE input stream, its producer's main output, and
+        // STREAM_START is relabeled from the producer's (richer) output URN
+        // to that stream URN.
+        let prev_node = &chain[i].node;
+        let next_in_media = match next.inputs.as_slice() {
+            [input] if input.source == StepSource::Node(prev_node.clone()) => {
+                input.stream_urn.clone()
             }
-            (None, _) => {
+            _ => {
                 return Err(ExecutionError::HostError(format!(
-                    "pipelined forward: chain wiring bug — group for cap '{}' has \
-                     no edge from its producer node '{}'",
-                    next_group.cap_urn, prev_to
+                    "pipelined forward: chain wiring bug — step '{}' (cap '{}') is not fed \
+                     by exactly the main output of '{}'",
+                    next.node, next.cap_urn, prev_node
                 )));
             }
         };
@@ -2624,18 +2775,18 @@ async fn run_group_chain(
 
         let fwd_switch = switch.clone();
         let extra_args: Vec<(String, Vec<u8>)> = cap_arguments
-            .get(&next_group.to)
+            .get(&next.node)
             .cloned()
             .unwrap_or_default();
 
-        let group_token_id = ordered_groups[i].token_id.clone();
-        let fwd_step_token_id = group_token_id.clone();
+        let step_token_id = chain[i].token_id.clone();
+        let fwd_step_token_id = step_token_id.clone();
         let pfn: Option<CapProgressFn> = progress_fn.map(|parent| {
-            let base = group_base(i);
-            let weight = group_weight;
+            let base = step_base(i);
+            let weight = step_weight;
             let mapper = ProgressMapper::new(parent, base, weight);
             let mapper = match step_progress_fn {
-                Some(sink) => mapper.with_step_sink(sink, &group_token_id),
+                Some(sink) => mapper.with_step_sink(sink, &step_token_id),
                 None => mapper,
             };
             mapper.as_cap_progress_fn()
@@ -2683,7 +2834,7 @@ async fn run_group_chain(
     }
     drop(chain_fault_tx);
 
-    // ── Step 5: Collect last group's output ──
+    // ── Step 5: Collect the last step's outputs ──
     let last_idx = n - 1;
     let last_cap_urn_owned = invocations[last_idx].2.clone();
     let last_cap_urn = last_cap_urn_owned.as_str();
@@ -2692,13 +2843,13 @@ async fn run_group_chain(
     let taken_last_rx = std::mem::replace(&mut invocations[last_idx].1, dummy_rx2);
     drop(dummy_tx2);
 
-    let last_group_token_id = ordered_groups[last_idx].token_id.clone();
+    let last_step_token_id = chain[last_idx].token_id.clone();
     let last_pfn: Option<CapProgressFn> = progress_fn.map(|parent| {
-        let base = group_base(last_idx);
-        let weight = group_weight;
+        let base = step_base(last_idx);
+        let weight = step_weight;
         let mapper = ProgressMapper::new(parent, base, weight);
         let mapper = match step_progress_fn {
-            Some(sink) => mapper.with_step_sink(sink, &last_group_token_id),
+            Some(sink) => mapper.with_step_sink(sink, &last_step_token_id),
             None => mapper,
         };
         mapper.as_cap_progress_fn()
@@ -2745,22 +2896,33 @@ async fn run_group_chain(
         }
     };
 
-    // Scoped so the collect future (which holds the spool's `&mut`) is
+    // Scoped so the collect future (which holds the sinks' `&mut`) is
     // dropped the moment the race resolves.
-    let collect_result: Result<_, ExecutionError> = {
-    let collect = super::stream_io::collect_terminal_output(
+    let collect_result: Result<Vec<super::stream_io::CollectedOutput>, ExecutionError> = {
+    let mut sinks: Vec<super::stream_io::OutputSink<'_>> = slots
+        .iter_mut()
+        .map(|slot| super::stream_io::OutputSink {
+            output: slot.declared,
+            writer: slot
+                .writer
+                .as_mut()
+                .map(|w| w.as_mut() as &mut dyn super::stream_io::IncrementalWriter),
+            spool: slot
+                .spool
+                .as_mut()
+                .map(|s| s as &mut dyn super::stream_io::IncrementalWriter),
+        })
+        .collect();
+    let collect = super::stream_io::collect_response(
         taken_last_rx,
         last_pfn.as_ref(),
         last_cap_urn,
         &contracts[last_idx],
-        &last_group_token_id,
+        &last_step_token_id,
         log_fn,
         body_index,
         stall_tracker.as_ref(),
-        writer,
-        spool
-            .as_deref_mut()
-            .map(|s| s as &mut dyn super::stream_io::IncrementalWriter),
+        &mut sinks,
         activity_timeout_secs,
         Some(&terminal_plumbing),
     );
@@ -2780,7 +2942,7 @@ async fn run_group_chain(
             details,
             arg_urn,
         }
-        .at_step(&last_group_token_id),
+        .at_step(&last_step_token_id),
         // An effect-contract violation keeps its typed identity (the audit
         // fired at receipt inside collect) — never flattened into HostError.
         super::stream_io::StreamIoError::EffectContract {
@@ -2796,7 +2958,7 @@ async fn run_group_chain(
             expected,
             actual,
         }
-        .at_step(&last_group_token_id),
+        .at_step(&last_step_token_id),
         super::stream_io::StreamIoError::StreamContract {
             cap_urn,
             declared_is_sequence,
@@ -2810,27 +2972,37 @@ async fn run_group_chain(
             emitted_is_sequence,
             emitted_unbounded,
         }
-        .at_step(&last_group_token_id),
+        .at_step(&last_step_token_id),
         super::stream_io::StreamIoError::OutputContract { cap_urn, detail } => {
-            ExecutionError::OutputContractViolation { cap_urn, detail }.at_step(&last_group_token_id)
+            ExecutionError::OutputContractViolation { cap_urn, detail }.at_step(&last_step_token_id)
         }
         other => ExecutionError::HostError(other.to_string()),
     };
 
-    // The terminal collect and the chain's fault channel race: whichever
-    // speaks first decides the chain. An upstream failure wins immediately —
-    // the terminal is not awaited for an END that cannot come.
+    // The terminal collect, the chain's fault channel and the run's failure
+    // signal race: whichever speaks first decides the chain. An upstream
+    // failure wins immediately — the terminal is not awaited for an END that
+    // cannot come — and so does a failure elsewhere in the run.
     let mut collect = std::pin::pin!(collect);
     let mut faults_open = true;
     loop {
         tokio::select! {
             biased;
             fault = chain_fault_rx.recv(), if faults_open => match fault {
-                Some((i, e)) => break Err(e.at_step(&ordered_groups[i].token_id)),
+                Some((i, e)) => break Err(e.at_step(&chain[i].token_id)),
                 // Every upstream task finished without fault; the terminal
                 // collect alone decides from here.
                 None => faults_open = false,
             },
+            cause = async {
+                match cancel {
+                    Some(cancel) => cancel.raised().await,
+                    None => std::future::pending().await,
+                }
+            } => break Err(ExecutionError::Collateral {
+                class: cause.class,
+                detail: cause.detail,
+            }),
             collected = &mut collect => break collected.map_err(map_collect_err),
         }
     }
@@ -2846,23 +3018,19 @@ async fn run_group_chain(
     // run in RUNNING. The ORIGINATING error is what this chain returns; the
     // collateral errors the joined tasks report are consequences, not causes.
     let teardown = |originating: &ExecutionError| {
-        let detail = format!(
-            "step {} ({}) failed: {}",
-            originating
-                .step_token_id()
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| "?".to_string()),
-            originating.failure_cap_urn().unwrap_or("?"),
-            originating.failure_reason()
-        );
         // The collateral cancel carries the ORIGINATING failure's class: the
         // cancelled steps are consequences of that failure, attributed to
         // whatever it was attributed to — never to the user, never "ours"
-        // because a cancel happened.
-        let reason = crate::bifaci::frame::CancelReason::collateral(
-            originating.attribution_class(),
-            detail,
-        );
+        // because a cancel happened. A chain stopped by a failure elsewhere in
+        // the run passes that failure's cause on as it was given.
+        let cause = match originating {
+            ExecutionError::Collateral { class, detail } => CollateralCause {
+                class: *class,
+                detail: detail.clone(),
+            },
+            other => CollateralCause::of(other),
+        };
+        let reason = crate::bifaci::frame::CancelReason::collateral(cause.class, cause.detail);
         let switch = switch.clone();
         let rids: Vec<MessageId> = invocations.iter().map(|(rid, _, _)| rid.clone()).collect();
         async move {
@@ -2887,20 +3055,20 @@ async fn run_group_chain(
     if let Err(e) = send_task.await {
         first_error.get_or_insert(
             ExecutionError::HostError(format!("Input send task panicked: {}", e))
-                .at_step(&ordered_groups[0].token_id),
+                .at_step(&chain[0].token_id),
         );
     }
     for (i, handle) in forwarding_handles.into_iter().enumerate() {
         if let Err(e) = handle.await {
             first_error.get_or_insert(
                 ExecutionError::HostError(format!("Forwarding task {} panicked: {}", i, e))
-                    .at_step(&ordered_groups[i].token_id),
+                    .at_step(&chain[i].token_id),
             );
         }
     }
     // Every sender is gone once the tasks are joined, so this drains to None.
     while let Some((i, e)) = chain_fault_rx.recv().await {
-        let e = e.at_step(&ordered_groups[i].token_id);
+        let e = e.at_step(&chain[i].token_id);
         if first_error.is_none() {
             first_error = Some(e);
         } else {
@@ -2908,7 +3076,7 @@ async fn run_group_chain(
         }
     }
 
-    let (output_bytes, is_sequence, terminal_meta) = match collect_result {
+    let collected = match collect_result {
         Ok(ok) => {
             if let Some(err) = first_error {
                 // The chain broke upstream after the terminal had already
@@ -2935,33 +3103,40 @@ async fn run_group_chain(
         pfn(progress_base + progress_span, last_cap_urn, "Completed");
     }
 
-    // ── Step 7: Decode this chain's sink output ──
-    let terminal_is_sequence = is_sequence.unwrap_or(false);
-
-    // Writer present (or the intermediate spool engaged) ⇒ data is on disk,
-    // no in-memory items. Otherwise decode the accumulated bytes (CBOR
-    // transport stripped).
-    let spool_engaged = spool.as_ref().is_some_and(|s| s.engaged());
-    let decoded_items = if has_writer || spool_engaged {
-        vec![]
-    } else {
-        super::stream_io::decode_terminal_output(&output_bytes, is_sequence)
-            .map_err(|e| ExecutionError::HostError(e.to_string()))?
-    };
-
-    Ok((decoded_items, terminal_is_sequence, terminal_meta))
+    // ── Step 7: Decode each kept output ──
+    //
+    // A writer present (or the spool engaged) ⇒ the data is on disk, no
+    // in-memory items. An output that did not fire has none either. Otherwise
+    // decode the accumulated bytes (CBOR transport stripped).
+    let mut results: Vec<SinkResult> = Vec::with_capacity(slots.len());
+    for (slot, output) in slots.iter().zip(collected) {
+        let on_disk = slot.writer.is_some() || slot.spool.as_ref().is_some_and(|s| s.engaged());
+        let items = if on_disk || !output.fired {
+            Vec::new()
+        } else {
+            super::stream_io::decode_terminal_output(&output.bytes, output.is_sequence)
+                .map_err(|e| ExecutionError::HostError(e.to_string()).at_step(&last_step_token_id))?
+        };
+        results.push(SinkResult {
+            items,
+            is_sequence: output.is_sequence.unwrap_or(false),
+            meta: output.meta,
+            fired: output.fired,
+        });
+    }
+    Ok(results)
 }
 
-/// Send a group's input frames from `node_data`: one named STREAM per edge
-/// (fan-in head sends N streams into the one cap), plus any extra cap-argument
-/// streams, then END. Provenance meta on the source node is forwarded on
-/// STREAM_START. Every source node MUST carry a sequence flag — a missing flag
-/// is a wiring bug and fails hard.
+/// Send a step's input frames from `node_data`: one named STREAM per input,
+/// then the step's argument values, then END. A step nothing is wired into
+/// is sent its argument values and END. Provenance meta on a source node is
+/// forwarded on STREAM_START. Every source node MUST carry a sequence flag —
+/// a missing flag is a wiring bug and fails hard.
 #[allow(clippy::too_many_arguments)]
-async fn send_group_input(
+async fn send_step_input(
     switch: &Arc<RelaySwitch>,
     rid: &MessageId,
-    group: &EdgeGroup,
+    step: &ResolvedStep,
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     node_data: &HashMap<String, Vec<u8>>,
     node_meta: &HashMap<String, crate::StreamMeta>,
@@ -2971,238 +3146,156 @@ async fn send_group_input(
     max_chunk: usize,
     credit: Option<(&crate::bifaci::credit::CreditRouter, u64)>,
 ) -> Result<(), ExecutionError> {
-    // One incoming payload per edge, grouped by arg URN (tagged-URN
-    // equivalence). The cartridge demuxes incoming streams by URN, so exactly
-    // ONE stream per distinct URN may go out:
-    //  - a single-edge group sends as-is (the historical path);
-    //  - an N-edge group is a GATHER into a sequence arg (N distinct producers
-    //    feeding one arg — the resolver's implicit Collect). Legal ONLY when
-    //    the cap's matching arg declares `is_sequence` and every member payload
-    //    is scalar; the N scalar payloads then concatenate — in edge order,
-    //    which is the resolver's source-declaration order — into one CBOR
-    //    sequence sent with is_sequence=true. A scalar arg receiving two
-    //    streams (the illegal "two stdins" case) or a sequence member inside a
-    //    gather is a malformed graph — fail hard, never silently double-send.
-    enum MemberSource<'a> {
+    /// Where a node's value is read from.
+    enum Held<'a> {
         Mem(&'a [u8]),
-        /// The member's data lives in a disk spool (unbounded intermediate at
-        /// a chain-split boundary) — streamed via `send_file_stream`.
+        /// The value lives in a disk spool (an unbounded intermediate at a
+        /// materialisation boundary) — streamed, never loaded.
         Spool(&'a std::path::Path),
     }
-    struct UrnGroup<'a> {
-        urn: crate::MediaUrn,
-        urn_str: &'a str,
-        members: Vec<(MemberSource<'a>, Option<&'a crate::StreamMeta>, bool)>,
-    }
-    let mut urn_groups: Vec<UrnGroup> = Vec::new();
-    for edge in &group.edges {
-        let data: MemberSource = if let Some(path) = node_spool.get(&edge.from) {
-            MemberSource::Spool(path.as_path())
-        } else {
-            MemberSource::Mem(
+    let held = |node: &'_ str| -> Result<(Held<'_>, bool), ExecutionError> {
+        let data = match node_spool.get(node) {
+            Some(path) => Held::Spool(path.as_path()),
+            None => Held::Mem(
                 node_data
-                    .get(&edge.from)
+                    .get(node)
                     .ok_or_else(|| {
                         ExecutionError::HostError(format!(
                             "Missing input data at node '{}' for cap '{}'",
-                            edge.from, edge.cap_urn
+                            node, step.cap_urn
                         ))
                     })?
                     .as_slice(),
-            )
+            ),
         };
-        let meta = node_meta.get(&edge.from);
-        let is_seq = *node_is_sequence.get(&edge.from).ok_or_else(|| {
+        let is_sequence = *node_is_sequence.get(node).ok_or_else(|| {
             ExecutionError::HostError(format!(
                 "Missing sequence flag at node '{}' for cap '{}'. Either the input \
                  map was constructed without a flag for this node, or an intermediate \
                  cap completed without setting its sequence flag — both are bugs.",
-                edge.from, edge.cap_urn,
+                node, step.cap_urn,
             ))
         })?;
-        // A live-feed reference node sends its selector labeled with the
-        // REFERENCE urn — never relabeled to the edge's in_media — so the
-        // receiving cartridge's demux intercepts it and resolves capture
-        // (13.2 §Reference Media). The reference is ONE record: wire
-        // is_sequence=false regardless of the node's content cardinality.
-        if let Some(reference_urn) = node_live_reference.get(&edge.from) {
-            let urn = crate::MediaUrn::from_string(reference_urn).map_err(|e| {
-                ExecutionError::HostError(format!(
-                    "live-feed reference URN '{}' at node '{}' is not a valid media URN: {e}",
-                    reference_urn, edge.from
-                ))
-            })?;
-            if urn_groups
-                .iter()
-                .any(|g| g.urn.is_equivalent(&urn).unwrap_or(false))
-            {
-                return Err(ExecutionError::HostError(format!(
-                    "cap '{}' would receive two live-feed reference streams '{}' — a \
-                     device capture cannot be fanned into one cap twice",
-                    edge.cap_urn, reference_urn
-                )));
-            }
-            urn_groups.push(UrnGroup {
-                urn,
-                urn_str: reference_urn.as_str(),
-                members: vec![(data, meta, false)],
-            });
-            continue;
-        }
-        let urn = crate::MediaUrn::from_string(&edge.in_media).map_err(|e| {
-            ExecutionError::HostError(format!(
-                "input arg URN '{}' for cap '{}' is not a valid media URN: {e}",
-                edge.in_media, edge.cap_urn
-            ))
-        })?;
-        match urn_groups
-            .iter_mut()
-            .find(|g| g.urn.is_equivalent(&urn).unwrap_or(false))
-        {
-            Some(g) => g.members.push((data, meta, is_seq)),
-            None => urn_groups.push(UrnGroup {
-                urn,
-                urn_str: edge.in_media.as_str(),
-                members: vec![(data, meta, is_seq)],
-            }),
-        }
-    }
+        Ok((data, is_sequence))
+    };
 
     let extra_args = cap_arguments
-        .get(&group.to)
+        .get(&step.node)
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
 
-    // Extra-arg streams must not collide with each other or with any input
-    // stream URN — they are value-channel deliveries, never gathered.
-    {
-        let mut seen_urns: Vec<crate::MediaUrn> =
-            urn_groups.iter().map(|g| g.urn.clone()).collect();
-        for (urn_str, _) in extra_args {
-            let urn = crate::MediaUrn::from_string(urn_str).map_err(|e| {
-                ExecutionError::HostError(format!(
-                    "input arg URN '{urn_str}' for cap '{}' is not a valid media URN: {e}",
-                    group.cap_urn
-                ))
-            })?;
-            if seen_urns
-                .iter()
-                .any(|s| s.is_equivalent(&urn).unwrap_or(false))
-            {
-                return Err(ExecutionError::HostError(format!(
-                    "cap '{}' receives two input streams with the same arg URN '{urn_str}'; \
-                     each input must carry a distinct arg URN — a cap has one main input, \
-                     and convergence args have distinct URNs",
-                    group.cap_urn
-                )));
-            }
-            seen_urns.push(urn);
-        }
-    }
-
-    // The full cap definition rides on every edge of the group; a group is one
-    // cap invocation, so the first edge's definition is the group's.
-    let cap_def = &group
-        .edges
-        .first()
-        .expect("an edge group is non-empty by construction")
-        .cap;
-
-    for urn_group in &urn_groups {
-        if urn_group.members.len() == 1 {
-            let (ref data, meta, is_seq) = urn_group.members[0];
-            match data {
-                MemberSource::Mem(bytes) => {
-                    super::stream_io::send_one_stream(
-                        switch,
-                        rid,
-                        urn_group.urn_str,
-                        bytes,
-                        meta.cloned(),
-                        is_seq,
-                        max_chunk,
-                        credit,
-                    )
-                    .await
-                    .map_err(|e| ExecutionError::HostError(e.to_string()))?;
-                }
-                MemberSource::Spool(path) => {
-                    super::stream_io::send_file_stream(
-                        switch,
-                        rid,
-                        urn_group.urn_str,
-                        path,
-                        meta.cloned(),
-                        is_seq,
-                        max_chunk,
-                        credit,
-                    )
-                    .await
-                    .map_err(|e| ExecutionError::HostError(e.to_string()))?;
-                }
-            }
-            continue;
-        }
-
-        // Gather: verify the receiving arg is a sequence arg.
-        let arg_def = cap_def
-            .args
+    // The cartridge tells its inputs apart by stream URN (tagged-URN
+    // equivalence), so exactly ONE stream per distinct URN may go out: an
+    // input stream, a live reference and an argument value never share one.
+    let mut sent_urns: Vec<crate::MediaUrn> = Vec::new();
+    let mut claim = |urn_str: &str, what: &str| -> Result<(), ExecutionError> {
+        let urn = crate::MediaUrn::from_string(urn_str).map_err(|e| {
+            ExecutionError::HostError(format!(
+                "{what} URN '{urn_str}' for cap '{}' is not a valid media URN: {e}",
+                step.cap_urn
+            ))
+        })?;
+        if sent_urns
             .iter()
-            .find(|a| {
-                crate::MediaUrn::from_string(a.stream_urn())
-                    .map(|u| u.is_equivalent(&urn_group.urn).unwrap_or(false))
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| {
-                ExecutionError::HostError(format!(
-                    "cap '{}' receives {} input streams on arg URN '{}', but no cap arg \
-                     declares that stream URN — malformed graph",
-                    group.cap_urn,
-                    urn_group.members.len(),
-                    urn_group.urn_str
-                ))
-            })?;
-        if !arg_def.is_sequence {
+            .any(|sent| sent.is_equivalent(&urn).unwrap_or(false))
+        {
             return Err(ExecutionError::HostError(format!(
-                "cap '{}' receives {} input streams with the same arg URN '{}', but that \
-                 arg is not a sequence arg; each scalar input must carry a distinct arg \
-                 URN — a cap has one main input, and convergence args have distinct URNs",
-                group.cap_urn,
-                urn_group.members.len(),
-                urn_group.urn_str
+                "cap '{}' would receive two input streams with the same URN '{urn_str}'; \
+                 each stream carries a distinct URN — a cap has one main input, each arg \
+                 one stream, and an arg a node is wired into takes no value beside it",
+                step.cap_urn
             )));
         }
-        // Assemble deterministically, in edge (= source-declaration) order: a
-        // scalar member contributes one item, a sequence member its items,
-        // and a SPOOLED member (an ended unbounded intermediate) streams its
-        // data from the file — a gather never re-buffers an unbounded
-        // stream into memory.
-        let members: Vec<super::stream_io::GatherMember> = urn_group
-            .members
-            .iter()
-            .map(|(data, _, member_is_seq)| match data {
-                MemberSource::Mem(bytes) => super::stream_io::GatherMember::Memory {
-                    data: bytes.to_vec(),
-                    is_sequence: *member_is_seq,
-                },
-                MemberSource::Spool(path) => super::stream_io::GatherMember::Spooled {
-                    path: path.to_path_buf(),
-                    is_sequence: *member_is_seq,
-                },
-            })
-            .collect();
-        super::stream_io::send_gathered_stream(
-            switch,
-            rid,
-            urn_group.urn_str,
-            members,
-            max_chunk,
-            credit,
-        )
-        .await
-        .map_err(|e| ExecutionError::HostError(e.to_string()))?;
+        sent_urns.push(urn);
+        Ok(())
+    };
+
+    for input in &step.inputs {
+        match &input.source {
+            StepSource::Node(node) => {
+                let (data, is_sequence) = held(node)?;
+                let meta = node_meta.get(node);
+                // A live-feed reference node sends its selector labeled with
+                // the REFERENCE urn — never relabeled to the input's stream
+                // URN — so the receiving cartridge's demux intercepts it and
+                // resolves capture (13.2 §Reference Media). The reference is
+                // ONE record: wire is_sequence=false regardless of the node's
+                // content cardinality.
+                let (stream_urn, is_sequence) = match node_live_reference.get(node) {
+                    Some(reference_urn) => (reference_urn.as_str(), false),
+                    None => (input.stream_urn.as_str(), is_sequence),
+                };
+                claim(stream_urn, "input stream")?;
+                match data {
+                    Held::Mem(bytes) => super::stream_io::send_one_stream(
+                        switch,
+                        rid,
+                        stream_urn,
+                        bytes,
+                        meta.cloned(),
+                        is_sequence,
+                        max_chunk,
+                        credit,
+                    )
+                    .await,
+                    Held::Spool(path) => super::stream_io::send_file_stream(
+                        switch,
+                        rid,
+                        stream_urn,
+                        path,
+                        meta.cloned(),
+                        is_sequence,
+                        max_chunk,
+                        credit,
+                    )
+                    .await,
+                }
+                .map_err(|e| ExecutionError::HostError(e.to_string()))?;
+            }
+            // A gather: the members' values in order as ONE sequence. A single
+            // value contributes one item, a sequence its items, and a SPOOLED
+            // member (an ended unbounded intermediate) streams its data from
+            // the file — a gather never re-buffers an unbounded stream into
+            // memory. No members is an empty sequence.
+            StepSource::Gather(nodes) => {
+                claim(&input.stream_urn, "input stream")?;
+                let mut members: Vec<super::stream_io::GatherMember> =
+                    Vec::with_capacity(nodes.len());
+                for node in nodes {
+                    if node_live_reference.contains_key(node) {
+                        return Err(ExecutionError::HostError(format!(
+                            "cap '{}' gathers live-feed reference '{}' — a device capture \
+                             is resolved by the one cap it is sent to, never gathered",
+                            step.cap_urn, node
+                        )));
+                    }
+                    let (data, is_sequence) = held(node)?;
+                    members.push(match data {
+                        Held::Mem(bytes) => super::stream_io::GatherMember::Memory {
+                            data: bytes.to_vec(),
+                            is_sequence,
+                        },
+                        Held::Spool(path) => super::stream_io::GatherMember::Spooled {
+                            path: path.to_path_buf(),
+                            is_sequence,
+                        },
+                    });
+                }
+                super::stream_io::send_gathered_stream(
+                    switch,
+                    rid,
+                    &input.stream_urn,
+                    members,
+                    max_chunk,
+                    credit,
+                )
+                .await
+                .map_err(|e| ExecutionError::HostError(e.to_string()))?;
+            }
+        }
     }
     for (media_urn, data) in extra_args {
+        claim(media_urn, "argument")?;
         super::stream_io::send_one_stream(
             switch, rid, media_urn, data, None, false, max_chunk, credit,
         )
@@ -3830,44 +3923,16 @@ async fn forward_frames(
     }
 }
 
-/// Execute a resolved DAG: discover cartridges, set up infrastructure, run edge groups.
-/// Execute a resolved DAG end-to-end.
-///
-/// `initial_is_sequence` is the per-node sequence-flag map that
-/// mirrors floom-engine's interpreter contract (see
-/// `floom_engine::cap::capdag_service::execute_dag` and
-/// `floom_engine::ops_rs::cap_interpreter::interpreter::resolve_inputs`).
-/// For every node in `initial_inputs` there MUST be a matching
-/// entry here declaring whether the bytes are a CBOR sequence
-/// (`true` — multiple self-delimiting items, dispatched as
-/// separate chunks) or a scalar blob (`false` — one chunk,
-/// wrapped in `Value::Bytes`).
-///
-/// Missing or extra entries are not papered over — they're a
-/// programmer error and we fail hard so the call site is fixed
-/// at the source. A silent default would let a sequence input
-/// flow into a scalar-shaped chunk on the wire (or vice-versa)
-/// and produce confusing downstream parse errors hours later
-/// inside the receiving cap.
-///
-/// The flag flows through to `send_one_stream`
-/// (orchestrator/stream_io.rs) which branches on it: sequence →
-/// split self-delimiting CBOR values into per-chunk frames;
-/// scalar → wrap raw bytes in `Value::Bytes` and chunk by
-/// `max_chunk`.
-///
-/// `log_fn` is mandatory. Cartridges emit operational log and
-/// progress frames during long-running work, and dropping them at
-/// the DAG boundary makes failures opaque.
 /// The per-item activity timeout for a segment, read from the segment's terminal cap
 /// metadata (`activity_timeout_secs`), falling to the documented default only when the
-/// key is absent or malformed. Shared by [`execute_dag`] and the CLI runtime so both
-/// resolve the timeout identically.
+/// key is absent or malformed.
 pub(crate) fn segment_activity_timeout(graph: &ResolvedGraph) -> u64 {
-    graph
-        .edges
-        .first()
-        .and_then(|e| e.cap.metadata.get(ACTIVITY_TIMEOUT_METADATA_KEY))
+    // The terminal cap: the last step of the segment's order.
+    let terminal = topological_sort_steps(&graph.steps)
+        .ok()
+        .and_then(|order| order.last().map(|&i| &graph.steps[i]));
+    terminal
+        .and_then(|step| step.cap.metadata.get(ACTIVITY_TIMEOUT_METADATA_KEY))
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|&v| v > 0)
         .unwrap_or(DEFAULT_ACTIVITY_TIMEOUT_SECS)
@@ -3890,7 +3955,7 @@ pub(crate) type HostableCartridge = (
 /// `discover_cartridges`, so they pass the same identity checks the engine applies and
 /// are held to the same signed bundle manifest. Each `Incompatible` entry is logged and
 /// skipped (discovery already surfaced the reason). An absent directory yields an empty
-/// list. Shared by [`execute_dag`] and the CLI runtime.
+/// list.
 ///
 /// The bundle's proof is established HERE, once, from the roots this build bakes: a
 /// build that trusts no roots can host no bundled cartridge, and every refusal names
@@ -3946,210 +4011,6 @@ pub(crate) async fn discover_bundled_cartridges(
         }
     }
     Ok(out)
-}
-
-pub async fn execute_dag(
-    graph: &ResolvedGraph,
-    cartridge_dir: PathBuf,
-    registry_url: Option<String>,
-    channel: crate::bifaci::cartridge_repo::CartridgeChannel,
-    fabric_manifest_version: u32,
-    initial_inputs: HashMap<String, NodeData>,
-    initial_is_sequence: HashMap<String, bool>,
-    dev_binaries: Vec<PathBuf>,
-    bundled_cartridges_dir: Option<PathBuf>,
-    fabric_registry: Arc<FabricRegistry>,
-    progress_fn: Option<&CapProgressFn>,
-    log_fn: &PipelineLogFn,
-    // Extra argument streams per node: node id → [(arg media URN, raw bytes)]. These
-    // are the already-resolved arg-stream bytes (the single format shared with the
-    // engine's `run_segment` and `execute_plan`) — not JSON, no serialization here.
-    cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
-    // Optional per-segment protocol trace. When present, the switch is sampled
-    // LIVE during the segment (a 250ms task) AND snapshotted once at teardown, so
-    // both a normal segment's transitions and a HANGING segment's stall point are
-    // captured. Owned `Arc` so the sampler task can hold its own reference. `None`
-    // on every path that does not trace.
-    trace_sink: Option<Arc<crate::bifaci::protocol_trace::ProtocolTraceSink>>,
-) -> Result<DagOutput, ExecutionError> {
-    // 1. Initialize cartridge manager and discover/download all needed cartridges
-    let mut cartridge_manager = CartridgeManager::new(
-        cartridge_dir,
-        registry_url.clone(),
-        channel,
-        fabric_manifest_version,
-        dev_binaries,
-        crate::bifaci::release_cert::RegistryTrust::from_build_constants(),
-        crate::fabric::registry::RegistryConfig::default().registry_base_url,
-    );
-    cartridge_manager.init().await?;
-
-    let cap_urns: Vec<&str> = graph.edges.iter().map(|e| e.cap_urn.as_str()).collect();
-    let mut cartridges = cartridge_manager.resolve_cartridges(&cap_urns).await?;
-
-    // 1b. Register the host's BUNDLED cartridges (shipped beside the executor) alongside
-    // the dev/registry cartridges. Shared discovery + integrity checks live in
-    // `discover_bundled_cartridges`. Absent dir ⇒ no bundled cartridges.
-    if let Some(bundled_cartridges_dir) = bundled_cartridges_dir {
-        cartridges.extend(
-            discover_bundled_cartridges(
-                &bundled_cartridges_dir,
-                channel,
-                registry_url.as_deref(),
-                fabric_manifest_version,
-            )
-            .await?,
-        );
-    }
-
-    // 2. Create execution context and add cartridge host as master
-    let mut ctx = ExecutionContext::new(fabric_registry).await?;
-    ctx.add_cartridge_host(cartridges).await?;
-
-    // 3. Resolve initial inputs to raw bytes and set on nodes.
-    //    Enforce strict 1:1 correspondence between
-    //    `initial_inputs` and `initial_is_sequence`: every input
-    //    node has an explicit sequence flag, every flag entry
-    //    refers to an input node. Missing or extra entries are a
-    //    programmer error, not a silent default.
-    let inputs_keys: HashSet<&str> = initial_inputs.keys().map(|s| s.as_str()).collect();
-    let flags_keys: HashSet<&str> = initial_is_sequence.keys().map(|s| s.as_str()).collect();
-    let missing_flags: Vec<&str> = inputs_keys.difference(&flags_keys).copied().collect();
-    if !missing_flags.is_empty() {
-        return Err(ExecutionError::HostError(format!(
-            "execute_dag: initial_is_sequence is missing entries for input \
-             node(s) {:?}. Every entry in `initial_inputs` requires an \
-             explicit sequence/scalar flag — see floom-engine's `resolve_inputs` \
-             for the canonical population pattern.",
-            missing_flags,
-        )));
-    }
-    let extra_flags: Vec<&str> = flags_keys.difference(&inputs_keys).copied().collect();
-    if !extra_flags.is_empty() {
-        return Err(ExecutionError::HostError(format!(
-            "execute_dag: initial_is_sequence has flag(s) for node(s) \
-             {:?} that are not present in `initial_inputs`. Either drop \
-             the stale flags or supply the matching input data.",
-            extra_flags,
-        )));
-    }
-    for (node, data) in initial_inputs {
-        // unwrap is sound: presence checked exhaustively above.
-        let is_seq = *initial_is_sequence
-            .get(&node)
-            .expect("initial_is_sequence key set verified above");
-        ctx.set_node_is_sequence(node.clone(), is_seq);
-        let bytes = data.into_bytes().await?;
-        ctx.set_node_data(node, bytes);
-    }
-    // Run the single shared segment executor. The reference path has no config
-    // service, so the activity timeout comes from the terminal cap's metadata
-    // (the same key the engine reads), defaulting when absent. No disk writer and
-    // no flow observer — those are engine concerns the reference path does not carry.
-    let activity_timeout_secs = segment_activity_timeout(graph);
-
-    // Protocol trace label: the segment's terminal cap URN (its output anchor).
-    // Computed once, shared by the live sampler and the final snapshot.
-    let trace_label = trace_sink.as_ref().map(|_| {
-        graph
-            .edges
-            .last()
-            .map(|e| e.cap_urn.clone())
-            .unwrap_or_else(|| "empty-graph".to_string())
-    });
-
-    // Live protocol sampler: while the segment runs, sample the switch's L8
-    // snapshot every 250ms and append it (deduped) so a segment that HANGS still
-    // leaves a line at the stall point — the last line before the harness kills
-    // it shows the stalled active request with its per-stream credit/flow
-    // counters. A live sample's write failure is logged and swallowed: a mid-run
-    // trace hiccup must never abort execution (only the final snapshot is
-    // fail-hard). Aborted the moment the segment returns.
-    let trace_sampler = match (&trace_sink, &trace_label) {
-        (Some(sink), Some(label)) => {
-            let switch = ctx.switch().clone();
-            let sink = sink.clone();
-            let label = label.clone();
-            Some(tokio::spawn(async move {
-                let mut ticker = tokio::time::interval(std::time::Duration::from_millis(250));
-                loop {
-                    ticker.tick().await;
-                    let stats = switch.protocol_stats().await;
-                    if let Err(e) = sink.record_deduped(&stats, &label).await {
-                        tracing::debug!(
-                            error = %e, segment = %label,
-                            "protocol trace live sample failed (continuing)"
-                        );
-                    }
-                }
-            }))
-        }
-        _ => None,
-    };
-
-    // Reference/in-memory path: no writer factory (nothing persists to disk) and no
-    // persisted sinks, so every terminal is returned as in-memory items. No flow
-    // observer — that is an engine concern.
-    let out = run_dag_on_context(
-        &mut ctx,
-        graph,
-        cap_arguments,
-        progress_fn,
-        None,
-        Some(log_fn),
-        None,
-        None,
-        None,
-        &HashSet::new(),
-        activity_timeout_secs,
-        None,
-        None,
-        None,
-    )
-    .await;
-
-    // The segment is done — stop the live sampler before the final snapshot so
-    // they cannot race on the same file. Awaiting the aborted handle yields a
-    // cancellation `JoinError`, which is expected and ignored.
-    if let Some(handle) = trace_sampler {
-        handle.abort();
-        let _ = handle.await;
-    }
-
-    // Final end-of-segment snapshot: capture the switch's L8 snapshot once more
-    // before teardown, on BOTH the success and failure paths, so the terminal
-    // state is on disk even if the last transition happened between live samples.
-    // Routed through `record_deduped` so it does not duplicate the last sample.
-    // Unlike the live path, this one is fail-hard: the user asked for a trace, so
-    // a final line that cannot be written is surfaced.
-    if let (Some(sink), Some(label)) = (&trace_sink, &trace_label) {
-        let stats = ctx.switch().protocol_stats().await;
-        if let Err(e) = sink.record_deduped(&stats, label).await {
-            match &out {
-                // Success path: the user asked for a trace and it could not be
-                // written — surface it hard rather than silently dropping the line.
-                Ok(_) => {
-                    let _ = ctx.shutdown();
-                    return Err(ExecutionError::HostError(format!(
-                        "protocol trace write failed for segment '{label}': {e}"
-                    )));
-                }
-                // Failure path: the segment already failed loudly; that error is
-                // the primary signal and stays the return value, but the trace
-                // failure is not swallowed — it is logged.
-                Err(_) => {
-                    tracing::error!(
-                        error = %e, segment = %label,
-                        "protocol trace write failed on the segment error path"
-                    );
-                }
-            }
-        }
-    }
-
-    // Tear down the per-run cartridge hosts regardless of outcome.
-    let _ = ctx.shutdown();
-    out
 }
 
 #[cfg(test)]
@@ -4271,82 +4132,254 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// Minimal ResolvedEdge for segment-detection tests.
-    fn edge(from: &str, to: &str, urn: &str) -> ResolvedEdge {
-        let cap_urn = CapUrn::from_string(urn).expect("test cap URN");
-        let cap = Cap::new(cap_urn, "t".to_string(), vec!["t".to_string()]);
-        ResolvedEdge {
-            token_id: format!("{}->{}", from, to).parse().unwrap(),
-            from: from.to_string(),
-            to: to.to_string(),
+    /// A step for chain tests: `node` runs `urn`, fed on its main input by
+    /// `from` (none for a step nothing is wired into).
+    fn step(node: &str, urn: &str, from: Option<&str>) -> ResolvedStep {
+        let cap_urn = crate::CapUrn::from_string(urn).unwrap();
+        let out_media = cap_urn.out_spec().to_string();
+        let mut cap = crate::Cap::new(cap_urn.clone(), "t".to_string(), vec!["t".to_string()]);
+        cap.outputs = vec![crate::cap::definition::CapOutput::new(
+            out_media.clone(),
+            "output",
+            "out".to_string(),
+        )];
+        ResolvedStep {
+            token_id: format!("tok-{node}").parse().unwrap(),
+            node: node.to_string(),
             cap_urn: urn.to_string(),
             cap,
-            in_media: "media:".to_string(),
-            out_media: "media:".to_string(),
+            inputs: from
+                .map(|from| crate::orchestrator::types::StepInput {
+                    stream_urn: cap_urn.in_spec().to_string(),
+                    source: StepSource::Node(from.to_string()),
+                })
+                .into_iter()
+                .collect(),
+            outputs: Vec::new(),
+            out_media,
+            policy: crate::machine::StepPolicy::default(),
         }
     }
 
-    // TEST1433: a multi-edge group (fan-in / gather) ALWAYS heads its own
-    // chain — mid-chain streaming forwards exactly one producer stream, so a
-    // multi-input invocation must be fed from materialised node_data. A
-    // single-edge group with one dedicated producer still chains linearly.
-    #[test]
-    fn test1433_multi_edge_group_heads_a_chain() {
-        // Gather shape: in→A, in2→B, then (A, B) → C on one cap.
-        let cap_c = "cap:in=\"media:enc=utf-8\";fold;out=\"media:enc=utf-8;ext=txt\"";
-        let edges = vec![
-            edge(
-                "in",
-                "A",
-                "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"",
-            ),
-            edge(
-                "in2",
-                "B",
-                "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8\"",
-            ),
-            edge("A", "C", cap_c),
-            edge("B", "C", cap_c),
-        ];
-        let groups = build_edge_groups(&edges);
-        assert_eq!(groups.len(), 3, "A, B, and the two-edge C group");
-        let order = topological_sort_groups(&groups).expect("acyclic");
-        let chains = decompose_group_chains(&groups, &order);
-        assert_eq!(
-            chains.len(),
-            3,
-            "the gather group must head its own chain, never continue A's or B's"
-        );
-        // Every chain containing the C group contains ONLY the C group.
-        let c_idx = groups.iter().position(|g| g.to == "C").expect("C group");
-        let c_chain = chains
-            .iter()
-            .find(|ch| ch.contains(&c_idx))
-            .expect("C chained");
-        assert_eq!(c_chain, &vec![c_idx]);
+    const OP_A: &str = "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"";
+    const OP_B: &str = "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8\"";
+    const OP_D: &str = "cap:in=\"media:enc=utf-8\";op-d;out=\"media:enc=utf-8;ext=txt\"";
+    const FOLD: &str = "cap:in=\"media:enc=utf-8\";fold;out=\"media:enc=utf-8;ext=txt\"";
 
-        // Control: a plain linear chain still fuses.
-        let linear = vec![
-            edge(
-                "in",
-                "A",
-                "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"",
-            ),
-            edge(
-                "A",
-                "D",
-                "cap:in=\"media:enc=utf-8\";op-d;out=\"media:enc=utf-8;ext=txt\"",
-            ),
-        ];
-        let groups = build_edge_groups(&linear);
-        let order = topological_sort_groups(&groups).expect("acyclic");
-        let chains = decompose_group_chains(&groups, &order);
+    fn chains_of(steps: &[ResolvedStep], keep: &[&str]) -> Vec<Vec<String>> {
+        let order = topological_sort_steps(steps).expect("acyclic");
+        let keep: HashSet<String> = keep.iter().map(|s| s.to_string()).collect();
+        decompose_step_chains(steps, &order, &keep)
+            .into_iter()
+            .map(|chain| chain.into_iter().map(|i| steps[i].node.clone()).collect())
+            .collect()
+    }
+
+    // TEST1433: a step fed by a gather ALWAYS heads its own chain — a
+    // pipelined hop forwards exactly one producer stream, so a gather must be
+    // fed from materialised values. So does a step with a second input
+    // stream. A step with one dedicated producer still chains.
+    #[test]
+    fn test1433_a_gather_or_a_second_input_heads_a_chain() {
+        // Gather shape: in→A, in2→B, then (A, B) gathered → C.
+        let mut c = step("C", FOLD, None);
+        c.inputs.push(crate::orchestrator::types::StepInput {
+            stream_urn: "media:enc=utf-8".to_string(),
+            source: StepSource::Gather(vec!["A".to_string(), "B".to_string()]),
+        });
+        let steps = vec![step("A", OP_A, Some("in")), step("B", OP_B, Some("in2")), c];
         assert_eq!(
-            chains.len(),
-            1,
-            "a dedicated single-edge consumer fuses into one chain"
+            chains_of(&steps, &[]),
+            vec![vec!["A".to_string()], vec!["B".to_string()], vec!["C".to_string()]],
+            "the gathered step heads its own chain, never continuing A's or B's"
         );
-        assert_eq!(chains[0].len(), 2);
+
+        // A gather of ONE member is still a gather: its value is delivered as
+        // a one-item sequence, not forwarded as it streams.
+        let mut d = step("D", OP_D, None);
+        d.inputs.push(crate::orchestrator::types::StepInput {
+            stream_urn: "media:enc=utf-8".to_string(),
+            source: StepSource::Gather(vec!["A".to_string()]),
+        });
+        assert_eq!(
+            chains_of(&[step("A", OP_A, Some("in")), d], &[]),
+            vec![vec!["A".to_string()], vec!["D".to_string()]]
+        );
+
+        // Two input streams: the main input from A and an arg from a graph input.
+        let mut d = step("D", OP_D, Some("A"));
+        d.inputs.push(crate::orchestrator::types::StepInput {
+            stream_urn: "media:context".to_string(),
+            source: StepSource::Node("ctx".to_string()),
+        });
+        assert_eq!(
+            chains_of(&[step("A", OP_A, Some("in")), d], &[]),
+            vec![vec!["A".to_string()], vec!["D".to_string()]]
+        );
+
+        // Control: a dedicated single-stream consumer fuses into one chain,
+        // whatever order the steps are listed in.
+        let linear = vec![step("D", OP_D, Some("A")), step("A", OP_A, Some("in"))];
+        assert_eq!(chains_of(&linear, &[]), vec![vec!["A".to_string(), "D".to_string()]]);
+        // And a step nothing is wired into heads a chain it can be the whole of.
+        assert_eq!(
+            chains_of(&[step("now", "cap:in=\"media:void\";now;out=\"media:stamp\"", None)], &[]),
+            vec![vec!["now".to_string()]]
+        );
+    }
+
+    // TEST12758: a hop is pipelined only when nothing else needs what the
+    // producer emits and nothing about the hop can change once it has begun.
+    // Each of these breaks the chain A→D into two: a second reader of A; an
+    // output of A other than its main one that something takes; a reader of A
+    // outside the graph; a main output of A that may not fire; a policy on
+    // either step.
+    #[test]
+    fn test12758_a_hop_is_pipelined_only_when_nothing_else_needs_it() {
+        let apart = vec![vec!["A".to_string()], vec!["D".to_string()]];
+        let base = || vec![step("A", OP_A, Some("in")), step("D", OP_D, Some("A"))];
+        assert_eq!(chains_of(&base(), &[]), vec![vec!["A".to_string(), "D".to_string()]]);
+
+        // A second reader of A.
+        let mut steps = base();
+        steps.push(step("E", FOLD, Some("A")));
+        assert_eq!(
+            chains_of(&steps, &[]),
+            vec![vec!["A".to_string()], vec!["D".to_string()], vec!["E".to_string()]]
+        );
+
+        // Another output of A that something takes (here, nothing in the graph
+        // reads it: it is kept for a reader elsewhere).
+        let mut steps = base();
+        steps[0].outputs.push(crate::orchestrator::types::StepOutput {
+            output_media_urn: "media:rest".to_string(),
+            node: "A.rest".to_string(),
+        });
+        assert_eq!(chains_of(&steps, &[]), apart);
+
+        // D reads A's other output, not its main one: not a hop of A's main stream.
+        let mut steps = base();
+        steps[0].outputs.push(crate::orchestrator::types::StepOutput {
+            output_media_urn: "media:enc=utf-8;rest".to_string(),
+            node: "A.rest".to_string(),
+        });
+        steps[1].inputs[0].source = StepSource::Node("A.rest".to_string());
+        assert_eq!(chains_of(&steps, &[]), apart);
+
+        // Something outside the graph reads A.
+        assert_eq!(chains_of(&base(), &["A"]), apart);
+        // ...while keeping D, the chain's last step, changes nothing.
+        assert_eq!(chains_of(&base(), &["D"]), vec![vec!["A".to_string(), "D".to_string()]]);
+
+        // A's main output may not fire.
+        let mut steps = base();
+        steps[0].cap.outputs[0].optional = true;
+        assert_eq!(chains_of(&steps, &[]), apart);
+
+        // A policy on the producer, and on the consumer.
+        for which in [0, 1] {
+            for policy in [
+                crate::machine::StepPolicy { retry: 1, on_error: crate::machine::OnError::Fail },
+                crate::machine::StepPolicy { retry: 0, on_error: crate::machine::OnError::Absent },
+            ] {
+                let mut steps = base();
+                steps[which].policy = policy;
+                assert_eq!(chains_of(&steps, &[]), apart, "policy {policy:?} on step {which}");
+            }
+        }
+    }
+
+    // TEST12759: steps are ordered so that a step follows every step that
+    // produces something it reads — its main output or another — the same way
+    // every time, and a graph in which steps wait on one another is refused.
+    #[test]
+    fn test12759_steps_are_ordered_by_what_they_read() {
+        let mut a = step("A", OP_A, Some("in"));
+        a.outputs.push(crate::orchestrator::types::StepOutput {
+            output_media_urn: "media:enc=utf-8;rest".to_string(),
+            node: "A.rest".to_string(),
+        });
+        // E reads A's other output; D reads A's main one; listed consumers first.
+        let steps = vec![step("E", FOLD, Some("A.rest")), step("D", OP_D, Some("A")), a];
+        let order = topological_sort_steps(&steps).unwrap();
+        assert_eq!(order, vec![2, 0, 1]);
+        assert_eq!(topological_sort_steps(&steps).unwrap(), order, "the same every time");
+
+        let cyclic = vec![step("A", OP_D, Some("B")), step("B", OP_D, Some("A"))];
+        assert!(topological_sort_steps(&cyclic).is_err());
+        let own = vec![step("A", OP_D, Some("A"))];
+        assert!(topological_sort_steps(&own).is_err(), "a step that reads what it produces");
+    }
+
+    // TEST12760: a failure signal is raised once — the first cause stands —
+    // and whoever waits on it is told, whether they began waiting before or
+    // after it was raised. A scope inside another is told of the outer
+    // failure and keeps its own to itself.
+    #[tokio::test]
+    async fn test12760_the_first_failure_is_the_cause() {
+        use crate::failure::AttributionClass;
+        let cancel = RunCancel::new();
+        assert_eq!(cancel.cause(), None);
+        let early = {
+            let cancel = cancel.clone();
+            tokio::spawn(async move { cancel.raised().await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!early.is_finished(), "nothing has failed yet");
+
+        let first = CollateralCause { class: AttributionClass::Resource, detail: "first".to_string() };
+        cancel.raise(first.clone());
+        cancel.raise(CollateralCause { class: AttributionClass::Input, detail: "second".to_string() });
+        assert_eq!(cancel.cause(), Some(first.clone()));
+        assert_eq!(early.await.unwrap(), first);
+        assert_eq!(cancel.raised().await, first, "a late waiter is told at once");
+
+        // A scope inside another: raised when the outer one is — with the
+        // outer cause — and raised on its own without raising the outer.
+        let outer = RunCancel::new();
+        let inner = outer.child();
+        let sibling = outer.child();
+        let inner_cause = CollateralCause { class: AttributionClass::Internal, detail: "inner".to_string() };
+        inner.raise(inner_cause.clone());
+        assert_eq!(inner.cause(), Some(inner_cause.clone()));
+        assert_eq!(inner.raised().await, inner_cause);
+        assert_eq!(outer.cause(), None, "a failure inside does not fail what is around it");
+        assert_eq!(sibling.cause(), None, "nor what is beside it");
+        let waiting = {
+            let sibling = sibling.clone();
+            tokio::spawn(async move { sibling.raised().await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        let outer_cause = CollateralCause { class: AttributionClass::Environment, detail: "outer".to_string() };
+        outer.raise(outer_cause.clone());
+        assert_eq!(waiting.await.unwrap(), outer_cause);
+        assert_eq!(sibling.cause(), Some(outer_cause.clone()));
+        assert_eq!(
+            inner.cause(),
+            Some(outer_cause.clone()),
+            "what is inside a failed scope is that failure's collateral"
+        );
+        assert_eq!(outer.child().child().raised().await, outer_cause, "at any depth");
+
+        // What a failure is the cause of: its class, its step and its reason.
+        let failure = ExecutionError::CartridgeExecutionFailed {
+            cap_urn: "cap:x".to_string(),
+            code: Some("E_FULL".to_string()),
+            class: AttributionClass::Resource,
+            details: "disk full".to_string(),
+            arg_urn: None,
+        }
+        .at_step(&"tok-7".parse().unwrap());
+        let cause = CollateralCause::of(&failure);
+        assert_eq!(cause.class, AttributionClass::Resource);
+        assert_eq!(cause.detail, "step tok-7 (cap:x) failed: disk full");
+        // And what is stopped because of it is not a failure of its own.
+        let stopped = ExecutionError::Collateral { class: cause.class, detail: cause.detail.clone() };
+        assert!(stopped.is_collateral());
+        assert_eq!(stopped.attribution_class(), AttributionClass::Resource);
+        assert!(stopped.at_step(&"tok-9".parse().unwrap()).is_collateral());
+        assert!(!failure.is_collateral());
     }
 
     // TEST1125: map_progress clamps child to [0.0, 1.0] and maps to [base, base+weight]

@@ -8,8 +8,12 @@
 //!   test ←→ RelaySwitch ←→ RelaySlave ←→ CartridgeHostRuntime ←→ testcartridge
 //! ```
 //!
-//! using the same harness as `orchestrator_integration.rs` (testcartridge is
-//! auto-built at test runtime if missing or outdated).
+//! by the path a machine takes outside the tests — notation → plan →
+//! `execute_plan` on a `CliRuntime` (`support::Machines`) — and, where a test
+//! needs the switch itself (protocol stats, negotiated limits, a second
+//! master), by running the plan's steps on a context it holds. The registry
+//! is the cartridge's own manifest. The test cartridge is built by cargo,
+//! against this capdag, once per test binary.
 //!
 //! # Spec coverage (docs/capdag-improvement/05-parity-test-spec.md,
 //! "Remaining as end-to-end scenarios")
@@ -46,22 +50,19 @@
 
 mod support;
 
-use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
 use capdag::orchestrator::{
-    execute_dag, parse_machine_to_cap_dag, CapProgressFn, CartridgeManager, ExecutionContext,
-    NodeData,
+    plan_to_resolved_graph, CartridgeManager, ExecutionContext, ResolvedGraph, ResolvedNotation,
 };
 use capdag::{
-    Cap, CapUrn, FabricRegistry, FrameReader, FrameWriter, Limits, PipelineLogFn,
-    RelayNotifyCapabilitiesPayload, RelaySlave, StreamMeta, DEFAULT_INITIAL_CREDIT,
+    FrameReader, FrameWriter, Limits, PipelineLogFn, RelayNotifyCapabilitiesPayload, RelaySlave,
+    DEFAULT_INITIAL_CREDIT,
 };
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tempfile::TempDir;
+use support::{Given, Machines};
 use tokio::io::{BufReader, BufWriter};
+
+const TAG: &str = "ProtocolE2ETest";
 
 // =============================================================================
 // Cap URNs under test (must match testcartridge's manifest verbatim)
@@ -69,50 +70,19 @@ use tokio::io::{BufReader, BufWriter};
 
 const CAP_STREAM_N_CHUNKS: &str = r#"cap:in="media:enc=utf-8;count-spec";test-stream-n-chunks;out="media:enc=utf-8;chunk-stream""#;
 const CAP_SLOW_CONSUME: &str = r#"cap:in="media:enc=utf-8;chunk-stream";test-slow-consume;out="media:enc=utf-8;consume-report""#;
+/// Echoes ONE value, chunk by chunk as it arrives.
 const CAP_ECHO_STREAM: &str =
     r#"cap:in="media:enc=utf-8;chunk-stream";test-echo-stream;out="media:enc=utf-8;echoed-stream""#;
+/// The same handler over a SEQUENCE of items.
+const CAP_ECHO_ITEMS: &str =
+    r#"cap:in="media:enc=utf-8;chunk-stream";test-echo-items;out="media:enc=utf-8;echoed-items""#;
 
 // =============================================================================
-// Log capture — every pipeline log/progress event, in arrival order
+// Payloads
 // =============================================================================
 
-/// Captured (cap_urn, level, message) triples in the order the engine
-/// delivered them. Ordering assertions (TEST7076) key on this sequence.
-type CapturedLogs = Arc<Mutex<Vec<(String, String, String)>>>;
-
-fn capturing_log_fn() -> (PipelineLogFn, CapturedLogs) {
-    let events: CapturedLogs = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&events);
-    let log_fn: PipelineLogFn = Arc::new(move |record| {
-        let cap_urn = record.cap_urn.unwrap_or_else(|| "machine".to_string());
-        eprintln!(
-            "[V4E2ELog][{}] {} {}",
-            record.level, cap_urn, record.message
-        );
-        sink.lock()
-            .unwrap()
-            .push((cap_urn, record.level, record.message));
-    });
-    (log_fn, events)
-}
-
-fn capturing_progress_fn(events: &CapturedLogs) -> CapProgressFn {
-    let sink = Arc::clone(events);
-    Arc::new(move |_progress, cap_urn, message| {
-        sink.lock().unwrap().push((
-            cap_urn.to_string(),
-            "progress".to_string(),
-            message.to_string(),
-        ));
-    })
-}
-
-// =============================================================================
-// Deterministic payloads (kept in sync with testcartridge/src/main.rs)
-// =============================================================================
-
-/// The exact ~1KB chunk `test-stream-n-chunks` emits for index `i`.
-/// Must stay byte-identical to `stream_chunk_payload` in
+/// Chunk payload produced by testcartridge's `test-stream-n-chunks` for
+/// index `i` — MUST stay byte-identical to `stream_chunk_payload` in
 /// mfab-tests/testcartridge/src/main.rs.
 fn stream_chunk_payload(i: usize) -> Vec<u8> {
     let mut s = format!("chunk-{:05}:", i);
@@ -122,7 +92,7 @@ fn stream_chunk_payload(i: usize) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// Expected concatenated output of `test-stream-n-chunks` for count `n`.
+/// The full expected output of `test-stream-n-chunks` for `n` chunks.
 fn expected_stream_output(n: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(n * 1024);
     for i in 0..n {
@@ -131,120 +101,133 @@ fn expected_stream_output(n: usize) -> Vec<u8> {
     out
 }
 
-/// Build a sequence-mode initial input of `n` 1024-byte items.
-/// Returns (RFC 8742 CBOR sequence of Bytes items, concatenated raw bytes).
-/// In sequence mode each item is sent as ONE CHUNK frame, so n > 32 exceeds
-/// the default initial_credit window and forces credit stall/resume.
-fn sequence_items(n: usize) -> (Vec<u8>, Vec<u8>) {
-    let mut seq = Vec::new();
-    let mut concat = Vec::new();
-    for i in 0..n {
-        let mut s = format!("item-{:05}:", i);
-        while s.len() < 1024 {
-            s.push('y');
-        }
-        let bytes = s.into_bytes();
-        concat.extend_from_slice(&bytes);
-        ciborium::into_writer(&ciborium::Value::Bytes(bytes), &mut seq)
-            .expect("CBOR-encode sequence item");
-    }
-    (seq, concat)
+/// `n` distinct 1024-byte items. An engine sends a sequence one frame per
+/// item, so `n` above the window exercises credit.
+fn sequence_items(n: usize) -> Vec<Vec<u8>> {
+    (0..n)
+        .map(|i| {
+            let mut s = format!("item-{:05}:", i);
+            while s.len() < 1024 {
+                s.push('y');
+            }
+            s.into_bytes()
+        })
+        .collect()
 }
 
 // =============================================================================
-// Test cap registry (same construction pattern as orchestrator_integration.rs)
+// Running a machine's steps on a context the test holds
 // =============================================================================
 
-/// Build a `Cap` from a cap URN string with one stdin arg matching its
-/// `in=` spec so the resolver's source-to-cap-arg matching can succeed.
-fn build_testcartridge_cap(urn_str: &str) -> Cap {
-    let cap_urn = CapUrn::from_string(urn_str).expect("Invalid test cap URN");
-    let in_spec = cap_urn.in_spec().to_string();
-    let out_spec = cap_urn.out_spec().to_string();
-    Cap {
-        urn: cap_urn.clone(),
-        version: 1,
-        title: format!(
-            "Test {}",
-            cap_urn.get_tag("op").map_or("unknown", |s| s.as_str())
-        ),
-        cap_description: None,
-        documentation: None,
-        metadata: HashMap::new(),
-        aliases: vec!["testcartridge".to_string()],
-        is_abstract: false,
-        args: vec![CapArg::new(
-            in_spec.clone(), "input",
-            true,
-            vec![ArgSource::Stdin { stdin: in_spec }],
-        )],
-        outputs: vec![CapOutput::new(out_spec, "output", "testcartridge output".to_string())],
-        metadata_json: None,
-        registered_by: None,
-        supported_model_types: Vec::new(),
-        default_model_spec: None,
-    }
+/// A one-step machine, ready to run on an `ExecutionContext`: its step, the
+/// node its input is put at and the node the step's result is read from.
+struct OnContext {
+    ctx: ExecutionContext,
+    graph: ResolvedGraph,
+    input: String,
+    output: String,
+    _dir: tempfile::TempDir,
 }
 
-/// Unified `FabricRegistry` pre-loaded with the testcartridge caps.
-fn create_v4_fabric_registry() -> Arc<FabricRegistry> {
-    let registry = FabricRegistry::new_for_test();
-    let caps = vec![
-        build_testcartridge_cap(CAP_STREAM_N_CHUNKS),
-        build_testcartridge_cap(CAP_SLOW_CONSUME),
-        build_testcartridge_cap(CAP_ECHO_STREAM),
-    ];
-    registry.add_caps_to_cache(caps);
-    Arc::new(registry)
-}
+/// Resolve and plan the one-input machine `notation`, and attach the test
+/// cartridge to a fresh context — the manual counterpart of what a runtime
+/// sets up, for tests that need the switch (protocol stats, negotiated
+/// limits, extra masters).
+async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool) -> OnContext {
+    let resolved = ResolvedNotation::resolve(notation, machines.registry.clone())
+        .await
+        .expect("the notation resolves");
+    let inputs = resolved.inputs().expect("inputs");
+    assert_eq!(inputs.len(), 1, "these machines take one input");
+    let sequences: HashSet<String> = if input_is_sequence {
+        HashSet::from([inputs[0].name.clone()])
+    } else {
+        HashSet::new()
+    };
+    let strand = resolved.plan(0, &sequences).await.expect("the machine plans");
+    let graph = plan_to_resolved_graph(&strand.plan, &machines.registry).expect("the plan converts");
+    let input = strand.input_slots[&inputs[0].name].clone();
+    // These machines are one step: its node is where its main output is.
+    assert_eq!(graph.steps.len(), 1, "these machines are one step");
+    let output = graph.steps[0].node.clone();
+    let cap_urns: Vec<&str> = graph.steps.iter().map(|step| step.cap_urn.as_str()).collect();
 
-// =============================================================================
-// testcartridge binary harness (mirrors orchestrator_integration.rs)
-// =============================================================================
-
-/// The testcartridge binary, built against this capdag (see `support`).
-fn testcartridge_bin() -> PathBuf {
-    support::testcartridge_bin("ProtocolE2ETest")
-}
-
-fn setup_test_env() -> (TempDir, PathBuf, Vec<PathBuf>) {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let cartridge_dir = temp_dir.path().join("cartridges");
-    fs::create_dir_all(&cartridge_dir).expect("Failed to create cartridge dir");
-    (temp_dir, cartridge_dir, vec![testcartridge_bin()])
-}
-
-/// Build an `ExecutionContext` with the testcartridge attached as a
-/// cartridge host — the manual-context counterpart of `execute_dag`'s
-/// setup phase, for tests that need direct access to the switch
-/// (protocol stats, negotiated limits, extra masters).
-async fn setup_execution_context(
-    cartridge_dir: PathBuf,
-    dev_binaries: Vec<PathBuf>,
-    cap_urns: &[&str],
-) -> ExecutionContext {
+    let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+    let cartridge_dir = dir.path().join("cartridges");
+    std::fs::create_dir_all(&cartridge_dir).expect("Failed to create cartridge dir");
     let mut manager = CartridgeManager::new(
         cartridge_dir,
         None,
         capdag::CartridgeChannel::Release,
         capdag::FABRIC_MANIFEST_VERSION,
-        dev_binaries,
+        vec![support::testcartridge_bin(TAG)],
         None,
         capdag::RegistryConfig::default().registry_base_url,
     );
     manager.init().await.expect("CartridgeManager init failed");
     let cartridges = manager
-        .resolve_cartridges(cap_urns)
+        .resolve_cartridges(&cap_urns)
         .await
         .expect("resolve_cartridges failed");
-
-    let mut ctx = ExecutionContext::new(create_v4_fabric_registry())
+    let mut ctx = ExecutionContext::new(machines.registry.clone())
         .await
         .expect("ExecutionContext::new failed");
     ctx.add_cartridge_host(cartridges)
         .await
         .expect("add_cartridge_host failed");
-    ctx
+    OnContext {
+        ctx,
+        graph,
+        input,
+        output,
+        _dir: dir,
+    }
+}
+
+impl OnContext {
+    /// Run the machine's step on the context, which stays the test's: the
+    /// switch is live afterwards. Returns what the step produced.
+    async fn run(&mut self, limit: Duration) -> Vec<u8> {
+        let log_fn: PipelineLogFn = std::sync::Arc::new(|record| {
+            eprintln!(
+                "[ProtocolE2E][{}] {} {}",
+                record.level,
+                record.cap_urn.as_deref().unwrap_or("machine"),
+                record.message
+            );
+        });
+        let outputs = tokio::time::timeout(
+            limit,
+            capdag::run_dag_on_context(
+                &mut self.ctx,
+                &self.graph,
+                &HashMap::new(),
+                None,
+                None,
+                Some(&log_fn),
+                None,
+                None,
+                None,
+                &HashSet::new(),
+                120,
+                None,
+                // Transient capture is engine-only: this protocol test runs
+                // the steps directly, with no run-artifact root and nothing
+                // to publish to.
+                None,
+                None,
+                None,
+            ),
+        )
+        .await
+        .expect("DEADLOCK: the run did not complete within its limit")
+        .expect("Execution failed");
+        outputs
+            .node_data
+            .get(&self.output)
+            .unwrap_or_else(|| panic!("nothing was produced at '{}'", self.output))
+            .concat()
+    }
 }
 
 // =============================================================================
@@ -255,53 +238,27 @@ async fn setup_execution_context(
 // engine's stream send (observed pause on the engine wire).
 //
 // E2E form of the law: the wire pause itself is asserted at the substrate
-// layer (TEST7050); here the observable contract is that a 100-chunk
+// layer (TEST7050); here the observable contract is that a 100-item
 // sequence input — 3x the 32-chunk initial window — flows COMPLETELY and
 // CORRECTLY through a deliberately slow consumer. If input-direction
 // grants broke, the engine's send gate would stall forever (timeout
 // fails the test); if the engine ignored the window, the cartridge would
 // terminate with ERR CREDIT_VIOLATION (execution fails); if items were
-// dropped, the count/bytes report would differ.
+// dropped, the count/bytes report would differ. The consumer takes a
+// sequence, so the hundred items are ONE request — a step that took one
+// value would be run a hundred times, each well inside the window.
 #[tokio::test]
 async fn test7054_slow_consumer_throttles_input_send() {
-    let registry = create_v4_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = format!(
-        "\n[slow_consume {}]\n[input -> slow_consume -> output]\n",
-        CAP_SLOW_CONSUME
-    );
-    let graph = parse_machine_to_cap_dag(&route, &*registry)
-        .await
-        .expect("Parse failed");
+    let machines = Machines::new(TAG);
+    let notation = format!("[slow_consume {CAP_SLOW_CONSUME}]\n[input -> slow_consume -> output]\n");
 
     // 100 items x 1024 bytes, one CHUNK frame each (> 32-chunk window).
-    let (seq, _concat) = sequence_items(100);
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::Bytes(seq));
-    let mut initial_is_sequence = HashMap::new();
-    initial_is_sequence.insert("input".to_string(), true);
-
-    let (log_fn, events) = capturing_log_fn();
-    let progress_fn = capturing_progress_fn(&events);
-    let outputs = tokio::time::timeout(
+    let items = sequence_items(100);
+    let items: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
+    support::testcartridge_bin(TAG);
+    let ran = tokio::time::timeout(
         Duration::from_secs(120),
-        execute_dag(
-            &graph,
-            cartridge_dir,
-            None,
-            capdag::CartridgeChannel::Release,
-            capdag::FABRIC_MANIFEST_VERSION,
-            initial_inputs,
-            initial_is_sequence,
-            dev_binaries,
-            None,
-            create_v4_fabric_registry(),
-            Some(&progress_fn),
-            &log_fn,
-            &HashMap::new(),
-            None,
-        ),
+        machines.run(&notation, &[("input", Given::Many(&items))]),
     )
     .await
     .expect(
@@ -309,20 +266,23 @@ async fn test7054_slow_consumer_throttles_input_send() {
          complete within 120s — input-direction credit grants are not \
          reaching the engine's send gate (L14)",
     )
-    .expect("Execution failed")
-    .node_data;
+    .expect("Execution failed");
 
-    // Scalar terminal: the slow-consume cap emits a single report item.
-    let output = outputs.get("output").expect("No output node").concat();
-    let report = String::from_utf8(output).expect("Invalid UTF-8 report");
+    // One value: the slow-consume cap emits a single report.
     assert_eq!(
-        report, "count=100;bytes=102400",
+        ran.text("output"),
+        "count=100;bytes=102400",
         "slow consumer must observe every item of the >window input exactly once"
+    );
+    assert_eq!(
+        ran.plan.nodes.values().filter(|node| node.is_cap()).count(),
+        1,
+        "one request took the whole sequence"
     );
 
     // Terminal metadata on END (L3/L5): the handler's finish() message must
     // arrive end-to-end as the final progress event.
-    let events = events.lock().unwrap().clone();
+    let events = machines.logs.lock().unwrap().clone();
     assert!(
         events.iter().any(|(urn, level, msg)| {
             urn.contains("test-slow-consume")
@@ -339,7 +299,7 @@ async fn test7054_slow_consumer_throttles_input_send() {
 // output) completes without deadlock at window 2.
 //
 // The window-2 wire variant is the substrate test; at e2e scale the
-// negotiated window is 32 chunks and the input is 100 chunks (>3x the
+// negotiated window is 32 chunks and the input is 100 items (>3x the
 // window), so completion is only possible when the engine feeds input
 // concurrently with collecting output (L15) and credit flows in BOTH
 // directions (L14). A deadlock hangs; the timeout converts it into a
@@ -347,39 +307,16 @@ async fn test7054_slow_consumer_throttles_input_send() {
 // in order.
 #[tokio::test]
 async fn test7056_bidirectional_echo_no_deadlock() {
-    let registry = create_v4_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
+    let machines = Machines::new(TAG);
+    let notation = format!("[echo {CAP_ECHO_ITEMS}]\n[input -> echo -> output]\n");
 
-    let route = format!("\n[echo {}]\n[input -> echo -> output]\n", CAP_ECHO_STREAM);
-    let graph = parse_machine_to_cap_dag(&route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let (seq, concat) = sequence_items(100);
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::Bytes(seq));
-    let mut initial_is_sequence = HashMap::new();
-    initial_is_sequence.insert("input".to_string(), true);
-
-    let (log_fn, events) = capturing_log_fn();
-    let outputs = tokio::time::timeout(
+    let items = sequence_items(100);
+    let concat = items.concat();
+    let items: Vec<&[u8]> = items.iter().map(Vec::as_slice).collect();
+    support::testcartridge_bin(TAG);
+    let ran = tokio::time::timeout(
         Duration::from_secs(120),
-        execute_dag(
-            &graph,
-            cartridge_dir,
-            None,
-            capdag::CartridgeChannel::Release,
-            capdag::FABRIC_MANIFEST_VERSION,
-            initial_inputs,
-            initial_is_sequence,
-            dev_binaries,
-            None,
-            create_v4_fabric_registry(),
-            None,
-            &log_fn,
-            &HashMap::new(),
-            None,
-        ),
+        machines.run(&notation, &[("input", Given::Many(&items))]),
     )
     .await
     .expect(
@@ -388,28 +325,22 @@ async fn test7056_bidirectional_echo_no_deadlock() {
          concurrently with feeding its input (L15), or credit is not flowing \
          in both directions (L14)",
     )
-    .expect("Execution failed")
-    .node_data;
+    .expect("Execution failed");
 
-    // Sequence terminal: the echo cap re-emits each input item; the decoded
-    // items concatenate back to the original payload.
-    let output = outputs.get("output").expect("No output node").concat();
-    assert_eq!(
-        output.len(),
-        concat.len(),
-        "echoed payload length must equal the input length"
-    );
-    assert_eq!(
-        output, concat,
-        "echoed payload must be byte-identical to the input, in order"
-    );
+    // The echo cap writes each input item out as it arrives: one value, the
+    // items end to end.
+    let (produced, is_sequence) = ran.produced("output");
+    assert!(!is_sequence);
+    let output = produced.concat();
+    assert_eq!(output.len(), concat.len(), "echoed payload length must equal the input length");
+    assert!(output == concat, "echoed payload must be byte-identical to the input, in order");
 
     // The echo handler logs on its first item — proof it consumed
     // incrementally rather than buffering to completion.
-    let events = events.lock().unwrap().clone();
+    let events = machines.logs.lock().unwrap().clone();
     assert!(
         events.iter().any(|(urn, _level, msg)| {
-            urn.contains("test-echo-stream") && msg == "echo-stream: first item received"
+            urn.contains("test-echo-items") && msg == "echo-stream: first item received"
         }),
         "echo cap's first-item log must be delivered; captured: {:?}",
         events
@@ -429,60 +360,27 @@ async fn test7056_bidirectional_echo_no_deadlock() {
 // `active` non-empty and fails the test (L7/L13).
 #[tokio::test]
 async fn test7059_terminal_end_releases_credit_and_leaks_no_state() {
-    let registry = create_v4_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
+    let machines = Machines::new(TAG);
+    let notation = format!("[echo {CAP_ECHO_ITEMS}]\n[input -> echo -> output]\n");
+    let mut machine = on_context(&machines, &notation, true).await;
 
-    let route = format!("\n[echo {}]\n[input -> echo -> output]\n", CAP_ECHO_STREAM);
-    let graph = parse_machine_to_cap_dag(&route, &*registry)
-        .await
-        .expect("Parse failed");
+    let items = sequence_items(100);
+    let concat = items.concat();
+    let input = machine.input.clone();
+    machine.ctx.set_node_is_sequence(input.clone(), true);
+    machine.ctx.set_node_data(
+        input,
+        capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(&items)
+            .expect("items wrap as a sequence"),
+    );
 
-    let mut ctx = setup_execution_context(cartridge_dir, dev_binaries, &[CAP_ECHO_STREAM]).await;
-
-    let (seq, concat) = sequence_items(100);
-    ctx.set_node_is_sequence("input".to_string(), true);
-    ctx.set_node_data("input".to_string(), seq);
-
-    let (log_fn, _events) = capturing_log_fn();
-    // `run_dag_on_context` is the ONE shared segment executor (the old
-    // `execute_fanin` is gone). It borrows the context — so the switch stays
-    // live for the post-run leak assertions — and returns the decoded outputs
-    // keyed by node rather than storing them back into the context.
-    let outputs = tokio::time::timeout(
-        Duration::from_secs(120),
-        capdag::run_dag_on_context(
-            &mut ctx,
-            &graph,
-            &HashMap::new(),
-            None,
-            None,
-            Some(&log_fn),
-            None,
-            None,
-            None,
-            &std::collections::HashSet::new(),
-            120,
-            None,
-            // Transient capture is engine-only: this protocol test runs the DAG
-            // directly, with no run-artifact root and nothing to publish to.
-            None,
-            None,
-        ),
-    )
-    .await
-    .expect("TEST7059 DEADLOCK: echo run did not complete within 120s")
-    .expect("Execution failed")
-    .node_data;
+    // The steps run on the test's own context — so the switch stays live for
+    // the post-run leak assertions.
+    let output = machine.run(Duration::from_secs(120)).await;
 
     // The run itself must have been correct — a leak test over a broken run
-    // proves nothing. The sequence terminal's decoded items concatenate back
-    // to the original payload.
-    let output = outputs.get("output").expect("No output node").concat();
-    assert_eq!(
-        output.as_slice(),
-        concat.as_slice(),
-        "echoed payload must round-trip intact before leak assertions"
-    );
+    // proves nothing.
+    assert!(output == concat, "echoed payload must round-trip intact before leak assertions");
 
     // Post-terminal settle: the terminal frame is forwarded to the response
     // channel before routing state is released (L6), but the identity-probe
@@ -490,7 +388,7 @@ async fn test7059_terminal_end_releases_credit_and_leaks_no_state() {
     // fail hard if any request is still registered after the deadline.
     let deadline = Instant::now() + Duration::from_secs(10);
     let stats = loop {
-        let stats = ctx.switch().protocol_stats().await;
+        let stats = machine.ctx.switch().protocol_stats().await;
         if stats.requests.active.is_empty() {
             break stats;
         }
@@ -557,22 +455,12 @@ async fn test7059_terminal_end_releases_credit_and_leaks_no_state() {
 async fn test7061_negotiated_initial_credit_is_min_of_proposals() {
     use capdag::bifaci::local_socket::UnixStream;
 
-    let registry = create_v4_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = format!(
-        "\n[producer {}]\n[input -> producer -> output]\n",
-        CAP_STREAM_N_CHUNKS
-    );
-    let graph = parse_machine_to_cap_dag(&route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let mut ctx =
-        setup_execution_context(cartridge_dir, dev_binaries, &[CAP_STREAM_N_CHUNKS]).await;
+    let machines = Machines::new(TAG);
+    let notation = format!("[producer {CAP_STREAM_N_CHUNKS}]\n[input -> producer -> output]\n");
+    let mut machine = on_context(&machines, &notation, false).await;
 
     // Part 1a: default-vs-default negotiation converges on the default.
-    let negotiated = ctx.limits().await;
+    let negotiated = machine.ctx.limits().await;
     assert_eq!(
         negotiated.initial_credit, DEFAULT_INITIAL_CREDIT,
         "with a real cartridge host attached, both sides propose the default \
@@ -582,44 +470,12 @@ async fn test7061_negotiated_initial_credit_is_min_of_proposals() {
     // Part 1b: a 48-chunk producer (> the 32-chunk window) completes with a
     // byte-perfect payload — the producer's OutputStream can only stream
     // past its initial window via the engine's consumption grants (L9/L10).
-    ctx.set_node_is_sequence("input".to_string(), false);
-    ctx.set_node_data("input".to_string(), b"48".to_vec());
-    let (log_fn, _events) = capturing_log_fn();
-    // Shared segment executor; borrows the context so `ctx` remains usable for
-    // the Part-2 master attachment and limits renegotiation below.
-    let outputs = tokio::time::timeout(
-        Duration::from_secs(120),
-        capdag::run_dag_on_context(
-            &mut ctx,
-            &graph,
-            &HashMap::new(),
-            None,
-            None,
-            Some(&log_fn),
-            None,
-            None,
-            None,
-            &std::collections::HashSet::new(),
-            120,
-            None,
-            // Transient capture is engine-only: this protocol test runs the DAG
-            // directly, with no run-artifact root and nothing to publish to.
-            None,
-            None,
-        ),
-    )
-    .await
-    .expect(
-        "TEST7061 DEADLOCK: 48-chunk producer did not complete within 120s — \
-         the engine's consumption grants are not replenishing the \
-         cartridge's output window (L10)",
-    )
-    .expect("Execution failed")
-    .node_data;
-    let output = outputs.get("output").expect("No output node").concat();
-    assert_eq!(
-        output.as_slice(),
-        expected_stream_output(48).as_slice(),
+    let input = machine.input.clone();
+    machine.ctx.set_node_is_sequence(input.clone(), false);
+    machine.ctx.set_node_data(input, b"48".to_vec());
+    let output = machine.run(Duration::from_secs(120)).await;
+    assert!(
+        output == expected_stream_output(48),
         "48-chunk producer output must arrive intact and in order past the \
          32-chunk initial window"
     );
@@ -648,7 +504,9 @@ async fn test7061_negotiated_initial_credit_is_min_of_proposals() {
             )
             .await;
     });
-    ctx.add_master("low-credit-limits-probe", switch_sock)
+    machine
+        .ctx
+        .add_master("low-credit-limits-probe", switch_sock)
         .await
         .expect("add_master(low-credit-limits-probe) failed");
 
@@ -656,7 +514,7 @@ async fn test7061_negotiated_initial_credit_is_min_of_proposals() {
     // against ordering, then assert hard.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let limits = ctx.limits().await;
+        let limits = machine.ctx.limits().await;
         if limits.initial_credit == 8 {
             break;
         }
@@ -685,7 +543,7 @@ async fn test7061_negotiated_initial_credit_is_min_of_proposals() {
 // item before the upstream cap emits its last.
 //
 // [input -> test-stream-n-chunks -> mid -> test-echo-stream -> output] is a
-// linear chain, so `execute_dag` pipelines it: the intermediate node's data
+// linear chain, so the run pipelines it: the intermediate node's data
 // streams cap-to-cap live and is never materialized. The producer emits 48
 // chunks (> the 32-chunk window) with a progress log per chunk; the echo
 // cap logs on its first consumed item. With credit flowing per hop, the
@@ -703,49 +561,22 @@ async fn test7076_pipelined_chain_downstream_consumes_before_upstream_finishes()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .try_init();
-    let registry = create_v4_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = format!(
-        "\n[producer {}]\n[echo {}]\n[input -> producer -> mid]\n[mid -> echo -> output]\n",
-        CAP_STREAM_N_CHUNKS, CAP_ECHO_STREAM
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "[producer {CAP_STREAM_N_CHUNKS}][echo {CAP_ECHO_STREAM}]\
+         [input -> producer -> mid][mid -> echo -> output]"
     );
-    let graph = parse_machine_to_cap_dag(&route, &*registry)
-        .await
-        .expect("Parse failed");
-    assert_eq!(graph.edges.len(), 2, "chain must resolve to two edges");
 
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::Text("48".to_string()));
-    let mut initial_is_sequence = HashMap::new();
-    initial_is_sequence.insert("input".to_string(), false);
-
-    let (log_fn, events) = capturing_log_fn();
-    let progress_fn = capturing_progress_fn(&events);
+    support::testcartridge_bin(TAG);
     // 180s, deliberately LONGER than the 120s activity timeout: on a
     // credit-forwarding stall the runtime's activity warnings fire at 120s
     // carrying the per-stream credit-state dumps (forwarder gate balances,
     // pending grants) — the diagnostics that identify the starved edge.
     // A kill timeout equal to the activity timeout races those dumps and
     // loses them from the failure log.
-    let outputs = tokio::time::timeout(
+    let ran = tokio::time::timeout(
         Duration::from_secs(180),
-        execute_dag(
-            &graph,
-            cartridge_dir,
-            None,
-            capdag::CartridgeChannel::Release,
-            capdag::FABRIC_MANIFEST_VERSION,
-            initial_inputs,
-            initial_is_sequence,
-            dev_binaries,
-            None,
-            create_v4_fabric_registry(),
-            Some(&progress_fn),
-            &log_fn,
-            &HashMap::new(),
-            None,
-        ),
+        machines.run(&notation, &[("input", Given::One(b"48"))]),
     )
     .await
     .expect(
@@ -754,28 +585,20 @@ async fn test7076_pipelined_chain_downstream_consumes_before_upstream_finishes()
          credit-state dumps in the 120s activity warnings above name the \
          starved edge",
     )
-    .expect("Execution failed")
-    .node_data;
+    .expect("Execution failed");
 
     // Correctness first: the full 48-chunk payload survived the pipelined
     // hop byte-for-byte.
-    let output = outputs.get("output").expect("No output node").concat();
-    assert_eq!(
-        output.as_slice(),
-        expected_stream_output(48).as_slice(),
-        "pipelined chain output must equal the producer's full payload"
-    );
-
-    // The pipelined intermediate node must NOT be materialized in the
-    // result map — that is the whole point of pipelining.
+    let (produced, is_sequence) = ran.produced("output");
+    assert!(!is_sequence);
     assert!(
-        !outputs.contains_key("mid"),
-        "pipelined intermediate node 'mid' must never be materialized"
+        produced.concat() == expected_stream_output(48),
+        "pipelined chain output must equal the producer's full payload"
     );
 
     // Ordering: the echo cap's first-item log precedes the producer's final
     // per-chunk progress log in the captured sequence.
-    let events = events.lock().unwrap().clone();
+    let events = machines.logs.lock().unwrap().clone();
     let echo_first_idx = events
         .iter()
         .position(|(urn, _level, msg)| {

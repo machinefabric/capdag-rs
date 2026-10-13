@@ -2,8 +2,9 @@
 //!
 //! This module defines the error types and IR structures used by the orchestrator.
 
+use crate::machine::StepPolicy;
 use crate::planner::StepToken;
-use crate::{Cap, InputStructure};
+use crate::Cap;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -22,240 +23,107 @@ pub enum ParseOrchestrationError {
     #[error("Cap URN '{cap_urn}' not found in registry")]
     CapNotFound { cap_urn: String },
 
-    /// Node media URN conflicts with existing assignment
-    #[error(
-        "Node '{node}' has conflicting media URNs: existing='{existing}', required_by_cap='{required_by_cap}'"
-    )]
-    NodeMediaConflict {
-        node: String,
-        existing: String,
-        required_by_cap: String,
-    },
-
     /// Graph contains a cycle (not a DAG)
     #[error("Graph is not a DAG, contains cycle involving nodes: {cycle_nodes:?}")]
     NotADag { cycle_nodes: Vec<String> },
 
-    /// Graph contains unsupported or undecomposed control-flow nodes
+    /// The plan or graph is not one that can be run as asked
     #[error("Invalid graph: {message}")]
     InvalidGraph { message: String },
 
-    /// Cap URN parsing error
-    #[error("Failed to parse Cap URN: {0}")]
-    CapUrnParseError(String),
-
-    /// Media URN parsing error
-    #[error("Failed to parse Media URN: {0}")]
-    MediaUrnParseError(String),
-
-    /// Registry error
-    #[error("Registry error: {0}")]
-    FabricRegistryError(String),
-
-    /// Structure mismatch between connected nodes (record vs opaque)
-    #[error(
-        "Structure mismatch at node '{node}': source is {source_structure:?} but cap expects {expected_structure:?}"
-    )]
-    StructureMismatch {
-        node: String,
-        source_structure: InputStructure,
-        expected_structure: InputStructure,
-    },
 }
 
 // =============================================================================
 // IR Structures
 // =============================================================================
 
-/// A resolved edge in the orchestration graph
+/// What one input of a step is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepSource {
+    /// One node's value, as it is.
+    Node(String),
+    /// Several nodes' values gathered, in order, into one sequence: a single
+    /// value contributes one item, a sequence its items. With no members it
+    /// is an empty sequence.
+    Gather(Vec<String>),
+}
+
+impl StepSource {
+    /// Every node this source reads, in order.
+    pub fn nodes(&self) -> &[String] {
+        match self {
+            StepSource::Node(node) => std::slice::from_ref(node),
+            StepSource::Gather(nodes) => nodes,
+        }
+    }
+}
+
+/// One input stream of a step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepInput {
+    /// The URN the stream is delivered under: the cap's `in=` for its main
+    /// input, the arg's stream URN for any other. A cartridge tells its
+    /// inputs apart by this.
+    pub stream_urn: String,
+    pub source: StepSource,
+}
+
+/// An output of a step other than its main one that something takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepOutput {
+    /// The output's media URN in the cap's definition: what its response
+    /// stream names.
+    pub output_media_urn: String,
+    /// The node its value is stored at.
+    pub node: String,
+}
+
+/// One step of a resolved graph: one invocation of a cap.
 #[derive(Debug, Clone)]
-pub struct ResolvedEdge {
-    /// Stable per-step identity carried from the originating `StrandStep.token_id`
-    /// (via the plan's Cap node). This is the key by which a run's live progress
-    /// updates map deterministically back to the client-rendered graph element.
+pub struct ResolvedStep {
+    /// Stable per-step identity carried from the originating strand step (via
+    /// the plan's Cap node). The key by which a run's live progress maps back
+    /// to the graph element a client rendered.
     pub token_id: StepToken,
-    /// Source node name
-    pub from: String,
-    /// Target node name
-    pub to: String,
+    /// The step's node: where its MAIN output is stored.
+    pub node: String,
     /// Cap URN string
     pub cap_urn: String,
     /// Resolved cap definition
     pub cap: Cap,
-    /// Input media URN from cap definition
-    pub in_media: String,
-    /// Output media URN from cap definition
+    /// The streams the step is sent, besides the values its args are given
+    /// from the run's argument ledger. None for a step nothing is wired into.
+    pub inputs: Vec<StepInput>,
+    /// The outputs other than the main one that something takes. A response
+    /// stream for any other declared output is audited, consumed and dropped.
+    pub outputs: Vec<StepOutput>,
+    /// The media URN of the main output, from the cap definition.
     pub out_media: String,
+    /// What the step does when it fails.
+    pub policy: StepPolicy,
 }
 
-/// A resolved orchestration graph
+impl ResolvedStep {
+    /// Every node the step reads, in input order.
+    pub fn source_nodes(&self) -> impl Iterator<Item = &String> {
+        self.inputs.iter().flat_map(|input| input.source.nodes().iter())
+    }
+
+    /// Every node the step produces: its own, then its other taken outputs'.
+    pub fn produced_nodes(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.node).chain(self.outputs.iter().map(|output| &output.node))
+    }
+}
+
+/// A resolved graph: steps with the cap definitions they run, wired by the
+/// nodes they read and produce. A node no step of the graph produces is an
+/// input of the graph: its value is supplied when the graph is run.
 #[derive(Debug, Clone)]
 pub struct ResolvedGraph {
-    /// Map from node name to derived media URN
+    /// Map from node name to the media URN it holds
     pub nodes: HashMap<String, String>,
-    /// Resolved edges with cap definitions
-    pub edges: Vec<ResolvedEdge>,
+    /// The steps, in no particular order
+    pub steps: Vec<ResolvedStep>,
     /// Original graph name (if any)
     pub graph_name: Option<String>,
-}
-
-impl ResolvedGraph {
-    /// Generate Mermaid flowchart code from this resolved graph.
-    pub fn to_mermaid(&self) -> String {
-        use std::collections::HashSet;
-        let mut out = String::new();
-        out.push_str("graph LR\n");
-
-        let mut targets: HashSet<&str> = HashSet::new();
-        let mut sources: HashSet<&str> = HashSet::new();
-        for edge in &self.edges {
-            sources.insert(&edge.from);
-            targets.insert(&edge.to);
-        }
-
-        for (name, media_urn) in &self.nodes {
-            let is_input = sources.contains(name.as_str()) && !targets.contains(name.as_str());
-            let is_output = targets.contains(name.as_str()) && !sources.contains(name.as_str());
-
-            let esc_name = mermaid_escape(name);
-            let esc_urn = mermaid_escape(media_urn);
-
-            if is_input {
-                out.push_str(&format!(
-                    "    {}([\"{}<br/><small>{}</small>\"])\n",
-                    name, esc_name, esc_urn
-                ));
-            } else if is_output {
-                out.push_str(&format!(
-                    "    {}(((\"{}<br/><small>{}</small>\")))\n",
-                    name, esc_name, esc_urn
-                ));
-            } else {
-                out.push_str(&format!(
-                    "    {}[\"{}<br/><small>{}</small>\"]\n",
-                    name, esc_name, esc_urn
-                ));
-            }
-        }
-
-        out.push('\n');
-
-        let mut seen_edges: HashSet<(String, String, String)> = HashSet::new();
-        for edge in &self.edges {
-            let key = (edge.from.clone(), edge.to.clone(), edge.cap_urn.clone());
-            if !seen_edges.insert(key) {
-                continue;
-            }
-            let title = mermaid_escape(&edge.cap.title);
-            let urn = mermaid_escape(&edge.cap_urn);
-            out.push_str(&format!(
-                "    {} -->|\"{}<br/><small>{}</small>\"| {}\n",
-                edge.from, title, urn, edge.to
-            ));
-        }
-
-        out
-    }
-}
-
-fn mermaid_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "#quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-// =============================================================================
-// Cap Registry Trait
-// =============================================================================
-
-// `FabricRegistryTrait` is gone. The orchestrator parser used it
-// only to indirect over the concrete `FabricRegistry` for testing,
-// but under the new resolver regime `Machine::from_string`
-// itself takes `&FabricRegistry` to compute source-to-arg
-// matching. Tests use `FabricRegistry::new_for_test()` +
-// `add_caps_to_cache(...)` instead of a hand-built mock.
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::urn::cap_urn::CapUrn;
-    use std::collections::HashMap;
-
-    fn make_test_cap(urn: &str, title: &str) -> Cap {
-        Cap::new(
-            CapUrn::from_string(urn).expect("valid cap urn"),
-            title.to_string(),
-            vec!["test-command".to_string()],
-        )
-    }
-
-    // TEST1142: ResolvedGraph.to_mermaid() renders node shapes, deduplicates edges, and escapes labels
-    #[test]
-    fn test1142_resolved_graph_to_mermaid_renders_shapes_dedupes_edges_and_escapes() {
-        let cap = make_test_cap(
-            r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#,
-            r#"Extract "Title" <One>\path"#,
-        );
-        let second_cap = make_test_cap(
-            r#"cap:in="media:enc=utf-8;ext=txt";embed;out="media:embedding;record""#,
-            "Embed",
-        );
-
-        let graph = ResolvedGraph {
-            nodes: HashMap::from([
-                ("input".to_string(), r#"media:document;ext=pdf"#.to_string()),
-                (
-                    "middle".to_string(),
-                    r#"media:enc=utf-8;ext=txt"#.to_string(),
-                ),
-                (
-                    "output".to_string(),
-                    r#"media:embedding;record"#.to_string(),
-                ),
-            ]),
-            edges: vec![
-                ResolvedEdge {
-                    token_id: "tok-0".parse().unwrap(),
-                    from: "input".to_string(),
-                    to: "middle".to_string(),
-                    cap_urn: cap.urn.to_string(),
-                    cap: cap.clone(),
-                    in_media: "media:document;ext=pdf".to_string(),
-                    out_media: "media:enc=utf-8;ext=txt".to_string(),
-                },
-                ResolvedEdge {
-                    token_id: "tok-1".parse().unwrap(),
-                    from: "input".to_string(),
-                    to: "middle".to_string(),
-                    cap_urn: cap.urn.to_string(),
-                    cap,
-                    in_media: "media:document;ext=pdf".to_string(),
-                    out_media: "media:enc=utf-8;ext=txt".to_string(),
-                },
-                ResolvedEdge {
-                    token_id: "tok-2".parse().unwrap(),
-                    from: "middle".to_string(),
-                    to: "output".to_string(),
-                    cap_urn: second_cap.urn.to_string(),
-                    cap: second_cap,
-                    in_media: "media:enc=utf-8;ext=txt".to_string(),
-                    out_media: "media:embedding;record".to_string(),
-                },
-            ],
-            graph_name: Some("demo".to_string()),
-        };
-
-        let mermaid = graph.to_mermaid();
-
-        assert!(mermaid.starts_with("graph LR\n"));
-        assert!(mermaid.contains(r#"input(["input<br/><small>media:document;ext=pdf</small>"])"#));
-        assert!(mermaid.contains(r#"middle["middle<br/><small>media:enc=utf-8;ext=txt</small>"]"#));
-        assert!(
-            mermaid.contains(r#"output((("output<br/><small>media:embedding;record</small>")))"#)
-        );
-        assert!(mermaid.contains(r#"input -->|"Extract #quot;Title#quot; &lt;One&gt;\\path"#));
-        assert!(mermaid.contains(r#"<small>cap:"#));
-        assert_eq!(mermaid.matches("input -->|").count(), 1);
-    }
 }

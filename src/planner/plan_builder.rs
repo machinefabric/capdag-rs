@@ -18,7 +18,7 @@ use std::sync::Arc;
 use super::argument_binding::{ArgumentBinding, ArgumentBindings};
 use super::cardinality::InputCardinality;
 use super::live_cap_fab::{StepToken, Strand};
-use super::plan::{ExecutionNodeType, MachineNode, MachinePlan, MachinePlanEdge};
+use super::plan::{ExecutionNodeType, ForEachSource, MachineNode, MachinePlan, MachinePlanEdge};
 use super::PlannerError;
 use crate::{Cap, FabricRegistry, MediaUrn, MediaValidation};
 
@@ -77,29 +77,30 @@ impl MachinePlanBuilder {
         false
     }
 
-    /// Build a branching [`MachinePlan`] directly from a resolved [`MachineStrand`]
-    /// (a DAG), preserving fan-out — one source feeding several caps.
+    /// Build the `MachinePlan` of a resolved `MachineStrand`, for a run.
     ///
-    /// This is the single, DAG-aware plan-construction path the whole system runs on:
-    /// notation → `MachineStrand` → this → `MachinePlan`.
+    /// Every edge of the strand is one step of the plan; its node id is the
+    /// step's token. Where each step runs is `IterationStructure`'s to say
+    /// (docs 09 §Iteration), computed here for THIS run — the cardinality the
+    /// run binds each input of the strand to is what notation could not know:
     ///
-    /// # Model
+    /// - A step that maps runs in a `ForEach`: the map names every sequence it
+    ///   zips (`sources`), each with the `Item` node its body is given, and
+    ///   every node that runs once per item (`body`). Steps that map over the
+    ///   same sequences in the same place share one map; a step given a value a
+    ///   map produces joins it; a map opened inside a body is listed in that
+    ///   body.
+    /// - Several nodes bound to one sequence arg are a gather: a `Collect`.
+    /// - Every output of a step other than its main one that something takes
+    ///   is a `CapOutput` node.
+    /// - A constant is the step's binding for that arg; nothing is wired.
+    /// - A step whose cap takes no input (`in=media:void`) has no main-input
+    ///   edge; a strand with no inputs has no `InputSlot`, one with no outputs
+    ///   no `Output`.
     ///
-    /// - **One producer per data node**, so an edge is emittable once its single stdin
-    ///   source has been produced. Fan-out is a node with several outgoing edges — each
-    ///   consumer reads the same producer independently.
-    /// - **Runtime media flows per data node**, not along a single spine: each cap
-    ///   instantiates its runtime output from its source node's runtime media
-    ///   (`apply_to_runtime_input_media`).
-    /// - **ForEach is cardinality-derived** (`edge.is_loop`, set by `resolve.rs` from
-    ///   `Cap::needs_foreach`). `is_loop` marks only the *entry* — a sequence node
-    ///   feeding a scalar-input cap. Subsequent scalar caps whose source is produced
-    ///   inside that ForEach region carry `is_loop=false` and extend the same body.
-    ///   No `Collect` is synthesized — every ForEach is unclosed (per-item output).
-    /// - **One `Output` per terminal anchor** — a fan-out strand has several.
-    ///
-    /// Nested ForEach (a sequence produced *inside* a body re-mapped by a further
-    /// scalar cap) is rejected hard — the executor does not support it.
+    /// An edge between two nodes says what is delivered, not how often: a node
+    /// inside a map, read from outside it, is the sequence of its values over
+    /// the runs. The executor reads that from where the two nodes are.
     pub async fn build_plan_from_machine_strand(
         &self,
         name: &str,
@@ -133,30 +134,21 @@ impl MachinePlanBuilder {
         strand: &crate::machine::graph::MachineStrand,
         anchor_cardinality: &HashMap<crate::machine::graph::NodeId, InputCardinality>,
     ) -> PlannerResult<MachinePlan> {
-        use crate::machine::graph::NodeId;
+        use crate::machine::graph::{BindingSource, EdgeAssignmentBinding, NodeId};
+        use crate::machine::iteration::{IterationStructure, MemberShape, ScopeId, StepShape, ROOT};
 
         let mut plan = MachinePlan::new(name);
         let caps =
             self.fabric_registry.get_cached_caps().await.map_err(|e| {
                 PlannerError::FabricRegistryError(format!("Failed to get caps: {e}"))
             })?;
+        let void_media = MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
+            .expect("MEDIA_VOID is a valid MediaUrn");
 
-        // Per data-node state, keyed by strand NodeId.
+        // The media each strand node holds in this run, and the plan node that
+        // holds its value.
         let mut node_runtime: HashMap<NodeId, MediaUrn> = HashMap::new();
         let mut producer: HashMap<NodeId, String> = HashMap::new();
-        // ForEach region a data node's data lives inside (unclosed ForEach → membership
-        // propagates to every descendant until the terminal). None = top level.
-        let mut node_region: HashMap<NodeId, String> = HashMap::new();
-
-        // Deferred ForEach nodes: fe_id → (input_producer_node, body_entry_cap, token).
-        // body_exit is tracked separately as later caps extend the region.
-        struct PendingForEach {
-            input_producer: String,
-            body_entry: String,
-            token_id: StepToken,
-        }
-        let mut pending_foreach: HashMap<String, PendingForEach> = HashMap::new();
-        let mut region_exit: HashMap<String, String> = HashMap::new();
 
         let input_anchors: Vec<NodeId> = strand.input_anchor_ids().to_vec();
         for &anchor in &input_anchors {
@@ -180,16 +172,87 @@ impl MachinePlanBuilder {
 
         let edges = strand.edges();
 
-        // Emit edges in data-flow order: an edge is ready once EVERY one of its sources
-        // (the main input and any convergence inputs) has a producer.
+        // Each step's cap definition, and the arg each of its bindings names.
+        let mut step_caps: Vec<&Cap> = Vec::with_capacity(edges.len());
+        for edge in edges {
+            let cap_urn_str = edge.cap_urn.to_string();
+            let cap = caps
+                .iter()
+                .find(|c| c.urn.to_string() == cap_urn_str)
+                .ok_or_else(|| {
+                    PlannerError::NotFound(format!("cap '{cap_urn_str}' not in registry cache"))
+                })?;
+            step_caps.push(cap);
+        }
+        let arg_of = |cap: &'_ Cap, binding: &EdgeAssignmentBinding| -> PlannerResult<usize> {
+            cap.args
+                .iter()
+                .position(|arg| {
+                    MediaUrn::from_string(&arg.media_urn)
+                        .map(|urn| urn.is_equivalent(&binding.cap_arg_media_urn).unwrap_or(false))
+                        .unwrap_or(false)
+                })
+                .ok_or_else(|| {
+                    PlannerError::InvalidPath(format!(
+                        "cap '{}': a binding names arg '{}', which is not in the cap definition",
+                        cap.urn, binding.cap_arg_media_urn
+                    ))
+                })
+        };
+
+        // Where every step runs, for this run.
+        let mut shapes: Vec<StepShape> = Vec::with_capacity(edges.len());
+        for (edge, cap) in edges.iter().zip(&step_caps) {
+            let mut members = Vec::new();
+            for binding in &edge.assignment {
+                if let Some(node) = binding.node() {
+                    members.push(MemberShape {
+                        node,
+                        arg_is_sequence: cap.args[arg_of(cap, binding)?].is_sequence,
+                    });
+                }
+            }
+            shapes.push(StepShape {
+                members,
+                outputs: edge
+                    .outputs
+                    .iter()
+                    .map(|output| (output.node, strand.node_is_sequence(output.node)))
+                    .collect(),
+            });
+        }
+        let iteration = IterationStructure::of(&shapes, |node| {
+            matches!(anchor_cardinality.get(&node), Some(InputCardinality::Sequence))
+        })
+        .map_err(|cyclic| {
+            PlannerError::InvalidPath(format!(
+                "strand '{name}' has steps that wait on one another (steps {:?})",
+                cyclic.0
+            ))
+        })?;
+
+        // One `ForEach` per map. Its item nodes are made when the first step
+        // that runs in it is emitted (every source has its plan node by then);
+        // its body is filled as steps are placed in it.
+        let fe_id = |scope: ScopeId| -> String {
+            format!(
+                "foreach_{}",
+                iteration
+                    .opened_by(scope)
+                    .expect("a map is opened by a step")
+            )
+        };
+        let mut bodies: Vec<Vec<String>> = vec![Vec::new(); iteration.scope_count()];
+        let mut items: HashMap<(ScopeId, NodeId), String> = HashMap::new();
+        let mut map_sources: Vec<Vec<ForEachSource>> = vec![Vec::new(); iteration.scope_count()];
+
+        // Emit steps in data-flow order: a step is ready once every node it is
+        // given has its plan node. (A constant needs none.)
         let mut emitted = vec![false; edges.len()];
         let mut remaining = edges.len();
         while remaining > 0 {
             let next = edges.iter().enumerate().position(|(i, e)| {
-                !emitted[i]
-                    && e.assignment
-                        .iter()
-                        .all(|b| producer.contains_key(&b.source))
+                !emitted[i] && e.source_nodes().all(|node| producer.contains_key(&node))
             });
             let Some(i) = next else {
                 return Err(PlannerError::InvalidPath(format!(
@@ -198,219 +261,226 @@ impl MachinePlanBuilder {
                 )));
             };
             let edge = &edges[i];
-            let tgt = edge.target;
+            let cap = step_caps[i];
             let cap_urn_str = edge.cap_urn.to_string();
-            let cap = caps
-                .iter()
-                .find(|c| c.urn.to_string() == cap_urn_str)
-                .ok_or_else(|| {
-                    PlannerError::NotFound(format!("cap '{cap_urn_str}' not in registry cache"))
-                })?;
+            let placement = &iteration.steps()[i];
+            let scope = placement.scope();
 
-            // The MAIN input is the binding feeding the cap's stdin argument — it threads
-            // the runtime media and drives ForEach/region placement. Every other binding
-            // is a convergence input (another cap's output routed into a named non-main
-            // arg), emitted as an `Arg` edge below. Identified by tagged-URN equivalence.
+            // The MAIN input is the binding feeding the cap's stdin argument: it
+            // threads the runtime media. A cap whose `in=` is `media:void` has
+            // none: it is a source, started by nothing but its own args.
             let in_spec_urn = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
                 PlannerError::InvalidPath(format!(
                     "cap '{cap_urn_str}' in= URN '{}' invalid: {e}",
                     cap.urn.in_spec()
                 ))
             })?;
-            let stdin_arg = cap
-                .args
-                .iter()
-                .find(|a| a.is_main_input(&in_spec_urn))
-                .ok_or_else(|| {
-                    PlannerError::InvalidPath(format!(
-                        "cap '{cap_urn_str}' declares no main-input arg (none whose declared \
-                         URN or stdin source is its in=)"
-                    ))
-                })?;
-            let stdin_arg_urn = MediaUrn::from_string(&stdin_arg.media_urn).map_err(|e| {
-                PlannerError::InvalidPath(format!(
-                    "cap '{cap_urn_str}' stdin arg URN '{}' invalid: {e}",
-                    stdin_arg.media_urn
-                ))
-            })?;
-            // Group this edge's bindings per arg slot (URN equivalence). A slot
-            // with N≥2 bindings is a GATHER — the resolver's implicit Collect: N
-            // distinct producers feeding one SEQUENCE arg. The plan materializes
-            // it as a real `Collect{input_nodes}` node so the executable plan
-            // never carries an unexplained multi-bound arg.
-            let mut slot_groups: Vec<(
-                MediaUrn,
-                Vec<&crate::machine::graph::EdgeAssignmentBinding>,
-            )> = Vec::new();
-            for b in &edge.assignment {
-                match slot_groups
-                    .iter_mut()
-                    .find(|(u, _)| u.is_equivalent(&b.cap_arg_media_urn).unwrap_or(false))
-                {
-                    Some((_, v)) => v.push(b),
-                    None => slot_groups.push((b.cap_arg_media_urn.clone(), vec![b])),
+            let takes_input = !in_spec_urn.is_equivalent(&void_media).unwrap_or(false);
+            let main_arg_index = if takes_input {
+                Some(
+                    cap.args
+                        .iter()
+                        .position(|a| a.is_main_input(&in_spec_urn))
+                        .ok_or_else(|| {
+                            PlannerError::InvalidPath(format!(
+                                "cap '{cap_urn_str}' declares no main-input arg (none whose declared \
+                                 URN or stdin source is its in=)"
+                            ))
+                        })?,
+                )
+            } else {
+                None
+            };
+
+            // The map this step runs in, when it is the first to: make the
+            // map's item nodes.
+            if let Some(map) = placement.map {
+                for &source in iteration.sources(map) {
+                    if items.contains_key(&(map, source)) {
+                        continue;
+                    }
+                    let source_plan_node = producer.get(&source).cloned().ok_or_else(|| {
+                        PlannerError::Internal(format!("mapped source node {source} has no producer"))
+                    })?;
+                    let media = node_runtime.get(&source).cloned().ok_or_else(|| {
+                        PlannerError::Internal(format!("no runtime media at mapped source node {source}"))
+                    })?;
+                    let id = fe_id(map);
+                    let item_id = format!("{id}_item_{}", map_sources[map].len());
+                    plan.add_node(MachineNode::item(
+                        &item_id,
+                        &id,
+                        &source_plan_node,
+                        &media.to_string(),
+                    ));
+                    bodies[map].push(item_id.clone());
+                    map_sources[map].push(ForEachSource {
+                        node: source_plan_node,
+                        item: item_id.clone(),
+                    });
+                    items.insert((map, source), item_id);
                 }
             }
 
-            let primary_group: &[&crate::machine::graph::EdgeAssignmentBinding] = slot_groups
-                .iter()
-                .find(|(u, _)| u.is_equivalent(&stdin_arg_urn).unwrap_or(false))
-                .map(|(_, v)| v.as_slice())
-                .ok_or_else(|| {
-                    PlannerError::InvalidPath(format!(
-                        "strand '{name}': cap '{cap_urn_str}' has no source bound to its stdin arg"
-                    ))
-                })?;
+            // The plan node a member is read from: the item of the map that
+            // iterates it, when the step is inside one and the arg takes one
+            // value; the node that holds it otherwise (whole — or, read from
+            // outside the map it is in, the sequence the map collected).
+            let read_from = |node: NodeId, arg_is_sequence: bool| -> PlannerResult<String> {
+                if !arg_is_sequence {
+                    if let Some(map) = iteration.item_map(node, scope) {
+                        return items.get(&(map, node)).cloned().ok_or_else(|| {
+                            PlannerError::Internal(format!(
+                                "map {map} has no item node for source {node}"
+                            ))
+                        });
+                    }
+                }
+                producer.get(&node).cloned().ok_or_else(|| {
+                    PlannerError::Internal(format!("source node {node} has no producer"))
+                })
+            };
 
-            // Synthesize a Collect for a gathered slot: producers wire into the
-            // Collect via `Collection` edges; the Collect feeds the cap. Fails
-            // hard unless the arg is a sequence arg (a scalar arg with N
-            // bindings is a resolver invariant violation). A member produced
-            // inside a ForEach region is fine: the executor's post-region
-            // segment materializes the region's accumulated per-item output as
-            // one sequence, and the gather flattens it alongside the other
-            // members in binding order.
-            let synthesize_gather_collect =
-                |plan: &mut MachinePlan,
-                 group: &[&crate::machine::graph::EdgeAssignmentBinding],
-                 arg_def: &crate::cap::definition::CapArg,
-                 collect_id: &str,
-                 producer: &HashMap<NodeId, String>,
-                 node_runtime: &HashMap<NodeId, MediaUrn>|
-                 -> PlannerResult<MediaUrn> {
-                    if !arg_def.is_sequence {
+            // The step's NODE bindings per arg. An arg with several is a
+            // GATHER, which only an arg that takes a sequence may be.
+            let mut arg_groups: Vec<(usize, Vec<NodeId>)> = Vec::new();
+            for binding in &edge.assignment {
+                let Some(node) = binding.node() else { continue };
+                let index = arg_of(cap, binding)?;
+                match arg_groups.iter_mut().find(|(arg, _)| *arg == index) {
+                    Some((_, nodes)) => nodes.push(node),
+                    None => arg_groups.push((index, vec![node])),
+                }
+            }
+            let main_is_constant = main_arg_index.is_some_and(|main| {
+                edge.assignment.iter().any(|binding| {
+                    binding.node().is_none()
+                        && arg_of(cap, binding).map_or(false, |index| index == main)
+                })
+            });
+            let main_group: Option<&Vec<NodeId>> = main_arg_index.and_then(|main| {
+                arg_groups
+                    .iter()
+                    .find(|(arg, _)| *arg == main)
+                    .map(|(_, nodes)| nodes)
+            });
+            if takes_input && main_group.is_none() && !main_is_constant {
+                return Err(PlannerError::InvalidPath(format!(
+                    "strand '{name}': cap '{cap_urn_str}' has no source bound to its main input"
+                )));
+            }
+
+            // The cap node's id IS the strand step's stable identity (the step
+            // token minted at parse and threaded through to the run graph):
+            // argument values and progress are keyed by it, never by a
+            // position that shifts when the plan changes.
+            let cap_node_id = edge.token_id.to_string();
+
+            // What each arg is wired from: one node, or a gather of several.
+            // `(arg index, plan node)`.
+            let mut wired: Vec<(usize, String)> = Vec::new();
+            let mut main_media: Option<MediaUrn> = None;
+            let mut main_from_anchor = false;
+            for (group_idx, (arg_index, nodes)) in arg_groups.iter().enumerate() {
+                let arg = &cap.args[*arg_index];
+                let is_main = Some(*arg_index) == main_arg_index;
+                let media_of = |node: NodeId| {
+                    node_runtime.get(&node).cloned().ok_or_else(|| {
+                        PlannerError::Internal(format!("no runtime media at source node {node}"))
+                    })
+                };
+                // One node on an arg is wired as it is — unless the arg takes a
+                // sequence and the node is one value there: it is then delivered
+                // as a sequence of one, which is a gather of one.
+                let wired_as_it_is = nodes.len() == 1
+                    && (!arg.is_sequence || iteration.is_sequence_from(nodes[0], scope));
+                let (from, media) = if wired_as_it_is {
+                    (read_from(nodes[0], arg.is_sequence)?, media_of(nodes[0])?)
+                } else {
+                    if !arg.is_sequence {
                         return Err(PlannerError::InvalidPath(format!(
                             "strand '{name}': cap '{cap_urn_str}' arg '{}' carries {} bindings \
                              but is not a sequence arg — a gather is only legal into a sequence \
                              arg (resolver invariant violated)",
-                            arg_def.media_urn,
-                            group.len()
+                            arg.media_urn,
+                            nodes.len()
                         )));
                     }
-                    let mut input_producer_ids: Vec<String> = Vec::with_capacity(group.len());
-                    let mut member_media: Vec<MediaUrn> = Vec::with_capacity(group.len());
-                    for b in group {
-                        let pid = producer.get(&b.source).cloned().ok_or_else(|| {
-                            PlannerError::Internal(format!(
-                                "gathered source node {} has no producer",
-                                b.source
-                            ))
-                        })?;
-                        let media = node_runtime.get(&b.source).cloned().ok_or_else(|| {
-                            PlannerError::Internal(format!(
-                                "no runtime media at gathered source node {}",
-                                b.source
-                            ))
-                        })?;
-                        input_producer_ids.push(pid);
-                        member_media.push(media);
+                    let mut members: Vec<String> = Vec::with_capacity(nodes.len());
+                    let mut member_media: Vec<MediaUrn> = Vec::with_capacity(nodes.len());
+                    for node in nodes {
+                        members.push(read_from(*node, true)?);
+                        member_media.push(media_of(*node)?);
                     }
-                    // The gathered sequence's element type is the join ∨ of the
-                    // member runtime medias — the most specific type every
-                    // member conforms to.
+                    // The gathered sequence's element type is the join of the
+                    // members' — the most specific type every member conforms to.
                     let item_media = MediaUrn::least_upper_bound(&member_media);
-                    let mut collect_node =
-                        MachineNode::collect(collect_id, input_producer_ids.clone());
-                    collect_node.node_type = ExecutionNodeType::Collect {
-                        input_nodes: input_producer_ids.clone(),
-                        output_media_urn: Some(item_media.to_string()),
+                    let collect_id = if is_main {
+                        format!("collect_{}", edge.token_id)
+                    } else {
+                        format!("collect_{}_{group_idx}", edge.token_id)
                     };
-                    collect_node.description = Some(format!(
-                        "Gather {} producers into a sequence of {}",
-                        input_producer_ids.len(),
-                        item_media
+                    plan.add_node(MachineNode::collect(
+                        &collect_id,
+                        members.clone(),
+                        &item_media.to_string(),
                     ));
-                    plan.add_node(collect_node);
-                    for pid in &input_producer_ids {
-                        plan.add_edge(MachinePlanEdge::collection(pid, collect_id));
+                    for member in &members {
+                        plan.add_edge(MachinePlanEdge::collection(member, &collect_id));
                     }
-                    Ok(item_media)
+                    if scope != ROOT {
+                        bodies[scope].push(collect_id.clone());
+                    }
+                    (collect_id, item_media)
                 };
-
-            // Primary (stdin) input: a single binding threads the producer
-            // directly (today's path); a gather threads a synthesized Collect.
-            let src: NodeId;
-            let in_media: MediaUrn;
-            let prev_node_id: String;
-            let src_is_input_anchor: bool;
-            let src_region: Option<String>;
-            if primary_group.len() == 1 {
-                let primary = primary_group[0];
-                src = primary.source;
-                in_media = node_runtime.get(&src).cloned().ok_or_else(|| {
-                    PlannerError::Internal(format!("no runtime media at source node {src}"))
-                })?;
-                prev_node_id = producer
-                    .get(&src)
-                    .cloned()
-                    .expect("producer set with runtime");
-                src_is_input_anchor = input_anchors.contains(&src);
-                src_region = node_region.get(&src).cloned();
-            } else {
-                let collect_id = format!("collect_{}", edge.token_id);
-                let item_media = synthesize_gather_collect(
-                    &mut plan,
-                    primary_group,
-                    stdin_arg,
-                    &collect_id,
-                    &producer,
-                    &node_runtime,
-                )?;
-                src = primary_group[0].source;
-                in_media = item_media;
-                prev_node_id = collect_id;
-                src_is_input_anchor = false;
-                src_region = None;
+                if is_main {
+                    main_media = Some(media);
+                    main_from_anchor = nodes.len() == 1 && input_anchors.contains(&nodes[0]);
+                }
+                wired.push((*arg_index, from));
             }
-            // The cap node's id IS the strand step's stable identity (StrandStep.token_id,
-            // a UUID minted at parse and threaded through resolved_strand → proto →
-            // run graph). Using it as the node id makes it the single execution key: the
-            // wizard binds argument values by this same token_id, so delivery is keyed by
-            // identity, never by a positional index that shifts when the plan changes.
-            let cap_node_id = edge.token_id.clone();
+            // A source: nothing is wired into its main input, and the type its
+            // effect is applied to is its declared input.
+            let in_media = main_media.unwrap_or_else(|| in_spec_urn.clone());
+            let main_from: Option<String> = main_arg_index.and_then(|main| {
+                wired
+                    .iter()
+                    .find(|(arg, _)| *arg == main)
+                    .map(|(_, from)| from.clone())
+            });
 
-            // A ForEach wraps this cap when the edge maps per-item (`is_loop`, from
-            // notation cardinality) OR when THIS cap's anchor binds a sequence
-            // feeding a scalar-input entry cap (multi-file execution — the
-            // machine is scalar→scalar but iterates once per file). Per-anchor:
-            // a 3-file anchor maps per item while a 1-file anchor beside it
-            // does not.
-            let (cap_input_is_seq, _) = cap.sequence_shape();
-            let src_anchor_is_sequence = src_is_input_anchor
-                && matches!(
-                    anchor_cardinality.get(&src),
-                    Some(InputCardinality::Sequence)
-                );
-            let needs_foreach = edge.is_loop || (src_anchor_is_sequence && !cap_input_is_seq);
-
-            // Nested ForEach — a sequence produced inside a body being re-mapped — is
-            // out of scope; fail hard rather than silently mis-execute.
-            if needs_foreach && src_region.is_some() {
-                return Err(PlannerError::InvalidPath(format!(
-                    "strand '{name}': cap '{cap_urn_str}' would nest a ForEach inside the \
-                     ForEach body of node {src} — nested ForEach is not supported"
-                )));
-            }
-
-            // Bindings — same rules as the linear builder.
+            // Bindings: what the step's args are given other than by a wire.
             let mut bindings = ArgumentBindings::new();
             let in_spec = cap.urn.in_spec();
             let out_spec = cap.urn.out_spec();
-            if let Some(arg_name) = Self::find_file_path_arg(cap) {
+            if let (Some(arg_name), Some(main_from)) = (Self::find_file_path_arg(cap), &main_from) {
                 let chainable = Self::is_file_path_stdin_chainable(cap);
-                if src_is_input_anchor || !chainable {
+                if main_from_anchor || !chainable {
                     bindings.add_file_path(&arg_name);
                 } else {
                     bindings.add(
                         arg_name.clone(),
                         ArgumentBinding::PreviousOutput {
-                            node_id: prev_node_id.clone(),
-                            output_field: None,
+                            node_id: main_from.clone(),
                         },
                     );
                 }
             }
-            for arg in cap.get_args() {
+            // Constants written in the machine: the arg's value, bound here,
+            // keyed by the URN the arg's value is delivered under. An arg so
+            // bound takes no value from the run.
+            for binding in &edge.assignment {
+                if let BindingSource::Constant(value) = &binding.source {
+                    let arg = &cap.args[arg_of(cap, binding)?];
+                    bindings.add(
+                        arg.stream_urn().to_string(),
+                        ArgumentBinding::Literal {
+                            value: value.clone(),
+                        },
+                    );
+                }
+            }
+            for (index, arg) in cap.get_args().iter().enumerate() {
                 if arg.media_urn == in_spec || arg.media_urn == out_spec {
                     continue;
                 }
@@ -423,18 +493,12 @@ impl MachinePlanBuilder {
                 if arg_urn.is_file_path() {
                     continue;
                 }
-                // Convergence-fed args are delivered by an `Arg` producer edge (below),
-                // never requested from the user — so they are not slot bindings.
-                let is_convergence_fed = edge.assignment.iter().any(|b| {
-                    !b.cap_arg_media_urn
-                        .is_equivalent(&stdin_arg_urn)
-                        .unwrap_or(false)
-                        && b.cap_arg_media_urn.is_equivalent(&arg_urn).unwrap_or(false)
-                });
-                if is_convergence_fed {
-                    continue;
-                }
-                if bindings.bindings.contains_key(&arg.media_urn) {
+                // An arg a node is wired into is delivered by that wire, and an
+                // arg bound to a constant has its value: neither is asked for.
+                if wired.iter().any(|(arg, _)| *arg == index)
+                    || bindings.bindings.contains_key(arg.stream_urn())
+                    || bindings.bindings.contains_key(&arg.media_urn)
+                {
                     continue;
                 }
                 bindings.add(
@@ -446,107 +510,31 @@ impl MachinePlanBuilder {
                 );
             }
 
-            plan.add_node(MachineNode::cap_with_bindings_token(
+            let mut cap_node = MachineNode::cap_with_bindings_token(
                 &cap_node_id,
                 &cap_urn_str,
                 bindings,
                 edge.token_id.clone(),
-            ));
-
-            if needs_foreach {
-                // ForEach entry — the cap becomes a body under a (deferred) ForEach node.
-                let fe_id = format!("foreach_{i}");
-                let foreach_token_id = if edge.is_loop {
-                    edge.foreach_token_id.clone().ok_or_else(|| {
-                        PlannerError::InvalidPath(format!(
-                            "strand '{name}': loop edge for cap '{cap_urn_str}' has no ForEach identity"
-                        ))
-                    })?
-                } else {
-                    // Runtime input cardinality introduced this boundary; this is
-                    // the point where that executed graph element is born.
-                    StepToken::mint()
-                };
-                pending_foreach.insert(
-                    fe_id.clone(),
-                    PendingForEach {
-                        input_producer: prev_node_id.clone(),
-                        body_entry: cap_node_id.to_string(),
-                        token_id: foreach_token_id,
-                    },
-                );
-                region_exit.insert(fe_id.clone(), cap_node_id.to_string());
-                node_region.insert(tgt, fe_id);
-            } else if let Some(region) = src_region {
-                if cap_input_is_seq {
-                    // A SEQUENCE-consuming cap fed from inside a ForEach region
-                    // CLOSES the region: it consumes the region's collected
-                    // per-item output as one sequence (the fold). It is wired
-                    // like any downstream consumer and does NOT extend the
-                    // region — the executor runs it in the post-region segment.
-                    plan.add_edge(MachinePlanEdge::direct(&prev_node_id, &cap_node_id));
-                } else {
-                    // Scalar cap extending an existing ForEach body — chain onto the
-                    // producer and extend the region's exit.
-                    plan.add_edge(MachinePlanEdge::direct(&prev_node_id, &cap_node_id));
-                    region_exit.insert(region.clone(), cap_node_id.to_string());
-                    node_region.insert(tgt, region);
-                }
-            } else {
-                // Top-level scalar cap.
-                plan.add_edge(MachinePlanEdge::direct(&prev_node_id, &cap_node_id));
+            );
+            if let ExecutionNodeType::Cap { policy, .. } = &mut cap_node.node_type {
+                *policy = edge.policy;
+            }
+            plan.add_node(cap_node);
+            if scope != ROOT {
+                bodies[scope].push(cap_node_id.clone());
             }
 
-            // Convergence edges: each non-main slot group wires producer output into
-            // the named non-main arg of this cap. A single-binding group wires its
-            // producer directly (the historical path); a gathered group (N≥2, a
-            // sequence arg) wires through a synthesized Collect. The runtime streams
-            // it as this cap's arg, keyed by the arg URN.
-            for (group_idx, (slot_urn, group)) in slot_groups.iter().enumerate() {
-                if slot_urn.is_equivalent(&stdin_arg_urn).unwrap_or(false) {
-                    continue;
-                }
-                // The stream URN the cartridge demuxes this arg by is the arg's STDIN
-                // URN — which may differ from its slot media URN (the binding's
-                // identity). Look up the arg by its slot URN, then take its stdin URN.
-                let arg_def = cap
-                    .args
-                    .iter()
-                    .find(|a| {
-                        MediaUrn::from_string(&a.media_urn)
-                            .map(|u| u.is_equivalent(slot_urn).unwrap_or(false))
-                            .unwrap_or(false)
-                    })
-                    .ok_or_else(|| {
-                        PlannerError::InvalidPath(format!(
-                            "cap '{cap_urn_str}': convergence arg '{slot_urn}' is not in the cap definition"
-                        ))
-                    })?;
-                // The stream URN the cartridge demuxes this arg by: its stdin source
-                // URN if it declares one, else its declared URN (a producer-fed arg
-                // need not use stdin).
-                let stream_urn = arg_def.stream_urn().to_string();
-                if group.len() == 1 {
-                    let producer_node = producer
-                        .get(&group[0].source)
-                        .cloned()
-                        .expect("emittable: every source has a producer");
-                    plan.add_edge(MachinePlanEdge::arg(
-                        &producer_node,
-                        &cap_node_id,
-                        &stream_urn,
-                    ));
+            // The wires: the main input is a `Direct` edge, every other arg an
+            // `Arg` edge naming the URN its stream is delivered under.
+            for (arg_index, from) in &wired {
+                if Some(*arg_index) == main_arg_index {
+                    plan.add_edge(MachinePlanEdge::direct(from, &cap_node_id));
                 } else {
-                    let collect_id = format!("collect_{}_{group_idx}", edge.token_id);
-                    synthesize_gather_collect(
-                        &mut plan,
-                        group,
-                        arg_def,
-                        &collect_id,
-                        &producer,
-                        &node_runtime,
-                    )?;
-                    plan.add_edge(MachinePlanEdge::arg(&collect_id, &cap_node_id, &stream_urn));
+                    plan.add_edge(MachinePlanEdge::arg(
+                        from,
+                        &cap_node_id,
+                        cap.args[*arg_index].stream_urn(),
+                    ));
                 }
             }
 
@@ -558,27 +546,93 @@ impl MachinePlanBuilder {
                         "runtime media inference for '{cap_urn_str}' on '{in_media}': {e}"
                     ))
                 })?;
-            node_runtime.insert(tgt, out_media);
-            producer.insert(tgt, cap_node_id.to_string());
+            // Every output the wiring takes is a value this step produces: the
+            // main one at the step's own node, holding the type the cap's
+            // effect derives; another at a node of its own, holding its own
+            // type — or the input's, when it carries the input.
+            let declared_out = edge.cap_urn.out_media_urn().map_err(|e| {
+                PlannerError::InvalidPath(format!("cap '{cap_urn_str}' out= URN invalid: {e}"))
+            })?;
+            for output in &edge.outputs {
+                let is_main = output
+                    .output_media_urn
+                    .is_equivalent(&declared_out)
+                    .unwrap_or(false);
+                if is_main {
+                    node_runtime.insert(output.node, out_media.clone());
+                    producer.insert(output.node, cap_node_id.clone());
+                    continue;
+                }
+                let declared = cap
+                    .output_by_urn(&output.output_media_urn.to_string())
+                    .ok_or_else(|| {
+                        PlannerError::InvalidPath(format!(
+                            "cap '{cap_urn_str}': the wiring takes output '{}', which is not in \
+                             the cap definition",
+                            output.output_media_urn
+                        ))
+                    })?;
+                let carries_input = declared.carries.is_some();
+                let output_node_id = format!("{cap_node_id}.{}", declared.name);
+                plan.add_node(MachineNode::cap_output(
+                    &output_node_id,
+                    &cap_node_id,
+                    &declared.media_urn,
+                    &declared.name,
+                    carries_input,
+                ));
+                plan.add_edge(MachinePlanEdge::direct(&cap_node_id, &output_node_id));
+                if scope != ROOT {
+                    bodies[scope].push(output_node_id.clone());
+                }
+                node_runtime.insert(
+                    output.node,
+                    if carries_input {
+                        in_media.clone()
+                    } else {
+                        output.output_media_urn.clone()
+                    },
+                );
+                producer.insert(output.node, output_node_id);
+            }
             emitted[i] = true;
             remaining -= 1;
         }
 
-        // Materialize the deferred ForEach nodes now that body extents are known.
-        for (fe_id, pf) in &pending_foreach {
-            let body_exit = region_exit
-                .get(fe_id)
-                .cloned()
-                .unwrap_or_else(|| pf.body_entry.clone());
+        // The maps, now that every body is known. A map opened inside another
+        // is a node of that other's body.
+        for map in 1..iteration.scope_count() {
+            let parent = iteration.parent(map);
+            if parent != ROOT {
+                bodies[parent].push(fe_id(map));
+            }
+        }
+        for map in 1..iteration.scope_count() {
+            let id = fe_id(map);
+            let opener = &edges[iteration.opened_by(map).expect("a map is opened by a step")];
+            // The map's identity is its opening step's: the one the strand
+            // already carries when notation derives the map, minted here when
+            // only this run's input cardinality brings it about.
+            let token_id = match (&opener.foreach_token_id, opener.is_loop) {
+                (Some(token), _) => token.clone(),
+                (None, false) => StepToken::mint(),
+                (None, true) => {
+                    return Err(PlannerError::InvalidPath(format!(
+                        "strand '{name}': loop edge for cap '{}' has no ForEach identity",
+                        opener.cap_urn
+                    )));
+                }
+            };
+            for source in &map_sources[map] {
+                plan.add_edge(MachinePlanEdge::direct(&source.node, &id));
+                plan.add_edge(MachinePlanEdge::iteration(&id, &source.item));
+            }
             plan.add_node(MachineNode::for_each_token(
-                fe_id,
-                &pf.input_producer,
-                &pf.body_entry,
-                &body_exit,
-                pf.token_id.clone(),
+                &id,
+                map_sources[map].clone(),
+                bodies[map].clone(),
+                token_id,
             ));
-            plan.add_edge(MachinePlanEdge::direct(&pf.input_producer, fe_id));
-            plan.add_edge(MachinePlanEdge::iteration(fe_id, &pf.body_entry));
         }
 
         // One Output per terminal anchor.

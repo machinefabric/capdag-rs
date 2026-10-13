@@ -18,22 +18,13 @@
 //!
 //! The combined result type is `MachineParseError`.
 //!
-//! ## Grammar (PEG / EBNF)
+//! ## Grammar
 //!
-//! ```ebnf
-//! program      = stmt*
-//! stmt         = "[" inner "]" | inner
-//! inner        = wiring | header
-//! header       = alias cap_urn
-//! wiring       = source arrow alias arrow alias
-//! source       = group | alias
-//! group        = "(" alias ("," alias)+ ")"
-//! arrow        = "-"+ ">"
-//! alias        = (ALPHA | "_") (ALNUM | "_" | "-")*
-//! cap_urn      = "cap:" cap_urn_body*
-//! cap_urn_body = quoted_value | !("]" | NEWLINE) ANY
-//! quoted_value = '"' ('\\"' | '\\\\' | !'"' ANY)* '"'
-//! ```
+//! The grammar is `machine.pest`; `syntax.rs` is its one reader and yields the
+//! statements this module resolves. A wiring is
+//! `sources -> step -> targets`: members that may name their arg or be
+//! constants, a step with an optional policy, and targets that may name the
+//! output they take (`capdag/docs/09-machine-notation.md`).
 //!
 //! ## Strand boundary discovery
 //!
@@ -43,56 +34,87 @@
 //! components are computed via union-find. The strand list in
 //! the resulting `Machine` is in **first-appearance order**:
 //! the strand whose earliest wiring appears first in the
-//! textual input comes first.
+//! textual input comes first. A constant is not a node and
+//! connects nothing.
 //!
-//! ## Media URN derivation per node name
+//! ## The media URN of a node
 //!
-//! For each wiring, the parser derives the media URNs that
-//! its source node names and target node name are bound to:
+//! Every node has one URN, derived from the wirings that touch it; where a
+//! member stands in its group never decides it (09 §The URN of a node):
 //!
-//! - **Primary source** (slot 0 in the wiring's source group):
-//!   bound to the cap's declared `in=` URN. If the same node
-//!   name was already bound to a different URN by an earlier
-//!   wiring, the two URNs must be `is_comparable` (on the same
-//!   specialization chain).
-//! - **Secondary sources** (slots 1+): take whichever URN was
-//!   previously bound to that node name. If unbound, default
-//!   to `media:` (the wildcard); the resolver / orchestrator
-//!   will distinguish concrete arg URNs at run time.
-//! - **Target**: bound to the cap's declared `out=` URN, with
-//!   the same `is_comparable` check.
+//! - a node some step **produces** has the URN of what that output carries;
+//! - a node **nothing produces**, as a **named** member, has the accepted
+//!   type of the arg it names;
+//! - as an **unnamed** member that nothing else gives a URN, it has the
+//!   accepted type of the step's main input — at most one such member per
+//!   wiring, and only while no named member bound the main input
+//!   (`UntypedMachineInput` otherwise);
+//! - URNs given to one node must be on one specialization chain
+//!   (`NodeMediaConflict` otherwise); the node has the most specific.
 
 use std::collections::HashMap;
 
-use pest::Parser;
 use pest_derive::Parser;
 
+use crate::cap::definition::Cap;
 use crate::cap::registry::FabricRegistry;
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 use crate::FabricRegistryError;
 
-use super::error::{MachineParseError, MachineSyntaxError};
-use super::graph::{Machine, MachineStrand, NodeId};
+use super::error::{MachineAbstractionError, MachineParseError, MachineSyntaxError};
+use super::graph::{BindingSource, Machine, MachineStrand, NodeId};
 use super::resolve::{resolve_pre_interned, ForEachIdentity, PreInternedWiring};
+use super::syntax::{parse_syntax, StepPolicy, SyntaxStatementKind, SyntaxValue};
 
 #[derive(Parser)]
 #[grammar = "machine/machine.pest"]
 pub struct MachineParser;
 
-/// One wiring as it comes off the AST walk, with raw alias
+/// What a member of a wiring gives its arg.
+enum RawValue {
+    /// A node, by the name the text gives it.
+    Node(String),
+    Constant(serde_json::Value),
+}
+
+/// One member of a wiring's sources.
+struct RawMember {
+    /// The arg the member names, when it names one.
+    name: Option<String>,
+    value: RawValue,
+}
+
+/// One wiring as it comes off the syntax tree, with raw alias
 /// names. Resolution happens in two more passes after this.
 struct RawWiring {
-    /// Node-name aliases for the source slots, in the order
-    /// the user wrote them. Slot 0 is the primary.
-    sources: Vec<String>,
+    /// The members, in the order the user wrote them. The order decides
+    /// nothing but the item order of a gather.
+    sources: Vec<RawMember>,
     /// Cap header alias.
     cap_alias: String,
-    /// Node-name alias for the target.
-    target: String,
+    policy: StepPolicy,
+    /// The targets: the output each names (`None`: the main output) and the
+    /// node it goes to.
+    targets: Vec<(Option<String>, String)>,
     /// Index of this wiring in the textual input. Used to
     /// order connected components by first appearance.
     position: usize,
+}
+
+impl RawWiring {
+    /// The name of every node this wiring consumes, in the order written.
+    fn source_nodes(&self) -> impl Iterator<Item = &String> {
+        self.sources.iter().filter_map(|m| match &m.value {
+            RawValue::Node(name) => Some(name),
+            RawValue::Constant(_) => None,
+        })
+    }
+
+    /// The name of every node this wiring touches.
+    fn nodes(&self) -> impl Iterator<Item = &String> {
+        self.source_nodes().chain(self.targets.iter().map(|(_, node)| node))
+    }
 }
 
 /// Per-strand mapping from user-written node name to the
@@ -133,71 +155,51 @@ pub fn parse_machine_with_node_names(
         return Err(MachineSyntaxError::Empty.into());
     }
 
-    // Phase 1: pest grammar parse.
-    let pairs =
-        MachineParser::parse(Rule::program, input).map_err(|e| MachineSyntaxError::ParseError {
-            details: format!("{}", e),
-        })?;
+    // Phase 1: the text, read into statements.
+    let statements = parse_syntax(input)?;
 
-    // Phase 2: walk AST collecting headers and wirings.
+    // Phase 2: headers and wirings.
     let mut headers: Vec<(String, CapUrn, usize)> = Vec::new();
     let mut wirings: Vec<RawWiring> = Vec::new();
-
-    let program = pairs
-        .into_iter()
-        .next()
-        .expect("pest produces a program rule");
-    for (stmt_idx, pair) in program.into_inner().enumerate() {
-        if pair.as_rule() != Rule::stmt {
-            continue; // skip EOI
-        }
-        let inner = pair.into_inner().next().expect("stmt wraps inner");
-        let content = inner
-            .into_inner()
-            .next()
-            .expect("inner wraps header or wiring");
-
-        match content.as_rule() {
-            Rule::header => {
-                let mut inner_pairs = content.into_inner();
-                let alias = inner_pairs
-                    .next()
-                    .expect("header has alias")
-                    .as_str()
-                    .to_string();
-                let cap_urn_str = inner_pairs.next().expect("header has cap_urn").as_str();
-                let cap_urn = CapUrn::from_string(cap_urn_str).map_err(|e| {
+    for statement in statements {
+        match statement.kind {
+            SyntaxStatementKind::CapHeader { alias, cap_urn } => {
+                let parsed = CapUrn::from_string(&cap_urn.value).map_err(|e| {
                     MachineSyntaxError::InvalidCapUrn {
-                        alias: alias.clone(),
+                        alias: alias.value.clone(),
                         details: format!("{}", e),
                     }
                 })?;
-                headers.push((alias, cap_urn, stmt_idx));
+                headers.push((alias.value, parsed, statement.position));
             }
-            Rule::wiring => {
-                let mut inner_pairs = content.into_inner();
-                let source_pair = inner_pairs.next().expect("wiring has source");
-                let sources = parse_source(source_pair);
-                inner_pairs.next(); // arrow
-                let cap_alias = inner_pairs
-                    .next()
-                    .expect("wiring has cap alias")
-                    .as_str()
-                    .to_string();
-                inner_pairs.next(); // arrow
-                let target = inner_pairs
-                    .next()
-                    .expect("wiring has target")
-                    .as_str()
-                    .to_string();
-                wirings.push(RawWiring {
-                    sources,
-                    cap_alias,
-                    target,
-                    position: stmt_idx,
-                });
+            SyntaxStatementKind::MachineHeader { alias, reference } => {
+                return Err(MachineSyntaxError::MachineReferenceWithoutSource {
+                    alias: alias.value,
+                    reference: reference.value,
+                }
+                .into());
             }
-            _ => unreachable!("grammar guarantees inner is header or wiring"),
+            SyntaxStatementKind::Wiring(wiring) => wirings.push(RawWiring {
+                sources: wiring
+                    .sources
+                    .into_iter()
+                    .map(|member| RawMember {
+                        name: member.name.map(|n| n.value),
+                        value: match member.value {
+                            SyntaxValue::Node(node) => RawValue::Node(node.value),
+                            SyntaxValue::Constant(constant) => RawValue::Constant(constant.value),
+                        },
+                    })
+                    .collect(),
+                cap_alias: wiring.step.value,
+                policy: wiring.policy,
+                targets: wiring
+                    .targets
+                    .into_iter()
+                    .map(|target| (target.name.map(|n| n.value), target.node.value))
+                    .collect(),
+                position: statement.position,
+            }),
         }
     }
 
@@ -266,76 +268,27 @@ pub fn parse_machine_with_node_names(
         }
     }
 
-    // Phase 4: derive node-name → MediaUrn bindings.
-    //
-    // Walk wirings in textual order. For each wiring:
-    //   - Primary source: bind cap.in=
-    //   - Secondary sources: bind to whatever they already
-    //     hold (or media: wildcard if unbound)
-    //   - Target: bind cap.out=
-    // Re-binding is allowed iff the new URN is_comparable to
-    // the existing one (same specialization chain).
-    let mut node_media: HashMap<String, MediaUrn> = HashMap::new();
-    let wildcard = MediaUrn::from_string("media:").expect("wildcard media URN parses");
-
+    // Phase 4: every step is defined, and no node bears a step's name.
     for w in &wirings {
-        let (cap_urn, _) =
-            alias_map
-                .get(&w.cap_alias)
-                .ok_or_else(|| MachineSyntaxError::UndefinedAlias {
-                    alias: w.cap_alias.clone(),
-                })?;
-
-        for src in &w.sources {
-            if alias_map.contains_key(src) {
-                return Err(MachineSyntaxError::NodeAliasCollision {
-                    name: src.clone(),
-                    alias: src.clone(),
-                }
-                .into());
-            }
-        }
-        if alias_map.contains_key(&w.target) {
-            return Err(MachineSyntaxError::NodeAliasCollision {
-                name: w.target.clone(),
-                alias: w.target.clone(),
+        if !alias_map.contains_key(&w.cap_alias) {
+            return Err(MachineSyntaxError::UndefinedAlias {
+                alias: w.cap_alias.clone(),
             }
             .into());
         }
-
-        let cap_in_media =
-            cap_urn
-                .in_media_urn()
-                .map_err(|e| MachineSyntaxError::InvalidMediaUrn {
-                    alias: w.cap_alias.clone(),
-                    details: format!("in= spec: {}", e),
-                })?;
-        let cap_out_media =
-            cap_urn
-                .out_media_urn()
-                .map_err(|e| MachineSyntaxError::InvalidMediaUrn {
-                    alias: w.cap_alias.clone(),
-                    details: format!("out= spec: {}", e),
-                })?;
-
-        // Primary source: bind to cap.in=
-        if !w.sources.is_empty() {
-            assign_or_check_node(&w.sources[0], &cap_in_media, &mut node_media, w.position)?;
-            // Secondaries: bind to wildcard if unbound, leave
-            // alone otherwise. The bound value is what
-            // resolution will see.
-            for src in w.sources.iter().skip(1) {
-                if !node_media.contains_key(src) {
-                    node_media.insert(src.clone(), wildcard.clone());
-                }
+        if let Some(node) = w.nodes().find(|node| alias_map.contains_key(*node)) {
+            return Err(MachineSyntaxError::NodeAliasCollision {
+                name: node.clone(),
+                alias: node.clone(),
             }
+            .into());
         }
-        assign_or_check_node(&w.target, &cap_out_media, &mut node_media, w.position)?;
     }
 
     // Phase 5: connected-components partition by shared node
     // name. Union-find over wiring indices, where two wirings
-    // are unioned iff they share at least one node name.
+    // are unioned iff they share at least one node name. A wiring that
+    // touches no node at all (`() -> tick -> ()`) is a strand of its own.
     let n = wirings.len();
     let mut union = UnionFind::new(n);
 
@@ -345,10 +298,7 @@ pub fn parse_machine_with_node_names(
     // earlier wiring.
     let mut node_first_wiring: HashMap<String, usize> = HashMap::new();
     for (w_idx, w) in wirings.iter().enumerate() {
-        let mut node_names: Vec<&String> = Vec::with_capacity(w.sources.len() + 1);
-        node_names.extend(w.sources.iter());
-        node_names.push(&w.target);
-        for node_name in node_names {
+        for node_name in w.nodes() {
             if let Some(&earlier) = node_first_wiring.get(node_name) {
                 union.union(earlier, w_idx);
             } else {
@@ -374,61 +324,67 @@ pub fn parse_machine_with_node_names(
         .collect();
     group_min_idx.sort_by_key(|(_, min_idx)| *min_idx);
 
-    // Phase 6: per-component pre-interning + resolution.
+    // Phase 6: per-component node typing, pre-interning and resolution.
     //
-    // For each connected component (= strand), allocate
-    // `NodeId`s in the order user node names are encountered
-    // (walking the wirings in their textual order). The
-    // resolver receives `PreInternedWiring`s that already
-    // reference NodeIds, plus the parallel `nodes: Vec<MediaUrn>`
-    // table. Two distinct user node names that happen to share
-    // a media URN stay distinct NodeIds — that's the parser's
-    // identity contract.
+    // For each connected component (= strand), every node is given its URN
+    // (`type_nodes`), then `NodeId`s are allocated in the order user node
+    // names are encountered (walking the wirings in their textual order).
+    // The resolver receives `PreInternedWiring`s that already reference
+    // NodeIds, plus the parallel `nodes: Vec<MediaUrn>` table. Two distinct
+    // user node names that happen to share a media URN stay distinct NodeIds
+    // — that's the parser's identity contract.
     let mut strands: Vec<MachineStrand> = Vec::with_capacity(group_min_idx.len());
     let mut strand_node_names: Vec<StrandNodeNames> = Vec::with_capacity(group_min_idx.len());
     for (strand_index, (root, _)) in group_min_idx.iter().enumerate() {
         let mut member_indices = groups[root].clone();
         member_indices.sort();
+        let members: Vec<&RawWiring> = member_indices.iter().map(|i| &wirings[*i]).collect();
+
+        let node_media = type_nodes(&members, &alias_map, registry, strand_index)?;
 
         let mut nodes: Vec<MediaUrn> = Vec::new();
         let mut name_to_id: StrandNodeNames = HashMap::new();
-
-        // Allocate a NodeId for `name`. If `name` is already
-        // bound to a NodeId in this strand, return it.
-        // Otherwise allocate a new NodeId, push the name's
-        // bound URN onto the nodes table, and return.
-        fn intern_named(
-            name: &str,
-            node_media: &HashMap<String, MediaUrn>,
-            nodes: &mut Vec<MediaUrn>,
-            name_to_id: &mut StrandNodeNames,
-        ) -> NodeId {
+        let mut intern = |name: &str| -> NodeId {
             if let Some(id) = name_to_id.get(name) {
                 return *id;
             }
             let urn = node_media
                 .get(name)
                 .cloned()
-                .expect("every node name was bound during phase 4");
+                .expect("every node of the strand was given its URN");
             let id = nodes.len() as NodeId;
             nodes.push(urn);
             name_to_id.insert(name.to_string(), id);
             id
-        }
+        };
 
-        let mut pre_interned: Vec<PreInternedWiring> = Vec::with_capacity(member_indices.len());
-        for &w_idx in &member_indices {
-            let w = &wirings[w_idx];
+        let mut pre_interned: Vec<PreInternedWiring> = Vec::with_capacity(members.len());
+        for w in &members {
             let (cap_urn, _) = alias_map
                 .get(&w.cap_alias)
                 .expect("cap alias was validated above");
 
-            let source_node_ids: Vec<NodeId> = w
-                .sources
+            let mut named_sources: Vec<(String, BindingSource)> = Vec::new();
+            let mut source_node_ids: Vec<NodeId> = Vec::new();
+            for member in &w.sources {
+                match (&member.name, &member.value) {
+                    (Some(name), RawValue::Node(node)) => {
+                        named_sources.push((name.clone(), BindingSource::Node(intern(node))))
+                    }
+                    (Some(name), RawValue::Constant(value)) => {
+                        named_sources.push((name.clone(), BindingSource::Constant(value.clone())))
+                    }
+                    (None, RawValue::Node(node)) => source_node_ids.push(intern(node)),
+                    (None, RawValue::Constant(_)) => {
+                        unreachable!("the syntax refuses a constant that names no arg")
+                    }
+                }
+            }
+            let targets: Vec<(Option<String>, NodeId)> = w
+                .targets
                 .iter()
-                .map(|name| intern_named(name, &node_media, &mut nodes, &mut name_to_id))
+                .map(|(name, node)| (name.clone(), intern(node)))
                 .collect();
-            let target_node_id = intern_named(&w.target, &node_media, &mut nodes, &mut name_to_id);
 
             pre_interned.push(PreInternedWiring {
                 // The notation (static-machine) path has no resolved-strand step to
@@ -437,8 +393,10 @@ pub fn parse_machine_with_node_names(
                 token_id: crate::planner::StepToken::mint(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: cap_urn.clone(),
+                named_sources,
                 source_node_ids,
-                target_node_id,
+                targets,
+                policy: w.policy,
             });
         }
 
@@ -448,6 +406,197 @@ pub fn parse_machine_with_node_names(
     }
 
     Ok((Machine::from_resolved_strands(strands), strand_node_names))
+}
+
+/// Give `node` the URN `urn`, beside any URN it was already given: the two must
+/// be on one specialization chain, and the node holds the more specific.
+fn give(
+    node_media: &mut HashMap<String, MediaUrn>,
+    node: &str,
+    urn: MediaUrn,
+) -> Result<(), MachineParseError> {
+    match node_media.get(node) {
+        None => {
+            node_media.insert(node.to_string(), urn);
+        }
+        Some(existing) => {
+            if !existing.is_comparable(&urn).unwrap_or(false) {
+                return Err(MachineAbstractionError::NodeMediaConflict {
+                    node: node.to_string(),
+                    first: existing.to_string(),
+                    second: urn.to_string(),
+                }
+                .into());
+            }
+            if urn.specificity() > existing.specificity() {
+                node_media.insert(node.to_string(), urn);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Give every node of one strand its media URN (see the module documentation
+/// and 09 §The URN of a node). The result does not depend on the order of the
+/// wirings: what produces a node and what names it are read first, for every
+/// wiring; only then is each wiring asked for the one unnamed machine input
+/// its main input can type, against what the first two passes left untyped.
+fn type_nodes(
+    wirings: &[&RawWiring],
+    alias_map: &HashMap<String, (CapUrn, usize)>,
+    registry: &FabricRegistry,
+    strand_index: usize,
+) -> Result<HashMap<String, MediaUrn>, MachineParseError> {
+    let cap_of = |w: &RawWiring| -> Result<(CapUrn, Cap), MachineParseError> {
+        let (cap_urn, _) = alias_map
+            .get(&w.cap_alias)
+            .expect("cap alias was validated above");
+        let cap = registry.get_cached_cap(&cap_urn.to_string()).ok_or_else(|| {
+            MachineAbstractionError::UnknownCap {
+                cap_urn: cap_urn.to_string(),
+            }
+        })?;
+        Ok((cap_urn.clone(), cap))
+    };
+    let media = |urn: &str| {
+        MediaUrn::from_string(urn)
+            .expect("cap registry invariant: a definition's media URNs are valid")
+    };
+    // What a cap's main input accepts: its `in=`. `None` when it takes none.
+    let main_input_of = |w: &RawWiring, cap_urn: &CapUrn| -> Result<Option<MediaUrn>, MachineParseError> {
+        let in_media = cap_urn.in_media_urn().map_err(|e| MachineSyntaxError::InvalidMediaUrn {
+            alias: w.cap_alias.clone(),
+            details: format!("in= spec: {}", e),
+        })?;
+        let void = media(crate::urn::media_urn::MEDIA_VOID);
+        Ok((!in_media.is_equivalent(&void).unwrap_or(false)).then_some(in_media))
+    };
+
+    let mut node_media: HashMap<String, MediaUrn> = HashMap::new();
+
+    // What produces a node, and — for a node nothing produces — what names it.
+    let produced: std::collections::HashSet<&String> = wirings
+        .iter()
+        .flat_map(|w| w.targets.iter().map(|(_, node)| node))
+        .collect();
+    for w in wirings {
+        let (cap_urn, cap) = cap_of(w)?;
+        for (name, node) in &w.targets {
+            let urn = match name {
+                // The main output: the cap URN's `out=`. (A cap with none is
+                // refused by the resolver, which holds the wiring to it.)
+                None => cap_urn.out_media_urn().map_err(|e| MachineSyntaxError::InvalidMediaUrn {
+                    alias: w.cap_alias.clone(),
+                    details: format!("out= spec: {}", e),
+                })?,
+                Some(name) => {
+                    let output = cap.output_named(name).ok_or_else(|| {
+                        MachineAbstractionError::UnknownOutputName {
+                            strand_index,
+                            cap_urn: cap_urn.to_string(),
+                            name: name.clone(),
+                            declared: cap.get_outputs().iter().map(|o| o.name.clone()).collect(),
+                        }
+                    })?;
+                    match (&output.carries, main_input_of(w, &cap_urn)?) {
+                        // An output that carries the input holds the input's type.
+                        (Some(_), Some(in_media)) => in_media,
+                        _ => media(&output.media_urn),
+                    }
+                }
+            };
+            give(&mut node_media, node, urn)?;
+        }
+        for member in &w.sources {
+            let (Some(name), RawValue::Node(node)) = (&member.name, &member.value) else {
+                continue;
+            };
+            let arg = cap.arg_named(name).ok_or_else(|| MachineAbstractionError::UnknownArgName {
+                strand_index,
+                cap_urn: cap_urn.to_string(),
+                name: name.clone(),
+                declared: cap.args.iter().map(|arg| arg.name.clone()).collect(),
+            })?;
+            // A node some step produces has that output's type; whether it
+            // conforms to the arg it is named into is the resolver's to say
+            // (`SourceDoesNotConformToArg`). The name types an input of the
+            // machine, which has no other type.
+            if !produced.contains(node) {
+                give(&mut node_media, node, media(arg.accepted_urn()))?;
+            }
+        }
+    }
+
+    // What a step's MAIN input says of the unnamed member that feeds it. A
+    // step has one data input, so where exactly one unnamed member can be it,
+    // that member's node is given the type the main input accepts:
+    //
+    // - a member nothing above gave a URN is an input of the machine whose arg
+    //   nothing says: one such member per wiring is the main input, and only
+    //   that (`UntypedMachineInput` otherwise);
+    // - failing that, the one unnamed member whose URN is on the main input's
+    //   specialization chain is refined to it — a consumer that asks for a
+    //   tighter type than the producer declared states the type of what flows
+    //   there, and the run holds the producer to it.
+    //
+    // Read against what the passes above left, for every wiring, before any
+    // of it is applied: the order of the wirings changes nothing.
+    let mut from_main_input: Vec<(String, MediaUrn)> = Vec::new();
+    for w in wirings {
+        let unnamed: Vec<&String> = w
+            .sources
+            .iter()
+            .filter_map(|m| match (&m.name, &m.value) {
+                (None, RawValue::Node(node)) => Some(node),
+                _ => None,
+            })
+            .collect();
+        if unnamed.is_empty() {
+            continue;
+        }
+        let (cap_urn, cap) = cap_of(w)?;
+        let main_input = main_input_of(w, &cap_urn)?;
+        let main_named = main_input.as_ref().is_some_and(|in_media| {
+            cap.args
+                .iter()
+                .find(|arg| arg.is_main_input(in_media))
+                .is_some_and(|main| w.sources.iter().any(|m| m.name.as_deref() == Some(main.name.as_str())))
+        });
+        let untyped: Vec<String> = unnamed
+            .iter()
+            .filter(|node| !node_media.contains_key(**node))
+            .map(|node| (*node).clone())
+            .collect();
+        match (untyped.as_slice(), &main_input) {
+            ([], Some(in_media)) if !main_named => {
+                let on_chain: Vec<&String> = unnamed
+                    .iter()
+                    .filter(|node| node_media[**node].is_comparable(in_media).unwrap_or(false))
+                    .copied()
+                    .collect();
+                if let [node] = on_chain.as_slice() {
+                    from_main_input.push(((*node).clone(), in_media.clone()));
+                }
+            }
+            ([], _) => {}
+            ([node], Some(in_media)) if !main_named => {
+                from_main_input.push((node.clone(), in_media.clone()))
+            }
+            _ => {
+                return Err(MachineAbstractionError::UntypedMachineInput {
+                    position: w.position,
+                    cap_urn: cap_urn.to_string(),
+                    members: untyped,
+                }
+                .into())
+            }
+        }
+    }
+    for (node, urn) in from_main_input {
+        give(&mut node_media, &node, urn)?;
+    }
+
+    Ok(node_media)
 }
 
 /// Run only the pest grammar parse over `input` and return the
@@ -461,39 +610,13 @@ pub fn parse_machine_with_node_names(
 /// before delegating to the existing sync resolver, without
 /// duplicating the resolver itself.
 fn extract_header_cap_urns(input: &str) -> Result<Vec<String>, MachineParseError> {
-    let pairs = MachineParser::parse(Rule::program, input.trim()).map_err(|e| {
-        MachineSyntaxError::ParseError {
-            details: format!("{}", e),
-        }
-    })?;
-
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut urns: Vec<String> = Vec::new();
-    let program = pairs
-        .into_iter()
-        .next()
-        .expect("pest produces a program rule");
-    for pair in program.into_inner() {
-        if pair.as_rule() != Rule::stmt {
-            continue;
-        }
-        let inner = pair.into_inner().next().expect("stmt wraps inner");
-        let content = inner
-            .into_inner()
-            .next()
-            .expect("inner wraps header or wiring");
-        if content.as_rule() != Rule::header {
-            continue;
-        }
-        let mut inner_pairs = content.into_inner();
-        let _alias = inner_pairs.next();
-        let cap_urn_str = inner_pairs
-            .next()
-            .expect("header has cap_urn")
-            .as_str()
-            .to_string();
-        if seen.insert(cap_urn_str.clone()) {
-            urns.push(cap_urn_str);
+    for statement in parse_syntax(input.trim())? {
+        if let SyntaxStatementKind::CapHeader { cap_urn, .. } = statement.kind {
+            if seen.insert(cap_urn.value.clone()) {
+                urns.push(cap_urn.value);
+            }
         }
     }
     Ok(urns)
@@ -505,84 +628,35 @@ fn extract_header_cap_urns(input: &str) -> Result<Vec<String>, MachineParseError
 /// candidate **cap aliases** the async warm-up must hydrate before the
 /// synchronous resolver runs.
 fn extract_unresolved_cap_alias_names(input: &str) -> Result<Vec<String>, MachineParseError> {
-    let pairs = MachineParser::parse(Rule::program, input.trim()).map_err(|e| {
-        MachineSyntaxError::ParseError {
-            details: format!("{}", e),
-        }
-    })?;
-
-    let program = pairs
-        .into_iter()
-        .next()
-        .expect("pest produces a program rule");
-
+    let statements = parse_syntax(input.trim())?;
     // First pass: collect every header alias (these shadow aliases).
+    let header_aliases: std::collections::HashSet<&str> = statements
+        .iter()
+        .filter_map(|statement| match &statement.kind {
+            SyntaxStatementKind::CapHeader { alias, .. }
+            | SyntaxStatementKind::MachineHeader { alias, .. } => Some(alias.value.as_str()),
+            SyntaxStatementKind::Wiring(_) => None,
+        })
+        .collect();
     // Second pass: collect cap-position names not in that set.
-    let mut header_aliases: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut cap_names: Vec<(String, bool)> = Vec::new(); // (name, is_wiring_cap_position)
-
-    for pair in program.into_inner() {
-        if pair.as_rule() != Rule::stmt {
-            continue;
-        }
-        let inner = pair.into_inner().next().expect("stmt wraps inner");
-        let content = inner
-            .into_inner()
-            .next()
-            .expect("inner wraps header or wiring");
-        match content.as_rule() {
-            Rule::header => {
-                let mut ip = content.into_inner();
-                let alias = ip.next().expect("header has alias").as_str().to_string();
-                header_aliases.insert(alias);
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut names: Vec<String> = Vec::new();
+    for statement in &statements {
+        if let SyntaxStatementKind::Wiring(wiring) = &statement.kind {
+            let name = wiring.step.value.as_str();
+            if !header_aliases.contains(name) && seen.insert(name) {
+                names.push(name.to_string());
             }
-            Rule::wiring => {
-                let mut ip = content.into_inner();
-                let _source = ip.next();
-                let _arrow = ip.next();
-                let cap_alias = ip
-                    .next()
-                    .expect("wiring has cap alias")
-                    .as_str()
-                    .to_string();
-                cap_names.push((cap_alias, true));
-            }
-            _ => {}
         }
     }
-
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out: Vec<String> = Vec::new();
-    for (name, _) in cap_names {
-        if header_aliases.contains(&name) {
-            continue;
-        }
-        if seen.insert(name.clone()) {
-            out.push(name);
-        }
-    }
-    Ok(out)
+    Ok(names)
 }
 
 /// Async parallel of `parse_machine_with_node_names`.
 ///
-/// Differs from the sync version only in that it pre-warms the
-/// `FabricRegistry`'s caches BEFORE running the existing sync resolver:
-///
-/// 1. Every cap URN declared in a header is fetched via `get_cap`.
-/// 2. Every cap-position name in a wiring that is NOT a local header is
-///    treated as a **cap alias**: the alias is resolved (warming the alias
-///    cache) and its target cap is fetched (warming the cap cache). An
-///    alias that points at a media URN in cap position is a hard error
-///    here, matching the synchronous resolver's `AliasNotACap`.
-///
-/// After the warm-up the resolver's synchronous `get_cached_cap` and
-/// `resolve_alias_cached` lookups all hit cache, so the resolver code is
-/// unchanged.
-///
-/// Use this from any `async` context where the registry may need to fetch
-/// caps over the network — notably the scenarios integration tests, which
-/// run with internet access and do not pre-load any bundled catalog.
+/// The cap definitions the notation names are fetched into the registry's
+/// cache first — every header's cap, and every registered cap alias used in
+/// step position — so the synchronous resolver finds them there.
 pub async fn parse_machine_with_node_names_async(
     input: &str,
     registry: &FabricRegistry,
@@ -668,54 +742,6 @@ impl Machine {
     }
 }
 
-/// Extract source node names from a source pair (single alias
-/// or group).
-fn parse_source(pair: pest::iterators::Pair<Rule>) -> Vec<String> {
-    let inner = pair.into_inner().next().expect("source has inner");
-    match inner.as_rule() {
-        Rule::group => inner
-            .into_inner()
-            .filter(|p| p.as_rule() == Rule::alias)
-            .map(|p| p.as_str().to_string())
-            .collect(),
-        Rule::alias => vec![inner.as_str().to_string()],
-        _ => unreachable!("source is group or alias"),
-    }
-}
-
-/// Bind a media URN to a node, or check that an existing
-/// binding is comparable. Two URNs bound to the same node name
-/// must be on the same specialization chain (`is_comparable`);
-/// the resolver will pick the more-specific one when it runs.
-fn assign_or_check_node(
-    node: &str,
-    media_urn: &MediaUrn,
-    node_media: &mut HashMap<String, MediaUrn>,
-    position: usize,
-) -> Result<(), MachineSyntaxError> {
-    if let Some(existing) = node_media.get(node) {
-        let compatible = existing.is_comparable(media_urn).unwrap_or(false);
-        if !compatible {
-            return Err(MachineSyntaxError::InvalidWiring {
-                position,
-                details: format!(
-                    "node '{}' has conflicting media types: existing '{}', new '{}'",
-                    node, existing, media_urn
-                ),
-            });
-        }
-        // The more-specific URN wins (so a downstream cap with
-        // a tighter pattern bound to the same node refines the
-        // type at that data position).
-        if media_urn.specificity() > existing.specificity() {
-            node_media.insert(node.to_string(), media_urn.clone());
-        }
-    } else {
-        node_media.insert(node.to_string(), media_urn.clone());
-    }
-    Ok(())
-}
-
 /// Tiny union-find used for connected-components partition.
 struct UnionFind {
     parent: Vec<usize>,
@@ -799,8 +825,8 @@ mod tests {
         assert_eq!(strand.edges().len(), 2);
         // The intermediate node must be the same NodeId for
         // both edges.
-        let extract_target = strand.edges()[0].target;
-        let embed_source = strand.edges()[1].assignment[0].source;
+        let extract_target = strand.edges()[0].main_target().expect("the main output is taken");
+        let embed_source = strand.edges()[1].assignment[0].node().expect("a node binding");
         assert_eq!(extract_target, embed_source);
     }
 

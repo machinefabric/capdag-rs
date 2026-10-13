@@ -1,6 +1,7 @@
 //! Position-preserving AST for machine notation language intelligence.
 //!
-//! Wraps the existing pest parser to capture token positions for:
+//! Built on the syntax reader (`syntax.rs`), which records where every part
+//! of a statement stands, to serve:
 //! - Semantic syntax coloring
 //! - Completion context detection
 //! - Hover information
@@ -12,14 +13,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use pest::Parser;
 use uuid::Uuid;
 
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
 use super::error::MachineSyntaxError;
-use super::parser::{MachineParser, Rule};
+use super::syntax::{parse_syntax, Spanned, StepPolicy, SyntaxStatementKind, SyntaxValue};
 
 // =============================================================================
 // Position types
@@ -74,28 +74,104 @@ pub struct ParsedHeader {
     pub statement_span: NotationSpan,
 }
 
+/// A parsed machine header (`alias machine "<reference>"`) with full
+/// position information.
+#[derive(Debug, Clone)]
+pub struct ParsedMachineHeader {
+    pub alias: String,
+    pub alias_span: NotationSpan,
+    /// The `machine` keyword.
+    pub keyword_span: NotationSpan,
+    /// The reference, unescaped.
+    pub reference: String,
+    /// The reference as written, quotes included.
+    pub reference_span: NotationSpan,
+    pub statement_span: NotationSpan,
+}
+
+/// What a member of a wiring's sources gives its arg.
+#[derive(Debug, Clone)]
+pub enum ParsedValue {
+    /// A node, and where its name is written.
+    Node(String, NotationSpan),
+    /// A constant (a JSON value), and where it is written.
+    Constant(serde_json::Value, NotationSpan),
+}
+
+/// One member of a wiring's sources.
+#[derive(Debug, Clone)]
+pub struct ParsedMember {
+    /// The arg the member names, and where the name is written.
+    pub name: Option<(String, NotationSpan)>,
+    pub value: ParsedValue,
+}
+
+/// One target of a wiring.
+#[derive(Debug, Clone)]
+pub struct ParsedTarget {
+    /// The output the target names, and where. `None`: the main output.
+    pub name: Option<(String, NotationSpan)>,
+    pub node: String,
+    pub node_span: NotationSpan,
+}
+
 /// A parsed wiring statement with full position information.
 #[derive(Debug, Clone)]
 pub struct ParsedWiring {
-    pub sources: Vec<(String, NotationSpan)>,
+    pub sources: Vec<ParsedMember>,
     pub cap_alias: String,
     pub cap_alias_span: NotationSpan,
-    pub target: String,
-    pub target_span: NotationSpan,
+    /// What the step does when it fails; the default when none is written.
+    pub policy: StepPolicy,
+    /// The policy as written, braces included, when one is.
+    pub policy_span: Option<NotationSpan>,
+    pub targets: Vec<ParsedTarget>,
     pub arrow_spans: Vec<NotationSpan>,
     pub statement_span: NotationSpan,
-    /// Open and close paren spans for fan-in groups.
-    pub paren_spans: Option<(NotationSpan, NotationSpan)>,
+    /// Open and close paren spans of each group written: the sources', then
+    /// the targets'.
+    pub paren_spans: Vec<(NotationSpan, NotationSpan)>,
+    /// The commas of both groups.
     pub comma_spans: Vec<NotationSpan>,
+    /// The `=` of every named member and named target.
+    pub assignment_spans: Vec<NotationSpan>,
 }
 
-/// A parsed statement — either a header or a wiring.
+impl ParsedWiring {
+    /// The nodes this wiring consumes, in the order written. A constant is
+    /// not a node.
+    pub fn source_nodes(&self) -> impl Iterator<Item = (&str, &NotationSpan)> {
+        self.sources.iter().filter_map(|member| match &member.value {
+            ParsedValue::Node(name, span) => Some((name.as_str(), span)),
+            ParsedValue::Constant(..) => None,
+        })
+    }
+
+    /// The nodes this wiring consumes without saying which arg they are for.
+    fn unnamed_source_nodes(&self) -> impl Iterator<Item = &str> {
+        self.sources.iter().filter_map(|member| match (&member.name, &member.value) {
+            (None, ParsedValue::Node(name, _)) => Some(name.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The node the main output goes to: the unnamed target, if there is one.
+    pub fn main_target(&self) -> Option<&ParsedTarget> {
+        self.targets.iter().find(|target| target.name.is_none())
+    }
+}
+
+/// A parsed statement — a header, a machine header or a wiring.
 #[derive(Debug, Clone)]
 pub enum ParsedStatement {
     Header(ParsedHeader),
+    MachineHeader(ParsedMachineHeader),
     Wiring(ParsedWiring),
 }
 
+// =============================================================================
+// Notation AST
+// =============================================================================
 // =============================================================================
 // Notation AST
 // =============================================================================
@@ -146,6 +222,14 @@ pub enum SemanticTokenType {
     Escape,
     TagKey,
     TagValue,
+    /// The name of an arg or of an output, where a member or a target names it.
+    Name,
+    /// A constant written in a wiring.
+    Constant,
+    /// The `machine` keyword of a machine header.
+    Keyword,
+    /// A step's policy.
+    Policy,
 }
 
 /// A semantic token with position and type.
@@ -168,6 +252,14 @@ pub enum NotationEntityKind {
     Node,
     CapAliasReference,
     Arrow,
+    /// The name of an arg, where a member names it.
+    ArgName,
+    /// The name of an output, where a target names it.
+    OutputName,
+    /// A constant bound to an arg.
+    Constant,
+    /// A reference to another machine, in a machine header.
+    MachineReference,
 }
 
 #[derive(Debug, Clone)]
@@ -264,171 +356,154 @@ pub fn parse_notation_ast(input: &str) -> NotationAST {
         return ast;
     }
 
-    // Phase 1: PEG parse
-    let pairs = match MachineParser::parse(Rule::program, trimmed) {
-        Ok(pairs) => pairs,
+    // Phase 1: the text, read into statements by the one reader of the
+    // grammar. What it refuses — text the grammar does not accept, and the
+    // rules the text alone decides — is this AST's error.
+    let statements = match parse_syntax(trimmed) {
+        Ok(statements) => statements,
         Err(e) => {
-            ast.error = Some(MachineSyntaxError::ParseError {
-                details: format!("{}", e),
-            });
+            ast.error = Some(e);
             // On parse failure, do a best-effort bracket scan for partial tokens
             scan_brackets_for_partial_ast(trimmed, &mut ast);
             return ast;
         }
     };
 
-    // Phase 2: Walk the pest AST and collect statements with positions.
-    // We need the byte offset of the trimmed string relative to the original
-    // input, so that positions are correct for the original text.
+    // Phase 2: statements with positions. Positions are byte offsets in the
+    // trimmed text; `trim_start` is where it begins in the original input.
     let trim_offset = input.len() - input.trim_end().len();
     let trim_start = input.len() - trimmed.len() - trim_offset;
-
-    let program = match pairs.into_iter().next() {
-        Some(p) => p,
-        None => return ast,
+    let span = |start: usize, end: usize| byte_range_to_notation_span(start, end, trimmed, trim_start);
+    let spanned = |part: &Spanned<String>| span(part.start, part.end);
+    // The first `ch` in `trimmed[from..to]` that is outside a quoted string.
+    let find = |ch: char, from: usize, to: usize| -> Option<NotationSpan> {
+        let mut in_quote = false;
+        let mut escaped = false;
+        for (offset, c) in trimmed[from..to].char_indices() {
+            if escaped {
+                escaped = false;
+            } else if in_quote && c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_quote = !in_quote;
+            } else if !in_quote && c == ch {
+                return Some(span(from + offset, from + offset + ch.len_utf8()));
+            }
+        }
+        None
     };
 
-    for pair in program.into_inner() {
-        if pair.as_rule() != Rule::stmt {
-            continue; // skip EOI
-        }
-
+    for statement in statements {
+        let stmt_span = span(statement.start, statement.end);
         // Bracket spans: for bracketed statements `[inner]`, extract
         // bracket positions. Line-based statements have no brackets.
-        let stmt_span = pest_span_to_notation_span(&pair.as_span(), trimmed, trim_start);
-        let is_bracketed = pair.as_str().starts_with('[');
-
-        if is_bracketed {
-            let open_bracket = NotationSpan {
-                start: stmt_span.start,
-                end: NotationPosition {
-                    line: stmt_span.start.line,
-                    character: stmt_span.start.character + 1,
-                },
-                start_byte: stmt_span.start_byte,
-                end_byte: stmt_span.start_byte + 1,
-            };
-            let close_bracket = NotationSpan {
-                start: NotationPosition {
-                    line: stmt_span.end.line,
-                    character: stmt_span.end.character.saturating_sub(1),
-                },
-                end: stmt_span.end,
-                start_byte: stmt_span.end_byte.saturating_sub(1),
-                end_byte: stmt_span.end_byte,
-            };
-            ast.bracket_spans.push((open_bracket, close_bracket));
+        if trimmed[statement.start..statement.end].starts_with('[') {
+            ast.bracket_spans.push((
+                span(statement.start, statement.start + 1),
+                span(statement.end - 1, statement.end),
+            ));
         }
 
-        // Descend into inner → header | wiring
-        let inner = match pair.into_inner().next() {
-            Some(p) => p,
-            None => continue,
-        };
-        let content = match inner.into_inner().next() {
-            Some(p) => p,
-            None => continue,
-        };
-
-        match content.as_rule() {
-            Rule::header => {
-                let mut inner_pairs = content.into_inner();
-
-                let alias_pair = match inner_pairs.next() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let alias = alias_pair.as_str().to_string();
-                let alias_span =
-                    pest_span_to_notation_span(&alias_pair.as_span(), trimmed, trim_start);
-
-                let cap_urn_pair = match inner_pairs.next() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let cap_urn_str = cap_urn_pair.as_str().to_string();
-                let cap_urn_span =
-                    pest_span_to_notation_span(&cap_urn_pair.as_span(), trimmed, trim_start);
-
-                let cap_urn = CapUrn::from_string(&cap_urn_str).ok();
-
+        match statement.kind {
+            SyntaxStatementKind::CapHeader { alias, cap_urn } => {
                 let header = ParsedHeader {
-                    alias: alias.clone(),
-                    alias_span,
-                    cap_urn_str,
-                    cap_urn_span,
-                    cap_urn,
+                    alias: alias.value.clone(),
+                    alias_span: spanned(&alias),
+                    cap_urn: CapUrn::from_string(&cap_urn.value).ok(),
+                    cap_urn_span: spanned(&cap_urn),
+                    cap_urn_str: cap_urn.value,
                     statement_span: stmt_span,
                 };
-
-                ast.alias_map.insert(alias, header.clone());
+                ast.alias_map.insert(alias.value, header.clone());
                 ast.statements.push(ParsedStatement::Header(header));
             }
-            Rule::wiring => {
-                let mut inner_pairs = content.into_inner();
-
-                // Parse source (single alias or group)
-                let source_pair = match inner_pairs.next() {
-                    Some(p) => p,
-                    None => continue,
+            SyntaxStatementKind::MachineHeader { alias, reference } => {
+                // The keyword stands between the alias and the reference.
+                let keyword_at = alias.end
+                    + trimmed[alias.end..reference.start]
+                        .find("machine")
+                        .expect("a machine header holds the keyword between its alias and its reference");
+                ast.statements.push(ParsedStatement::MachineHeader(ParsedMachineHeader {
+                    alias_span: spanned(&alias),
+                    alias: alias.value,
+                    keyword_span: span(keyword_at, keyword_at + "machine".len()),
+                    reference_span: span(reference.start, reference.end),
+                    reference: reference.value,
+                    statement_span: stmt_span,
+                }));
+            }
+            SyntaxStatementKind::Wiring(wiring) => {
+                let mut paren_spans = Vec::new();
+                let mut comma_spans = Vec::new();
+                let mut assignment_spans = Vec::new();
+                // A group is what stands in parentheses; a bare alias is not one.
+                let mut group = |range: (usize, usize)| {
+                    if trimmed[range.0..range.1].starts_with('(') {
+                        paren_spans.push((span(range.0, range.0 + 1), span(range.1 - 1, range.1)));
+                    }
                 };
-                let (sources, paren_spans, comma_spans) =
-                    parse_source_with_spans(&source_pair, trimmed, trim_start);
+                group(wiring.sources_span);
+                group(wiring.targets_span);
 
-                // First arrow
-                let arrow1 = inner_pairs.next();
-                let mut arrow_spans = Vec::new();
-                if let Some(ref a) = arrow1 {
-                    arrow_spans.push(pest_span_to_notation_span(
-                        &a.as_span(),
-                        trimmed,
-                        trim_start,
-                    ));
+                // Where each member and each target starts and ends, to find
+                // the commas between them and the `=` inside them.
+                let mut sources = Vec::with_capacity(wiring.sources.len());
+                let mut previous_end: Option<usize> = None;
+                for member in wiring.sources {
+                    let (value_start, value_end) = match &member.value {
+                        SyntaxValue::Node(node) => (node.start, node.end),
+                        SyntaxValue::Constant(constant) => (constant.start, constant.end),
+                    };
+                    let start = member.name.as_ref().map_or(value_start, |name| name.start);
+                    if let Some(end) = previous_end {
+                        comma_spans.extend(find(',', end, start));
+                    }
+                    if let Some(name) = &member.name {
+                        assignment_spans.extend(find('=', name.end, value_start));
+                    }
+                    previous_end = Some(value_end);
+                    sources.push(ParsedMember {
+                        name: member.name.map(|name| (name.value.clone(), spanned(&name))),
+                        value: match member.value {
+                            SyntaxValue::Node(node) => ParsedValue::Node(node.value.clone(), spanned(&node)),
+                            SyntaxValue::Constant(constant) => {
+                                ParsedValue::Constant(constant.value, span(constant.start, constant.end))
+                            }
+                        },
+                    });
+                }
+                let mut targets = Vec::with_capacity(wiring.targets.len());
+                let mut previous_end: Option<usize> = None;
+                for target in wiring.targets {
+                    let start = target.name.as_ref().map_or(target.node.start, |name| name.start);
+                    if let Some(end) = previous_end {
+                        comma_spans.extend(find(',', end, start));
+                    }
+                    if let Some(name) = &target.name {
+                        assignment_spans.extend(find('=', name.end, target.node.start));
+                    }
+                    previous_end = Some(target.node.end);
+                    targets.push(ParsedTarget {
+                        name: target.name.map(|name| (name.value.clone(), spanned(&name))),
+                        node_span: spanned(&target.node),
+                        node: target.node.value,
+                    });
                 }
 
-                // Cap alias (the cap-position node name)
-                let cap_pair = match inner_pairs.next() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let cap_alias = cap_pair.as_str().to_string();
-                let cap_alias_span =
-                    pest_span_to_notation_span(&cap_pair.as_span(), trimmed, trim_start);
-
-                // Second arrow
-                let arrow2 = inner_pairs.next();
-                if let Some(ref a) = arrow2 {
-                    arrow_spans.push(pest_span_to_notation_span(
-                        &a.as_span(),
-                        trimmed,
-                        trim_start,
-                    ));
-                }
-
-                // Target alias
-                let target_pair = match inner_pairs.next() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let target = target_pair.as_str().to_string();
-                let target_span =
-                    pest_span_to_notation_span(&target_pair.as_span(), trimmed, trim_start);
-
-                let wiring = ParsedWiring {
+                ast.statements.push(ParsedStatement::Wiring(ParsedWiring {
                     sources,
-                    cap_alias,
-                    cap_alias_span,
-                    target,
-                    target_span,
-                    arrow_spans,
+                    cap_alias_span: spanned(&wiring.step),
+                    cap_alias: wiring.step.value,
+                    policy: wiring.policy,
+                    policy_span: wiring.policy_span.map(|(start, end)| span(start, end)),
+                    targets,
+                    arrow_spans: wiring.arrow_spans.iter().map(|(start, end)| span(*start, *end)).collect(),
                     statement_span: stmt_span,
                     paren_spans,
                     comma_spans,
-                };
-
-                ast.statements.push(ParsedStatement::Wiring(wiring));
+                    assignment_spans,
+                }));
             }
-            _ => {}
         }
     }
 
@@ -461,39 +536,59 @@ pub fn parse_notation_ast(input: &str) -> NotationAST {
 }
 
 /// Build node_media mapping from wiring statements and the alias map.
+///
+/// This is the lexical part of the rule the resolver applies (09 §The URN of
+/// a node), for what the text and its headers alone decide: the node the main
+/// output goes to holds the cap's `out=`, and the one unnamed member of a
+/// wiring that nothing else gave a URN holds its `in=`. Where a member stands
+/// in its group decides nothing. What a NAMED member or target holds is in
+/// the cap's definition, which this lexical view does not have; the resolved
+/// machine has it.
 fn build_node_media(
     statements: &[ParsedStatement],
     alias_map: &BTreeMap<String, ParsedHeader>,
     node_media: &mut HashMap<String, MediaUrn>,
 ) {
-    for stmt in statements {
-        if let ParsedStatement::Wiring(w) = stmt {
-            // Look up the cap URN for this wiring's alias
-            let cap_urn = match alias_map.get(&w.cap_alias) {
-                Some(h) => match &h.cap_urn {
-                    Some(u) => u,
-                    None => continue,
-                },
-                None => continue,
-            };
-
-            // Derive media URNs from cap's in=/out= specs
-            if let Ok(in_media) = cap_urn.in_media_urn() {
-                if let Some((name, _)) = w.sources.first() {
-                    if !alias_map.contains_key(name) && !node_media.contains_key(name) {
-                        node_media.insert(name.clone(), in_media);
-                    }
-                }
-            }
-            if let Ok(out_media) = cap_urn.out_media_urn() {
-                if !alias_map.contains_key(&w.target) && !node_media.contains_key(&w.target) {
-                    node_media.insert(w.target.clone(), out_media);
-                }
+    let cap_urn_of = |w: &ParsedWiring| alias_map.get(&w.cap_alias).and_then(|h| h.cap_urn.as_ref());
+    let wirings = || {
+        statements.iter().filter_map(|stmt| match stmt {
+            ParsedStatement::Wiring(w) => Some(w),
+            _ => None,
+        })
+    };
+    // What a step produces.
+    for w in wirings() {
+        let (Some(cap_urn), Some(target)) = (cap_urn_of(w), w.main_target()) else {
+            continue;
+        };
+        if let Ok(out_media) = cap_urn.out_media_urn() {
+            if !alias_map.contains_key(&target.node) && !node_media.contains_key(&target.node) {
+                node_media.insert(target.node.clone(), out_media);
             }
         }
     }
+    // What a step is given without a name, when nothing produced it.
+    let mut untyped: Vec<(String, MediaUrn)> = Vec::new();
+    for w in wirings() {
+        let Some(cap_urn) = cap_urn_of(w) else {
+            continue;
+        };
+        let members: Vec<&str> = w
+            .unnamed_source_nodes()
+            .filter(|name| !alias_map.contains_key(*name) && !node_media.contains_key(*name))
+            .collect();
+        if let ([name], Ok(in_media)) = (members.as_slice(), cap_urn.in_media_urn()) {
+            untyped.push((name.to_string(), in_media));
+        }
+    }
+    for (name, in_media) in untyped {
+        node_media.entry(name).or_insert(in_media);
+    }
 }
 
+// =============================================================================
+// Completion context detection
+// =============================================================================
 // =============================================================================
 // Completion context detection
 // =============================================================================
@@ -709,7 +804,11 @@ pub fn build_editor_model(
                 .and_then(|header| cap_shapes.get(&header.cap_urn_str))
                 .map(|(_, out)| *out)
                 .unwrap_or(false);
-            node_is_sequence.insert(wiring.target.clone(), output_is_sequence);
+            // `cap_shapes` knows the cap's MAIN output; the node that takes it
+            // is the unnamed target.
+            if let Some(target) = wiring.main_target() {
+                node_is_sequence.insert(target.node.clone(), output_is_sequence);
+            }
         }
     }
 
@@ -740,6 +839,28 @@ pub fn build_editor_model(
                         cap_details,
                     )),
                     linked_cap_urn: Some(header.cap_urn_str.clone()),
+                    color_index: None,
+                });
+            }
+            ParsedStatement::MachineHeader(header) => {
+                entities.push(NotationEntityInfo {
+                    token_id: new_token_id(),
+                    kind: NotationEntityKind::AliasDefinition,
+                    range: header.alias_span.clone(),
+                    label: header.alias.clone(),
+                    detail: Some("Machine alias definition".to_string()),
+                    hover_markdown: Some(format!("Machine `{}`", header.reference)),
+                    linked_cap_urn: None,
+                    color_index: None,
+                });
+                entities.push(NotationEntityInfo {
+                    token_id: new_token_id(),
+                    kind: NotationEntityKind::MachineReference,
+                    range: header.reference_span.clone(),
+                    label: header.reference.clone(),
+                    detail: Some("Reference to another machine".to_string()),
+                    hover_markdown: None,
+                    linked_cap_urn: None,
                     color_index: None,
                 });
             }
@@ -778,17 +899,58 @@ pub fn build_editor_model(
                     .and_then(|urn| cap_shapes.get(urn))
                     .copied()
                     .unwrap_or((false, false));
-                let primary_source_is_sequence = wiring
-                    .sources
-                    .first()
-                    .map(|(name, _)| node_is_sequence.get(name).copied().unwrap_or(false))
-                    .unwrap_or(false);
-                let is_loop = primary_source_is_sequence && !input_is_sequence;
+                // Lexically, the members a step is given without a name are the
+                // candidates for its main input; which arg a NAMED member is
+                // for, and whether that arg takes a sequence, is in the cap's
+                // definition. So the badge is shown where an unnamed member
+                // holds a sequence and the cap's main input takes one value.
+                let unnamed_source_is_sequence = wiring
+                    .unnamed_source_nodes()
+                    .any(|name| node_is_sequence.get(name).copied().unwrap_or(false));
+                let is_loop = unnamed_source_is_sequence && !input_is_sequence;
+
+                // What each member names, and each constant: text entities of
+                // the step, sharing its token so hovering one lights the step.
+                for member in &wiring.sources {
+                    if let Some((name, name_span)) = &member.name {
+                        entities.push(NotationEntityInfo {
+                            token_id: cap_token_id.clone(),
+                            kind: NotationEntityKind::ArgName,
+                            range: name_span.clone(),
+                            label: name.clone(),
+                            detail: Some("Argument name".to_string()),
+                            hover_markdown: None,
+                            linked_cap_urn: linked_cap_urn.clone(),
+                            color_index: Some(color_index),
+                        });
+                    }
+                    if let ParsedValue::Constant(value, value_span) = &member.value {
+                        entities.push(NotationEntityInfo {
+                            token_id: cap_token_id.clone(),
+                            kind: NotationEntityKind::Constant,
+                            range: value_span.clone(),
+                            label: value.to_string(),
+                            detail: Some("Constant".to_string()),
+                            hover_markdown: None,
+                            linked_cap_urn: linked_cap_urn.clone(),
+                            color_index: Some(color_index),
+                        });
+                    }
+                }
 
                 // Source nodes: each named node resolves to ONE logical
-                // token and ONE graph node, shared across all wirings.
+                // token and ONE graph node, shared across all wirings. The
+                // label of its edge is the arg it names, when it names one.
                 let mut source_identities: Vec<(String, String)> = Vec::new();
-                for (source_name, source_span) in &wiring.sources {
+                let source_labels: Vec<Option<String>> = wiring
+                    .sources
+                    .iter()
+                    .filter(|member| matches!(member.value, ParsedValue::Node(..)))
+                    .map(|member| member.name.as_ref().map(|(name, _)| name.clone()))
+                    .collect();
+                let source_names: Vec<String> =
+                    wiring.source_nodes().map(|(name, _)| name.to_string()).collect();
+                for (source_name, source_span) in wiring.source_nodes() {
                     let (source_token_id, source_graph_id) = ensure_graph_node(
                         &mut graph_elements,
                         &mut node_identity_by_name,
@@ -803,7 +965,7 @@ pub fn build_editor_model(
                         token_id: source_token_id,
                         kind: NotationEntityKind::Node,
                         range: source_span.clone(),
-                        label: source_name.clone(),
+                        label: source_name.to_string(),
                         detail: ast.node_media.get(source_name).map(|urn| urn.to_string()),
                         hover_markdown: Some(format_node_hover(
                             source_name,
@@ -815,32 +977,49 @@ pub fn build_editor_model(
                     });
                 }
 
-                // Target node.
-                let (target_token_id, target_graph_id) = ensure_graph_node(
-                    &mut graph_elements,
-                    &mut node_identity_by_name,
-                    &wiring.target,
-                    ast,
-                    media_details,
-                    &node_is_sequence,
-                );
-                entities.push(NotationEntityInfo {
-                    token_id: target_token_id.clone(),
-                    kind: NotationEntityKind::Node,
-                    range: wiring.target_span.clone(),
-                    label: wiring.target.clone(),
-                    detail: ast
-                        .node_media
-                        .get(&wiring.target)
-                        .map(|urn| urn.to_string()),
-                    hover_markdown: Some(format_node_hover(
-                        &wiring.target,
-                        &ast.node_media,
+                // Target nodes: one per output the wiring takes.
+                let mut target_identities: Vec<(String, Option<String>, String)> = Vec::new();
+                for target in &wiring.targets {
+                    let (target_token_id, target_graph_id) = ensure_graph_node(
+                        &mut graph_elements,
+                        &mut node_identity_by_name,
+                        &target.node,
+                        ast,
                         media_details,
-                    )),
-                    linked_cap_urn: None,
-                    color_index: None,
-                });
+                        &node_is_sequence,
+                    );
+                    if let Some((name, name_span)) = &target.name {
+                        entities.push(NotationEntityInfo {
+                            token_id: cap_token_id.clone(),
+                            kind: NotationEntityKind::OutputName,
+                            range: name_span.clone(),
+                            label: name.clone(),
+                            detail: Some("Output name".to_string()),
+                            hover_markdown: None,
+                            linked_cap_urn: linked_cap_urn.clone(),
+                            color_index: Some(color_index),
+                        });
+                    }
+                    entities.push(NotationEntityInfo {
+                        token_id: target_token_id,
+                        kind: NotationEntityKind::Node,
+                        range: target.node_span.clone(),
+                        label: target.node.clone(),
+                        detail: ast.node_media.get(&target.node).map(|urn| urn.to_string()),
+                        hover_markdown: Some(format_node_hover(
+                            &target.node,
+                            &ast.node_media,
+                            media_details,
+                        )),
+                        linked_cap_urn: None,
+                        color_index: None,
+                    });
+                    target_identities.push((
+                        target.node.clone(),
+                        target.name.as_ref().map(|(name, _)| name.clone()),
+                        target_graph_id,
+                    ));
+                }
 
                 // Arrows in this wiring share the cap's token_id. Hovering
                 // an arrow highlights the cap and its adjacent nodes.
@@ -857,14 +1036,14 @@ pub fn build_editor_model(
                     });
                 }
 
-                // Graph edges: one per source connection + one output
-                // edge. They share the cap's token_id so hovering the
+                // Graph edges: one per source connection and one per taken
+                // output. They share the cap's token_id so hovering the
                 // cap in text lights up all its edges in the graph.
                 for (source_idx, (_, source_graph_id)) in source_identities.iter().enumerate() {
-                    let edge_label = if source_identities.len() == 1 {
-                        "in".to_string()
-                    } else {
-                        format!("in {}", source_idx + 1)
+                    let edge_label = match &source_labels[source_idx] {
+                        Some(name) => name.clone(),
+                        None if source_identities.len() == 1 => "in".to_string(),
+                        None => format!("in {}", source_idx + 1),
                     };
                     graph_elements.push(NotationGraphElementInfo {
                         token_id: cap_token_id.clone(),
@@ -875,12 +1054,9 @@ pub fn build_editor_model(
                         linked_cap_urn: linked_cap_urn.clone(),
                         linked_media_urn: None,
                         is_sequence: Some(
-                            wiring
-                                .sources
-                                .get(source_idx)
-                                .map(|(name, _)| {
-                                    node_is_sequence.get(name).copied().unwrap_or(false)
-                                })
+                            node_is_sequence
+                                .get(&source_names[source_idx])
+                                .copied()
                                 .unwrap_or(false),
                         ),
                         source_graph_id: Some(source_graph_id.clone()),
@@ -890,25 +1066,28 @@ pub fn build_editor_model(
                     });
                 }
 
-                graph_elements.push(NotationGraphElementInfo {
-                    token_id: cap_token_id.clone(),
-                    graph_id: format!("edge-{wiring_index}-out"),
-                    kind: NotationGraphElementKind::Edge,
-                    label: "out".to_string(),
-                    detail: Some("Result connection".to_string()),
-                    linked_cap_urn: linked_cap_urn.clone(),
-                    linked_media_urn: None,
-                    is_sequence: Some(
-                        node_is_sequence
-                            .get(&wiring.target)
-                            .copied()
-                            .unwrap_or(false),
-                    ),
-                    source_graph_id: Some(cap_fab_id.clone()),
-                    target_graph_id: Some(target_graph_id),
-                    color_index: Some(color_index),
-                    is_loop,
-                });
+                for (target_idx, (target_node, target_name, target_graph_id)) in
+                    target_identities.into_iter().enumerate()
+                {
+                    graph_elements.push(NotationGraphElementInfo {
+                        token_id: cap_token_id.clone(),
+                        // The main output's edge keeps the id it always had.
+                        graph_id: match &target_name {
+                            None => format!("edge-{wiring_index}-out"),
+                            Some(_) => format!("edge-{wiring_index}-out-{target_idx}"),
+                        },
+                        kind: NotationGraphElementKind::Edge,
+                        label: target_name.unwrap_or_else(|| "out".to_string()),
+                        detail: Some("Result connection".to_string()),
+                        linked_cap_urn: linked_cap_urn.clone(),
+                        linked_media_urn: None,
+                        is_sequence: Some(node_is_sequence.get(&target_node).copied().unwrap_or(false)),
+                        source_graph_id: Some(cap_fab_id.clone()),
+                        target_graph_id: Some(target_graph_id),
+                        color_index: Some(color_index),
+                        is_loop,
+                    });
+                }
 
                 graph_elements.push(NotationGraphElementInfo {
                     token_id: cap_token_id,
@@ -970,21 +1149,38 @@ pub fn emit_semantic_tokens(ast: &NotationAST, _input: &str) -> Vec<SemanticToke
                 // type acts as the "cap URN" color.
                 tokens.push(span_to_token(&h.cap_urn_span, SemanticTokenType::CapPrefix));
             }
+            ParsedStatement::MachineHeader(h) => {
+                tokens.push(span_to_token(&h.alias_span, SemanticTokenType::Alias));
+                tokens.push(span_to_token(&h.keyword_span, SemanticTokenType::Keyword));
+                tokens.push(span_to_token(&h.reference_span, SemanticTokenType::String));
+            }
             ParsedStatement::Wiring(w) => {
-                // Parens for fan-in groups
-                if let Some((open_paren, close_paren)) = &w.paren_spans {
+                // Parens of the groups, their commas, and the `=` of every
+                // named member and target.
+                for (open_paren, close_paren) in &w.paren_spans {
                     tokens.push(span_to_token(open_paren, SemanticTokenType::Paren));
                     tokens.push(span_to_token(close_paren, SemanticTokenType::Paren));
                 }
-
-                // Commas in fan-in groups
                 for comma_span in &w.comma_spans {
                     tokens.push(span_to_token(comma_span, SemanticTokenType::Comma));
                 }
+                for assignment_span in &w.assignment_spans {
+                    tokens.push(span_to_token(assignment_span, SemanticTokenType::Assignment));
+                }
 
-                // Source nodes
-                for (_, span) in &w.sources {
-                    tokens.push(span_to_token(span, SemanticTokenType::Node));
+                // Members: the arg each names, and its node or its constant.
+                for member in &w.sources {
+                    if let Some((_, name_span)) = &member.name {
+                        tokens.push(span_to_token(name_span, SemanticTokenType::Name));
+                    }
+                    match &member.value {
+                        ParsedValue::Node(_, span) => {
+                            tokens.push(span_to_token(span, SemanticTokenType::Node))
+                        }
+                        ParsedValue::Constant(_, span) => {
+                            tokens.push(span_to_token(span, SemanticTokenType::Constant))
+                        }
+                    }
                 }
 
                 // Arrows
@@ -992,11 +1188,20 @@ pub fn emit_semantic_tokens(ast: &NotationAST, _input: &str) -> Vec<SemanticToke
                     tokens.push(span_to_token(arrow_span, SemanticTokenType::Arrow));
                 }
 
-                // Cap alias in wiring (reference to a defined capability)
+                // Cap alias in wiring (reference to a defined capability),
+                // and its policy.
                 tokens.push(span_to_token(&w.cap_alias_span, SemanticTokenType::Alias));
+                if let Some(policy_span) = &w.policy_span {
+                    tokens.push(span_to_token(policy_span, SemanticTokenType::Policy));
+                }
 
-                // Target node
-                tokens.push(span_to_token(&w.target_span, SemanticTokenType::Node));
+                // Targets: the output each names, and its node.
+                for target in &w.targets {
+                    if let Some((_, name_span)) = &target.name {
+                        tokens.push(span_to_token(name_span, SemanticTokenType::Name));
+                    }
+                    tokens.push(span_to_token(&target.node_span, SemanticTokenType::Node));
+                }
             }
         }
     }
@@ -1012,26 +1217,23 @@ pub fn emit_semantic_tokens(ast: &NotationAST, _input: &str) -> Vec<SemanticToke
 }
 
 // =============================================================================
-// Helper: Pest span → NotationSpan
+// Helper: byte range → NotationSpan
 // =============================================================================
 
 /// Convert a pest `Span` to a `NotationSpan` with 0-based line/character.
-fn pest_span_to_notation_span(
-    span: &pest::Span,
+/// The `NotationSpan` of the byte range `start..end` of `source`, where
+/// `source` begins `offset_in_original` bytes into the original text.
+fn byte_range_to_notation_span(
+    start: usize,
+    end: usize,
     source: &str,
     offset_in_original: usize,
 ) -> NotationSpan {
-    let start_byte = span.start() + offset_in_original;
-    let end_byte = span.end() + offset_in_original;
-
-    let start = byte_offset_to_position(source, span.start());
-    let end = byte_offset_to_position(source, span.end());
-
     NotationSpan {
-        start,
-        end,
-        start_byte,
-        end_byte,
+        start: byte_offset_to_position(source, start),
+        end: byte_offset_to_position(source, end),
+        start_byte: start + offset_in_original,
+        end_byte: end + offset_in_original,
     }
 }
 
@@ -1238,117 +1440,6 @@ fn scan_brackets_for_partial_ast(text: &str, ast: &mut NotationAST) {
     }
 }
 
-// =============================================================================
-// Helper: Source parsing with spans
-// =============================================================================
-
-/// Parse a source pair, extracting names with spans and paren/comma positions.
-fn parse_source_with_spans(
-    pair: &pest::iterators::Pair<Rule>,
-    source: &str,
-    offset: usize,
-) -> (
-    Vec<(String, NotationSpan)>,
-    Option<(NotationSpan, NotationSpan)>,
-    Vec<NotationSpan>,
-) {
-    let mut sources = Vec::new();
-    let mut paren_spans = None;
-    let mut comma_spans = Vec::new();
-
-    // Clone the pair since we need to iterate its inner elements
-    let pair = pair.clone();
-    let inner = match pair.into_inner().next() {
-        Some(p) => p,
-        None => return (sources, paren_spans, comma_spans),
-    };
-
-    match inner.as_rule() {
-        Rule::group => {
-            // Group: "(" alias ("," alias)+ ")"
-            // The pest span of the group includes parens.
-            let group_span = pest_span_to_notation_span(&inner.as_span(), source, offset);
-
-            // Open paren is the first character of the group span
-            let open_paren = NotationSpan {
-                start: group_span.start,
-                end: NotationPosition {
-                    line: group_span.start.line,
-                    character: group_span.start.character + 1,
-                },
-                start_byte: group_span.start_byte,
-                end_byte: group_span.start_byte + 1,
-            };
-            // Close paren is the last character
-            let close_paren = NotationSpan {
-                start: NotationPosition {
-                    line: group_span.end.line,
-                    character: group_span.end.character.saturating_sub(1),
-                },
-                end: group_span.end,
-                start_byte: group_span.end_byte.saturating_sub(1),
-                end_byte: group_span.end_byte,
-            };
-            paren_spans = Some((open_paren, close_paren));
-
-            // Extract aliases and find commas
-            let group_text = inner.as_str();
-            let group_start_byte = inner.as_span().start();
-
-            // Find commas in the group text
-            let mut in_group = false;
-            for (ci, ch) in group_text.char_indices() {
-                if ch == '(' {
-                    in_group = true;
-                    continue;
-                }
-                if ch == ')' {
-                    break;
-                }
-                if in_group && ch == ',' {
-                    let comma_byte = group_start_byte + ci;
-                    let comma_pos = byte_offset_to_position(source, comma_byte);
-                    comma_spans.push(NotationSpan {
-                        start: comma_pos,
-                        end: NotationPosition {
-                            line: comma_pos.line,
-                            character: comma_pos.character + 1,
-                        },
-                        start_byte: comma_byte + offset,
-                        end_byte: comma_byte + offset + 1,
-                    });
-                }
-            }
-
-            for p in inner.into_inner() {
-                if p.as_rule() == Rule::alias {
-                    let name = p.as_str().to_string();
-                    let span = pest_span_to_notation_span(&p.as_span(), source, offset);
-                    sources.push((name, span));
-                }
-            }
-        }
-        Rule::alias => {
-            let name = inner.as_str().to_string();
-            let span = pest_span_to_notation_span(&inner.as_span(), source, offset);
-            sources.push((name, span));
-        }
-        _ => {}
-    }
-
-    (sources, paren_spans, comma_spans)
-}
-
-// =============================================================================
-// Helper: Hover formatting
-// =============================================================================
-
-/// Render a cap URN's `in` / `out` direction specs followed
-/// by every non-direction tag as rows in a property table.
-/// Only `in` and `out` have functional meaning on a cap URN;
-/// every other tag is arbitrary user-attached data and is
-/// enumerated generically here for display without any tag
-/// being privileged.
 fn push_cap_urn_properties(md: &mut String, cap_urn: &CapUrn) {
     md.push_str("| Property | Value |\n|----------|-------|\n");
     md.push_str(&format!("| in | `{}` |\n", cap_urn.in_spec()));
@@ -1694,9 +1785,9 @@ mod tests {
             .expect("should have a wiring");
 
         assert_eq!(wiring.sources.len(), 2);
-        assert_eq!(wiring.sources[0].0, "thumbnail");
-        assert_eq!(wiring.sources[1].0, "model_spec");
-        assert!(wiring.paren_spans.is_some());
+        let nodes: Vec<&str> = wiring.source_nodes().map(|(name, _)| name).collect();
+        assert_eq!(nodes, vec!["thumbnail", "model_spec"]);
+        assert_eq!(wiring.paren_spans.len(), 1, "the sources are a group; the target is not");
         assert_eq!(wiring.comma_spans.len(), 1);
     }
 

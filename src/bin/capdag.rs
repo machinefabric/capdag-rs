@@ -2,7 +2,6 @@
 //!
 //! A unified CLI for executing and validating machine notation pipelines.
 
-use capdag::machine::parse_machine_with_node_names;
 use capdag::orchestrator::{build_plans_from_notation, execute_plan, CliRuntime, EngineRuntime, PlanInput};
 use capdag::{CapProgressFn, CartridgeChannel, ExecutionNodeType, FabricRegistry, PipelineLogFn};
 use std::collections::HashMap;
@@ -203,44 +202,6 @@ fn is_executable_file(_path: &PathBuf) -> bool {
 
 /// Find input nodes in the machine notation (root sources with no incoming edges).
 ///
-/// Parses the machine notation into a `Machine` (alongside the
-/// per-strand `name → NodeId` map) and returns the user-written
-/// node names of every input anchor across all strands. The
-/// resolver computes the input anchors as part of the resolved
-/// `MachineStrand`; we just translate the NodeIds back to the
-/// names the user wrote.
-fn find_input_nodes(notation: &str, registry: &FabricRegistry) -> Vec<String> {
-    let (machine, strand_node_names) = match parse_machine_with_node_names(notation, registry) {
-        Ok(pair) => pair,
-        Err(e) => {
-            eprintln!(
-                "Failed to parse machine notation for input node detection: {}",
-                e
-            );
-            return vec![];
-        }
-    };
-
-    let mut seen = std::collections::HashSet::new();
-    let mut inputs: Vec<String> = Vec::new();
-    for (strand, name_to_id) in machine.strands().iter().zip(strand_node_names.iter()) {
-        // Invert name → NodeId so we can label each input
-        // anchor with its user-written name.
-        let mut id_to_name: HashMap<u32, String> = HashMap::with_capacity(name_to_id.len());
-        for (name, id) in name_to_id {
-            id_to_name.insert(*id, name.clone());
-        }
-        for anchor_id in strand.input_anchor_ids() {
-            if let Some(name) = id_to_name.get(anchor_id) {
-                if seen.insert(name.clone()) {
-                    inputs.push(name.clone());
-                }
-            }
-        }
-    }
-    inputs
-}
-
 /// File extensions to skip when expanding directories
 const SKIP_EXTENSIONS: &[&str] = &[
     "json", "log", "txt", "md", "yml", "yaml", "toml", "sh", "py", "rb", "js", "ts", "rs", "go",
@@ -389,9 +350,18 @@ fn print_usage(program: &str) {
            - the cap's declared --flags and positional args are accepted natively\n\
            - --arg <flag-or-media-urn>=<value> addresses any arg explicitly\n\
              (value form @<path> reads the file's bytes)\n\n\
+         A cap that takes no input is run on nothing; one that gives no output\n\
+         is run for what it does.\n\n\
+         Running a machine: its inputs are addressed by the names its notation\n\
+         gives them. A path goes to the input its media conforms to; --input\n\
+         <node>=<value> says which (@<path> reads a file). A machine with one\n\
+         input given several paths runs once per path.\n\n\
          Output (pipe discipline): a single scalar result streams RAW to stdout;\n\
-         sequences and fan-outs write files (named {{input}}.{{node}}[.{{i}}].{{ext}})\n\
-         and list their paths on stdout. Logs/progress go to stderr.\n\n\
+         sequences and fan-outs write files (named {{input}}.{{node}}[.{{i}}].{{ext}},\n\
+         {{node}} being the output's name in the notation) and list their paths on\n\
+         stdout. Logs/progress go to stderr.\n\n\
+         Exit status: 0 completed; 3 completed, with failures a step's policy\n\
+         tolerated (listed on stderr); 1 failed; 130 cancelled.\n\n\
          Options:\n\
            --fabric <url>           Resolve caps/media/aliases against this fabric\n\
                                     registry instead of the built-in one (env:\n\
@@ -401,6 +371,8 @@ fn print_usage(program: &str) {
            -o, --output <dir>       Write result files into <dir> (default: cwd)\n\
            --force                  Overwrite existing output files\n\
            --arg <name>=<value>     Explicit cap argument (repeatable; single-cap mode)\n\
+           --input <node>=<value>   A machine input by its name in the notation\n\
+                                    (repeatable; run mode; @<path> reads a file)\n\
            --dev-bins <binary> ...  Use local cartridge binaries\n\
            --trace <file.trace>     Write a per-segment bifaci protocol trace (JSONL)\n\
            --help                   Show this help; after a cap name, that cap's interface\n\
@@ -851,6 +823,7 @@ async fn cmd_run(args: &[String]) -> ! {
     let mut output_dir: Option<PathBuf> = None;
     let mut force_overwrite = false;
     let mut positionals: Vec<String> = Vec::new();
+    let mut named_inputs: Vec<(String, String)> = Vec::new();
     let mut selector: Option<String> = None;
     let mut arg_idx = 2;
 
@@ -884,6 +857,23 @@ async fn cmd_run(args: &[String]) -> ! {
             }
             "--force" => {
                 force_overwrite = true;
+                arg_idx += 1;
+            }
+            "--input" => {
+                arg_idx += 1;
+                let Some(pair) = args.get(arg_idx) else {
+                    eprintln!("--input requires <node>=<value>");
+                    process::exit(2);
+                };
+                let Some((name, value)) = pair.split_once('=') else {
+                    eprintln!("--input '{pair}' is not of the form <node>=<value>");
+                    process::exit(2);
+                };
+                if name.is_empty() {
+                    eprintln!("--input '{pair}' names no node");
+                    process::exit(2);
+                }
+                named_inputs.push((name.to_string(), value.to_string()));
                 arg_idx += 1;
             }
             "--selector" => {
@@ -942,6 +932,7 @@ async fn cmd_run(args: &[String]) -> ! {
         notation,
         machine_file,
         &positionals[1..],
+        named_inputs,
         selector,
         dev_binaries,
         trace_file,
@@ -951,20 +942,258 @@ async fn cmd_run(args: &[String]) -> ! {
     .await
 }
 
-/// Execute machine notation against a set of input files — the shared engine
-/// behind `capdag run <file.machine>` and `capdag plan --run`.
+/// How a run ended, least to most severe: the process's exit status is the
+/// worst over everything it ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RunEnd {
+    /// Every output was produced, or was reported not produced by a branch
+    /// that did not fire.
+    Completed,
+    /// Outputs were written, and at least one step failed under a policy
+    /// that tolerates it.
+    Tolerated,
+    /// A step failed and nothing tolerated it.
+    Failed,
+    /// The user cancelled.
+    Cancelled,
+}
+
+impl RunEnd {
+    fn exit_code(self) -> i32 {
+        match self {
+            RunEnd::Completed => 0,
+            RunEnd::Tolerated => 3,
+            RunEnd::Failed => 1,
+            RunEnd::Cancelled => 130,
+        }
+    }
+}
+
+/// A required arg of a step that nothing gives a value to, as the user must
+/// be told of it before anything runs.
+fn unbound_required_args(
+    plan: &capdag::planner::MachinePlan,
+    registry: &FabricRegistry,
+    cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
+) -> Vec<String> {
+    let same = |a: &str, b: &str| match (capdag::MediaUrn::from_string(a), capdag::MediaUrn::from_string(b)) {
+        (Ok(a), Ok(b)) => a.is_equivalent(&b).unwrap_or(false),
+        _ => false,
+    };
+    let mut missing = Vec::new();
+    let mut ids: Vec<&String> = plan.nodes.keys().collect();
+    ids.sort();
+    for id in ids {
+        let ExecutionNodeType::Cap {
+            cap_urn,
+            arg_bindings,
+            ..
+        } = &plan.nodes[id].node_type
+        else {
+            continue;
+        };
+        let Some(cap) = registry.get_cached_cap(cap_urn) else {
+            missing.push(format!("step '{cap_urn}': its cap is not in the registry"));
+            continue;
+        };
+        for arg in cap.get_args() {
+            if !arg.required || arg.default_value.is_some() {
+                continue;
+            }
+            let stream = arg.stream_urn();
+            let wired = plan.edges.iter().any(|edge| {
+                &edge.to_node == id
+                    && match &edge.edge_type {
+                        capdag::planner::EdgeType::Direct => same(cap.urn.in_spec(), stream),
+                        capdag::planner::EdgeType::Arg { arg_urn } => same(arg_urn, stream),
+                        _ => false,
+                    }
+            });
+            let constant = arg_bindings.bindings.iter().any(|(urn, binding)| {
+                matches!(binding, capdag::planner::ArgumentBinding::Literal { .. }) && same(urn, stream)
+            });
+            let given = cap_arguments
+                .get(id)
+                .is_some_and(|values| values.iter().any(|(urn, _)| same(urn, stream)));
+            if !(wired || constant || given) {
+                missing.push(format!(
+                    "step '{}' has no value for its required arg '{}' ({}) — bind it in the \
+                     machine: a constant in the wiring (`{}=<value>`), or a node supplied with \
+                     `--input`",
+                    cap.title, arg.name, arg.media_urn, arg.name
+                ));
+            }
+        }
+    }
+    missing
+}
+
+/// Run one strand's plan to its end, write what it produced, and say on
+/// stderr everything that did not simply complete: steps skipped, attempted
+/// again or tolerated, and outputs that were not produced.
+#[allow(clippy::too_many_arguments)]
+async fn run_strand(
+    strand: capdag::orchestrator::StrandPlan,
+    runtime: Arc<dyn EngineRuntime>,
+    initial_inputs: HashMap<String, PlanInput>,
+    initial_is_sequence: HashMap<String, bool>,
+    cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>>,
+    progress: CapProgressFn,
+    log_fn: PipelineLogFn,
+) -> (capdag::orchestrator::StrandPlan, Result<capdag::PipelineResult, capdag::ExecutionError>) {
+    let ledger = match capdag::RunArgumentLedger::new(&strand.plan, cap_arguments) {
+        Ok(ledger) => Arc::new(ledger),
+        Err(e) => {
+            let error = capdag::ExecutionError::HostError(format!("argument values refused: {e}"));
+            return (strand, Err(error));
+        }
+    };
+    let callbacks = capdag::RunCallbacks {
+        progress: Some(progress),
+        log: Some(log_fn),
+        ..Default::default()
+    };
+    let result = execute_plan(
+        &strand.plan,
+        runtime,
+        initial_inputs,
+        initial_is_sequence,
+        ledger,
+        callbacks,
+    )
+    .await;
+    (strand, result)
+}
+
+/// Write a finished strand's outputs and report how it ended.
+fn finish_strand(
+    strand: &capdag::orchestrator::StrandPlan,
+    result: Result<capdag::PipelineResult, capdag::ExecutionError>,
+    output_dir: Option<PathBuf>,
+    force: bool,
+    input_stem: String,
+) -> RunEnd {
+    let result = match result {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("{e}");
+            return if e.attribution_class() == capdag::AttributionClass::User {
+                RunEnd::Cancelled
+            } else {
+                RunEnd::Failed
+            };
+        }
+    };
+    let options = capdag::orchestrator::EmitOptions {
+        output_dir,
+        force,
+        input_stem,
+        output_names: strand.output_names.clone(),
+    };
+    let mut stdout = std::io::stdout();
+    if let Err(e) = capdag::orchestrator::emit_terminals(&result, &options, &mut stdout) {
+        eprintln!("{e}");
+        return RunEnd::Failed;
+    }
+    for terminal in &result.terminals {
+        if terminal.produced().is_none() {
+            let name = strand
+                .output_names
+                .get(terminal.output_node_id())
+                .map(String::as_str)
+                .unwrap_or_else(|| terminal.output_node_id());
+            eprintln!("Not produced: output '{name}' ({})", terminal.media_urn());
+        }
+    }
+    let describe = |failure: &capdag::StepFailure| {
+        format!(
+            "[{}{}] {}",
+            failure.class,
+            failure
+                .code
+                .as_deref()
+                .map(|code| format!("/{code}"))
+                .unwrap_or_default(),
+            failure.message
+        )
+    };
+    for report in &result.steps {
+        let run = report
+            .body
+            .as_ref()
+            .map(|body| format!(" (item {})", body.body_index))
+            .unwrap_or_default();
+        match &report.outcome {
+            capdag::StepOutcome::Skipped { absent } => eprintln!(
+                "Skipped: step {}{run} — it needs {}, which was not produced",
+                report.cap_urn,
+                absent.join(", ")
+            ),
+            capdag::StepOutcome::Completed { failed_attempts } => {
+                for (attempt, failure) in failed_attempts.iter().enumerate() {
+                    eprintln!(
+                        "Attempted again: step {}{run}, attempt {} failed {}",
+                        report.cap_urn,
+                        attempt + 1,
+                        describe(failure)
+                    );
+                }
+            }
+            capdag::StepOutcome::FailedTolerated {
+                failure,
+                failed_attempts,
+            } => eprintln!(
+                "Tolerated failure: step {}{run} {}{}",
+                report.cap_urn,
+                describe(failure),
+                if failed_attempts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (after {} earlier attempt(s))", failed_attempts.len())
+                }
+            ),
+        }
+    }
+    match result.verdict {
+        capdag::RunVerdict::Completed => RunEnd::Completed,
+        capdag::RunVerdict::CompletedWithToleratedFailures => RunEnd::Tolerated,
+    }
+}
+
+/// What one input of a machine is given for one run.
+#[derive(Clone)]
+enum InputGiven {
+    /// One or more values, in the order they were given: one is the value
+    /// itself, several are a sequence.
+    Values(Vec<Vec<u8>>),
+    /// A live source: the reference the run carries to whoever captures.
+    Live(String),
+}
+
+/// Execute machine notation — the shared engine behind `capdag run
+/// <file.machine>` and `capdag plan --run`.
 ///
-/// Single-input machines run once per input file (the historical behavior).
-/// A machine with a MULTI-anchor strand (a planner convergence candidate)
-/// binds the whole file set across its input slots by media type: each file's
-/// detected media must conform to exactly one slot at minimum specificity
-/// distance (ties are a hard error — never positional guessing), every slot
-/// must receive at least one file, and a slot receiving several files gets
-/// them as one sequence.
+/// A machine's inputs are its input anchors, addressed by the names its
+/// notation gives them (18.1 §`capdag run`):
+///
+/// - `--input <node>=<value>` gives the input named `<node>` a value
+///   (`@<path>` reads a file); given several times for one node, the values
+///   are a sequence.
+/// - A positional path, or a live-source token, goes to the input its media
+///   conforms to most closely among those `--input` did not name; one that
+///   conforms to several equally is refused, naming them. An input given
+///   several paths takes them as one sequence.
+/// - A machine with exactly ONE input given several paths and nothing else
+///   is run once per path.
+///
+/// Every input must be given something, and every required arg of every
+/// step must have a value: both are checked before anything runs.
+#[allow(clippy::too_many_arguments)]
 async fn execute_notation(
     notation: String,
     machine_label: &str,
     input_args: &[String],
+    named_inputs: Vec<(String, String)>,
     selector: Option<String>,
     dev_binaries: Vec<PathBuf>,
     trace_file: Option<String>,
@@ -972,8 +1201,8 @@ async fn execute_notation(
     force_overwrite: bool,
 ) -> ! {
     // Create the unified FabricRegistry. Holds cap definitions and media defs
-    // together; consumed by `build_plans_from_notation` (for resolution) and the
-    // runtime (for cap lookup and adapter dispatch during execution).
+    // together; consumed by notation resolution and the runtime (for cap
+    // lookup and adapter dispatch during execution).
     let registry = match FabricRegistry::new().await {
         Ok(reg) => Arc::new(reg),
         Err(e) => {
@@ -982,29 +1211,42 @@ async fn execute_notation(
         }
     };
 
-    // Build execution plans through the single ForEach/Collect-aware front-end — the
-    // same planner path the engine runs. One plan per connected strand.
-    let plans = match build_plans_from_notation(&notation, registry.clone()).await {
-        Ok(p) => p,
-        Err(e) => {
+    // Resolve the notation once: what the machine takes and gives, by name.
+    // Its plans are built per run, once the run's inputs say which of them
+    // are sequences.
+    let resolved =
+        match capdag::orchestrator::ResolvedNotation::resolve(&notation, registry.clone()).await {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                eprintln!("Validation failed: {}", e);
+                process::exit(1);
+            }
+        };
+    let (inputs, outputs) = match (resolved.inputs(), resolved.outputs()) {
+        (Ok(inputs), Ok(outputs)) => (inputs, outputs),
+        (Err(e), _) | (_, Err(e)) => {
             eprintln!("Validation failed: {}", e);
             process::exit(1);
         }
     };
+    let input_names = || -> String {
+        if inputs.is_empty() {
+            "none".to_string()
+        } else {
+            inputs
+                .iter()
+                .map(|input| format!("'{}' ({})", input.name, input.media_urn))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    };
 
-    // Find input nodes automatically
-    let input_nodes = find_input_nodes(&notation, registry.as_ref());
-    if input_nodes.is_empty() {
-        eprintln!("No input nodes found in machine notation");
-        process::exit(1);
-    }
-
-    // Partition inputs: LIVE-SOURCE tokens (media urns in the live family,
-    // e.g. `media:audio;live;microphone`) vs file paths. A live token is a
-    // machine SOURCE — the fabric live def's `metadata.content` pairing is
-    // the urn the planning anchors accept, and the run carries the
-    // reference + selector to the first consuming cap's cartridge, which
-    // captures (13.2 §Reference Media).
+    // Partition positional inputs: LIVE-SOURCE tokens (media urns in the live
+    // family, e.g. `media:audio;live;microphone`) vs file paths. A live token
+    // is a machine SOURCE — the fabric live def's `metadata.content` pairing
+    // is the urn an input must accept, and the run carries the reference +
+    // selector to the first consuming cap's cartridge, which captures (13.2
+    // §Reference Media).
     warm_fabric_from_manifest(&registry).await;
     let mut live_sources: Vec<(String, capdag::MediaUrn)> = Vec::new();
     let mut file_args: Vec<String> = Vec::new();
@@ -1061,26 +1303,212 @@ async fn execute_notation(
     // Collect all input paths and expand them
     let mut all_files: Vec<PathBuf> = Vec::new();
     for arg in &file_args {
-        let expanded = expand_input_path(arg);
-        all_files.extend(expanded);
-    }
-
-    if all_files.is_empty() && live_sources.is_empty() {
-        eprintln!("No input files or live sources found");
-        process::exit(1);
+        all_files.extend(expand_input_path(arg));
     }
     if !file_args.is_empty() && all_files.is_empty() {
         eprintln!("No input files found");
         process::exit(1);
     }
-
     // Sort files for consistent ordering
     all_files.sort();
 
+    // ── What each input is given ──
+    let mut given: HashMap<String, InputGiven> = HashMap::new();
+
+    // By name.
+    for (name, value) in &named_inputs {
+        if !inputs.iter().any(|input| &input.name == name) {
+            eprintln!(
+                "--input: the machine has no input named '{name}'; its inputs are: {}",
+                input_names()
+            );
+            process::exit(2);
+        }
+        let bytes = match value.strip_prefix('@') {
+            Some(path) => match fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("--input {name}: cannot read '{path}': {e}");
+                    process::exit(1);
+                }
+            },
+            None => value.clone().into_bytes(),
+        };
+        match given.entry(name.clone()).or_insert_with(|| InputGiven::Values(Vec::new())) {
+            InputGiven::Values(values) => values.push(bytes),
+            InputGiven::Live(_) => unreachable!("only values are given by name"),
+        }
+    }
+    let named: std::collections::HashSet<&String> = named_inputs.iter().map(|(name, _)| name).collect();
+
+    // By media: the input a path or a live source conforms to most closely,
+    // among those not given by name. Equally close to several is ambiguous
+    // and refused — never settled by position.
+    let closest_input = |media: &capdag::MediaUrn, what: &str| -> String {
+        let mut best: Vec<(&capdag::orchestrator::MachineAnchor, i64)> = Vec::new();
+        for input in inputs.iter().filter(|input| !named.contains(&input.name)) {
+            if !media.conforms_to(&input.media_urn).unwrap_or(false) {
+                continue;
+            }
+            let distance = media.specificity() as i64 - input.media_urn.specificity() as i64;
+            match best.first() {
+                Some((_, nearest)) if distance > *nearest => {}
+                Some((_, nearest)) if distance == *nearest => best.push((input, distance)),
+                _ => best = vec![(input, distance)],
+            }
+        }
+        match best.as_slice() {
+            [(input, _)] => input.name.clone(),
+            [] => {
+                eprintln!(
+                    "{what} ({media}) does not conform to any input of this machine that is \
+                     not already given by name; its inputs are: {}",
+                    input_names()
+                );
+                process::exit(1);
+            }
+            several => {
+                eprintln!(
+                    "{what} ({media}) conforms equally to several inputs of this machine: {} — \
+                     say which with `--input <name>=@<path>`",
+                    several
+                        .iter()
+                        .map(|(input, _)| format!("'{}'", input.name))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                process::exit(1);
+            }
+        }
+    };
+    // The files each input was given by media, with the paths they came from
+    // (for naming what a run produces).
+    let mut file_inputs: Vec<(String, PathBuf, Vec<u8>)> = Vec::with_capacity(all_files.len());
+    for file in &all_files {
+        let media = detect_input_media_or_exit(file, &registry);
+        let bytes = match fs::read(file) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Error reading input file '{}': {}", file.display(), e);
+                process::exit(1);
+            }
+        };
+        let name = closest_input(&media, &format!("'{}'", file.display()));
+        file_inputs.push((name, file.clone(), bytes));
+    }
+    let mut live_inputs: Vec<(String, String)> = Vec::with_capacity(live_sources.len());
+    for (reference, content) in &live_sources {
+        let name = closest_input(content, &format!("live source '{reference}'"));
+        if file_inputs.iter().any(|(input, _, _)| input == &name) {
+            eprintln!(
+                "input '{name}' was given both files and live source '{reference}' — a device \
+                 capture cannot join a file sequence on one input"
+            );
+            process::exit(1);
+        }
+        if let Some((_, previous)) = live_inputs.iter().find(|(input, _)| input == &name) {
+            eprintln!(
+                "input '{name}' was given two live sources ('{previous}' and '{reference}') — \
+                 one input cannot capture twice"
+            );
+            process::exit(1);
+        }
+        live_inputs.push((name, reference.clone()));
+    }
+
+    // ── The runs ──
+    //
+    // A machine with exactly one input, given several paths and nothing
+    // else, is run once per path. Anything else is one run, in which an
+    // input given several paths takes them as a sequence.
+    struct Run {
+        label: String,
+        stem: String,
+        given: HashMap<String, InputGiven>,
+    }
+    let machine_stem = Path::new(machine_label)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "machine".to_string());
+    let stem_of = |path: &Path| {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "input".to_string())
+    };
+    let once_per_path = inputs.len() == 1
+        && named_inputs.is_empty()
+        && live_inputs.is_empty()
+        && file_inputs.len() > 1;
+    let runs: Vec<Run> = if once_per_path {
+        file_inputs
+            .iter()
+            .map(|(name, path, bytes)| Run {
+                label: path.display().to_string(),
+                stem: stem_of(path),
+                given: HashMap::from([(name.clone(), InputGiven::Values(vec![bytes.clone()]))]),
+            })
+            .collect()
+    } else {
+        for (name, _, bytes) in &file_inputs {
+            match given.entry(name.clone()).or_insert_with(|| InputGiven::Values(Vec::new())) {
+                InputGiven::Values(values) => values.push(bytes.clone()),
+                InputGiven::Live(_) => unreachable!("files and a live source on one input were refused above"),
+            }
+        }
+        for (name, reference) in &live_inputs {
+            given.insert(name.clone(), InputGiven::Live(reference.clone()));
+        }
+        // What the run's outputs are named for: its one path; the first of
+        // several, marked as a combination; its device; or the machine.
+        let stem = match (file_inputs.as_slice(), live_inputs.as_slice()) {
+            ([(_, path, _)], []) => stem_of(path),
+            ([(_, path, _), ..], _) => format!("{}.combined", stem_of(path)),
+            ([], [(_, reference), ..]) => reference
+                .trim_start_matches("media:")
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>(),
+            ([], []) => machine_stem.clone(),
+        };
+        vec![Run {
+            label: machine_label.to_string(),
+            stem,
+            given,
+        }]
+    };
+    // Every input is given something, in every run.
+    for run in &runs {
+        let missing: Vec<String> = inputs
+            .iter()
+            .filter(|input| !run.given.contains_key(&input.name))
+            .map(|input| format!("'{}' ({})", input.name, input.media_urn))
+            .collect();
+        if !missing.is_empty() {
+            eprintln!(
+                "the machine's input(s) {} were given nothing — pass a path each accepts, or \
+                 `--input <name>=<value>` (`@<path>` reads a file)",
+                missing.join(", ")
+            );
+            process::exit(1);
+        }
+    }
+
     eprintln!("=== capdag: Machine Notation Execution ===\n");
     eprintln!("Machine: {}", machine_label);
-    eprintln!("Input node(s): {}", input_nodes.join(", "));
-    eprintln!("Strands (plans): {}", plans.len());
+    eprintln!("Inputs: {}", input_names());
+    eprintln!(
+        "Outputs: {}",
+        if outputs.is_empty() {
+            "none".to_string()
+        } else {
+            outputs
+                .iter()
+                .map(|output| format!("'{}'", output.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    );
+    eprintln!("Strands (plans): {}", resolved.strand_count());
     eprintln!("Input files: {}", all_files.len());
     for f in &all_files {
         eprintln!("  - {}", f.display());
@@ -1093,15 +1521,53 @@ async fn execute_notation(
     }
 
     let cartridge_dir = user_cartridge_dir();
-
     let registry_url: Option<String> = BAKED_REGISTRY_URL.map(str::to_string);
-
     let bundled_cartridges_dir = bundled_cartridges_dir();
 
-    // The executor speaks `cap_arguments` (raw per-node arg-stream bytes). A
-    // `.machine` run supplies every argument through data-flow edges and input
-    // files, so the CLI passes no extra per-node argument streams here.
+    // A `.machine` run is self-contained: every arg of every step is bound in
+    // the notation or has a default, so the CLI gives no argument values of
+    // its own.
     let cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
+
+    // ── The plans of every run, and what must hold before anything runs ──
+    let mut planned: Vec<(usize, Vec<capdag::orchestrator::StrandPlan>)> = Vec::with_capacity(runs.len());
+    for (index, run) in runs.iter().enumerate() {
+        let sequences: std::collections::HashSet<String> = run
+            .given
+            .iter()
+            .filter(|(_, given)| matches!(given, InputGiven::Values(values) if values.len() > 1))
+            .map(|(name, _)| name.clone())
+            .collect();
+        let mut strands = Vec::with_capacity(resolved.strand_count());
+        for strand in 0..resolved.strand_count() {
+            let of_strand: std::collections::HashSet<String> = sequences
+                .iter()
+                .filter(|name| inputs.iter().any(|input| input.strand == strand && &input.name == *name))
+                .cloned()
+                .collect();
+            match resolved.plan(strand, &of_strand).await {
+                Ok(plan) => strands.push(plan),
+                Err(e) => {
+                    eprintln!("Validation failed: {}", e);
+                    process::exit(1);
+                }
+            }
+        }
+        if index == 0 {
+            let missing: Vec<String> = strands
+                .iter()
+                .flat_map(|strand| unbound_required_args(&strand.plan, &registry, &cap_arguments))
+                .collect();
+            if !missing.is_empty() {
+                eprintln!("The machine cannot run as written:");
+                for line in missing {
+                    eprintln!("  - {line}");
+                }
+                process::exit(1);
+            }
+        }
+        planned.push((index, strands));
+    }
 
     eprintln!("\n=== Executing ===\n");
     if !dev_binaries.is_empty() {
@@ -1129,9 +1595,9 @@ async fn execute_notation(
     };
 
     // The CLI runtime: hosts cartridges in-process on ONE reused relay switch (a cap's
-    // cartridge is spawned once and every ForEach body multiplexes onto it, like the
-    // engine), keeps output in memory, and fails hard on any ForEach body failure.
-    // execute_plan drives the ForEach/Collect decomposition on top of it.
+    // cartridge is spawned once and every run of a map multiplexes onto it, like the
+    // engine), persists terminals as part-files in the output directory, and adds no
+    // tolerance of its own: a failure ends the run unless the machine says otherwise.
     let cli_runtime = Arc::new(CliRuntime::new(
         cartridge_dir.clone(),
         registry_url.clone(),
@@ -1149,450 +1615,96 @@ async fn execute_notation(
 
     let (progress, log_fn) = progress_hooks();
 
-    // Process each file
-    let mut success_count = 0;
-    let mut error_count = 0;
-
-    let input_slots_of = |plan: &capdag::planner::MachinePlan| -> Vec<(String, capdag::MediaUrn)> {
-        let mut slots: Vec<(String, capdag::MediaUrn)> = plan
-            .nodes
-            .iter()
-            .filter_map(|(id, n)| match &n.node_type {
-                ExecutionNodeType::InputSlot {
-                    expected_media_urn, ..
-                } => match capdag::MediaUrn::from_string(expected_media_urn) {
-                    Ok(u) => Some((id.clone(), u)),
-                    Err(e) => {
-                        eprintln!(
-                            "input slot '{id}' declares an invalid media URN \
-                                 '{expected_media_urn}': {e}"
-                        );
-                        process::exit(1);
-                    }
-                },
-                _ => None,
-            })
-            .collect();
-        slots.sort_by(|a, b| a.0.cmp(&b.0));
-        slots
+    // The stdout fast-path only applies when this execution can produce
+    // exactly one scalar result overall — with several strands or several
+    // runs, force file mode so results never interleave on stdout.
+    let effective_dir = if resolved.strand_count() > 1 || runs.len() > 1 {
+        Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
+    } else {
+        output_dir.clone()
     };
 
-    let multi_anchor = plans.iter().any(|p| input_slots_of(p).len() > 1);
-
-    if multi_anchor {
-        // ── Multi-anchor machine: bind the WHOLE file set across all slots by
-        // media type, then run each plan exactly once. ──
-        eprintln!(
-            "--- Multi-anchor machine: binding {} files by media type ---",
-            all_files.len()
-        );
+    let mut ends: Vec<RunEnd> = Vec::new();
+    for (index, strands) in planned {
+        let run = &runs[index];
+        eprintln!("--- Processing: {} ---", run.label);
         eprintln!("Run: {}", notation);
 
-        // Detect each file's media once. Detection reads the extension index,
-        // which is populated by cached media defs — warm from the manifest so
-        // a cold cache does not misread every input as bare `media:`.
-        warm_fabric_from_manifest(&registry).await;
-        let mut file_media: Vec<(PathBuf, capdag::MediaUrn, Vec<u8>)> =
-            Vec::with_capacity(all_files.len());
-        for file in &all_files {
-            let media = detect_input_media_or_exit(file, &registry);
-            let bytes = match fs::read(file) {
-                Ok(b) => b,
-                Err(e) => {
-                    eprintln!("Error reading input file '{}': {}", file.display(), e);
-                    process::exit(1);
-                }
-            };
-            file_media.push((file.clone(), media, bytes));
-        }
-
-        // All slots across all plans. Each file must bind to exactly one slot:
-        // the conforming slot at minimum specificity distance; a tie between
-        // distinct slots is ambiguous and fails hard.
-        let all_slots: Vec<(usize, String, capdag::MediaUrn)> = plans
-            .iter()
-            .enumerate()
-            .flat_map(|(pi, p)| {
-                input_slots_of(p)
-                    .into_iter()
-                    .map(move |(id, urn)| (pi, id, urn))
-            })
-            .collect();
-        let mut slot_files: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-        for (file, media, bytes) in &file_media {
-            let mut best: Option<(usize, i64)> = None; // (slot index, distance)
-            let mut tied = false;
-            for (i, (_, _, slot_urn)) in all_slots.iter().enumerate() {
-                if !media.conforms_to(slot_urn).unwrap_or(false) {
-                    continue;
-                }
-                let dist = media.specificity() as i64 - slot_urn.specificity() as i64;
-                match &best {
-                    None => best = Some((i, dist)),
-                    Some((_, bd)) if dist < *bd => {
-                        best = Some((i, dist));
-                        tied = false;
-                    }
-                    Some((bi, bd)) if dist == *bd => {
-                        // Same slot media on two plans would be distinct slots;
-                        // an equal-distance second slot is a real ambiguity.
-                        if *bi != i {
-                            tied = true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let Some((slot_idx, _)) = best else {
-                eprintln!(
-                    "'{}' (detected {}) does not conform to any input anchor of this machine",
-                    file.display(),
-                    media
-                );
-                process::exit(1);
-            };
-            if tied {
-                eprintln!(
-                    "'{}' (detected {}) conforms to several input anchors at equal specificity \
-                     — the binding is ambiguous",
-                    file.display(),
-                    media
-                );
-                process::exit(1);
-            }
-            slot_files
-                .entry(all_slots[slot_idx].1.clone())
-                .or_default()
-                .push(bytes.clone());
-        }
-        // Live sources bind by their CONTENT urn, with the same
-        // minimum-specificity-distance rule as files. A slot takes EITHER
-        // files or one live source — a device capture cannot join a file
-        // sequence on one anchor, and one anchor cannot capture twice.
-        let mut slot_live: HashMap<String, String> = HashMap::new();
-        for (reference, content) in &live_sources {
-            let mut best: Option<(usize, i64)> = None;
-            let mut tied = false;
-            for (i, (_, _, slot_urn)) in all_slots.iter().enumerate() {
-                if !content.conforms_to(slot_urn).unwrap_or(false) {
-                    continue;
-                }
-                let dist = content.specificity() as i64 - slot_urn.specificity() as i64;
-                match &best {
-                    None => best = Some((i, dist)),
-                    Some((_, bd)) if dist < *bd => {
-                        best = Some((i, dist));
-                        tied = false;
-                    }
-                    Some((bi, bd)) if dist == *bd => {
-                        if *bi != i {
-                            tied = true;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            let Some((slot_idx, _)) = best else {
-                eprintln!(
-                    "live source '{reference}' (delivers {content}) does not conform to any \
-                     input anchor of this machine"
-                );
-                process::exit(1);
-            };
-            if tied {
-                eprintln!(
-                    "live source '{reference}' (delivers {content}) conforms to several input \
-                     anchors at equal specificity — the binding is ambiguous"
-                );
-                process::exit(1);
-            }
-            let slot_id = all_slots[slot_idx].1.clone();
-            if slot_files.contains_key(&slot_id) {
-                eprintln!(
-                    "input anchor '{slot_id}' received both files and live source \
-                     '{reference}' — a device capture cannot join a file sequence on one anchor"
-                );
-                process::exit(1);
-            }
-            if let Some(prev) = slot_live.insert(slot_id.clone(), reference.clone()) {
-                eprintln!(
-                    "input anchor '{slot_id}' received two live sources ('{prev}' and \
-                     '{reference}') — one anchor cannot capture twice"
-                );
-                process::exit(1);
-            }
-        }
-        for (_, slot_id, slot_urn) in &all_slots {
-            if !slot_files.contains_key(slot_id) && !slot_live.contains_key(slot_id) {
-                eprintln!(
-                    "input anchor '{slot_id}' ({slot_urn}) received no input — every anchor \
-                     of a multi-anchor machine needs a file or live source"
-                );
-                process::exit(1);
-            }
-        }
-
-        let mut run_failed = false;
-        for (idx, plan) in plans.iter().enumerate() {
+        // The strands of a machine have no path between them: they run at
+        // the same time. What each produced is written in strand order.
+        let mut running = Vec::with_capacity(strands.len());
+        for strand in strands {
             let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
+            // The executor requires every input to carry an explicit
+            // cardinality — a default would hide a wiring mismatch.
             let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
-            for (slot_id, _) in input_slots_of(plan) {
-                if let Some(reference) = slot_live.get(&slot_id) {
-                    initial_inputs.insert(
-                        slot_id.clone(),
+            for (name, slot) in &strand.input_slots {
+                let (input, is_sequence) = match &run.given[name] {
+                    InputGiven::Values(values) if values.len() == 1 => {
+                        (PlanInput::Bytes(values[0].clone()), false)
+                    }
+                    InputGiven::Values(values) => {
+                        match capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(values) {
+                            Ok(sequence) => (PlanInput::Bytes(sequence), true),
+                            Err(e) => {
+                                eprintln!(
+                                    "failed to assemble the {}-value sequence for input '{name}': {e}",
+                                    values.len()
+                                );
+                                process::exit(1);
+                            }
+                        }
+                    }
+                    // A live source feeds the REFERENCE selector, which the
+                    // first cap's cartridge resolves into the unbounded
+                    // content sequence.
+                    InputGiven::Live(reference) => (
                         PlanInput::LiveReference {
                             reference_urn: reference.clone(),
                             selector: selector_bytes.clone(),
                         },
-                    );
-                    initial_is_sequence.insert(slot_id, true);
-                    continue;
-                }
-                let files = slot_files.get(&slot_id).expect("verified above");
-                if files.len() == 1 {
-                    initial_inputs.insert(slot_id.clone(), PlanInput::Bytes(files[0].clone()));
-                    initial_is_sequence.insert(slot_id, false);
-                } else {
-                    let seq = match capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(
-                        files,
-                    ) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!(
-                                "failed to assemble the {}-file sequence for '{slot_id}': {e}",
-                                files.len()
-                            );
-                            process::exit(1);
-                        }
-                    };
-                    initial_inputs.insert(slot_id.clone(), PlanInput::Bytes(seq));
-                    initial_is_sequence.insert(slot_id, true);
-                }
+                        true,
+                    ),
+                };
+                initial_inputs.insert(slot.clone(), input);
+                initial_is_sequence.insert(slot.clone(), is_sequence);
             }
-
-            match execute_plan(
-                plan,
+            running.push(tokio::spawn(run_strand(
+                strand,
                 runtime.clone(),
                 initial_inputs,
                 initial_is_sequence,
-                &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
-                    .expect("cli argument map names plan steps"),
-                Some(&progress),
-                None,
-                Some(&log_fn),
-                None,
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(result) => {
-                    let stem = all_files[0]
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "input".to_string());
-                    let options = capdag::orchestrator::EmitOptions {
-                        output_dir: Some(output_dir.clone().unwrap_or_else(|| PathBuf::from("."))),
-                        force: force_overwrite,
-                        input_stem: if plans.len() > 1 {
-                            format!("{stem}.combined.strand{idx}")
-                        } else {
-                            format!("{stem}.combined")
-                        },
-                    };
-                    let mut stdout = std::io::stdout();
-                    if let Err(e) =
-                        capdag::orchestrator::emit_terminals(&result, &options, &mut stdout)
-                    {
-                        eprintln!("{e}");
-                        run_failed = true;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    run_failed = true;
-                }
-            }
+                cap_arguments.clone(),
+                progress.clone(),
+                log_fn.clone(),
+            )));
         }
-        if run_failed {
-            error_count += 1;
-        } else {
-            success_count += 1;
-        }
-    } else {
-        enum RunInput {
-            File(PathBuf),
-            Live {
-                reference: String,
-                content: capdag::MediaUrn,
-            },
-        }
-        let mut run_inputs: Vec<RunInput> =
-            all_files.iter().cloned().map(RunInput::File).collect();
-        run_inputs.extend(live_sources.iter().map(|(r, c)| RunInput::Live {
-            reference: r.clone(),
-            content: c.clone(),
-        }));
-        let run_count = run_inputs.len();
-        for run_input in &run_inputs {
-            let run_label = match run_input {
-                RunInput::File(f) => f.display().to_string(),
-                RunInput::Live { reference, .. } => reference.clone(),
-            };
-            eprintln!("--- Processing: {run_label} ---");
-            eprintln!("Run: {}", notation);
-
-            // A file feeds a scalar blob into each plan's single input slot; a
-            // live source feeds the REFERENCE selector, which the first cap's
-            // cartridge resolves into the unbounded content sequence. A
-            // ForEach inside the strand is driven by an intermediate cap's
-            // sequence output, never by this input.
-            let file_bytes: Vec<u8> = match run_input {
-                RunInput::File(file) => match fs::read(file) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("Error reading input file '{}': {}", file.display(), e);
-                        error_count += 1;
-                        continue;
-                    }
-                },
-                RunInput::Live { .. } => Vec::new(),
-            };
-
-            // Each connected strand is its own plan; run them all against this file.
-            let mut file_failed = false;
-            for (idx, plan) in plans.iter().enumerate() {
-                let input_slot_id = input_slots_of(plan)
-                    .first()
-                    .map(|(id, _)| id.clone())
-                    .unwrap_or_else(|| {
-                        eprintln!("strand {idx} has no input anchor");
-                        process::exit(1);
-                    });
-                let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
-                // The executor requires every input node to carry an explicit sequence
-                // flag — a default would hide a wiring mismatch. Files are scalar
-                // here; a live source is an unbounded content SEQUENCE.
-                let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
-                match run_input {
-                    RunInput::File(_) => {
-                        initial_inputs.insert(
-                            input_slot_id.clone(),
-                            PlanInput::Bytes(file_bytes.clone()),
-                        );
-                        initial_is_sequence.insert(input_slot_id, false);
-                    }
-                    RunInput::Live { reference, content } => {
-                        let slot_urn = input_slots_of(plan)
-                            .first()
-                            .map(|(_, u)| u.clone())
-                            .expect("verified above");
-                        if !content.conforms_to(&slot_urn).unwrap_or(false) {
-                            eprintln!(
-                                "live source '{reference}' delivers '{content}', which does \
-                                 not conform to this machine's input anchor '{slot_urn}' — \
-                                 this machine cannot consume that device"
-                            );
-                            error_count += 1;
-                            file_failed = true;
-                            break;
-                        }
-                        initial_inputs.insert(
-                            input_slot_id.clone(),
-                            PlanInput::LiveReference {
-                                reference_urn: reference.clone(),
-                                selector: selector_bytes.clone(),
-                            },
-                        );
-                        initial_is_sequence.insert(input_slot_id, true);
-                    }
+        for handle in running {
+            match handle.await {
+                Ok((strand, result)) => ends.push(finish_strand(
+                    &strand,
+                    result,
+                    effective_dir.clone(),
+                    force_overwrite,
+                    run.stem.clone(),
+                )),
+                Err(join) => {
+                    eprintln!("a strand of the run panicked: {join}");
+                    ends.push(RunEnd::Failed);
                 }
-
-                match execute_plan(
-                    plan,
-                    runtime.clone(),
-                    initial_inputs,
-                    initial_is_sequence,
-                    &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
-                        .expect("cli argument map names plan steps"),
-                    Some(&progress),
-                    None,
-                    Some(&log_fn),
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(result) => {
-                        // Real output emission (pipe discipline; see cli_output).
-                        // The stdout fast-path only applies when this execution
-                        // can produce exactly one scalar result overall — with
-                        // several strands or several input files, force file
-                        // mode so results never interleave on stdout.
-                        let effective_dir = if plans.len() > 1 || run_count > 1 {
-                            Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
-                        } else {
-                            output_dir.clone()
-                        };
-                        let stem = match run_input {
-                            RunInput::File(file) => file
-                                .file_stem()
-                                .map(|s| s.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| "input".to_string()),
-                            // A live run's outputs are named for the device
-                            // family (e.g. `audio-live-microphone`).
-                            RunInput::Live { reference, .. } => reference
-                                .trim_start_matches("media:")
-                                .chars()
-                                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                                .collect::<String>(),
-                        };
-                        let options = capdag::orchestrator::EmitOptions {
-                            output_dir: effective_dir,
-                            force: force_overwrite,
-                            input_stem: if plans.len() > 1 {
-                                format!("{stem}.strand{idx}")
-                            } else {
-                                stem
-                            },
-                        };
-                        let mut stdout = std::io::stdout();
-                        if let Err(e) =
-                            capdag::orchestrator::emit_terminals(&result, &options, &mut stdout)
-                        {
-                            eprintln!("{e}");
-                            file_failed = true;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        file_failed = true;
-                    }
-                }
-            }
-
-            if file_failed {
-                error_count += 1;
-            } else {
-                success_count += 1;
             }
         }
     }
 
+    let count = |end: RunEnd| ends.iter().filter(|e| **e == end).count();
     eprintln!("=== Summary ===");
-    if multi_anchor {
-        eprintln!("Bound files: {}", all_files.len());
-    } else {
-        eprintln!("Processed: {}", all_files.len());
-    }
-    eprintln!("Success: {}", success_count);
-    eprintln!("Errors: {}", error_count);
+    eprintln!("Runs: {}", runs.len());
+    eprintln!("Completed: {}", count(RunEnd::Completed));
+    eprintln!("Completed with tolerated failures: {}", count(RunEnd::Tolerated));
+    eprintln!("Failed: {}", count(RunEnd::Failed));
+    eprintln!("Cancelled: {}", count(RunEnd::Cancelled));
 
-    if error_count > 0 {
-        process::exit(1);
-    }
-    process::exit(0);
+    process::exit(ends.into_iter().max().unwrap_or(RunEnd::Completed).exit_code());
 }
 
 /// Build the FabricRegistry or exit with the error.
@@ -2168,6 +2280,7 @@ async fn cmd_plan(args: &[String]) -> ! {
             chosen.notation.clone(),
             &format!("plan candidate [{pick}]"),
             &file_strings,
+            Vec::new(),
             None,
             dev_binaries,
             trace_file,
@@ -2490,6 +2603,23 @@ async fn cmd_cap(args: &[String]) -> ! {
         Files(Vec<PathBuf>),
         Stdin(Vec<u8>),
         Live { reference: String },
+        /// The cap takes no input: it is run on nothing.
+        Nothing,
+    }
+    // A cap that takes no input is a source: nothing is piped in, and a path
+    // or a live source given to it has nowhere to go.
+    let takes_input = notation.contains(&format!(
+        "[{} -> ",
+        capdag::orchestrator::SINGLE_CAP_INPUT_NODE
+    ));
+    if !takes_input && !invocation.input_paths.is_empty() {
+        eprintln!(
+            "cap {} takes no input, and {} input(s) were given: {}",
+            cap.urn,
+            invocation.input_paths.len(),
+            invocation.input_paths.join(", ")
+        );
+        process::exit(2);
     }
     let live_tokens: Vec<String> = invocation
         .input_paths
@@ -2523,7 +2653,9 @@ async fn cmd_cap(args: &[String]) -> ! {
         }
         None => b"{}".to_vec(),
     };
-    let inputs = if let Some(reference) = live_tokens.first() {
+    let inputs = if !takes_input {
+        InputSource::Nothing
+    } else if let Some(reference) = live_tokens.first() {
         InputSource::Live {
             reference: reference.clone(),
         }
@@ -2562,49 +2694,52 @@ async fn cmd_cap(args: &[String]) -> ! {
     };
 
     // Build the plan through the same planner front-end as every other mode.
-    let plans = match build_plans_from_notation(&notation, registry.clone()).await {
-        Ok(plans) => plans,
+    let resolved =
+        match capdag::orchestrator::ResolvedNotation::resolve(&notation, registry.clone()).await {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                eprintln!("Failed to plan cap execution: {e}");
+                process::exit(1);
+            }
+        };
+    if resolved.strand_count() != 1 {
+        eprintln!(
+            "internal error: single-cap notation produced {} strands (expected 1)",
+            resolved.strand_count()
+        );
+        process::exit(1);
+    }
+    let strand = match resolved.plan(0, &std::collections::HashSet::new()).await {
+        Ok(strand) => strand,
         Err(e) => {
             eprintln!("Failed to plan cap execution: {e}");
             process::exit(1);
         }
     };
-    let [plan] = plans.as_slice() else {
+    // The cap's input, when it takes one: the plan's slot for the node the
+    // synthesized notation calls `input`.
+    let input_slot_id: Option<String> = strand
+        .input_slots
+        .get(capdag::orchestrator::SINGLE_CAP_INPUT_NODE)
+        .cloned();
+    if input_slot_id.is_some() != takes_input || strand.input_slots.len() > 1 {
         eprintln!(
-            "internal error: single-cap notation produced {} plans (expected 1)",
-            plans.len()
+            "internal error: single-cap plan has input slots {:?} for a cap that {}",
+            strand.input_slots.keys().collect::<Vec<_>>(),
+            if takes_input { "takes an input" } else { "takes none" }
         );
         process::exit(1);
-    };
-    let input_slot_id = {
-        let slots: Vec<&String> = plan
-            .nodes
-            .iter()
-            .filter(|(_, n)| matches!(n.node_type, ExecutionNodeType::InputSlot { .. }))
-            .map(|(id, _)| id)
-            .collect();
-        match slots.as_slice() {
-            [single] => (*single).clone(),
-            other => {
-                eprintln!(
-                    "internal error: single-cap plan has {} input slots (expected 1)",
-                    other.len()
-                );
-                process::exit(1);
-            }
-        }
-    };
+    }
 
-    // Cap arguments ride on the CAP execution group, which the executor keys
-    // by the group's `to` node — the plan's cap node id, which IS the strand
-    // step's planner-minted `StrandStep.token_id` (plan_builder: "the cap
-    // node's id IS the strand step's stable identity"; the wizard binds
-    // argument values by the same token). Read that existing token off the
-    // plan, exactly like `input_slot_id` above — keying by a fixed name was
-    // how argument values silently vanished: they validated, then never
-    // matched any execution group, so the cartridge ran on defaults.
+    // Cap arguments are keyed by the plan's cap node id, which IS the strand
+    // step's planner-minted token (plan_builder: "the cap node's id IS the
+    // strand step's stable identity"). Read that existing token off the plan
+    // — keying by a fixed name was how argument values silently vanished:
+    // they validated, then never matched any step, so the cartridge ran on
+    // defaults.
     let cap_node_id = {
-        let caps: Vec<&String> = plan
+        let caps: Vec<&String> = strand
+            .plan
             .nodes
             .iter()
             .filter(|(_, n)| matches!(n.node_type, ExecutionNodeType::Cap { .. }))
@@ -2653,23 +2788,24 @@ async fn cmd_cap(args: &[String]) -> ! {
     arm_ctrl_c(cli_runtime.clone());
     let (progress, log_fn) = progress_hooks();
 
-    // One run per input (stdin = a single run; a live source = a single run).
-    let runs: Vec<(String, PlanInput)> = match inputs {
-        InputSource::Stdin(bytes) => vec![("stdin".to_string(), PlanInput::Bytes(bytes))],
-        InputSource::Live { reference } => {
-            let stem: String = reference
-                .trim_start_matches("media:")
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect();
-            vec![(
-                stem,
-                PlanInput::LiveReference {
-                    reference_urn: reference,
-                    selector: selector_bytes.clone(),
-                },
-            )]
-        }
+    // One run per input: stdin and a live source are a single run each, and a
+    // cap that takes no input is run once, on nothing.
+    let file_safe = |text: &str| -> String {
+        text.trim_start_matches("media:")
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    };
+    let runs: Vec<(String, Option<PlanInput>)> = match inputs {
+        InputSource::Nothing => vec![(file_safe(cap_token), None)],
+        InputSource::Stdin(bytes) => vec![("stdin".to_string(), Some(PlanInput::Bytes(bytes)))],
+        InputSource::Live { reference } => vec![(
+            file_safe(&reference),
+            Some(PlanInput::LiveReference {
+                reference_urn: reference,
+                selector: selector_bytes.clone(),
+            }),
+        )],
         InputSource::Files(files) => {
             let mut runs = Vec::with_capacity(files.len());
             for file in files {
@@ -2678,7 +2814,7 @@ async fn cmd_cap(args: &[String]) -> ! {
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "input".to_string());
                 match fs::read(&file) {
-                    Ok(bytes) => runs.push((stem, PlanInput::Bytes(bytes))),
+                    Ok(bytes) => runs.push((stem, Some(PlanInput::Bytes(bytes)))),
                     Err(e) => {
                         eprintln!("Error reading input file '{}': {}", file.display(), e);
                         process::exit(1);
@@ -2690,60 +2826,37 @@ async fn cmd_cap(args: &[String]) -> ! {
     };
     let multi_run = runs.len() > 1;
 
-    let mut error_count = 0usize;
+    let mut end = RunEnd::Completed;
     for (stem, input) in runs {
-        // A live source is an unbounded content SEQUENCE at the anchor; a
-        // file/stdin run stays the historical scalar blob.
-        let is_live = matches!(input, PlanInput::LiveReference { .. });
         let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
-        initial_inputs.insert(input_slot_id.clone(), input);
         let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
-        initial_is_sequence.insert(input_slot_id.clone(), is_live);
-
-        match execute_plan(
-            plan,
+        if let (Some(slot), Some(input)) = (&input_slot_id, input) {
+            // A live source is an unbounded content SEQUENCE at the anchor; a
+            // file/stdin run stays the historical scalar blob.
+            initial_is_sequence.insert(slot.clone(), matches!(input, PlanInput::LiveReference { .. }));
+            initial_inputs.insert(slot.clone(), input);
+        }
+        let (strand, result) = run_strand(
+            strand.clone(),
             runtime.clone(),
             initial_inputs,
             initial_is_sequence,
-            &capdag::RunArgumentLedger::new(plan, cap_arguments.clone())
-                .expect("single-cap argument map names the plan's step"),
-            Some(&progress),
-            None,
-            Some(&log_fn),
-            None,
-            None,
-            None,
+            cap_arguments.clone(),
+            progress.clone(),
+            log_fn.clone(),
         )
-        .await
-        {
-            Ok(result) => {
-                // Several inputs must never interleave raw results on
-                // stdout — force file mode.
-                let effective_dir = if multi_run {
-                    Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
-                } else {
-                    output_dir.clone()
-                };
-                let options = capdag::orchestrator::EmitOptions {
-                    output_dir: effective_dir,
-                    force: force_overwrite,
-                    input_stem: stem,
-                };
-                let mut stdout = std::io::stdout();
-                if let Err(e) = capdag::orchestrator::emit_terminals(&result, &options, &mut stdout)
-                {
-                    eprintln!("{e}");
-                    error_count += 1;
-                }
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                error_count += 1;
-            }
-        }
+        .await;
+        // Several inputs must never interleave raw results on stdout — force
+        // file mode.
+        let effective_dir = if multi_run {
+            Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
+        } else {
+            output_dir.clone()
+        };
+        end = end.max(finish_strand(&strand, result, effective_dir, force_overwrite, stem));
     }
 
-    process::exit(if error_count > 0 { 1 } else { 0 });
+    process::exit(end.exit_code());
 }
 
 /// `capdag resolve [--no-cache] <cap-alias-or-urn>` — print the canonical cap

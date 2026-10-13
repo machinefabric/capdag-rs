@@ -45,11 +45,15 @@ pub(crate) fn build_cap_with_slot_stdin_pairs(
 ) -> Cap {
     let urn = CapUrn::from_string(cap_urn_str)
         .unwrap_or_else(|e| panic!("test fixture: invalid cap URN {cap_urn_str}: {e}"));
+    // Each arg has a name of its own (RULE17): the first is `input`, the
+    // rest `arg1`, `arg2`, …
     let arg_values: Vec<CapArg> = args
         .iter()
-        .map(|(slot, stdin)| {
+        .enumerate()
+        .map(|(index, (slot, stdin))| {
             CapArg::new(
-                slot.to_string(), "input",
+                slot.to_string(),
+                if index == 0 { "input".to_string() } else { format!("arg{index}") },
                 true,
                 vec![ArgSource::Stdin {
                     stdin: stdin.to_string(),

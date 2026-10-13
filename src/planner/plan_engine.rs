@@ -144,8 +144,11 @@ impl Assembler {
             token_id: token_id.clone(),
             foreach_identity: ForEachIdentity::MintIfRequired,
             cap_urn: cap_urn.clone(),
+            named_sources: Vec::new(),
             source_node_ids: sources,
-            target_node_id: target,
+            // A path step produces its cap's main output.
+            targets: vec![(None, target)],
+            policy: crate::machine::StepPolicy::default(),
         });
         (target, token_id)
     }

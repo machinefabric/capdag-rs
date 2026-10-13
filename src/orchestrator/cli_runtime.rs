@@ -15,8 +15,9 @@
 //! [`CliDiskWriter`] part-files in the emit target directory (so UNBOUNDED terminals
 //! stream to disk per L16, and `emit_terminals` renames the parts to their contract
 //! names), the flow observer tracks ONLY feed-bearing rids (for the Ctrl-C
-//! stop-input control), and any ForEach body failure fails the whole plan
-//! (failures are exposed, not tolerated). Everything else — the segment
+//! stop-input control), and a run of a map's body that fails fails the whole
+//! plan unless the machine itself says otherwise (failures are exposed; the
+//! CLI adds no tolerance of its own). Everything else — the segment
 //! orchestration — is the shared `EngineRuntime::run_segment` default.
 
 use std::collections::HashSet;
@@ -30,7 +31,7 @@ use crate::bifaci::cartridge_repo::CartridgeChannel;
 use crate::bifaci::protocol_trace::ProtocolTraceSink;
 use crate::bifaci::relay_switch::RelaySwitch;
 use crate::cap::registry::FabricRegistry;
-use crate::orchestrator::execute_plan::EngineRuntime;
+use crate::orchestrator::execute_plan::{EngineRuntime, MapFailurePolicy};
 use crate::orchestrator::executor::{
     discover_bundled_cartridges, segment_activity_timeout, CartridgeManager, ExecutionContext,
 };
@@ -214,7 +215,7 @@ impl CliHost {
         graph: &ResolvedGraph,
         rt: &CliRuntime,
     ) -> Result<(), ExecutionError> {
-        let cap_urns: Vec<&str> = graph.edges.iter().map(|e| e.cap_urn.as_str()).collect();
+        let cap_urns: Vec<&str> = graph.steps.iter().map(|step| step.cap_urn.as_str()).collect();
 
         // Fast path: every cap this segment needs is already hosted. This is the hot
         // path for a ForEach — bodies 2..N of the same cap must not re-resolve or
@@ -344,8 +345,19 @@ impl EngineRuntime for CliRuntime {
         let seq = self.writer_seq.clone();
         Some(Box::new(move |sink: &str, coordinate| {
             let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // `n` alone makes the name unique; the run it belongs to makes it
+            // readable — every enclosing run's index, outermost first.
             let tag = match &coordinate {
-                Some(c) => format!("{n}.{sink}.b{}", c.body_index),
+                Some(c) => {
+                    let run: Vec<String> = c
+                        .enclosing
+                        .iter()
+                        .map(|outer| outer.body_index)
+                        .chain(std::iter::once(c.body_index))
+                        .map(|index| index.to_string())
+                        .collect();
+                    format!("{n}.{sink}.b{}", run.join("-"))
+                }
                 None => format!("{n}.{sink}"),
             };
             Box::new(crate::orchestrator::cli_writer::CliDiskWriter::new(
@@ -359,9 +371,10 @@ impl EngineRuntime for CliRuntime {
         self.fabric_registry.clone()
     }
 
-    async fn foreach_partial_failure_policy(&self) -> String {
-        // Reference regime: expose failures — any ForEach body failure fails the plan.
-        "fail".to_string()
+    async fn map_failure_policy(&self) -> Result<MapFailurePolicy, ExecutionError> {
+        // Reference regime: expose failures. A machine that wants a failed
+        // item dropped says so on the step (`on_error=absent`).
+        Ok(MapFailurePolicy::Fail)
     }
 }
 

@@ -283,6 +283,22 @@ impl IncrementalWriter for CliDiskWriter {
             },
         }
     }
+
+    /// Remove every part-file this writer created: the stream did not end, so
+    /// none of them is an output.
+    fn abort(self: Box<Self>) {
+        match self.state {
+            State::Idle => {}
+            State::Blob { path, .. } => {
+                let _ = std::fs::remove_file(path);
+            }
+            State::Sequence { saved_paths, .. } => {
+                for path in saved_paths {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

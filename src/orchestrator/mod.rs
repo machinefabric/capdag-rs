@@ -1,22 +1,21 @@
-//! Orchestrator: Machine Notation Parser with CapDag Orchestration
+//! Orchestrator: running a machine.
 //!
-//! This module parses machine notation through `Machine::from_string`,
-//! looks up the resolved caps in the registry, and produces a
-//! validated executable DAG IR (`ResolvedGraph`).
+//! Machine notation resolves to a [`MachinePlan`](crate::planner::MachinePlan)
+//! ([`build_plans_from_notation`]); [`execute_plan`] runs a plan on an
+//! [`EngineRuntime`] — the capdag CLI's is [`CliRuntime`] — deciding what runs
+//! when, what maps, and what is skipped, and handing each pipelined chain of
+//! steps to the segment executor as a [`ResolvedGraph`].
 //!
 //! # Example
 //!
 //! ```ignore
-//! use capdag::orchestrator::parse_machine_to_cap_dag;
-//! use capdag::FabricRegistry;
+//! use capdag::orchestrator::{build_plans_from_notation, execute_plan};
 //!
-//! let route = r#"
-//!     [extract cap:in="media:bytes;document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
-//!     [A -> extract -> B]
+//! let notation = r#"
+//!     [extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
+//!     [doc -> extract -> text]
 //! "#;
-//!
-//! let registry = FabricRegistry::new().await?;
-//! let graph = parse_machine_to_cap_dag(route, &registry).await?;
+//! let plans = build_plans_from_notation(notation, registry.clone()).await?;
 //! ```
 
 pub mod cbor_util;
@@ -27,7 +26,6 @@ pub mod cli_writer;
 pub mod execute_plan;
 pub mod executor;
 pub mod machine_plan;
-pub mod parser;
 pub mod plan_converter;
 pub mod run_arguments;
 pub mod stream_io;
@@ -35,16 +33,17 @@ pub mod transient;
 pub mod types;
 
 // Re-export key types
-pub use types::{ParseOrchestrationError, ResolvedEdge, ResolvedGraph};
+pub use types::{
+    ParseOrchestrationError, ResolvedGraph, ResolvedStep, StepInput, StepOutput, StepSource,
+};
 
-pub use parser::parse_machine_to_cap_dag;
-
-pub use machine_plan::build_plans_from_notation;
+pub use machine_plan::{build_plans_from_notation, MachineAnchor, ResolvedNotation, StrandPlan};
 
 pub use execute_plan::{
     execute_plan, BodyOutcomeFn, EngineRuntime, ForEachBodyCoordinate, ForEachItemSnapshot,
-    ForEachItemsFn, OutputItem, PipelineItemFn, PipelineResult, PlanInput, SegmentOutput,
-    WriterResult,
+    ForEachItemsFn, MapFailurePolicy, OutputItem, PipelineResult, PlanInput, ProducedTerminal,
+    RunCallbacks, RunVerdict, SegmentOutput, StepFailure, StepOutcome, StepReport, StepReportFn,
+    PlanTerminal, WriterResult,
 };
 
 pub use cli_cap::{
@@ -59,7 +58,7 @@ pub use transient::{
     TRANSIENT_SIDECAR, TRANSIENT_STAGING_SUFFIX,
 };
 
-pub use plan_converter::plan_to_resolved_graph;
+pub use plan_converter::{plan_to_resolved_graph, steps_to_resolved_graph};
 
 pub use run_arguments::{
     AppliedArgumentUpdate, ArgumentUpdate, ArgumentUpdateDisposition, ArgumentUpdateOutcome,
@@ -72,14 +71,14 @@ pub use cbor_util::{
 };
 
 pub use executor::{
-    execute_dag, map_progress, run_dag_on_context, CapProgressFn, CapStepProgressFn,
-    CartridgeManager, DagOutput, EdgeGroup, ExecutionContext, ExecutionError, NodeData,
-    ProgressMapper,
+    map_progress, run_dag_on_context, CapProgressFn, CapStepProgressFn, CartridgeManager,
+    CollateralCause, DagOutput, ExecutionContext, ExecutionError, ProgressMapper, RunCancel,
 };
 
 pub use stream_io::{
-    collect_terminal_output, decode_terminal_output, send_one_stream, unwrap_cbor_value,
-    ActivityTimer, CreditGrantFn, CreditPlumbing, FlowObserver, IncrementalWriter, PipelineLogFn,
+    collect_response, collect_terminal_output, decode_terminal_output, send_one_stream,
+    unwrap_cbor_value, ActivityTimer, CollectedOutput, CreditGrantFn, CreditPlumbing,
+    FlowObserver, IncrementalWriter, OutputSink, PipelineLogFn,
     PipelineLogRecord, PipelineProgressTracker, SegmentWriterFactory, StreamIoError, TerminalItem,
     TerminalMeta, TerminalOutput, PIPELINE_STALL_TIMEOUT_SECS,
 };

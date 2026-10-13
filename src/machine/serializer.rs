@@ -56,7 +56,7 @@
 use std::fmt::Write;
 
 use super::error::MachineAbstractionError;
-use super::graph::{Machine, MachineEdge, MachineStrand};
+use super::graph::{BindingSource, Machine, MachineEdge, MachineStrand};
 use crate::FabricRegistry;
 
 /// Serialization format for machine notation.
@@ -216,11 +216,24 @@ fn build_serialization_plan(machine: &Machine, rendering: CapRendering<'_>) -> S
             }
             next_alias += 1;
         }
-        let mut node_names: Vec<String> = Vec::with_capacity(strand.nodes().len());
-        for _ in strand.nodes() {
-            node_names.push(format!("n{}", next_node));
-            next_node += 1;
+        // Nodes are named in the order the canonical edge walk first meets
+        // them: each edge's sources in assignment order, then its outputs.
+        // The name of a node is then a property of the machine, not of the
+        // order its nodes happened to be allocated in — two inputs of one type
+        // get the same names whichever was written first.
+        let mut node_names: Vec<Option<String>> = vec![None; strand.nodes().len()];
+        for edge in strand.edges() {
+            for node in edge.source_nodes().chain(edge.output_nodes()) {
+                if node_names[node as usize].is_none() {
+                    node_names[node as usize] = Some(format!("n{}", next_node));
+                    next_node += 1;
+                }
+            }
         }
+        let node_names: Vec<String> = node_names
+            .into_iter()
+            .map(|name| name.expect("every node of a strand is a source or an output of an edge"))
+            .collect();
         strand_plans.push(StrandPlan {
             edge_tokens,
             needs_header,
@@ -235,27 +248,40 @@ fn build_serialization_plan(machine: &Machine, rendering: CapRendering<'_>) -> S
 
 /// Emit one wiring statement (without enclosing brackets or
 /// trailing newline) for a single edge inside a strand.
+///
+/// Every binding is written under its arg's name and every taken output under
+/// its output's name, in the canonical (URN-sorted) order of the edge. Nothing
+/// is left for a reader of the text to match by type, so what is written
+/// resolves to the edge it was written from whatever other args the cap has.
+/// A gather writes its arg's name once per member, in item order.
 fn format_wiring(edge: &MachineEdge, alias: &str, strand_plan: &StrandPlan) -> String {
-    // Sources, in the canonical (cap-arg-sorted) assignment
-    // order. The serializer surfaces this canonical form so
-    // round-trip is byte-stable.
-    let source_names: Vec<&String> = edge
+    let members: Vec<String> = edge
         .assignment
         .iter()
-        .map(|b| &strand_plan.node_names[b.source as usize])
+        .map(|b| match &b.source {
+            BindingSource::Node(id) => {
+                format!("{}={}", b.arg_name, strand_plan.node_names[*id as usize])
+            }
+            // `serde_json` writes a value as JSON, which is what a constant is.
+            BindingSource::Constant(value) => format!("{}={}", b.arg_name, value),
+        })
         .collect();
-    let target_name = &strand_plan.node_names[edge.target as usize];
+    let targets: Vec<String> = edge
+        .outputs
+        .iter()
+        .map(|o| format!("{}={}", o.output_name, strand_plan.node_names[o.node as usize]))
+        .collect();
     // The per-item map (`edge.is_loop`) is NOT emitted into notation text: it is a
-    // derived cardinality property, not authored syntax (the `LOOP` keyword is
-    // retired). Re-parsing this notation re-derives the same `is_loop` from the cap
-    // shapes, so round-trip stays semantically stable.
-
-    if source_names.len() == 1 {
-        format!("{} -> {} -> {}", source_names[0], alias, target_name)
-    } else {
-        let group: Vec<&str> = source_names.iter().map(|s| s.as_str()).collect();
-        format!("({}) -> {} -> {}", group.join(", "), alias, target_name)
-    }
+    // derived cardinality property, not authored syntax. Re-parsing this notation
+    // re-derives the same `is_loop` from the cap shapes, so round-trip stays
+    // semantically stable.
+    format!(
+        "({}) -> {}{} -> ({})",
+        members.join(", "),
+        alias,
+        edge.policy.to_notation(),
+        targets.join(", ")
+    )
 }
 
 fn emit_bracketed(
@@ -478,31 +504,54 @@ fn emit_strand_json(
             })?;
         write!(
             json,
-            "{{\"alias\":\"{}\",\"cap_urn\":\"{}\",\"title\":\"{}\",\"is_loop\":{},\"assignment\":[",
+            "{{\"alias\":\"{}\",\"cap_urn\":\"{}\",\"title\":\"{}\",\"is_loop\":{},\"retry\":{},\"on_error\":\"{}\",\"assignment\":[",
             plan.edge_tokens[e_idx],
             json_escape(&cap_urn_str),
             json_escape(&cap_title),
-            edge.is_loop
+            edge.is_loop,
+            edge.policy.retry,
+            match edge.policy.on_error {
+                super::syntax::OnError::Fail => "fail",
+                super::syntax::OnError::Absent => "absent",
+            }
         )
         .unwrap();
+        // Each binding says which arg (its URN and its name) and what feeds
+        // it: a node of the strand, or a constant (a JSON value, as written).
         for (b_idx, b) in edge.assignment.iter().enumerate() {
             if b_idx > 0 {
                 json.push(',');
             }
             write!(
                 json,
-                "{{\"cap_arg_media_urn\":\"{}\",\"source_node\":\"{}\"}}",
+                "{{\"cap_arg_media_urn\":\"{}\",\"arg_name\":\"{}\",",
                 json_escape(&b.cap_arg_media_urn.to_string()),
-                plan.node_names[b.source as usize]
+                json_escape(&b.arg_name)
+            )
+            .unwrap();
+            match &b.source {
+                BindingSource::Node(id) => {
+                    write!(json, "\"source_node\":\"{}\"}}", plan.node_names[*id as usize]).unwrap()
+                }
+                BindingSource::Constant(value) => write!(json, "\"constant\":{}}}", value).unwrap(),
+            }
+        }
+        // Each output the step's wiring takes, and the node it goes to.
+        write!(json, "],\"outputs\":[").unwrap();
+        for (o_idx, o) in edge.outputs.iter().enumerate() {
+            if o_idx > 0 {
+                json.push(',');
+            }
+            write!(
+                json,
+                "{{\"output_media_urn\":\"{}\",\"output_name\":\"{}\",\"node\":\"{}\"}}",
+                json_escape(&o.output_media_urn.to_string()),
+                json_escape(&o.output_name),
+                plan.node_names[o.node as usize]
             )
             .unwrap();
         }
-        write!(
-            json,
-            "],\"target_node\":\"{}\"}}",
-            plan.node_names[edge.target as usize]
-        )
-        .unwrap();
+        write!(json, "]}}").unwrap();
     }
     write!(json, "],").unwrap();
 
@@ -610,13 +659,16 @@ mod tests {
             notation.contains("[edge_0 cap:") && notation.contains("[edge_1 cap:"),
             "headers must use edge_0 / edge_1 aliases, got: {notation}"
         );
+        // A wiring is written with every binding under its arg's name and
+        // every taken output under its output's name: nothing in the canonical
+        // text is left to be matched by type when it is read back.
         assert!(
-            notation.contains("[n0 -> edge_0 -> n1]"),
-            "first wiring should be `n0 -> edge_0 -> n1`, got: {notation}"
+            notation.contains("[(input=n0) -> edge_0 -> (output=n1)]"),
+            "first wiring should be `(input=n0) -> edge_0 -> (output=n1)`, got: {notation}"
         );
         assert!(
-            notation.contains("[n1 -> edge_1 -> n2]"),
-            "second wiring should be `n1 -> edge_1 -> n2`, got: {notation}"
+            notation.contains("[(input=n1) -> edge_1 -> (output=n2)]"),
+            "second wiring should be `(input=n1) -> edge_1 -> (output=n2)`, got: {notation}"
         );
     }
 

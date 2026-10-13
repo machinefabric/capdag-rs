@@ -438,131 +438,22 @@ impl InputValidator {
     ) -> Result<(), ValidationError> {
         let cap_urn = cap.urn_string();
 
-        // Numeric validation
-        if let Some(min) = validation.min {
-            if let Some(num) = value.as_f64() {
-                if num < min {
-                    return Err(ValidationError::MediaDefValidationFailed {
-                        cap_urn,
-                        argument_name: arg_def.media_urn.clone(),
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("minimum value {}", min),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
+        // The decision is the media definition's (`MediaValidation::violation`);
+        // this gives it the cap and the argument it was made for.
+        match validation.violation(value) {
+            Ok(None) => Ok(()),
+            Ok(Some(validation_rule)) => Err(ValidationError::MediaDefValidationFailed {
+                cap_urn,
+                argument_name: arg_def.media_urn.clone(),
+                media_urn: resolved.media_urn.clone(),
+                validation_rule,
+                actual_value: value.clone(),
+            }),
+            Err(issue) => Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!("{} in media def '{}'", issue, resolved.media_urn),
+            }),
         }
-
-        if let Some(max) = validation.max {
-            if let Some(num) = value.as_f64() {
-                if num > max {
-                    return Err(ValidationError::MediaDefValidationFailed {
-                        cap_urn,
-                        argument_name: arg_def.media_urn.clone(),
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("maximum value {}", max),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        // Length validation (for strings and arrays)
-        if let Some(min_length) = validation.min_length {
-            match (value.as_str(), value.as_array()) {
-                (Some(s), _) => {
-                    if s.len() < min_length {
-                        return Err(ValidationError::MediaDefValidationFailed {
-                            cap_urn,
-                            argument_name: arg_def.media_urn.clone(),
-                            media_urn: resolved.media_urn.clone(),
-                            validation_rule: format!("minimum length {}", min_length),
-                            actual_value: value.clone(),
-                        });
-                    }
-                }
-                (_, Some(arr)) => {
-                    if arr.len() < min_length {
-                        return Err(ValidationError::MediaDefValidationFailed {
-                            cap_urn,
-                            argument_name: arg_def.media_urn.clone(),
-                            media_urn: resolved.media_urn.clone(),
-                            validation_rule: format!("minimum array length {}", min_length),
-                            actual_value: value.clone(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(max_length) = validation.max_length {
-            match (value.as_str(), value.as_array()) {
-                (Some(s), _) => {
-                    if s.len() > max_length {
-                        return Err(ValidationError::MediaDefValidationFailed {
-                            cap_urn,
-                            argument_name: arg_def.media_urn.clone(),
-                            media_urn: resolved.media_urn.clone(),
-                            validation_rule: format!("maximum length {}", max_length),
-                            actual_value: value.clone(),
-                        });
-                    }
-                }
-                (_, Some(arr)) => {
-                    if arr.len() > max_length {
-                        return Err(ValidationError::MediaDefValidationFailed {
-                            cap_urn,
-                            argument_name: arg_def.media_urn.clone(),
-                            media_urn: resolved.media_urn.clone(),
-                            validation_rule: format!("maximum array length {}", max_length),
-                            actual_value: value.clone(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Pattern validation
-        if let Some(pattern) = &validation.pattern {
-            if let Some(s) = value.as_str() {
-                let regex =
-                    regex::Regex::new(pattern).map_err(|e| ValidationError::InvalidCapSchema {
-                        cap_urn: cap_urn.clone(),
-                        issue: format!(
-                            "Invalid regex pattern '{}' in media def '{}': {}",
-                            pattern, resolved.media_urn, e
-                        ),
-                    })?;
-                if !regex.is_match(s) {
-                    return Err(ValidationError::MediaDefValidationFailed {
-                        cap_urn,
-                        argument_name: arg_def.media_urn.clone(),
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("pattern '{}'", pattern),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        // Allowed values validation
-        if let Some(allowed_values) = &validation.allowed_values {
-            if let Some(s) = value.as_str() {
-                if !allowed_values.contains(&s.to_string()) {
-                    return Err(ValidationError::MediaDefValidationFailed {
-                        cap_urn,
-                        argument_name: arg_def.media_urn.clone(),
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("allowed values: {:?}", allowed_values),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Validate a value against a local JSON schema
@@ -686,97 +577,20 @@ impl OutputValidator {
     ) -> Result<(), ValidationError> {
         let cap_urn = cap.urn_string();
 
-        // Numeric validation
-        if let Some(min) = validation.min {
-            if let Some(num) = value.as_f64() {
-                if num < min {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("minimum value {}", min),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
+        // The same decision an argument value is held to.
+        match validation.violation(value) {
+            Ok(None) => Ok(()),
+            Ok(Some(validation_rule)) => Err(ValidationError::OutputMediaDefValidationFailed {
+                cap_urn,
+                media_urn: resolved.media_urn.clone(),
+                validation_rule,
+                actual_value: value.clone(),
+            }),
+            Err(issue) => Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!("{} in media def '{}'", issue, resolved.media_urn),
+            }),
         }
-
-        if let Some(max) = validation.max {
-            if let Some(num) = value.as_f64() {
-                if num > max {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("maximum value {}", max),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        // Length validation
-        if let Some(min_length) = validation.min_length {
-            if let Some(s) = value.as_str() {
-                if s.len() < min_length {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("minimum length {}", min_length),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        if let Some(max_length) = validation.max_length {
-            if let Some(s) = value.as_str() {
-                if s.len() > max_length {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("maximum length {}", max_length),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        // Pattern validation
-        if let Some(pattern) = &validation.pattern {
-            if let Some(s) = value.as_str() {
-                let regex =
-                    regex::Regex::new(pattern).map_err(|e| ValidationError::InvalidCapSchema {
-                        cap_urn: cap_urn.clone(),
-                        issue: format!(
-                            "Invalid regex pattern '{}' in media def '{}': {}",
-                            pattern, resolved.media_urn, e
-                        ),
-                    })?;
-                if !regex.is_match(s) {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("pattern '{}'", pattern),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        // Allowed values validation
-        if let Some(allowed_values) = &validation.allowed_values {
-            if let Some(s) = value.as_str() {
-                if !allowed_values.contains(&s.to_string()) {
-                    return Err(ValidationError::OutputMediaDefValidationFailed {
-                        cap_urn,
-                        media_urn: resolved.media_urn.clone(),
-                        validation_rule: format!("allowed values: {:?}", allowed_values),
-                        actual_value: value.clone(),
-                    });
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Validate a value against a local JSON schema

@@ -1,617 +1,402 @@
-//! Integration tests for capdag orchestrator using testcartridge
+//! End-to-end tests of running machines, on the test cartridge.
 //!
-//! These tests verify the orchestrator's ability to:
-//! 1. Parse and validate machine notation graphs with Cap URNs
-//! 2. Execute DAGs using testcartridge capabilities
-//! 3. Handle data flow between nodes
-//! 4. Work with CBOR protocol via CartridgeHost
+//! Every test here takes the path a machine takes outside the tests:
+//! notation → plan → `execute_plan` on a `CliRuntime` that hosts the real
+//! test cartridge process (`support::Machines`). The registry the notation
+//! resolves against is the cartridge's own manifest, so the definitions a
+//! machine is planned on are the ones the cartridge that runs it serves.
 //!
-//! testcartridge provides simple, predictable test caps without heavy dependencies
-//! The testcartridge binary will be auto-built if missing or outdated
+//! The test cartridge is built by cargo, against this capdag, once per test
+//! binary.
 
 mod support;
 
-use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
-use capdag::orchestrator::{
-    execute_dag, parse_machine_to_cap_dag, NodeData, ParseOrchestrationError,
-};
-use capdag::{Cap, CapUrn, FabricRegistry, PipelineLogFn, StreamMeta};
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::Arc;
-use tempfile::TempDir;
+use capdag::orchestrator::{build_plans_from_notation, ParseOrchestrationError, ResolvedNotation};
+use capdag::{AttributionClass, RunVerdict, StepOutcome};
+use support::{Given, Machines};
 
-fn test_pipeline_log_fn() -> PipelineLogFn {
-    fn render_meta(meta: Option<&StreamMeta>) -> String {
-        let Some(meta) = meta else {
-            return String::new();
-        };
-        if let Some(ciborium::Value::Float(progress)) = meta.get("progress") {
-            return format!(" [meta progress={:.1}%]", progress * 100.0);
-        }
-        if let Some(ciborium::Value::Integer(progress)) = meta.get("progress") {
-            let progress: i128 = (*progress).into();
-            return format!(" [meta progress={}]", progress);
-        }
-        format!(" [meta {:?}]", meta)
-    }
+const TAG: &str = "TestcartridgeTest";
 
-    Arc::new(|record| {
-        let meta_suffix = render_meta(record.meta.as_ref());
-        let cap_urn = record.cap_urn.as_deref().unwrap_or("machine");
-        match record.body_index {
-            Some(index) => eprintln!(
-                "[OrchestratorTestLog][{}][body {}]{} {} {}",
-                record.level, index, meta_suffix, cap_urn, record.message
-            ),
-            None => eprintln!(
-                "[OrchestratorTestLog][{}]{} {} {}",
-                record.level, meta_suffix, cap_urn, record.message
-            ),
-        }
-    })
-}
-
-// =============================================================================
-// Test Cap Registry for testcartridge Caps
-//
-// Builds a `FabricRegistry::new_for_test()` populated with the
-// testcartridge caps. Each cap declares one stdin arg matching
-// its `in=` spec so the resolver's source-to-cap-arg matching
-// can succeed. Used by both `parse_machine_to_cap_dag` (for
-// resolution) and `execute_dag` (for runtime cap lookup).
-// =============================================================================
-
-/// Build a `Cap` from a cap URN string with one stdin arg
-/// matching its `in=` spec.
-fn build_testcartridge_cap(urn_str: &str) -> Cap {
-    let cap_urn = CapUrn::from_string(urn_str).expect("Invalid test cap URN");
-    let in_spec = cap_urn.in_spec().to_string();
-    let out_spec = cap_urn.out_spec().to_string();
-    Cap {
-        urn: cap_urn.clone(),
-        version: 1,
-        title: format!(
-            "Test {}",
-            cap_urn.get_tag("op").map_or("unknown", |s| s.as_str())
-        ),
-        cap_description: None,
-        documentation: None,
-        metadata: HashMap::new(),
-        aliases: vec!["testcartridge".to_string()],
-        is_abstract: false,
-        args: vec![CapArg::new(
-            in_spec.clone(), "input",
-            true,
-            vec![ArgSource::Stdin { stdin: in_spec }],
-        )],
-        outputs: vec![CapOutput::new(out_spec, "output", "testcartridge output".to_string())],
-        metadata_json: None,
-        registered_by: None,
-        // Empty model-related fields — testcartridge has no model
-        // dependency, so it accepts any architecture and has no
-        // default model spec. See `Cap` doc-comments in
-        // src/cap/definition.rs.
-        supported_model_types: Vec::new(),
-        default_model_spec: None,
-    }
-}
-
-/// Build the two-input `test-combine` cap def (matches testcartridge): a MAIN input on
-/// stdin (`node2` = `in=`) plus a distinct-URN, NON-stdin second arg (`node3`) fed by a
-/// producer. Exercises convergence — two producers routed into one cap by distinct arg
-/// URNs. Note RULE3 holds: only the main arg declares a stdin source.
-fn build_combine_cap() -> Cap {
-    let cap_urn = CapUrn::from_string(
-        r#"cap:in="media:enc=utf-8;node2";test-combine;out="media:enc=utf-8;combined""#,
-    )
-    .expect("Invalid combine URN");
-    Cap {
-        urn: cap_urn,
-        version: 1,
-        title: "Test Combine".to_string(),
-        cap_description: None,
-        documentation: None,
-        metadata: HashMap::new(),
-        aliases: vec!["testcartridge".to_string()],
-        is_abstract: false,
-        args: vec![
-            CapArg::new(
-                "media:enc=utf-8;file-path", "input",
-                true,
-                vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8;node2".to_string(),
-                }],
-            ),
-            CapArg::new(
-                "media:enc=utf-8;node3", "second-input",
-                true,
-                vec![ArgSource::CliFlag {
-                    cli_flag: "--second-input".to_string(),
-                }],
-            ),
-        ],
-        outputs: vec![CapOutput::new(
-            "media:enc=utf-8;combined".to_string(), "output",
-            "combined output".to_string(),
-        )],
-        metadata_json: None,
-        registered_by: None,
-        supported_model_types: Vec::new(),
-        default_model_spec: None,
-    }
-}
-
-const SPLIT_CAP: &str = r#"cap:in="media:enc=utf-8;node1";test-split;out="media:enc=utf-8;node2""#;
+const EDGE1: &str = r#"cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2""#;
+const EDGE2: &str = r#"cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3""#;
+const EDGE7: &str = r#"cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6""#;
+const EDGE8: &str = r#"cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7""#;
+const EDGE9: &str = r#"cap:in="media:enc=utf-8;node7";test-edge9;out="media:enc=utf-8;node8""#;
+const EDGE10: &str = r#"cap:in="media:enc=utf-8;node8";test-edge10;out="media:enc=utf-8;node1""#;
+const COMBINE: &str = r#"cap:in="media:enc=utf-8;node2";test-combine;out="media:enc=utf-8;combined""#;
+const LARGE: &str = r#"cap:in="media:void";test-large;out="media:""#;
+const PEER: &str = r#"cap:in="media:enc=utf-8;node1";test-peer;out="media:enc=utf-8;node5""#;
+const SPLIT: &str = r#"cap:in="media:enc=utf-8;node1";test-split;out="media:enc=utf-8;node2""#;
 const SPLIT_PIECES: &str = "media:numeric;split-pieces";
 
-/// Build the `test-split` cap def (matches testcartridge): one input, and four
-/// outputs — the head (main), the rest (required), `flagged` (optional) and
-/// `original` (optional, carries the input unchanged).
-fn build_split_cap() -> Cap {
-    let mut cap = build_testcartridge_cap(SPLIT_CAP);
-    cap.title = "Test Split".to_string();
-    cap.args.push(CapArg::new(
-        SPLIT_PIECES, "rest-pieces",
-        false,
-        vec![ArgSource::CliFlag { cli_flag: "--rest-pieces".to_string() }],
-    ));
-    cap.outputs = vec![
-        CapOutput::new("media:enc=utf-8;node2", "head", "The input before its first ':'"),
-        CapOutput::new("media:enc=utf-8;split-rest", "rest", "The input after its first ':'"),
-        CapOutput::new("media:enc=utf-8;split-flagged", "flagged", "Present when the input holds a '!'")
-            .optional(true),
-        CapOutput::new("media:enc=utf-8;split-original", "original", "The input, unchanged")
-            .optional(true)
-            .carrying_input(),
-    ];
-    capdag::validate_cap_definition(&cap).expect("the split cap def is a valid definition");
-    cap
-}
+const SAY: &str = r#"cap:in="media:void";test-dag-say;out="media:dag-said;enc=utf-8""#;
+const WORDS: &str = r#"cap:in="media:enc=utf-8";test-dag-words;out="media:dag-word;enc=utf-8""#;
+const SHOUT: &str = r#"cap:in="media:enc=utf-8";test-dag-shout;out="media:dag-shout;enc=utf-8""#;
+const JOIN: &str = r#"cap:in="media:enc=utf-8";test-dag-join;out="media:dag-joined;enc=utf-8""#;
+const PAIR: &str = r#"cap:in="media:enc=utf-8";test-dag-pair;out="media:dag-pair;enc=utf-8""#;
+const FLAKY: &str = r#"cap:in="media:enc=utf-8";test-dag-flaky;out="media:dag-flaky;enc=utf-8""#;
 
-/// Run `route` over the testcartridge with `input` at node `A`, and return the
-/// bytes at `sink`. `arguments` are per-node argument values.
-async fn run_route(
-    route: &str,
-    input: &str,
-    sink: &str,
-    arguments: HashMap<String, Vec<(String, Vec<u8>)>>,
-) -> Result<Vec<u8>, capdag::orchestrator::ExecutionError> {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text(input.to_string()));
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None,
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None,
-        registry,
-        None,
-        &test_pipeline_log_fn(),
-        &arguments,
-        None,
+/// The headers of every cap the DAG tests wire, each under its short name.
+fn dag_headers() -> String {
+    format!(
+        "[say {SAY}][words {WORDS}][shout {SHOUT}][join {JOIN}][pair {PAIR}][flaky {FLAKY}]\
+         [split {SPLIT}][edge2 {EDGE2}]"
     )
-    .await?
-    .node_data;
-    Ok(scalar_bytes(outputs.get(sink).expect("the sink has data")))
 }
 
 // =============================================================================
-// Test Helpers
+// Resolving notation against the cartridge's own definitions
 // =============================================================================
 
-/// The testcartridge binary, built against this capdag (see `support`).
-fn testcartridge_bin() -> PathBuf {
-    support::testcartridge_bin("TestcartridgeTest")
-}
-
-fn setup_test_env() -> (TempDir, PathBuf, Vec<PathBuf>) {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let cartridge_dir = temp_dir.path().join("cartridges");
-    fs::create_dir_all(&cartridge_dir).expect("Failed to create cartridge dir");
-    (temp_dir, cartridge_dir, vec![testcartridge_bin()])
-}
-
-/// Build the `initial_is_sequence` map that pairs with the
-/// caller's `initial_inputs`, declaring every input node as
-/// scalar. The orchestrator now requires a 1:1 match between
-/// the keys of `initial_inputs` and `initial_is_sequence`
-/// (missing or extra entries are a hard error). Every test in
-/// this file feeds scalar inputs (single text/bytes/file blob
-/// per input node), so this helper covers them all.
-fn all_scalar(inputs: &HashMap<String, NodeData>) -> HashMap<String, bool> {
-    inputs.keys().map(|k| (k.clone(), false)).collect()
-}
-
-/// `execute_dag` returns each node's output as a `Vec<Vec<u8>>` of decoded items:
-/// input/intermediate nodes carry their raw bytes as a single item, and a scalar
-/// terminal decodes to exactly one item. This helper asserts the single-item
-/// (scalar) shape and returns its raw bytes — the successor to the old
-/// `NodeData::Bytes(b)` match arm.
-fn scalar_bytes(items: &[Vec<u8>]) -> Vec<u8> {
-    assert_eq!(
-        items.len(),
-        1,
-        "expected a scalar node (exactly 1 item), got {} items",
-        items.len()
-    );
-    items[0].clone()
-}
-
-/// Create an `Arc<FabricRegistry>` with all testcartridge caps.
-/// Used by both `parse_machine_to_cap_dag` (which needs the
-/// resolver's `args` lists) and `execute_dag` (which looks up
-/// the full cap definition at runtime).
-/// Build a single unified `FabricRegistry` pre-loaded with the
-/// testcartridge synthetic caps the orchestrator integration tests
-/// depend on. The merged registry holds caps and media defs together,
-/// so callers pass the same Arc to anything that previously took two
-/// separate registries.
-fn create_test_fabric_registry() -> Arc<FabricRegistry> {
-    let registry = FabricRegistry::new_for_test();
-    let caps = vec![
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node3";test-edge3;out="media:enc=utf-8;list;node4""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;list;node4";test-edge4;out="media:enc=utf-8;node5""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node7";test-edge9;out="media:enc=utf-8;node8""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node8";test-edge10;out="media:enc=utf-8;node1""#,
-        ),
-        build_testcartridge_cap(r#"cap:in="media:void";test-large;out="media:""#),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node1";test-peer;out="media:enc=utf-8;node3""#,
-        ),
-        build_testcartridge_cap(
-            r#"cap:in="media:enc=utf-8;node1";identity;out="media:enc=utf-8;node1""#,
-        ),
-        build_combine_cap(),
-        build_split_cap(),
-    ];
-    registry.add_caps_to_cache(caps);
-    Arc::new(registry)
-}
-
-// =============================================================================
-// Phase 1: Basic capdag CLI Functionality with testcartridge
-// =============================================================================
-
-// TEST919: Parse simple machine notation graph with test-edge1
+// TEST919: a one-step machine resolves against the cartridge's manifest: it
+// takes one input and gives one output, each under the name the notation
+// wrote, holding the media the cap declares.
 #[tokio::test]
 async fn test919_parse_simple_testcartridge_graph() {
-    let registry = create_test_fabric_registry();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[A -> test_edge1 -> B]
-"#;
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
-
-    let graph = result.unwrap();
-    assert_eq!(graph.nodes.len(), 2);
-    assert_eq!(graph.edges.len(), 1);
-    let node_a = capdag::MediaUrn::from_string(graph.nodes.get("A").unwrap()).unwrap();
-    let expected_a = capdag::MediaUrn::from_string("media:enc=utf-8;node1").unwrap();
-    assert!(node_a.is_equivalent(&expected_a).unwrap());
-    let node_b = capdag::MediaUrn::from_string(graph.nodes.get("B").unwrap()).unwrap();
-    let expected_b = capdag::MediaUrn::from_string("media:enc=utf-8;node2").unwrap();
-    assert!(node_b.is_equivalent(&expected_b).unwrap());
+    let machines = Machines::new(TAG);
+    let notation = format!("[test_edge1 {EDGE1}]\n[A -> test_edge1 -> B]\n");
+    let resolved = ResolvedNotation::resolve(&notation, machines.registry.clone())
+        .await
+        .expect("resolves");
+    assert_eq!(resolved.strand_count(), 1);
+    let same = |a: &capdag::MediaUrn, b: &str| {
+        a.is_equivalent(&capdag::MediaUrn::from_string(b).unwrap()).unwrap()
+    };
+    let inputs = resolved.inputs().unwrap();
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].name, "A");
+    assert!(same(&inputs[0].media_urn, "media:enc=utf-8;node1"));
+    let outputs = resolved.outputs().unwrap();
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].name, "B");
+    assert!(same(&outputs[0].media_urn, "media:enc=utf-8;node2"));
 }
 
-// TEST889: Execute single-edge DAG (test-edge1)
+// TEST950: Validate that cycles are rejected
 #[tokio::test]
-async fn test889_execute_single_edge_dag() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[input -> test_edge1 -> output]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    // Create initial input
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::Text("TEST".to_string()));
-
-    // Execute DAG
-    let fabric_registry = create_test_fabric_registry();
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let result = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        fabric_registry,
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await;
-
-    assert!(result.is_ok(), "Execution failed: {:?}", result.err());
-
-    let outputs = result.unwrap().node_data;
-    let output_data = outputs.get("output").expect("No output node");
-
-    let b = scalar_bytes(output_data);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    assert_eq!(output_str, "[PREPEND]TEST");
-}
-
-// TEST888: Execute two-edge chain (test-edge1 -> test-edge2)
-#[tokio::test]
-async fn test888_execute_edge1_to_edge2_chain() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[test_edge2 cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3"]
-[A -> test_edge1 -> B]
-[B -> test_edge2 -> C]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text("CHAIN".to_string()));
-
-    let fabric_registry = create_test_fabric_registry();
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        fabric_registry,
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let final_output = outputs.get("C").expect("No final output");
-
-    let b = scalar_bytes(final_output);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    // edge1: [PREPEND]CHAIN, edge2: [PREPEND]CHAIN[APPEND]
-    assert_eq!(output_str, "[PREPEND]CHAIN[APPEND]");
-}
-
-// TEST887: Execute with file-path input
-#[tokio::test]
-async fn test887_execute_with_file_input() {
-    let registry = create_test_fabric_registry();
-    let (temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[input -> test_edge1 -> output]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    // Create test input file
-    let input_file = temp.path().join("input.txt");
-    fs::write(&input_file, "FILE_CONTENT").expect("Failed to write file");
-
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::FilePath(input_file));
-
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let output = outputs.get("output").expect("No output");
-
-    let b = scalar_bytes(output);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    assert_eq!(output_str, "[PREPEND]FILE_CONTENT");
-}
-
-// TEST952: Execute large payload (test-large cap)
-#[tokio::test]
-async fn test952_execute_large_payload() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_large cap:in="media:void";test-large;out="media:"]
-[input -> test_large -> output]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    // test-large generates payload based on size, but with media:void input
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("input".to_string(), NodeData::Bytes(vec![]));
-
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let output = outputs.get("output").expect("No output");
-
-    let b = scalar_bytes(output);
-    // Default size is 1MB
-    assert_eq!(b.len(), 1_048_576);
-    // Verify pattern: repeating 0-255
-    for (i, &byte) in b.iter().enumerate() {
-        assert_eq!(byte, (i % 256) as u8, "Pattern mismatch at byte {}", i);
+async fn test950_reject_cycles() {
+    let machines = Machines::new(TAG);
+    // The six-step chain ends on the type it starts from: wired back to its
+    // own start, every step reads what a later one produces.
+    let cycle = format!(
+        "[e1 {EDGE1}][e2 {EDGE2}][e7 {EDGE7}][e8 {EDGE8}][e9 {EDGE9}][e10 {EDGE10}]\
+         [A -> e1 -> B][B -> e2 -> C][C -> e7 -> D][D -> e8 -> E][E -> e9 -> F][F -> e10 -> A]"
+    );
+    match build_plans_from_notation(&cycle, machines.registry.clone()).await {
+        Err(ParseOrchestrationError::NotADag { .. }) => {}
+        other => panic!("Expected NotADag error, got: {:?}", other.map(|plans| plans.len())),
     }
 }
+
+// TEST943: Two nodes with the same media type but different names are two
+// distinct graph positions — NOT a loop. A cap whose input and output are one
+// type has its upstream and downstream node carry the same media URN; that
+// must not collapse them into a self-loop. Node identity comes from the
+// user-written name, not the media URN.
+#[tokio::test]
+async fn test943_same_media_different_names_is_not_a_cycle() {
+    use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
+    const SAME: &str = r#"cap:in="media:enc=utf-8;node1";same-type;out="media:enc=utf-8;node1""#;
+    let mut same = capdag::Cap::new(
+        capdag::CapUrn::from_string(SAME).unwrap(),
+        "Same type".to_string(),
+        vec!["same-type".to_string()],
+    );
+    same.args.push(CapArg::new(
+        "media:enc=utf-8;node1",
+        "input",
+        true,
+        vec![ArgSource::Stdin {
+            stdin: "media:enc=utf-8;node1".to_string(),
+        }],
+    ));
+    same.outputs = vec![CapOutput::new("media:enc=utf-8;node1", "output", "the same type")];
+    let machines = Machines::with_caps(TAG, vec![same]);
+    let notation = format!("[same {SAME}][A -> same -> B]");
+    let resolved = ResolvedNotation::resolve(&notation, machines.registry.clone())
+        .await
+        .expect("A -> same -> B must resolve: distinct names, not a cycle");
+    assert_eq!(resolved.inputs().unwrap()[0].name, "A");
+    assert_eq!(resolved.outputs().unwrap()[0].name, "B");
+    let plans = build_plans_from_notation(&notation, machines.registry.clone()).await.unwrap();
+    assert_eq!(plans[0].nodes.values().filter(|node| node.is_cap()).count(), 1);
+}
+
+// TEST949: Empty machine notation (no edges)
+#[tokio::test]
+async fn test949_empty_graph() {
+    let machines = Machines::new(TAG);
+    match build_plans_from_notation("", machines.registry.clone()).await {
+        Err(ParseOrchestrationError::MachineSyntaxParseFailed(_)) => {}
+        other => panic!("Expected MachineSyntaxParseFailed, got: {:?}", other.map(|plans| plans.len())),
+    }
+}
+
+// TEST948: Invalid cap URN in machine notation
+#[tokio::test]
+async fn test948_invalid_cap_urn() {
+    let machines = Machines::new(TAG);
+    let notation = concat!(r#"[bad cap:INVALID]"#, "[A -> bad -> B]");
+    assert!(
+        build_plans_from_notation(notation, machines.registry.clone()).await.is_err(),
+        "Should reject invalid cap URN"
+    );
+}
+
+// TEST947: Cap not found in registry
+#[tokio::test]
+async fn test947_cap_not_found() {
+    let machines = Machines::new(TAG);
+    let notation = r#"
+[nonexistent cap:in="media:unknown";nonexistent;out="media:unknown"]
+[A -> nonexistent -> B]
+"#;
+    match build_plans_from_notation(notation, machines.registry.clone()).await {
+        // The parser resolves header caps and wraps the lookup failure.
+        Err(ParseOrchestrationError::MachineSyntaxParseFailed(message)) => {
+            assert!(message.contains("nonexistent"), "{message}");
+        }
+        other => panic!("Expected MachineSyntaxParseFailed, got: {:?}", other.map(|plans| plans.len())),
+    }
+}
+
+// =============================================================================
+// Chains
+// =============================================================================
+
+// TEST889: Execute a single-step machine (test-edge1)
+#[tokio::test]
+async fn test889_execute_single_edge_dag() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!("[test_edge1 {EDGE1}]\n[input -> test_edge1 -> output]\n"),
+            &[("input", Given::One(b"TEST"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("output"), "[PREPEND]TEST");
+    assert_eq!(ran.result.verdict, RunVerdict::Completed);
+}
+
+// TEST888: Execute a two-step chain (test-edge1 -> test-edge2)
+#[tokio::test]
+async fn test888_execute_edge1_to_edge2_chain() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!("[test_edge1 {EDGE1}][test_edge2 {EDGE2}][A -> test_edge1 -> B][B -> test_edge2 -> C]"),
+            &[("A", Given::One(b"CHAIN"))],
+        )
+        .await
+        .expect("Execution failed");
+    // edge1: [PREPEND]CHAIN, edge2: [PREPEND]CHAIN[APPEND]
+    assert_eq!(ran.text("C"), "[PREPEND]CHAIN[APPEND]");
+}
+
+/// The chain edge1 → edge2 → edge7 → edge8 [→ edge9 [→ edge10]], run on "hello".
+async fn run_chain(steps: usize) -> String {
+    let all = [
+        ("e1", EDGE1),
+        ("e2", EDGE2),
+        ("e7", EDGE7),
+        ("e8", EDGE8),
+        ("e9", EDGE9),
+        ("e10", EDGE10),
+    ];
+    let mut notation = String::new();
+    for (alias, urn) in &all[..steps] {
+        notation.push_str(&format!("[{alias} {urn}]"));
+    }
+    for (index, (alias, _)) in all[..steps].iter().enumerate() {
+        notation.push_str(&format!("[n{index} -> {alias} -> n{}]", index + 1));
+    }
+    Machines::new(TAG)
+        .run(&notation, &[("n0", Given::One(b"hello"))])
+        .await
+        .expect("Execution failed")
+        .text(&format!("n{steps}"))
+}
+
+// TEST946: 4-machine: edge1 -> edge2 -> edge7 -> edge8
+// node1 -> node2 -> node3 -> node6 -> node7
+// "hello" -> "[PREPEND]hello" -> "[PREPEND]hello[APPEND]" -> "[PREPEND]HELLO[APPEND]" -> "]DNEPPA[OLLEH]DNEPERP["
+#[tokio::test]
+async fn test946_four_machine() {
+    assert_eq!(run_chain(4).await, "]DNEPPA[OLLEH]DNEPERP[");
+}
+
+// TEST945: 5-machine: edge1 -> edge2 -> edge7 -> edge8 -> edge9 (wrap)
+#[tokio::test]
+async fn test945_five_machine() {
+    assert_eq!(run_chain(5).await, "<<]DNEPPA[OLLEH]DNEPERP[>>");
+}
+
+// TEST944: 6-machine: edge1 -> edge2 -> edge7 -> edge8 -> edge9 -> edge10 (unwrap + lowercase)
+#[tokio::test]
+async fn test944_six_machine() {
+    assert_eq!(run_chain(6).await, "]dneppa[olleh]dneperp[");
+}
+
+// =============================================================================
+// Sources, sinks and constants
+// =============================================================================
+
+// TEST952: a machine that starts from a step nothing is wired into. The
+// large-payload cap takes no input: it is given none — no dummy value stands
+// in for one — and its megabyte arrives whole. A machine whose last step
+// nothing reads has no output, and runs.
+#[tokio::test]
+async fn test952_execute_large_payload() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(&format!("[test_large {LARGE}]\n[() -> test_large -> output]\n"), &[])
+        .await
+        .expect("Execution failed");
+    let (items, is_sequence) = ran.produced("output");
+    assert!(!is_sequence);
+    let bytes = &items[0];
+    // Default size is 1MB
+    assert_eq!(bytes.len(), 1_048_576);
+    // Verify pattern: repeating 0-255
+    for (i, &byte) in bytes.iter().enumerate() {
+        assert_eq!(byte, (i % 256) as u8, "Pattern mismatch at byte {}", i);
+    }
+
+    let ran = machines
+        .run(&format!("[test_edge1 {EDGE1}]\n[A -> test_edge1 -> ()]\n"), &[("A", Given::One(b"x"))])
+        .await
+        .expect("a machine with no output runs");
+    assert!(ran.result.terminals.is_empty());
+    assert_eq!(ran.result.verdict, RunVerdict::Completed);
+}
+
+// TEST12795: a constant written in the machine reaches its step as that
+// arg's value, and starts a step that takes no input. An arg so bound is the
+// machine's: a value for it from the run is refused, naming the step and the
+// arg.
+#[tokio::test]
+async fn test12795_a_constant_starts_a_source_and_is_not_the_runs_to_change() {
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "{}[(text=\"hello brave world\") -> say -> s][s -> words -> w][w -> shout -> out]",
+        dag_headers()
+    );
+    let ran = machines.run(&notation, &[]).await.expect("Execution failed");
+    assert_eq!(ran.texts("out"), vec!["HELLO", "BRAVE", "WORLD"]);
+
+    let say = ran
+        .plan
+        .nodes
+        .iter()
+        .find(|(_, node)| node.cap_urn().is_some_and(|urn| urn.contains("test-dag-say")))
+        .map(|(id, _)| id.clone())
+        .unwrap();
+    let given = std::collections::HashMap::from([(
+        say.clone(),
+        vec![("media:dag-say-text;enc=utf-8".to_string(), b"something else".to_vec())],
+    )]);
+    match capdag::RunArgumentLedger::new(&ran.plan, given) {
+        Err(capdag::RunArgumentError::ArgumentBound { token_id, media_urn }) => {
+            assert_eq!(token_id, say);
+            assert_eq!(media_urn, "media:dag-say-text;enc=utf-8");
+        }
+        other => panic!("expected the bound arg to be refused, got {:?}", other.map(|_| ())),
+    }
+}
+
+// =============================================================================
+// Which arg, and which output
+// =============================================================================
 
 // TEST1316: Convergence — two producers routed into ONE cap via DISTINCT arg URNs.
 //
 // `A -edge1-> B(node2)`; `B -edge2-> D(node3)`; then `(B, D) -combine-> E`. `B` fans
 // out (feeds both edge2 and combine). `combine` has a MAIN input on stdin (node2 = B)
-// plus a distinct-URN second arg (node3 = D). This is the legal convergence the old
-// two-stdin test951 was not: the resolver matches B→the main arg and D→the node3 arg,
-// the plan/parser emit B as the main-input edge and D as a node3 `Arg` edge, and the
-// cartridge `require_stream`s both by their distinct URNs. E must carry BOTH.
+// plus a distinct-URN second arg (node3 = D): the resolver matches B to the main arg
+// and D to the node3 arg by type, and the cartridge reads both by their URNs. E must
+// carry BOTH.
 #[tokio::test]
 async fn test1316_convergence_two_producers_distinct_arg_urns() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[test_edge2 cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3"]
-[test_combine cap:in="media:enc=utf-8;node2";test-combine;out="media:enc=utf-8;combined"]
-[A -> test_edge1 -> B]
-[B -> test_edge2 -> D]
-[(B, D) -> test_combine -> E]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!(
+                "[test_edge1 {EDGE1}][test_edge2 {EDGE2}][test_combine {COMBINE}]\
+                 [A -> test_edge1 -> B][B -> test_edge2 -> D][(B, D) -> test_combine -> E]"
+            ),
+            &[("A", Given::One(b"hello"))],
+        )
         .await
-        .expect("Parse failed");
+        .expect("Execution failed");
+    // B = edge1(hello) = "[PREPEND]hello"; D = edge2(B) = "[PREPEND]hello[APPEND]";
+    // E = combine(B main, D arg) = "B|D".
+    assert_eq!(ran.text("E"), "[PREPEND]hello|[PREPEND]hello[APPEND]");
+}
 
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text("hello".to_string()));
-    let initial_is_sequence = all_scalar(&initial_inputs);
+// TEST12794: two inputs of ONE type are told apart by the name of the arg
+// each is bound to — and by nothing else: swapping the names swaps what the
+// step is given. Without a name there is nothing to tell them apart by, and
+// the wiring is refused.
+#[tokio::test]
+async fn test12794_two_inputs_of_one_type_are_told_apart_by_name() {
+    let machines = Machines::new(TAG);
+    let inputs = [("a", Given::One(b"alpha" as &[u8])), ("b", Given::One(b"beta" as &[u8]))];
+    let ran = machines
+        .run(&format!("{}[(a, right=b) -> pair -> out]", dag_headers()), &inputs)
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("out"), "alpha|beta");
 
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None,
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
+    let inputs = [("a", Given::One(b"alpha" as &[u8])), ("b", Given::One(b"beta" as &[u8]))];
+    let ran = machines
+        .run(&format!("{}[(b, right=a) -> pair -> out]", dag_headers()), &inputs)
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("out"), "beta|alpha");
+
+    // Both named: the same.
+    let inputs = [("a", Given::One(b"alpha" as &[u8])), ("b", Given::One(b"beta" as &[u8]))];
+    let ran = machines
+        .run(&format!("{}[(right=a, left=b) -> pair -> out]", dag_headers()), &inputs)
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("out"), "beta|alpha");
+
+    // Neither named: each fits either arg.
+    match ResolvedNotation::resolve(
+        &format!("{}[(a, b) -> pair -> out]", dag_headers()),
+        machines.registry.clone(),
     )
     .await
-    .expect("Execution failed")
-    .node_data;
-
-    // B = edge1(hello) = "[PREPEND]hello"; D = edge2(B) = "[PREPEND]hello[APPEND]";
-    // E = combine(B main, D arg) = "B|D". If convergence mis-routed (e.g. D not
-    // delivered on its node3 URN), combine's require_stream(node3) would fail and
-    // execution would error — so a passing assertion here proves both inputs arrived
-    // by their distinct URNs.
-    let e = scalar_bytes(outputs.get("E").expect("No E output"));
-    let e_str = String::from_utf8(e).expect("Invalid UTF-8");
-    assert_eq!(e_str, "[PREPEND]hello|[PREPEND]hello[APPEND]");
+    {
+        Err(ParseOrchestrationError::MachineSyntaxParseFailed(message)) => {
+            assert!(message.contains("test-dag-pair"), "the refusal names the cap: {message}");
+        }
+        other => panic!("expected the unnamed wiring to be refused, got {:?}", other.map(|_| ())),
+    }
 }
 
 // TEST12728: a cap that answers on several outputs, as the last step of a run.
-// What the run takes from it is its main output: the head. The other streams
-// it sends — a required rest, and two optional outputs that fire here, one of
-// them carrying the input itself — pass the engine's audit and are not mixed
-// into the result, which is what happened when every chunk of a response was
-// collected into one buffer.
+// What the run takes from it is what the machine took: here its main output,
+// the head. The other streams it sends — a required rest, and two optional
+// outputs that fire here, one of them carrying the input itself — pass the
+// engine's audit and are not mixed into the result, which is what happened
+// when every chunk of a response was collected into one buffer.
 #[tokio::test]
 async fn test12728_several_outputs_the_main_one_is_the_steps_result() {
-    let route = format!("[test_split {SPLIT_CAP}]\n[A -> test_split -> B]\n");
+    let machines = Machines::new(TAG);
+    let notation = format!("[test_split {SPLIT}]\n[A -> test_split -> B]\n");
 
     // Every output fires: head, rest, flagged, original.
-    let head = run_route(&route, "alpha!?:beta", "B", HashMap::new())
-        .await
-        .expect("Execution failed");
-    assert_eq!(String::from_utf8(head).unwrap(), "alpha!?");
+    let ran = machines.run(&notation, &[("A", Given::One(b"alpha!?:beta"))]).await.expect("Execution failed");
+    assert_eq!(ran.text("B"), "alpha!?");
 
     // No ':' — the handler writes no rest. The runtime sends the required
     // output empty, and the engine, which holds the response to a stream for
     // every required output, accepts it.
-    let head = run_route(&route, "alone", "B", HashMap::new())
-        .await
-        .expect("Execution failed");
-    assert_eq!(String::from_utf8(head).unwrap(), "alone");
+    let ran = machines.run(&notation, &[("A", Given::One(b"alone"))]).await.expect("Execution failed");
+    assert_eq!(ran.text("B"), "alone");
 }
 
 // TEST12729: the same cap in the middle of a chain. The next step is fed the
@@ -620,547 +405,337 @@ async fn test12728_several_outputs_the_main_one_is_the_steps_result() {
 // run completes instead of stalling on it.
 #[tokio::test]
 async fn test12729_several_outputs_the_main_one_feeds_the_next_step() {
-    let route = format!(
-        "[test_split {SPLIT_CAP}]\n\
-         [test_edge2 cap:in=\"media:enc=utf-8;node2\";test-edge2;out=\"media:enc=utf-8;node3\"]\n\
-         [A -> test_split -> B]\n\
-         [B -> test_edge2 -> C]\n"
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "[test_split {SPLIT}][test_edge2 {EDGE2}][A -> test_split -> B][B -> test_edge2 -> C]"
     );
-    let mut arguments = HashMap::new();
-    arguments.insert("B".to_string(), vec![(SPLIT_PIECES.to_string(), b"80".to_vec())]);
     // The cartridge is built before the clock starts: the limit below is on
     // the run, and a build is not a stall.
-    testcartridge_bin();
-    let result = tokio::time::timeout(
+    support::testcartridge_bin(TAG);
+    let ran = tokio::time::timeout(
         std::time::Duration::from_secs(120),
-        run_route(&route, "alpha?:beta", "C", arguments),
+        machines.run_with(&notation, &[("A", Given::One(b"alpha?:beta"))], &[(SPLIT, SPLIT_PIECES, b"80")]),
     )
     .await
     .expect("the run stalled: a stream nobody reads was not credited")
     .expect("Execution failed");
     // edge2 appends to what it was fed: the head, not the rest and not the
     // 80 pieces of padding.
-    assert_eq!(String::from_utf8(result).unwrap(), "alpha?[APPEND]");
+    assert_eq!(ran.text("C"), "alpha?[APPEND]");
 }
 
-// TEST950: Validate that cycles are rejected
+// TEST12796: each output of a step goes to the step that takes it. The head
+// feeds one consumer and the rest another; each is given what was emitted on
+// its output and nothing of the other, and both results are the machine's.
 #[tokio::test]
-async fn test950_reject_cycles() {
-    let registry = create_test_fabric_registry();
+async fn test12796_two_outputs_feed_two_consumers() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!("{}[A -> split -> (h, rest=r)][h -> edge2 -> x][r -> shout -> y]", dag_headers()),
+            &[("A", Given::One(b"left:right"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("x"), "left[APPEND]");
+    assert_eq!(ran.text("y"), "RIGHT");
 
-    // Create a self-loop using identity cap
-    let route = r#"
-[identity cap:in="media:enc=utf-8;node1";identity;out="media:enc=utf-8;node1"]
-[A -> identity -> A]
-"#;
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    assert!(result.is_err(), "Should reject cycle");
-
-    match result.err() {
-        Some(ParseOrchestrationError::NotADag { .. }) => {
-            // Expected error
-        }
-        other => panic!("Expected NotADag error, got: {:?}", other),
-    }
-}
-
-// TEST943: Two nodes with the same media type but different names are two
-// distinct graph positions — NOT a loop. The identity cap has `in = out` by
-// type, so its upstream and downstream node carry the same media URN; this
-// must not collapse them into a self-loop. Node identity comes from the
-// user-written name, not the media URN.
-#[tokio::test]
-async fn test943_same_media_different_names_is_not_a_cycle() {
-    let registry = create_test_fabric_registry();
-
-    let route = r#"
-[identity cap:in="media:enc=utf-8;node1";identity;out="media:enc=utf-8;node1"]
-[A -> identity -> B]
-"#;
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    let graph = result.expect("A -> identity -> B must parse: distinct names, not a cycle");
-    assert_eq!(graph.edges.len(), 1, "single edge expected");
-    assert_eq!(graph.edges[0].from, "A");
-    assert_eq!(graph.edges[0].to, "B");
-}
-
-// TEST949: Empty machine notation (no edges)
-#[tokio::test]
-async fn test949_empty_graph() {
-    let registry = create_test_fabric_registry();
-
-    let route = "";
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    assert!(result.is_err(), "Should fail on empty machine notation");
-
-    match result.err() {
-        Some(ParseOrchestrationError::MachineSyntaxParseFailed(_)) => {
-            // Expected error
-        }
-        other => panic!("Expected MachineSyntaxParseFailed, got: {:?}", other),
-    }
-}
-
-// TEST948: Invalid cap URN in machine notation
-#[tokio::test]
-async fn test948_invalid_cap_urn() {
-    let registry = create_test_fabric_registry();
-
-    let route = concat!(r#"[bad cap:INVALID]"#, "[A -> bad -> B]");
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    assert!(result.is_err(), "Should reject invalid cap URN");
-}
-
-// TEST947: Cap not found in registry
-#[tokio::test]
-async fn test947_cap_not_found() {
-    let registry = create_test_fabric_registry();
-
-    let route = r#"
-[nonexistent cap:in="media:unknown";nonexistent;out="media:unknown"]
-[A -> nonexistent -> B]
-"#;
-
-    let result = parse_machine_to_cap_dag(route, &*registry).await;
-    assert!(result.is_err(), "Should fail when cap not found");
-
-    match result.err() {
-        Some(ParseOrchestrationError::MachineSyntaxParseFailed(_)) => {
-            // Expected: the parser resolves header caps and wraps lookup failure
-        }
-        other => panic!("Expected MachineSyntaxParseFailed, got: {:?}", other),
-    }
+    // An output the machine takes and no step reads is an output of the machine.
+    let ran = machines
+        .run(
+            &format!("{}[A -> split -> (h, rest=r)]", dag_headers()),
+            &[("A", Given::One(b"left:right"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("h"), "left");
+    assert_eq!(ran.text("r"), "right");
 }
 
 // =============================================================================
-// Phase 2: Long Chain Tests (4-6 caps)
+// Maps
 // =============================================================================
 
-// TEST946: 4-machine: edge1 -> edge2 -> edge7 -> edge8
-// node1 -> node2 -> node3 -> node6 -> node7
-// "hello" -> "[PREPEND]hello" -> "[PREPEND]hello[APPEND]" -> "[PREPEND]HELLO[APPEND]" -> "]DNEPPA[OLLEH]DNEPERP["
+// TEST12797: sequences on two args that each take one value are zipped: run
+// i of the step is given item i of each. Sequences of different lengths fail
+// the run, naming what each gave, before the step is run on anything.
 #[tokio::test]
-async fn test946_four_machine() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[test_edge2 cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3"]
-[test_edge7 cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6"]
-[test_edge8 cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7"]
-[A -> test_edge1 -> B]
-[B -> test_edge2 -> C]
-[C -> test_edge7 -> D]
-[D -> test_edge8 -> E]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text("hello".to_string()));
-
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let final_output = outputs.get("E").expect("No final output");
-
-    let b = scalar_bytes(final_output);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    // edge1: [PREPEND]hello
-    // edge2: [PREPEND]hello[APPEND]
-    // edge7 (uppercase): [PREPEND]HELLO[APPEND]
-    // edge8 (reverse): ]DNEPPA[OLLEH]DNEPERP[
-    assert_eq!(output_str, "]DNEPPA[OLLEH]DNEPERP[");
-}
-
-// TEST945: 5-machine: edge1 -> edge2 -> edge7 -> edge8 -> edge9
-// node1 -> node2 -> node3 -> node6 -> node7 -> node8
-// adds <<...>> wrapping around the reversed string
-#[tokio::test]
-async fn test945_five_machine() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[test_edge2 cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3"]
-[test_edge7 cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6"]
-[test_edge8 cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7"]
-[test_edge9 cap:in="media:enc=utf-8;node7";test-edge9;out="media:enc=utf-8;node8"]
-[A -> test_edge1 -> B]
-[B -> test_edge2 -> C]
-[C -> test_edge7 -> D]
-[D -> test_edge8 -> E]
-[E -> test_edge9 -> F]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text("hello".to_string()));
-
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let final_output = outputs.get("F").expect("No final output");
-
-    let b = scalar_bytes(final_output);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    // Previous 4 caps: ]DNEPPA[OLLEH]DNEPERP[
-    // edge9 (wrap): <<]DNEPPA[OLLEH]DNEPERP[>>
-    assert_eq!(output_str, "<<]DNEPPA[OLLEH]DNEPERP[>>");
-}
-
-// TEST944: 6-machine: edge1 -> edge2 -> edge7 -> edge8 -> edge9 -> edge10
-// Full cycle: node1 -> node2 -> node3 -> node6 -> node7 -> node8 -> node1
-// Completes the round trip: unwrap markers + lowercase
-#[tokio::test]
-async fn test944_six_machine() {
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-
-    let route = r#"
-[test_edge1 cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2"]
-[test_edge2 cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3"]
-[test_edge7 cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6"]
-[test_edge8 cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7"]
-[test_edge9 cap:in="media:enc=utf-8;node7";test-edge9;out="media:enc=utf-8;node8"]
-[test_edge10 cap:in="media:enc=utf-8;node8";test-edge10;out="media:enc=utf-8;node1"]
-[A -> test_edge1 -> B]
-[B -> test_edge2 -> C]
-[C -> test_edge7 -> D]
-[D -> test_edge8 -> E]
-[E -> test_edge9 -> F]
-[F -> test_edge10 -> G]
-"#;
-
-    let graph = parse_machine_to_cap_dag(route, &*registry)
-        .await
-        .expect("Parse failed");
-
-    let mut initial_inputs = HashMap::new();
-    initial_inputs.insert("A".to_string(), NodeData::Text("hello".to_string()));
-
-    let initial_is_sequence = all_scalar(&initial_inputs);
-    let outputs = execute_dag(
-        &graph,
-        cartridge_dir,
-        None, // dev-bin fixtures — no registry
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        initial_inputs,
-        initial_is_sequence,
-        dev_binaries,
-        None, // no bundled cartridges in these unit fixtures
-        create_test_fabric_registry(),
-        None,
-        &test_pipeline_log_fn(),
-        &std::collections::HashMap::new(),
-        None,
-    )
-    .await
-    .expect("Execution failed")
-    .node_data;
-
-    let final_output = outputs.get("G").expect("No final output");
-
-    let b = scalar_bytes(final_output);
-    let output_str = String::from_utf8(b).expect("Invalid UTF-8");
-    // Previous 5 caps: <<]DNEPPA[OLLEH]DNEPERP[>>
-    // edge10 (unwrap+lowercase): ]dneppa[olleh]dneperp[
-    assert_eq!(output_str, "]dneppa[olleh]dneperp[");
-
-    // v3 pipelining regime: this six-cap machine is one linear-chain segment,
-    // so the intermediate nodes stream cap-to-cap and are deliberately NEVER
-    // materialized into the result map — the correct terminal value above
-    // proves every intermediate transformation ran, in order, through live
-    // frame forwarding. Their absence is asserted so a regression back to
-    // materialization (which would silently reintroduce the memory barrier)
-    // is caught.
-    for node in ["B", "C", "D", "E", "F"] {
-        assert!(
-            !outputs.contains_key(node),
-            "pipelined intermediate node {} must not be materialized (L16 pipelining regime)",
-            node
-        );
-    }
-}
-
-// =============================================================================
-// Phase 3: Peer Invoke Testing (TEST394)
-// =============================================================================
-
-// TEST394: Test peer invoke round-trip (testcartridge calls itself)
-// Disabled: LocalCartridgeRouter feature not implemented - uses non-existent modules
-#[cfg(feature = "__disabled_local_cartridge_router")]
-#[tokio::test]
-#[ignore]
-async fn test394_peer_invoke_roundtrip() {
-    use capdag::local_cartridge_router::LocalCartridgeRouter;
-    use capdag::{CapArgumentValue, CartridgeHost};
-    use std::process::Stdio;
-    use std::sync::Arc;
-    use tokio::process::Command;
-
-    let testcartridge = testcartridge_bin();
-
-    // Create LocalCartridgeRouter for routing peer invoke requests
-    let router = Arc::new(LocalCartridgeRouter::new());
-    let router_arc: Arc<dyn capdag::cap_router::CapRouter> = router.clone();
-
-    // Spawn testcartridge
-    let mut child = Command::new(&testcartridge)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn testcartridge");
-
-    let stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
-
-    // Create host with router
-    let host = CartridgeHost::new_with_router(stdin, stdout, router_arc)
-        .await
-        .expect("Failed to create host");
-
-    // Get manifest to discover all caps
-    let manifest_bytes = host.cartridge_manifest();
-    let manifest: capdag::CapManifest =
-        serde_json::from_slice(manifest_bytes).expect("Failed to parse manifest");
-
-    let all_caps = manifest.all_caps();
-    eprintln!(
-        "[TEST394] Discovered {} caps from testcartridge",
-        all_caps.len()
+async fn test12797_two_sequences_are_zipped() {
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "{}[a -> words -> xs][b -> words -> ys][(xs, right=ys) -> pair -> p]",
+        dag_headers()
     );
-
-    // Register all caps with the router (pointing to this same host)
-    let host_arc = Arc::new(host);
-    for cap in &all_caps {
-        let cap_urn = cap.urn.to_string();
-        eprintln!("[TEST394] Registering cap: {}", cap_urn);
-        router
-            .register_cartridge(&cap_urn, Arc::clone(&host_arc))
-            .await;
-    }
-
-    // Now call test-peer, which will peer invoke test-edge1 and test-edge2
-    let test_peer_urn = r#"cap:in="media:enc=utf-8;node1";test-peer;out="media:enc=utf-8;node5""#;
-    let input_data = b"CHAIN".to_vec();
-    let arguments = vec![CapArgumentValue::new("media:enc=utf-8;node1", input_data)];
-
-    eprintln!("[TEST394] Calling test-peer with input: CHAIN");
-
-    let mut response = host_arc
-        .request_with_arguments(test_peer_urn, &arguments)
+    let ran = machines
+        .run(&notation, &[("a", Given::One(b"one two three")), ("b", Given::One(b"x y z"))])
         .await
-        .expect("Failed to call test-peer");
+        .expect("Execution failed");
+    assert_eq!(ran.texts("p"), vec!["one|x", "two|y", "three|z"]);
 
-    // Collect response chunks
-    let mut result_data = Vec::new();
-    while let Some(chunk_result) = response.recv().await {
-        match chunk_result {
-            Ok(chunk) => {
-                eprintln!("[TEST394] Received chunk: {} bytes", chunk.payload.len());
-                result_data.extend_from_slice(&chunk.payload);
-            }
-            Err(e) => {
-                panic!("Peer invoke failed: {:?}", e);
-            }
-        }
-    }
-
-    // Shutdown host (try_unwrap to get ownership)
-    match Arc::try_unwrap(host_arc) {
-        Ok(host) => host.shutdown().await,
-        Err(_) => eprintln!("[TEST394] Warning: Could not unwrap host Arc, skipping shutdown"),
-    }
-
-    // Debug: print raw bytes
-    eprintln!(
-        "[TEST394] Raw response bytes: {:?}",
-        &result_data[..std::cmp::min(result_data.len(), 30)]
+    // The run above is on the same record: what the next one adds is read
+    // from here on.
+    let before = machines.logs.lock().unwrap().len();
+    let error = machines
+        .run(&notation, &[("a", Given::One(b"one two three")), ("b", Given::One(b"x y"))])
+        .await
+        .err()
+        .expect("sequences of different lengths cannot be zipped");
+    let message = error.to_string();
+    assert!(message.contains("gave 3") && message.contains("gave 2"), "{message}");
+    assert_eq!(error.attribution_class(), AttributionClass::Input);
+    let logs = machines.logs.lock().unwrap();
+    assert!(
+        logs[before..].iter().any(|(cap, _, _)| cap.contains("test-dag-words")),
+        "the steps before the map ran and were heard from: {:?}",
+        &logs[before..]
     );
-
-    // Decode CBOR response
-    let cbor_value: ciborium::Value =
-        ciborium::from_reader(&result_data[..]).expect("Failed to decode CBOR response");
-
-    eprintln!("[TEST394] Decoded CBOR value: {:?}", cbor_value);
-
-    // Extract bytes from CBOR value
-    let result_bytes = match cbor_value {
-        ciborium::Value::Bytes(b) => b,
-        _ => panic!("Expected CBOR Bytes, got: {:?}", cbor_value),
-    };
-
-    let result_str = String::from_utf8(result_bytes).expect("Invalid UTF-8 in result");
-
-    eprintln!("[TEST394] Final result: {}", result_str);
-
-    // Expected flow:
-    // 1. test-peer receives "CHAIN"
-    // 2. Calls peer.invoke(test-edge1, "CHAIN") -> "[PREPEND]CHAIN"
-    // 3. Calls peer.invoke(test-edge2, "[PREPEND]CHAIN") -> "[PREPEND]CHAIN[APPEND]"
-    // 4. Returns final result
-    assert_eq!(
-        result_str, "[PREPEND]CHAIN[APPEND]",
-        "Peer invoke chain should prepend and append correctly"
+    assert!(
+        !logs[before..].iter().any(|(cap, _, _)| cap.contains("test-dag-pair")),
+        "the step was not run on any item: {:?}",
+        &logs[before..]
     );
 }
 
-// =============================================================================
-// Host-mediated live capture → ForEach region (13.2 §Reference Media)
-// =============================================================================
+// TEST12798: a sequence produced inside a map is mapped inside it, and a
+// step that takes a sequence folds what the inner map produced once per
+// OUTER item. From the machine, what the inner map produced is one flat
+// sequence, in order. A map over nothing produces nothing, and its fold is
+// given an empty sequence.
+#[tokio::test]
+async fn test12798_a_map_inside_a_map_and_a_fold_per_outer_item() {
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "{}[docs -> words -> w][w -> shout -> s][s -> join -> line][(w, right=w) -> pair -> e]",
+        dag_headers()
+    );
+    let docs: [&[u8]; 3] = [b"a b", b"", b"c d e"];
+    let ran = machines
+        .run(&notation, &[("docs", Given::Many(&docs))])
+        .await
+        .expect("Execution failed");
+    // One line per document — the empty one included: its words are no
+    // items, and the join of no items is the empty text.
+    assert_eq!(ran.texts("line"), vec!["A+B", "", "C+D+E"]);
+    assert_eq!(ran.texts("e"), vec!["a|a", "b|b", "c|c", "d|d", "e|e"]);
+}
 
-// TEST11011: a live source drives a ForEach region END TO END through the
-// REAL stack — the CLI runtime hosts the actual testcartridge process on a
-// real relay switch, the HOST opens the built-in `media:live;synthetic`
-// feed itself through the same capture dispatch the hardware backends use,
-// and one body runs per delivered item while the feed runs. No mocks
-// anywhere: real capture bridge, real region driver, real cartridge
-// invocations, real persisted body outputs.
+// TEST12799: an output that may not fire and does not leaves what needs it
+// skipped: the step wired to it does not run and is reported skipped, a
+// gather it is a member of holds one member fewer, and a machine output
+// behind it is not produced — which is neither empty nor a failure. When it
+// does fire, all of them have it.
+#[tokio::test]
+async fn test12799_an_output_that_does_not_fire_skips_and_shrinks() {
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "{}[A -> split -> (h, flagged=f)][f -> shout -> loud][(h, f) -> join -> j]",
+        dag_headers()
+    );
+
+    // No '!': `flagged` does not fire.
+    let ran = machines.run(&notation, &[("A", Given::One(b"plain:rest"))]).await.expect("Execution failed");
+    assert!(!ran.was_produced("loud"));
+    assert_eq!(ran.text("j"), "plain", "the gather holds the head alone");
+    assert_eq!(ran.result.verdict, RunVerdict::Completed);
+    let skipped: Vec<_> = ran
+        .result
+        .steps
+        .iter()
+        .filter(|report| matches!(report.outcome, StepOutcome::Skipped { .. }))
+        .collect();
+    assert_eq!(skipped.len(), 1);
+    assert!(skipped[0].cap_urn.contains("test-dag-shout"));
+
+    // With a '!': it fires, and everything that takes it has it.
+    let ran = machines.run(&notation, &[("A", Given::One(b"wow!:rest"))]).await.expect("Execution failed");
+    assert_eq!(ran.text("loud"), "FLAGGED");
+    assert_eq!(ran.text("j"), "wow!+flagged");
+    assert!(ran.result.steps.is_empty());
+}
+
+// TEST11011: a live source drives a map END TO END through the REAL stack —
+// the CLI runtime hosts the actual testcartridge process on a real relay
+// switch, the HOST opens the built-in `media:live;synthetic` feed itself
+// through the same capture dispatch the hardware backends use, and one run of
+// the body happens per delivered item while the feed runs. No mocks anywhere:
+// real capture bridge, real map driver, real cartridge invocations, real
+// persisted outputs.
 #[tokio::test]
 async fn test11011_live_synthetic_foreach_region_end_to_end() {
-    use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput};
-    use capdag::planner::{InputCardinality, MachineNode, MachinePlan, MachinePlanEdge};
-
-    let registry = create_test_fabric_registry();
-    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
-    let persist_dir = _temp.path().join("outputs");
-
-    // input (live synthetic, sequence) → fe → mapper (test-edge1, one item
-    // per body) → out. The planner produces exactly this shape when a
-    // scalar-consuming cap is planned over live content.
-    let mut plan = MachinePlan::new("live-region-e2e");
-    plan.add_node(MachineNode::input_slot(
-        "input",
-        "input",
-        "media:feed-frames",
-        InputCardinality::Sequence,
-    ));
-    plan.add_node(MachineNode::cap(
-        "mapper",
-        r#"cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2""#,
-    ));
-    plan.add_node(MachineNode::for_each_token(
-        "fe",
-        "input",
-        "mapper",
-        "mapper",
-        "live-e2e-token".parse().unwrap(),
-    ));
-    plan.add_node(MachineNode::output("out", "result", "mapper"));
-    plan.add_edge(MachinePlanEdge::direct("input", "fe"));
-    plan.add_edge(MachinePlanEdge::iteration("fe", "mapper"));
-    plan.add_edge(MachinePlanEdge::direct("mapper", "out"));
-
-    let runtime: Arc<dyn EngineRuntime> = Arc::new(CliRuntime::new(
-        cartridge_dir,
-        None, // no registry URL — dev binaries only, no network
-        capdag::CartridgeChannel::Release,
-        capdag::FABRIC_MANIFEST_VERSION,
-        dev_binaries,
-        None,
-        registry.clone(),
-        None,
-        persist_dir,
-    ));
-
-    let inputs = HashMap::from([(
-        "input".to_string(),
-        PlanInput::LiveReference {
-            reference_urn: "media:live;synthetic".to_string(),
-            selector: br#"{"params":{"items":3,"interval_ms":0,"item_bytes":4}}"#.to_vec(),
-        },
-    )]);
-    let flags = HashMap::from([("input".to_string(), true)]);
-
-    let result = execute_plan(
-        &plan,
-        runtime,
-        inputs,
-        flags,
-        &capdag::RunArgumentLedger::new(&plan, HashMap::new()).expect("empty ledger"),
-        None,
-        None,
-        Some(&test_pipeline_log_fn()),
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect("a live source must drive the region through the real stack");
-
-    // One persisted body output per delivered feed item, in item order: the
-    // CLI runtime persists terminal sinks, so the region terminal carries
-    // writer results (one blob per body) instead of in-memory items.
-    let terminal = result.terminal("out").expect("region terminal");
-    assert!(terminal.is_sequence, "a region terminal is a sequence");
-    assert_eq!(
-        terminal.writer_results.len(),
-        3,
-        "one persisted body output per feed item"
-    );
-    for (i, writer) in terminal.writer_results.iter().enumerate() {
-        assert_eq!(
-            writer.saved_paths.len(),
-            1,
-            "body {i} persisted exactly one blob"
-        );
-        let bytes =
-            fs::read(&writer.saved_paths[0]).expect("persisted body output is on disk");
-        // The synthetic feed emits [i % 256; item_bytes]; test-edge1 prepends.
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(
+            &format!("[test_edge1 {EDGE1}]\n[frames -> test_edge1 -> out]\n"),
+            &[(
+                "frames",
+                Given::Live {
+                    reference_urn: "media:live;synthetic",
+                    selector: br#"{"params":{"items":3,"interval_ms":0,"item_bytes":4}}"#,
+                },
+            )],
+        )
+        .await
+        .expect("a live source must drive the map through the real stack");
+    // One persisted output per delivered feed item, in item order. The
+    // synthetic feed emits [i % 256; item_bytes]; test-edge1 prepends.
+    let (items, is_sequence) = ran.produced("out");
+    assert!(is_sequence, "what a map produces is a sequence");
+    assert_eq!(items.len(), 3, "one output per feed item");
+    for (i, bytes) in items.iter().enumerate() {
         let mut expected = b"[PREPEND]".to_vec();
         expected.extend(std::iter::repeat(i as u8).take(4));
-        assert_eq!(
-            bytes, expected,
-            "body {i} ran on the feed's actual item bytes"
-        );
+        assert_eq!(bytes, &expected, "run {i} was given the feed's actual item bytes");
     }
+}
+
+// =============================================================================
+// Scheduling and step policy
+// =============================================================================
+
+// TEST12800: steps with no path between them run at the same time. Two
+// steps that each take three seconds, and the step that needs both: the run
+// takes about three seconds, not six.
+#[tokio::test]
+async fn test12800_independent_steps_run_at_the_same_time() {
+    let machines = Machines::new(TAG);
+    let notation = format!(
+        "{}[(a, delay-ms=3000) -> shout -> x][(b, delay-ms=3000) -> shout -> y][(x, right=y) -> pair -> p]",
+        dag_headers()
+    );
+    // The cartridge is built before the clock starts.
+    support::testcartridge_bin(TAG);
+    let started = std::time::Instant::now();
+    let ran = machines
+        .run(&notation, &[("a", Given::One(b"a")), ("b", Given::One(b"b"))])
+        .await
+        .expect("Execution failed");
+    let elapsed = started.elapsed();
+    assert_eq!(ran.text("p"), "A|B");
+    assert!(
+        elapsed >= std::time::Duration::from_secs(3),
+        "each step takes three seconds: {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(5500),
+        "two three-second steps side by side took {elapsed:?} — as long as one after the other"
+    );
+}
+
+// TEST12801: `retry=N` attempts a step again after a failure of a retryable
+// class. A step that fails twice and then answers completes under `retry=3`,
+// with both failed attempts on record, and fails under `retry=1` with the
+// failure the cartridge declared. A failure that is the input's fault is not
+// attempted again whatever was asked.
+#[tokio::test]
+async fn test12801_a_retryable_failure_is_attempted_again() {
+    let machines = Machines::new(TAG);
+    let flaky = |policy: &str, failures: usize, class: &str| {
+        // Failures are counted per key, in the cartridge: each run has its own.
+        let key = uuid::Uuid::new_v4();
+        format!(
+            "{}[(a, key=\"{key}\", failures={failures}, class=\"{class}\") -> flaky{policy} -> out]",
+            dag_headers()
+        )
+    };
+
+    let ran = machines
+        .run(&flaky("{retry=3}", 2, "resource"), &[("a", Given::One(b"a"))])
+        .await
+        .expect("two failures are within three retries");
+    assert_eq!(ran.text("out"), "a:attempt-3");
+    assert_eq!(ran.result.verdict, RunVerdict::Completed);
+    match ran.result.steps.as_slice() {
+        [report] => match &report.outcome {
+            StepOutcome::Completed { failed_attempts } => {
+                assert_eq!(failed_attempts.len(), 2);
+                assert!(failed_attempts.iter().all(|failure| {
+                    failure.class == AttributionClass::Resource && failure.code.as_deref() == Some("FLAKY")
+                }));
+                assert!(failed_attempts[0].message.contains("attempt 1"), "{:?}", failed_attempts[0]);
+                assert!(failed_attempts[1].message.contains("attempt 2"), "{:?}", failed_attempts[1]);
+            }
+            other => panic!("expected a completion with its attempts, got {other:?}"),
+        },
+        other => panic!("expected one step on the report, got {other:?}"),
+    }
+
+    let error = machines
+        .run(&flaky("{retry=1}", 2, "resource"), &[("a", Given::One(b"a"))])
+        .await
+        .err()
+        .expect("two failures are more than one retry");
+    assert_eq!(error.failure_code(), Some("FLAKY"));
+    assert_eq!(error.attribution_class(), AttributionClass::Resource);
+    assert!(error.failure_reason().contains("attempt 2"), "{error}");
+
+    let error = machines
+        .run(&flaky("{retry=3}", 1, "input"), &[("a", Given::One(b"a"))])
+        .await
+        .err()
+        .expect("a failure of the input stands");
+    assert_eq!(error.attribution_class(), AttributionClass::Input);
+    assert!(error.failure_reason().contains("attempt 1"), "it was asked once: {error}");
+}
+
+// TEST12802: `on_error=absent` tolerates a step that failed for good. In a
+// map, the item it failed on is dropped and the others are produced; the run
+// ends COMPLETED WITH TOLERATED FAILURES, with the failure — its class, its
+// code, its message — on record. Without the policy the same failure fails
+// the run.
+#[tokio::test]
+async fn test12802_a_tolerated_failure_drops_its_item_and_is_said() {
+    let machines = Machines::new(TAG);
+    let notation = |policy: &str| {
+        format!(
+            "{}[doc -> words -> w][(w, fail-on=\"bad\") -> shout{policy} -> s]",
+            dag_headers()
+        )
+    };
+
+    let ran = machines
+        .run(&notation("{on_error=absent}"), &[("doc", Given::One(b"good bad fine"))])
+        .await
+        .expect("the failure is tolerated");
+    assert_eq!(ran.texts("s"), vec!["GOOD", "FINE"]);
+    assert_eq!(ran.result.verdict, RunVerdict::CompletedWithToleratedFailures);
+    let tolerated: Vec<_> = ran
+        .result
+        .steps
+        .iter()
+        .filter_map(|report| match &report.outcome {
+            StepOutcome::FailedTolerated { failure, .. } => Some((report, failure)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tolerated.len(), 1);
+    let (report, failure) = tolerated[0];
+    assert_eq!(failure.class, AttributionClass::Input);
+    assert_eq!(failure.code.as_deref(), Some("SHOUT_REFUSED"));
+    assert!(failure.message.contains("'bad'"), "{failure:?}");
+    assert_eq!(report.body.as_ref().expect("in the map").body_index, 1);
+
+    let error = machines
+        .run(&notation(""), &[("doc", Given::One(b"good bad fine"))])
+        .await
+        .err()
+        .expect("nothing tolerates the failure");
+    assert_eq!(error.failure_code(), Some("SHOUT_REFUSED"));
+    assert_eq!(error.attribution_class(), AttributionClass::Input);
+}
+
+// =============================================================================
+// Peer calls
+// =============================================================================
+
+// TEST394: a cap that calls other caps while it runs: test-peer invokes
+// test-edge1 and then test-edge2 through its host, which routes both back to
+// the cartridge. The step's result is what the two calls made of its input.
+#[tokio::test]
+async fn test394_peer_invoke_roundtrip() {
+    let machines = Machines::new(TAG);
+    let ran = machines
+        .run(&format!("[test_peer {PEER}]\n[A -> test_peer -> B]\n"), &[("A", Given::One(b"CHAIN"))])
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("B"), "[PREPEND]CHAIN[APPEND]");
 }

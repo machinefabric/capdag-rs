@@ -316,6 +316,16 @@ impl ResponseAudit {
         &mut self,
         frame: &crate::bifaci::frame::Frame,
     ) -> Result<&DeclaredOutput, StreamIoError> {
+        let index = self.audit_stream_start(frame)?;
+        Ok(&self.contract.outputs[index])
+    }
+
+    /// [`audit_frame`](Self::audit_frame), saying which declared output the
+    /// stream is by its index in the contract's outputs.
+    pub fn audit_stream_start(
+        &mut self,
+        frame: &crate::bifaci::frame::Frame,
+    ) -> Result<usize, StreamIoError> {
         let stream_id = frame.stream_id.clone().unwrap_or_default();
         let index = match frame.output_urn() {
             // The stream that names no output is the main output's.
@@ -404,15 +414,20 @@ impl ResponseAudit {
 
         self.opened[index] = true;
         self.streams.insert(stream_id, index);
-        Ok(&self.contract.outputs[index])
+        Ok(index)
     }
 
     /// The declared output the audited stream `stream_id` is. `None` for a
     /// stream this audit has not seen a STREAM_START for.
     pub fn output_of(&self, stream_id: Option<&str>) -> Option<&DeclaredOutput> {
-        self.streams
-            .get(stream_id.unwrap_or_default())
-            .map(|&index| &self.contract.outputs[index])
+        self.output_index_of(stream_id)
+            .map(|index| &self.contract.outputs[index])
+    }
+
+    /// The index, among the contract's outputs, of the declared output the
+    /// audited stream `stream_id` is.
+    pub fn output_index_of(&self, stream_id: Option<&str>) -> Option<usize> {
+        self.streams.get(stream_id.unwrap_or_default()).copied()
     }
 
     /// Whether `stream_id` is the stream of the cap's main output.
@@ -778,6 +793,12 @@ pub trait IncrementalWriter: Send {
     /// owns the writer. A multi-sink segment run creates one writer per persisted sink
     /// via a [`SegmentWriterFactory`] and finalises each here.
     fn finish(self: Box<Self>) -> super::execute_plan::WriterResult;
+
+    /// The request this writer was taking did not end in success: it failed,
+    /// was cancelled, or is about to be attempted again. Discard everything
+    /// written — nothing of a stream that did not end stands. Called instead
+    /// of [`finish`](Self::finish), at most once.
+    fn abort(self: Box<Self>);
 }
 
 /// Creates a fresh [`IncrementalWriter`] for a persisted terminal sink. The segment
@@ -932,6 +953,12 @@ impl IncrementalWriter for SpoolWriter {
             total_bytes: self.total_bytes,
             stream_meta: self.stream_meta,
             item_metas: Vec::new(),
+        }
+    }
+
+    fn abort(self: Box<Self>) {
+        if self.engaged {
+            let _ = std::fs::remove_file(&self.path);
         }
     }
 }
@@ -1495,7 +1522,8 @@ pub async fn send_one_stream(
 ///
 /// Returns `Vec<Vec<u8>>` — a list of unwrapped items:
 /// - `is_sequence=true` (emit_list_item): each CBOR value in the
-///   sequence is unwrapped (Bytes→raw, Text→UTF-8) into a separate item.
+///   sequence is unwrapped (Bytes→raw, Text→UTF-8) into a separate item;
+///   a sequence nothing was written to is no items.
 /// - `is_sequence=false/None` (write/emit_cbor): CBOR Bytes/Text
 ///   wrappers are unwrapped and concatenated into a single item.
 pub fn decode_terminal_output(
@@ -1503,7 +1531,13 @@ pub fn decode_terminal_output(
     is_sequence: Option<bool>,
 ) -> Result<Vec<Vec<u8>>, StreamIoError> {
     if response_chunks.is_empty() {
-        return Ok(vec![vec![]]);
+        // A sequence with nothing in it has no items; a single value with no
+        // bytes is one empty value.
+        return Ok(if is_sequence == Some(true) {
+            Vec::new()
+        } else {
+            vec![vec![]]
+        });
     }
 
     if is_sequence == Some(true) {
@@ -1877,25 +1911,56 @@ impl TerminalOutput {
 // Terminal collect
 // =============================================================================
 
-/// Collect the terminal response from a cap, decoding frames as they arrive.
+/// Where one output of a response goes as it arrives.
+pub struct OutputSink<'a> {
+    /// Which declared output this takes: its index among the outputs of the
+    /// contract the response is held to.
+    pub output: usize,
+    /// Streams the output to its destination instead of buffering it.
+    pub writer: Option<&'a mut dyn IncrementalWriter>,
+    /// A disk spool, engaged only when the stream declares itself UNBOUNDED
+    /// and no writer was given. Without either, an unbounded stream is
+    /// refused: it is never buffered (L16).
+    pub spool: Option<&'a mut dyn IncrementalWriter>,
+}
+
+/// What was collected of one output.
+#[derive(Debug, Default)]
+pub struct CollectedOutput {
+    /// The chunk payloads in order (CBOR transport bytes). Empty when a
+    /// writer or the spool took the stream.
+    pub bytes: Vec<u8>,
+    /// The cardinality the stream stated, when it stated one.
+    pub is_sequence: Option<bool>,
+    pub meta: TerminalMeta,
+    /// The cap opened a stream for this output. False only for an optional
+    /// output that did not fire: it is absent, which is not empty.
+    pub fired: bool,
+}
+
+/// Collect the response of a cap, output by output, decoding frames as they
+/// arrive.
 ///
-/// Walks the response stream (STREAM_START → CHUNK… → STREAM_END → END), with
-/// optional per-cap progress callbacks, pipeline logging, a shared pipeline
-/// stall tracker, and an optional `IncrementalWriter` that streams the bytes
-/// to disk rather than buffering them in memory.
+/// Walks the response (one STREAM_START → CHUNK… → STREAM_END per output the
+/// cap writes, then END), auditing every stream against the output it is
+/// (13.2 §Outputs). An output with a sink in `sinks` is collected there —
+/// buffered, or streamed through the sink's writer or spool; a stream of a
+/// declared output nothing takes is audited, consumed (its producer is
+/// credited for it) and dropped.
 ///
-/// Returns `(response_bytes, is_sequence, terminal_meta)`. When a writer is
-/// provided, `response_bytes` is empty — the data is already persisted via
-/// the writer.
+/// Returns one [`CollectedOutput`] per sink, in the order of `sinks`.
 ///
 /// # Error semantics
 /// - `END` with non-zero or absent `exit_code` → `StreamIoError::Terminal`.
 /// - `ERR` frame → `StreamIoError::Terminal`.
 /// - Response channel closed without `END` → `StreamIoError::Terminal`.
-/// - No activity for `activity_timeout_secs` → cancel request at relay,
-///   return `StreamIoError::ActivityTimeout`.
+/// - A stream that breaks what the cap declares → the contract error it is.
 /// - Writer failures bubble up as their `StreamIoError::Writer`.
-pub async fn collect_terminal_output(
+///
+/// Silence is not an error: it is surfaced once, as a warning, and the
+/// collector keeps waiting (long caps are legitimate; a cancel is the user's).
+#[allow(clippy::too_many_arguments)]
+pub async fn collect_response(
     mut rx: mpsc::UnboundedReceiver<Frame>,
     progress_fn: Option<&CapProgressFn>,
     cap_urn: &str,
@@ -1904,23 +1969,43 @@ pub async fn collect_terminal_output(
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
     stall_tracker: Option<&Arc<PipelineProgressTracker>>,
-    writer: Option<&mut dyn IncrementalWriter>,
-    spool: Option<&mut dyn IncrementalWriter>,
+    sinks: &mut [OutputSink<'_>],
     activity_timeout_secs: u64,
     credit: Option<&CreditPlumbing>,
-) -> Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError> {
-    // The terminal cap's emission is audited against its declared effect
-    // contract at receipt — before the payload is collected or persisted.
+) -> Result<Vec<CollectedOutput>, StreamIoError> {
+    // Every stream is audited against the output it is at receipt — before a
+    // byte of it is collected or persisted.
     let mut effect_audit = ResponseAudit::new(cap_urn, contract.clone())?;
-    let mut response_chunks: Vec<u8> = Vec::new();
-    let mut is_sequence: Option<bool> = None;
+    // Which sink takes each declared output.
+    let mut sink_of: Vec<Option<usize>> = vec![None; contract.outputs().len()];
+    for (index, sink) in sinks.iter().enumerate() {
+        let slot = sink_of.get_mut(sink.output).ok_or_else(|| {
+            StreamIoError::Protocol(format!(
+                "collect: a sink takes output #{} of cap '{}', which declares {}",
+                sink.output,
+                cap_urn,
+                contract.outputs().len()
+            ))
+        })?;
+        if slot.replace(index).is_some() {
+            return Err(StreamIoError::Protocol(format!(
+                "collect: two sinks take output #{} of cap '{}'",
+                sink.output, cap_urn
+            )));
+        }
+    }
+    let main_sink: Option<usize> = contract
+        .outputs()
+        .iter()
+        .position(|o| o.main)
+        .and_then(|main| sink_of[main]);
+    let mut collected: Vec<CollectedOutput> =
+        sinks.iter().map(|_| CollectedOutput::default()).collect();
     // Consumed-chunk accounting for batched grants (L10): the producer's
     // output window is replenished as we consume, so it can stream past the
     // initial window without stalling.
     let mut consumed = ConsumedStreams::default();
     let mut timer = ActivityTimer::new(activity_timeout_secs);
-    let has_writer = writer.is_some();
-    let mut terminal_meta = TerminalMeta::default();
     // Whether we've already emitted the per-cap activity-silence warning
     // for the current quiet window. We do NOT abort on activity timeout:
     // long-running terminal caps (vision/LLM inference, large transcription)
@@ -1931,15 +2016,6 @@ pub async fn collect_terminal_output(
     // operator knows the cap is alive-but-quiet, without log-spam every
     // 500 ms. The flag resets to false the next time any frame arrives.
     let mut activity_warning_logged = false;
-
-    // Rebind writer as a LOCAL reborrow — we call methods on it inside the
-    // loop, and engaging the spool replaces it (both reborrows share the
-    // local lifetime, so the two parameters keep independent lifetimes).
-    let mut writer: Option<&mut dyn IncrementalWriter> = match writer {
-        Some(w) => Some(&mut *w),
-        None => None,
-    };
-    let mut spool = spool;
 
     loop {
         let frame = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
@@ -1955,20 +2031,22 @@ pub async fn collect_terminal_output(
                 match frame.frame_type {
                     FrameType::Chunk => {
                         timer.touch();
-                        // What is collected is the cap's main output. A chunk
-                        // of another output is consumed — its producer is
-                        // credited for it below — and not collected.
-                        let is_main = effect_audit.is_main_stream(frame.stream_id.as_deref());
-                        if let Some(payload) = frame.payload.as_ref().filter(|_| is_main) {
-                            if let Some(ref mut w) = writer {
+                        // A chunk goes to the sink of the output its stream
+                        // is. A chunk of an output nothing takes is consumed —
+                        // its producer is credited for it below — and dropped.
+                        let sink = effect_audit
+                            .output_index_of(frame.stream_id.as_deref())
+                            .and_then(|output| sink_of[output]);
+                        if let (Some(index), Some(payload)) = (sink, frame.payload.as_ref()) {
+                            if let Some(w) = sinks[index].writer.as_mut() {
                                 w.on_chunk_payload(payload, frame.meta.clone()).await?;
                             } else {
-                                response_chunks.extend_from_slice(payload);
+                                collected[index].bytes.extend_from_slice(payload);
                                 // Collect per-item meta for ForEach propagation.
                                 // Each non-None chunk meta marks the first chunk
                                 // of a new item.
                                 if let Some(meta) = frame.meta.clone() {
-                                    terminal_meta.item_metas.push(meta);
+                                    collected[index].meta.item_metas.push(meta);
                                 }
                             }
                         }
@@ -2026,19 +2104,21 @@ pub async fn collect_terminal_output(
                         // required output.
                         effect_audit.audit_end()?;
 
-                        if let Some(payload) = &frame.payload {
-                            if let Some(ref mut w) = writer {
+                        // A payload on END itself is the main output's.
+                        if let (Some(index), Some(payload)) = (main_sink, &frame.payload) {
+                            if let Some(w) = sinks[index].writer.as_mut() {
                                 if !payload.is_empty() {
                                     w.on_chunk_payload(payload, frame.meta.clone()).await?;
                                 }
                             } else {
-                                response_chunks.extend_from_slice(payload);
+                                collected[index].bytes.extend_from_slice(payload);
                             }
                         }
-                        if let Some(ref mut w) = writer {
-                            w.on_stream_end().await?;
+                        for sink in sinks.iter_mut() {
+                            if let Some(w) = sink.writer.as_mut() {
+                                w.on_stream_end().await?;
+                            }
                         }
-                        let _ = has_writer;
 
                         // Terminal metadata IS the final progress event (L5):
                         // END carries the authoritative final progress (1.0 by
@@ -2105,7 +2185,7 @@ pub async fn collect_terminal_output(
                             }
                         }
 
-                        return Ok((response_chunks, is_sequence, terminal_meta));
+                        return Ok(collected);
                     }
                     FrameType::Err => {
                         let class = frame.attribution_class().map_err(StreamIoError::Protocol)?;
@@ -2202,43 +2282,48 @@ pub async fn collect_terminal_output(
                     FrameType::StreamStart => {
                         timer.touch();
                         // Effect + stream-contract audit at receipt: the
-                        // emission must satisfy the cap's declared effect and
-                        // declared shape before a single byte of it is
+                        // emission must satisfy the declared type and shape of
+                        // the output it is before a single byte of it is
                         // collected or persisted.
-                        if !effect_audit.audit_frame(&frame)?.main {
-                            // Another output's stream: audited, consumed, and
-                            // not part of what is collected.
+                        let output = effect_audit.audit_stream_start(&frame)?;
+                        let Some(index) = sink_of[output] else {
+                            // An output nothing takes: audited, consumed, and
+                            // not collected.
                             continue;
-                        }
+                        };
+                        let sink = &mut sinks[index];
                         // An UNBOUNDED stream must be consumed incrementally
                         // (L16): a writer streams it to disk; without one this
                         // buffering collector would be unbounded memory. An
-                        // INTERMEDIATE at a mandatory split boundary engages
+                        // INTERMEDIATE at a materialisation boundary engages
                         // its disk spool here instead (the caller passed one);
                         // a TERMINAL without a persisted sink is refused
                         // loudly, never an OOM (15.2 §Live-Feed Machines).
-                        if frame.is_unbounded() && writer.is_none() {
-                            match spool.take() {
-                                Some(sp) => writer = Some(&mut *sp),
+                        if frame.is_unbounded() && sink.writer.is_none() {
+                            match sink.spool.take() {
+                                Some(spool) => sink.writer = Some(spool),
                                 None => {
                                     return Err(StreamIoError::Protocol(format!(
-                                        "cap '{}' terminal declared an UNBOUNDED stream but the \
-                                         sink is not persisted — unbounded terminals require \
+                                        "cap '{}' declared an UNBOUNDED stream for output '{}' but \
+                                         the sink is not persisted — unbounded outputs require \
                                          incremental consumption (a persisted sink / \
                                          IncrementalWriter, or TerminalOutput), never a \
                                          buffering collector (L16)",
-                                        cap_urn
+                                        cap_urn,
+                                        contract.outputs()[output].urn
                                     )));
                                 }
                             }
                         }
+                        let slot = &mut collected[index];
+                        slot.fired = true;
                         if let Some(seq) = frame.is_sequence {
-                            is_sequence = Some(seq);
+                            slot.is_sequence = Some(seq);
                         }
-                        if let Some(ref mut w) = writer {
+                        if let Some(w) = sink.writer.as_mut() {
                             let media = frame.media_urn.as_deref().unwrap_or("");
                             w.on_stream_start(
-                                is_sequence,
+                                slot.is_sequence,
                                 media,
                                 frame.meta.clone(),
                                 frame.stream_id.clone(),
@@ -2246,7 +2331,7 @@ pub async fn collect_terminal_output(
                             .await?;
                         } else {
                             // Capture stream-level meta for ForEach propagation
-                            terminal_meta.stream_meta = frame.meta.clone();
+                            slot.meta.stream_meta = frame.meta.clone();
                         }
                     }
                     _ => {
@@ -2305,11 +2390,12 @@ pub async fn collect_terminal_output(
                         .iter()
                         .map(|(sid, n)| format!("{:?}: pending_grants={}", sid, n))
                         .collect();
+                    let consumed_bytes: usize = collected.iter().map(|c| c.bytes.len()).sum();
                     let details = format!(
                         "no activity for {}s — continuing to wait. Use Cancel to abort. \
                          Terminal credit state: consumed_bytes={} [{}]",
                         activity_timeout_secs,
-                        response_chunks.len(),
+                        consumed_bytes,
                         pending.join("; "),
                     );
                     emit_pipeline_log(
@@ -2325,7 +2411,7 @@ pub async fn collect_terminal_output(
                     );
                     tracing::warn!(
                         cap_urn = %cap_urn,
-                        consumed_bytes = response_chunks.len(),
+                        consumed_bytes,
                         pending_grants = ?pending,
                         "[cap] No activity for {}s; continuing to wait for completion or cancel",
                         activity_timeout_secs
@@ -2335,6 +2421,58 @@ pub async fn collect_terminal_output(
             }
         }
     }
+}
+
+/// Collect a cap's MAIN output and drop every other: [`collect_response`]
+/// with one sink.
+///
+/// Returns `(response_bytes, is_sequence, terminal_meta)`. When a writer is
+/// provided — or the spool was engaged — `response_bytes` is empty: the data
+/// is where the writer put it. A cap that declares no output yields nothing.
+#[allow(clippy::too_many_arguments)]
+pub async fn collect_terminal_output<'w>(
+    rx: mpsc::UnboundedReceiver<Frame>,
+    progress_fn: Option<&CapProgressFn>,
+    cap_urn: &str,
+    contract: &ResponseContract,
+    step_token_id: &StepToken,
+    log_fn: Option<&PipelineLogFn>,
+    body_index: Option<usize>,
+    stall_tracker: Option<&Arc<PipelineProgressTracker>>,
+    writer: Option<&'w mut dyn IncrementalWriter>,
+    spool: Option<&'w mut dyn IncrementalWriter>,
+    activity_timeout_secs: u64,
+    credit: Option<&CreditPlumbing>,
+) -> Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError> {
+    let mut sinks: Vec<OutputSink<'w>> = contract
+        .outputs()
+        .iter()
+        .position(|o| o.main)
+        .map(|output| OutputSink {
+            output,
+            writer,
+            spool,
+        })
+        .into_iter()
+        .collect();
+    let mut collected = collect_response(
+        rx,
+        progress_fn,
+        cap_urn,
+        contract,
+        step_token_id,
+        log_fn,
+        body_index,
+        stall_tracker,
+        &mut sinks,
+        activity_timeout_secs,
+        credit,
+    )
+    .await?;
+    Ok(match collected.pop() {
+        Some(main) => (main.bytes, main.is_sequence, main.meta),
+        None => (Vec::new(), None, TerminalMeta::default()),
+    })
 }
 
 #[cfg(test)]
@@ -2792,6 +2930,277 @@ mod tests {
         match result {
             Err(StreamIoError::Terminal { code, .. }) => assert_eq!(code.as_deref(), Some("NO_FIT")),
             other => panic!("expected the cap's own failure, got {:?}", other.map(|r| r.0)),
+        }
+    }
+
+    /// A writer that keeps what it is given in memory, for inspection.
+    #[derive(Default)]
+    struct Recording {
+        started: Vec<(Option<bool>, String)>,
+        payloads: Vec<Vec<u8>>,
+        ended: usize,
+    }
+
+    #[async_trait]
+    impl IncrementalWriter for std::sync::Arc<std::sync::Mutex<Recording>> {
+        async fn on_stream_start(
+            &mut self,
+            is_sequence: Option<bool>,
+            media_urn: &str,
+            _meta: Option<StreamMeta>,
+            _stream_id: Option<String>,
+        ) -> Result<(), StreamIoError> {
+            self.lock().unwrap().started.push((is_sequence, media_urn.to_string()));
+            Ok(())
+        }
+
+        async fn on_chunk_payload(
+            &mut self,
+            payload: &[u8],
+            _meta: Option<StreamMeta>,
+        ) -> Result<(), StreamIoError> {
+            self.lock().unwrap().payloads.push(payload.to_vec());
+            Ok(())
+        }
+
+        async fn on_stream_end(&mut self) -> Result<(), StreamIoError> {
+            self.lock().unwrap().ended += 1;
+            Ok(())
+        }
+
+        fn finish(self: Box<Self>) -> crate::orchestrator::execute_plan::WriterResult {
+            unreachable!("the collector does not finish a writer")
+        }
+
+        fn abort(self: Box<Self>) {}
+    }
+
+    /// The regress cap's response `frames`, collected into `sinks`.
+    async fn collect_into(
+        frames: Vec<Frame>,
+        sinks: &mut [OutputSink<'_>],
+    ) -> Result<Vec<CollectedOutput>, StreamIoError> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for frame in frames {
+            tx.send(frame).unwrap();
+        }
+        drop(tx);
+        collect_response(
+            rx,
+            None,
+            &regress_urn(),
+            &ResponseContract::of(&regress_cap()).unwrap(),
+            &"step_test".parse().unwrap(),
+            None,
+            None,
+            None,
+            sinks,
+            5,
+            None,
+        )
+        .await
+    }
+
+    /// The index of the regress cap's output `urn` among those it declares.
+    fn declared(urn: &str) -> usize {
+        let urn = crate::MediaUrn::from_string(urn).unwrap();
+        ResponseContract::of(&regress_cap())
+            .unwrap()
+            .outputs()
+            .iter()
+            .position(|output| output.urn.is_equivalent(&urn).unwrap())
+            .unwrap()
+    }
+
+    fn buffered<'a>(output: usize) -> OutputSink<'a> {
+        OutputSink {
+            output,
+            writer: None,
+            spool: None,
+        }
+    }
+
+    // TEST12789: a response is collected output by output. Each output with a
+    // sink is collected there — its own chunks, in order, with its own mode —
+    // however the streams interleave; a sink with a writer is streamed to it
+    // and buffers nothing; an output with no sink is dropped; an optional
+    // output that opened no stream did not fire, which is not the same as an
+    // output that fired empty.
+    #[tokio::test]
+    async fn test12789_a_response_is_collected_output_by_output() {
+        let rid = MessageId::new_uuid();
+        let frames = || {
+            vec![
+                response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
+                response_start(&rid, "fit", FIT, FIT, false),
+                chunk_of(&rid, "res", b"R1"),
+                response_start(&rid, "rej", REJECTED, SERIES, false),
+                chunk_of(&rid, "fit", b"FIT-"),
+                chunk_of(&rid, "rej", b"seen"),
+                chunk_of(&rid, "res", b"R2"),
+                chunk_of(&rid, "fit", b"DONE"),
+                Frame::stream_end(rid.clone(), "res".to_string(), 2),
+                Frame::stream_end(rid.clone(), "rej".to_string(), 1),
+                Frame::stream_end(rid.clone(), "fit".to_string(), 2),
+                Frame::end_ok(rid.clone(), None),
+            ]
+        };
+
+        // Sinks for the residuals, the main output and the note — in that
+        // order, which is the order the result comes back in. Nothing takes
+        // `rejected`.
+        let mut sinks = vec![buffered(declared(RESIDUALS)), buffered(declared(FIT)), buffered(declared(NOTE))];
+        let collected = collect_into(frames(), &mut sinks).await.expect("a valid response");
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0].bytes, b"R1R2");
+        assert_eq!(collected[0].is_sequence, Some(true));
+        assert!(collected[0].fired);
+        assert_eq!(collected[1].bytes, b"FIT-DONE");
+        assert_eq!(collected[1].is_sequence, Some(false));
+        assert!(collected[1].fired);
+        // The note is optional and opened no stream: it did not fire.
+        assert!(!collected[2].fired);
+        assert!(collected[2].bytes.is_empty());
+        assert_eq!(collected[2].is_sequence, None);
+
+        // The main output through a writer: streamed, nothing buffered, and
+        // the writer is told the stream's mode and media and that it ended.
+        let recording: std::sync::Arc<std::sync::Mutex<Recording>> = Default::default();
+        let mut writer = recording.clone();
+        let mut sinks = vec![
+            OutputSink {
+                output: declared(FIT),
+                writer: Some(&mut writer),
+                spool: None,
+            },
+            buffered(declared(REJECTED)),
+        ];
+        let collected = collect_into(frames(), &mut sinks).await.unwrap();
+        assert!(collected[0].bytes.is_empty(), "a written output is not also buffered");
+        assert!(collected[0].fired);
+        assert_eq!(collected[1].bytes, b"seen");
+        let recorded = recording.lock().unwrap();
+        assert_eq!(recorded.started, vec![(Some(false), FIT.to_string())]);
+        assert_eq!(recorded.payloads, vec![b"FIT-".to_vec(), b"DONE".to_vec()]);
+        assert_eq!(recorded.ended, 1);
+        drop(recorded);
+
+        // An output that fires with nothing in it has fired.
+        let mut sinks = vec![buffered(declared(RESIDUALS)), buffered(declared(FIT))];
+        let collected = collect_into(
+            vec![
+                response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
+                response_start(&rid, "fit", FIT, FIT, false),
+                chunk_of(&rid, "fit", b"FIT"),
+                Frame::stream_end(rid.clone(), "res".to_string(), 0),
+                Frame::stream_end(rid.clone(), "fit".to_string(), 1),
+                Frame::end_ok(rid.clone(), None),
+            ],
+            &mut sinks,
+        )
+        .await
+        .unwrap();
+        assert!(collected[0].fired, "empty is not absent");
+        assert!(collected[0].bytes.is_empty());
+        assert_eq!(decode_terminal_output(&collected[0].bytes, collected[0].is_sequence).unwrap(), Vec::<Vec<u8>>::new());
+
+        // No sinks at all: the response is still audited, and everything dropped.
+        let collected = collect_into(frames(), &mut []).await.unwrap();
+        assert!(collected.is_empty());
+    }
+
+    // TEST12790: an unbounded stream is never buffered, whichever output it
+    // is: with a spool it goes to the spool, and without one the collection
+    // is refused, naming the output. Sinks that cannot be are refused before
+    // anything is read: one for an output the cap does not declare, two for
+    // one output.
+    #[tokio::test]
+    async fn test12790_an_unbounded_output_is_spooled_or_refused() {
+        let rid = MessageId::new_uuid();
+        let unbounded = |sid: &str, output: &str, media: &str| {
+            let mut start = response_start(&rid, sid, output, media, true);
+            start.unbounded = Some(true);
+            start
+        };
+        // The residuals are declared `streaming` for this test.
+        let frames = || {
+            vec![
+                unbounded("res", RESIDUALS, RESIDUALS),
+                response_start(&rid, "fit", FIT, FIT, false),
+                chunk_of(&rid, "res", b"R1"),
+                chunk_of(&rid, "fit", b"FIT"),
+                Frame::stream_end(rid.clone(), "res".to_string(), 1),
+                Frame::stream_end(rid.clone(), "fit".to_string(), 1),
+                Frame::end_ok(rid.clone(), None),
+            ]
+        };
+        let collect = |frames: Vec<Frame>, sinks: Vec<(usize, bool)>| async move {
+            let mut cap = regress_cap();
+            cap.outputs[0].streaming = true;
+            let contract = ResponseContract::of(&cap).unwrap();
+            let recording: std::sync::Arc<std::sync::Mutex<Recording>> = Default::default();
+            let mut spools: Vec<std::sync::Arc<std::sync::Mutex<Recording>>> =
+                sinks.iter().map(|_| recording.clone()).collect();
+            let mut out_sinks: Vec<OutputSink<'_>> = sinks
+                .iter()
+                .zip(spools.iter_mut())
+                .map(|((output, spooled), spool)| OutputSink {
+                    output: *output,
+                    writer: None,
+                    spool: if *spooled { Some(spool) } else { None },
+                })
+                .collect();
+            let (tx, rx) = mpsc::unbounded_channel();
+            for frame in frames {
+                tx.send(frame).unwrap();
+            }
+            drop(tx);
+            let result = collect_response(
+                rx,
+                None,
+                &regress_urn(),
+                &contract,
+                &"step_test".parse().unwrap(),
+                None,
+                None,
+                None,
+                &mut out_sinks,
+                5,
+                None,
+            )
+            .await;
+            let spooled = recording.lock().unwrap().payloads.clone();
+            (result, spooled)
+        };
+
+        let (result, spooled) = collect(frames(), vec![(declared(RESIDUALS), true), (declared(FIT), true)]).await;
+        let collected = result.expect("the unbounded output is spooled");
+        assert!(collected[0].bytes.is_empty(), "nothing of an unbounded stream is buffered");
+        assert!(collected[0].fired);
+        assert_eq!(collected[1].bytes, b"FIT", "a bounded output beside it is buffered as usual");
+        assert_eq!(spooled, vec![b"R1".to_vec()], "only the unbounded stream engaged its spool");
+
+        let (result, _) = collect(frames(), vec![(declared(RESIDUALS), false), (declared(FIT), false)]).await;
+        match result {
+            Err(StreamIoError::Protocol(message)) => {
+                assert!(message.contains("UNBOUNDED") && message.contains("residual"), "{message}");
+            }
+            other => panic!("expected the unbounded output to be refused, got {:?}", other.map(|c| c.len())),
+        }
+
+        // Nothing takes it: it is consumed and dropped, bounded or not.
+        let (result, _) = collect(frames(), vec![(declared(FIT), false)]).await;
+        assert_eq!(result.unwrap()[0].bytes, b"FIT");
+
+        let (result, _) = collect(frames(), vec![(9, false)]).await;
+        match result {
+            Err(StreamIoError::Protocol(message)) => assert!(message.contains("output #9"), "{message}"),
+            other => panic!("expected a refusal, got {:?}", other.map(|c| c.len())),
+        }
+        let (result, _) = collect(frames(), vec![(declared(FIT), false), (declared(FIT), false)]).await;
+        match result {
+            Err(StreamIoError::Protocol(message)) => assert!(message.contains("two sinks"), "{message}"),
+            other => panic!("expected a refusal, got {:?}", other.map(|c| c.len())),
         }
     }
 

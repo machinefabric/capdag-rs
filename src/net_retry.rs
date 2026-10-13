@@ -108,6 +108,12 @@ impl RetryPolicy {
     /// earlier version cast `2^retry_index` to `u32` for `Duration::checked_mul`,
     /// which truncated to 0 once the shift exceeded 32 bits — yielding a 0ns
     /// backoff for high retry indices. Computing in `u128` nanos avoids that.)
+    /// How long to wait before retry `retry_index` (0 = the first retry): the
+    /// exponential backoff for that index with full jitter applied.
+    pub fn delay_before_retry(&self, retry_index: u32) -> Duration {
+        jitter(self.backoff_for(retry_index))
+    }
+
     fn backoff_for(&self, retry_index: u32) -> Duration {
         let cap_nanos = self.max_delay.as_nanos();
         // Once the shift would exceed the cap's bit-width there is no point

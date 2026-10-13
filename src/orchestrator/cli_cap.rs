@@ -230,41 +230,61 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
 /// ```
 ///
 /// The header embeds the ALREADY-RESOLVED full cap URN, so no second
-/// alias/registry lookup happens inside the parser. Requirements:
-/// - exactly ONE stdin-fed arg (the single-cap CLI drives exactly one piped
-///   input; zero or several are hard errors naming the cap), and
-/// - a declared output.
+/// alias/registry lookup happens inside the parser.
+///
+/// - A cap that takes an input (`in=` is not `media:void`) must have exactly
+///   ONE stdin-fed arg: the single-cap CLI drives exactly one piped input,
+///   and zero or several are hard errors naming the cap. A cap that takes
+///   none is a source: `() -> step -> …`, run with nothing piped in.
+/// - A cap that declares an output gives it at `output`; one that declares
+///   none is a sink: `… -> step -> ()`, run for what it does.
 pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
+    let void = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
+        .expect("MEDIA_VOID is a valid MediaUrn");
+    let takes_input = !cap
+        .urn
+        .in_media_urn()
+        .map_err(|e| format!("cap {} declares an invalid input: {e}", cap.urn))?
+        .is_equivalent(&void)
+        .unwrap_or(false);
     let stdin_count = cap
         .get_args()
         .iter()
         .filter(|a| has_stdin_source(a))
         .count();
-    match stdin_count {
-        1 => {}
-        0 => {
+    let sources = match (takes_input, stdin_count) {
+        (true, 1) => SINGLE_CAP_INPUT_NODE.to_string(),
+        (true, 0) => {
             return Err(format!(
-                "cap {} takes no piped (stdin) input — the single-cap CLI drives exactly \
-                 one input stream. Run it inside a .machine file instead.",
+                "cap {} declares an input but no arg of it takes piped (stdin) input — the \
+                 single-cap CLI drives exactly one input stream. Run it inside a .machine \
+                 file instead.",
                 cap.urn
             ))
         }
-        n => {
+        (true, n) => {
             return Err(format!(
                 "cap {} takes {n} piped inputs — the single-cap CLI drives exactly one. \
                  Run it inside a .machine file instead.",
                 cap.urn
             ))
         }
-    }
-    if cap.main_output().is_none() {
-        return Err(format!(
-            "cap {} declares no output — nothing for the CLI to emit.",
-            cap.urn
-        ));
-    }
+        (false, 0) => "()".to_string(),
+        (false, n) => {
+            return Err(format!(
+                "cap {} takes no input (`in=media:void`) and yet declares {n} piped (stdin) \
+                 arg(s) — its definition contradicts itself",
+                cap.urn
+            ))
+        }
+    };
+    let targets = if cap.main_output().is_some() {
+        SINGLE_CAP_OUTPUT_NODE
+    } else {
+        "()"
+    };
     Ok(format!(
-        "[{SINGLE_CAP_STEP_NAME} {}]\n[{SINGLE_CAP_INPUT_NODE} -> {SINGLE_CAP_STEP_NAME} -> {SINGLE_CAP_OUTPUT_NODE}]",
+        "[{SINGLE_CAP_STEP_NAME} {}]\n[{sources} -> {SINGLE_CAP_STEP_NAME} -> {targets}]",
         cap.urn
     ))
 }
@@ -563,8 +583,10 @@ mod tests {
     }
 
     // TEST8040: notation synthesis wraps a resolved cap in the canonical
-    // one-edge machine; a cap with zero stdin args (nothing to pipe) and a
-    // cap with no output are hard errors naming the cap.
+    // one-edge machine. A cap that takes no input is wired as a source and
+    // one that gives no output as a sink; a cap that declares an input with
+    // no arg to pipe it into, and one whose definition contradicts itself,
+    // are hard errors naming the cap.
     #[test]
     fn test8040_single_cap_notation_synthesis() {
         let cap = test_cap();
@@ -578,15 +600,40 @@ mod tests {
             "[{SINGLE_CAP_INPUT_NODE} -> {SINGLE_CAP_STEP_NAME} -> {SINGLE_CAP_OUTPUT_NODE}]"
         )));
 
+        // A cap that takes an input, with no arg to pipe it into.
         let mut no_stdin = test_cap();
         no_stdin.args.retain(|a| !has_stdin_source(a));
         let err = synthesize_single_cap_notation(&no_stdin).unwrap_err();
-        assert!(err.contains("no piped (stdin) input"), "{err}");
+        assert!(err.contains("no arg of it takes piped (stdin) input"), "{err}");
 
+        // A cap that gives nothing is run for what it does: a sink.
         let mut no_output = test_cap();
         no_output.outputs.clear();
-        let err = synthesize_single_cap_notation(&no_output).unwrap_err();
-        assert!(err.contains("declares no output"), "{err}");
+        let notation = synthesize_single_cap_notation(&no_output).unwrap();
+        assert!(
+            notation.ends_with(&format!("[{SINGLE_CAP_INPUT_NODE} -> {SINGLE_CAP_STEP_NAME} -> ()]")),
+            "{notation}"
+        );
+
+        // A cap that takes nothing is a source: nothing is piped into it.
+        let mut source = test_cap();
+        source.args.retain(|a| !has_stdin_source(a));
+        source.urn = crate::CapUrn::from_string(&format!(
+            r#"cap:in="media:void";now;out="{}""#,
+            source.urn.out_spec()
+        ))
+        .unwrap();
+        let notation = synthesize_single_cap_notation(&source).unwrap();
+        assert!(
+            notation.ends_with(&format!("[() -> {SINGLE_CAP_STEP_NAME} -> {SINGLE_CAP_OUTPUT_NODE}]")),
+            "{notation}"
+        );
+        // ...and one that says it takes nothing while declaring a piped arg
+        // contradicts itself.
+        let mut contradictory = test_cap();
+        contradictory.urn = source.urn.clone();
+        let err = synthesize_single_cap_notation(&contradictory).unwrap_err();
+        assert!(err.contains("contradicts itself"), "{err}");
     }
 
     // TEST8041: invocation mapping — the cap's OWN interface works exactly

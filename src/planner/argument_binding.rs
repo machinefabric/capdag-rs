@@ -204,10 +204,9 @@ pub enum ArgumentBinding {
     },
     InputFilePath,
     InputMediaUrn,
+    /// The whole value another node produced.
     PreviousOutput {
         node_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output_field: Option<String>,
     },
     CapDefault,
     CapSetting {
@@ -317,7 +316,7 @@ impl<'a> ArgumentResolutionContext<'a> {
 /// array) ARE JSON on the wire by design and pass through
 /// `serde_json::to_vec`. Mirrors the dispatch in
 /// `bifaci::cartridge_runtime::extract_arg_value`.
-fn json_value_to_bytes(value: &serde_json::Value) -> Vec<u8> {
+pub(crate) fn json_value_to_bytes(value: &serde_json::Value) -> Vec<u8> {
     match value {
         serde_json::Value::String(s) => s.as_bytes().to_vec(),
         serde_json::Value::Bool(b) => {
@@ -382,29 +381,11 @@ pub fn resolve_binding(
             )
         }
 
-        ArgumentBinding::PreviousOutput {
-            node_id,
-            output_field,
-        } => {
+        ArgumentBinding::PreviousOutput { node_id } => {
             let output = context.previous_outputs.get(node_id).ok_or_else(|| {
                 PlannerError::Internal(format!("No output from node '{}'", node_id))
             })?;
-
-            let json_value = if let Some(field) = output_field {
-                output.get(field).ok_or_else(|| {
-                    PlannerError::Internal(format!(
-                        "Field '{}' not found in output from node '{}'",
-                        field, node_id
-                    ))
-                })?
-            } else {
-                output
-            };
-
-            (
-                json_value_to_bytes(json_value),
-                ArgumentSource::PreviousOutput,
-            )
+            (json_value_to_bytes(output), ArgumentSource::PreviousOutput)
         }
 
         ArgumentBinding::CapDefault => {
@@ -707,27 +688,19 @@ mod tests {
     }
 
     // TEST793: Tests ArgumentBinding PreviousOutput serializes/deserializes correctly
-    // Verifies JSON round-trip preserves node_id and output_field values
+    // Verifies JSON round-trip preserves node_id, and that the value is the whole output
     #[test]
     fn test793_argument_binding_serialization() {
         let binding = ArgumentBinding::PreviousOutput {
             node_id: "node_0".to_string(),
-            output_field: Some("result_path".to_string()),
         };
         let json = serde_json::to_string(&binding).unwrap();
-        assert!(json.contains("previous_output"));
-        assert!(json.contains("node_0"));
+        assert_eq!(json, r#"{"type":"previous_output","node_id":"node_0"}"#);
         let deserialized: ArgumentBinding = serde_json::from_str(&json).unwrap();
-        if let ArgumentBinding::PreviousOutput {
-            node_id,
-            output_field,
-        } = deserialized
-        {
-            assert_eq!(node_id, "node_0");
-            assert_eq!(output_field, Some("result_path".to_string()));
-        } else {
-            panic!("Expected PreviousOutput binding");
-        }
+        assert!(matches!(
+            deserialized,
+            ArgumentBinding::PreviousOutput { node_id } if node_id == "node_0"
+        ));
     }
 
     // TEST794: Tests ArgumentBindings add_file_path adds InputFilePath binding
@@ -818,7 +791,7 @@ mod tests {
         let mut prev_outputs = HashMap::new();
         prev_outputs.insert(
             "node_0".to_string(),
-            json!({"result_path": "/output/result.png"}),
+            json!("/output/result.png"),
         );
         let context = ArgumentResolutionContext {
             input_files: &files,
@@ -830,7 +803,6 @@ mod tests {
         };
         let binding = ArgumentBinding::PreviousOutput {
             node_id: "node_0".to_string(),
-            output_field: Some("result_path".to_string()),
         };
         let result = resolve_binding(&binding, &context, "cap:test", "step_0", None, true)
             .unwrap()

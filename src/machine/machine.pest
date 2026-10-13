@@ -13,6 +13,14 @@
 //
 // Both forms can be freely mixed in the same program.
 //
+// A wiring is one invocation: what it is given, the step, what is taken.
+//   (path, benchmark=bench) -> compare -> result            a named member
+//   (prices, window=20, statistic="mean") -> rolling -> s   constants: any JSON value
+//   () -> now -> stamp                                      a source given nothing
+//   report -> publish -> ()                                 a sink
+//   obs -> regress -> (fit, residuals=res)                  several outputs
+//   ref -> fetch{retry=3} -> series                         a step policy
+//
 // WHITESPACE is defined as implicit — pest inserts optional whitespace
 // between `~` operands in non-atomic rules. Do NOT use explicit
 // WHITESPACE+/WHITESPACE* inside non-atomic rules (the implicit and
@@ -24,7 +32,10 @@ program = { SOI ~ stmt* ~ EOI }
 
 stmt = { "[" ~ inner ~ "]" | inner }
 
-inner = { wiring | header }
+// A wiring is tried first: it is the only form with an arrow, and its first
+// token may be a group. The two headers both start with an alias and are told
+// apart by what follows it.
+inner = { wiring | machine_header | header }
 
 // Header: alias must be followed by a cap URN starting with "cap:".
 // Implicit whitespace between alias and cap_urn ensures at least one
@@ -32,17 +43,60 @@ inner = { wiring | header }
 // with "cap:" — they can't run together).
 header = { alias ~ cap_urn }
 
-wiring = { source ~ arrow ~ alias ~ arrow ~ alias }
+// Machine header: an alias for another machine, usable in step position.
+// The reference is an opaque string the host resolves.
+machine_header = { alias ~ machine_kw ~ string }
+machine_kw = @{ "machine" ~ !alias_continue }
 
-source = { group | alias }
+wiring = { sources ~ arrow ~ step ~ arrow ~ targets }
 
-group = { "(" ~ alias ~ ("," ~ alias)+ ~ ")" }
+sources = { source_group | alias }
+source_group = { "(" ~ (member ~ ("," ~ member)*)? ~ ")" }
+// A member names an arg, or does not. Named is tried first: it is the longer
+// form, and an unnamed member is exactly a node alias.
+member = { named_member | constant | alias }
+named_member = { alias ~ "=" ~ (constant | alias) }
+
+// A step is a header alias or a registered cap alias, with an optional policy.
+step = { alias ~ policy? }
+policy = { "{" ~ (policy_entry ~ ("," ~ policy_entry)*)? ~ "}" }
+policy_entry = { alias ~ "=" ~ policy_value }
+policy_value = { number | alias }
+
+targets = { target_group | alias }
+target_group = { "(" ~ (target ~ ("," ~ target)*)? ~ ")" }
+target = { named_target | alias }
+named_target = { alias ~ "=" ~ alias }
 
 arrow = { "-"+ ~ ">" }
 
 alias = @{ alias_start ~ alias_continue* }
 alias_start = { ASCII_ALPHA | "_" }
 alias_continue = { ASCII_ALPHANUMERIC | "_" | "-" }
+
+// A constant is a JSON value. `true`, `false` and `null` are constants, never
+// node names; a bare word that is none of them is an alias.
+constant = { object | array | string | number | boolean | null }
+boolean = @{ ("true" | "false") ~ !alias_continue }
+null = @{ "null" ~ !alias_continue }
+object = { "{" ~ (pair ~ ("," ~ pair)*)? ~ "}" }
+pair = { string ~ ":" ~ constant }
+array = { "[" ~ (constant ~ ("," ~ constant)*)? ~ "]" }
+number = @{
+    "-"? ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ ("." ~ ASCII_DIGIT+)?
+    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+    ~ !alias_continue
+}
+// A JSON string: any character but an unescaped quote, backslash or control
+// character, with JSON's escapes.
+string = ${ "\"" ~ string_inner ~ "\"" }
+string_inner = @{ string_char* }
+string_char = {
+    !("\"" | "\\" | '\u{0000}'..'\u{001F}') ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ "u" ~ ASCII_HEX_DIGIT{4}
+}
 
 cap_urn = @{ "cap:" ~ cap_urn_body* }
 
