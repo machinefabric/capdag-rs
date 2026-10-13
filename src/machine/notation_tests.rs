@@ -19,17 +19,17 @@ use super::graph::{BindingSource, Machine, MachineEdge};
 use super::parser::{parse_machine, parse_machine_with_node_names};
 use super::syntax::{OnError, StepPolicy};
 
-const SERIES: &str = "media:fmt=json;list;record;time-series";
+pub(super) const SERIES: &str = "media:fmt=json;list;record;time-series";
 const BENCHMARK: &str = "media:benchmark;fmt=json;list;record;time-series";
 const WINDOW: &str = "media:integer;window";
 const LABEL: &str = "media:enc=utf-8;label";
 const TAG: &str = "media:enc=utf-8;tag";
-const COMPARISON: &str = "media:comparison;fmt=json;record";
-const RESIDUALS: &str = "media:fmt=json;list;record;residual";
-const NOTE: &str = "media:enc=utf-8;note";
+pub(super) const COMPARISON: &str = "media:comparison;fmt=json;record";
+pub(super) const RESIDUALS: &str = "media:fmt=json;list;record;residual";
+pub(super) const NOTE: &str = "media:enc=utf-8;note";
 const REFERENCE: &str = "media:enc=utf-8;series-ref";
 
-fn definition(urn: &str, title: &str, args: Vec<CapArg>, outputs: Vec<CapOutput>) -> Cap {
+pub(super) fn definition(urn: &str, title: &str, args: Vec<CapArg>, outputs: Vec<CapOutput>) -> Cap {
     let cap = Cap {
         urn: CapUrn::from_string(urn).unwrap_or_else(|e| panic!("{urn}: {e}")),
         version: 1,
@@ -147,7 +147,7 @@ fn media_def(urn: &str, validation: Option<MediaValidation>, schema: Option<serd
 /// A registry with the caps above and the media definitions their constants
 /// are held to: a window of 1 to 365, a label that is a string of three
 /// allowed words, tags and references that are strings.
-fn registry() -> FabricRegistry {
+pub(super) fn registry() -> FabricRegistry {
     let registry = FabricRegistry::new_for_test();
     registry.add_caps_to_cache(vec![compare_cap(), fetch_cap(), publish_cap(), mean_cap(), score_cap()]);
     registry.insert_cached_media_def_for_test(media_def(
@@ -168,7 +168,7 @@ fn registry() -> FabricRegistry {
     registry
 }
 
-const HEADERS: &str = "\
+pub(super) const HEADERS: &str = "\
 [compare cap:in=\"media:fmt=json;list;record;time-series\";compare;out=\"media:comparison;fmt=json;record\"]\
 [fetch cap:in=media:void;fetch;out=\"media:fmt=json;list;record;time-series\"]\
 [publish cap:in=\"media:comparison;fmt=json;record\";publish;out=media:void]\
@@ -605,4 +605,5 @@ fn test12743_render_payload_carries_names_constants_and_outputs() {
     assert!(names.contains(&"comparison") && names.contains(&"residuals"), "{names:?}");
     assert!(outputs.iter().all(|o| o["node"].is_string()));
     assert!(edge.get("target_node").is_none(), "one target is not the shape any more");
+    assert_eq!(edge["included_as"], json!([]), "a step the machine wrote itself");
 }

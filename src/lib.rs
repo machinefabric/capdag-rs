@@ -88,7 +88,9 @@ pub use fabric::alias::{
     classify_alias_target, is_alias_token, normalize_alias_name, token_is_urn, AliasNameError,
     AliasTargetKind, StoredAlias,
 };
-pub use fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef};
+pub use fabric::registry::{
+    write_fabric_snapshot, FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef,
+};
 
 // Build-time-baked fabric manifest version (see capdag/build.rs).
 pub use cartridge_registry_version::CARTRIDGE_REGISTRY_VERSION;
@@ -294,9 +296,11 @@ pub use planner::{
 // Machine notation — typed DAG path identifiers
 pub use machine::{
     parse_machine, parse_machine_async, parse_machine_with_node_names,
-    parse_machine_with_node_names_async, Machine, MachineAbstractionError, MachineEdge,
-    MachineParseError, MachineRun, MachineRunStatus, MachineStrand, MachineSyntaxError,
-    NotationFormat, StrandNodeNames,
+    parse_machine_with_node_names_async, parse_machine_with_sources,
+    parse_machine_with_sources_async, FileMachineSource, LoadedMachine, Machine,
+    MachineAbstractionError, MachineEdge, MachineParseError, MachineRun, MachineRunStatus,
+    MachineSource, MachineSourceError, MachineStrand, MachineSyntaxError, MapMachineSource,
+    NoMachineSource, NotationFormat, StrandNodeNames,
 };
 
 // Orchestrator — machine notation parsing and DAG execution
@@ -304,6 +308,7 @@ pub use orchestrator::{
     assemble_cbor_array,
     assemble_cbor_sequence,
     build_plans_from_notation,
+    build_plans_from_notation_from,
     // Stream I/O — shared between orchestrator executor and floom-engine engine
     collect_terminal_output,
     decode_terminal_output,

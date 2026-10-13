@@ -504,7 +504,7 @@ fn emit_strand_json(
             })?;
         write!(
             json,
-            "{{\"alias\":\"{}\",\"cap_urn\":\"{}\",\"title\":\"{}\",\"is_loop\":{},\"retry\":{},\"on_error\":\"{}\",\"assignment\":[",
+            "{{\"alias\":\"{}\",\"cap_urn\":\"{}\",\"title\":\"{}\",\"is_loop\":{},\"retry\":{},\"on_error\":\"{}\",\"included_as\":[{}],\"assignment\":[",
             plan.edge_tokens[e_idx],
             json_escape(&cap_urn_str),
             json_escape(&cap_title),
@@ -513,7 +513,14 @@ fn emit_strand_json(
             match edge.policy.on_error {
                 super::syntax::OnError::Fail => "fail",
                 super::syntax::OnError::Absent => "absent",
-            }
+            },
+            // The machine steps the step was included through, outermost
+            // first: what a view groups the steps of an included machine by.
+            edge.included_as
+                .iter()
+                .map(|step| format!("\"{}\"", json_escape(step)))
+                .collect::<Vec<_>>()
+                .join(",")
         )
         .unwrap();
         // Each binding says which arg (its URN and its name) and what feeds

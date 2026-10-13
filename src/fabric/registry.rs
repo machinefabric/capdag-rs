@@ -2662,6 +2662,114 @@ fn cache_alias_entry(
     Ok(())
 }
 
+/// Every media URN a cap definition references, normalized, each once: its
+/// `in=` and `out=`, every arg's URN and the type it accepts (its stdin
+/// source's, or its `accepts`), and every output's URN — the main one and
+/// the others alike, since each is the type of a node a machine can hold.
+/// The wildcard `media:` names no definition and is left out.
+///
+/// A malformed URN means the definition is corrupt: it is an error, never a
+/// URN quietly skipped.
+fn referenced_media_urns(cap: &Cap) -> Result<Vec<String>, FabricRegistryError> {
+    let mut referenced: Vec<String> = Vec::new();
+    let mut push = |urn: &str| -> Result<(), FabricRegistryError> {
+        let normalized = normalize_media_urn(urn)?;
+        if normalized != "media:" && !referenced.contains(&normalized) {
+            referenced.push(normalized);
+        }
+        Ok(())
+    };
+    push(cap.urn.in_spec())?;
+    push(cap.urn.out_spec())?;
+    for arg in &cap.args {
+        push(&arg.media_urn)?;
+        push(arg.accepted_urn())?;
+    }
+    for output in cap.get_outputs() {
+        push(&output.media_urn)?;
+    }
+    Ok(referenced)
+}
+
+/// Write a fabric snapshot into `dir`: the files a fabric registry serves
+/// for manifest `manifest_version` holding exactly `caps` and `media`.
+///
+/// `dir` then has the layout a registry's origin has — `manifest/<N>.json`,
+/// `caps/<sha256 of the URN>/<defver>.json`, `media/<sha256>/<defver>.json` —
+/// so serving it over HTTP as it is gives a fabric a client can be pointed
+/// at. It is how definitions that are in no published fabric (a cartridge
+/// under development, a test cartridge) are made resolvable.
+///
+/// The snapshot is held to what a registry is held to: every cap is a valid
+/// definition, no URN is given twice, and every media URN a cap references
+/// has its definition in `media`. A definition is written at its own
+/// `version`, or at 1 when that is 0.
+pub fn write_fabric_snapshot(
+    dir: &Path,
+    manifest_version: u32,
+    caps: &[Cap],
+    media: &[StoredMediaDef],
+) -> Result<(), FabricRegistryError> {
+    if manifest_version == 0 {
+        return Err(FabricRegistryError::ValidationError(
+            "a fabric snapshot has a manifest version of 1 or more: version 0 is the state before manifests".to_string(),
+        ));
+    }
+    let defver = |version: u32| version.max(1);
+    let write = |path: PathBuf, body: Vec<u8>| -> Result<(), FabricRegistryError> {
+        let failed = |e: std::io::Error| {
+            FabricRegistryError::CacheError(format!("cannot write {}: {e}", path.display()))
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(failed)?;
+        }
+        fs::write(&path, body).map_err(failed)
+    };
+    let encode = |what: &str, value: Result<Vec<u8>, serde_json::Error>| {
+        value.map_err(|e| FabricRegistryError::ParseError(format!("cannot encode {what}: {e}")))
+    };
+    // Only the layout is asked of the path builders: where under `dir` an
+    // object of a registry whose origin is `dir` would be cached.
+    let layout = RegistryConfig::default();
+
+    let mut manifest = Manifest::empty(manifest_version);
+    for definition in media {
+        let urn = normalize_media_urn(&definition.urn)?;
+        let version = defver(definition.version);
+        if manifest.media.insert(urn.clone(), version).is_some() {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "media URN '{urn}' is defined twice in the snapshot"
+            )));
+        }
+        let (_, path) = media_url_and_cache_path(dir, &layout, &urn, version);
+        write(path, encode(&urn, serde_json::to_vec_pretty(definition))?)?;
+    }
+    for cap in caps {
+        crate::cap::validation::validate_cap_definition(cap)
+            .map_err(|e| FabricRegistryError::ValidationError(e.to_string()))?;
+        let urn = cap.urn.to_string();
+        let version = defver(cap.version);
+        if manifest.caps.insert(urn.clone(), version).is_some() {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "cap '{urn}' is defined twice in the snapshot"
+            )));
+        }
+        for referenced in referenced_media_urns(cap)? {
+            if !manifest.media.contains_key(&referenced) {
+                return Err(FabricRegistryError::NotFound(format!(
+                    "cap '{urn}' references media URN '{referenced}', which the snapshot does not define"
+                )));
+            }
+        }
+        let (_, path) = cap_url_and_cache_path(dir, &layout, &urn, version);
+        write(path, encode(&urn, serde_json::to_vec_pretty(cap))?)?;
+    }
+    write(
+        dir.join("manifest").join(format!("{manifest_version}.json")),
+        encode("the manifest", serde_json::to_vec_pretty(&manifest))?,
+    )
+}
+
 /// Atomic cap fetcher. Fetches the cap body, then ensures every media URN
 /// it references is in the media cache. Caches the cap only on full
 /// success; otherwise returns `Err` and writes nothing.
@@ -2705,33 +2813,7 @@ async fn fetch_one_cap_atomic(
     }
     let cap = checked_cap_definition(&body, normalized_urn)?;
 
-    // Walk every media URN referenced by the cap. Empty/wildcard URN
-    // (`media:`) is the identity / wildcard sentinel — it has no
-    // fetchable spec and must be skipped.
-    let mut referenced: Vec<String> = Vec::new();
-    // A malformed media URN here means the fetched cap body is corrupt; the
-    // closure returns the parse error so the atomic fetch fails rather than
-    // caching a cap that references an unnormalizable media URN.
-    let push = |v: &mut Vec<String>, s: &str| -> Result<(), FabricRegistryError> {
-        let n = normalize_media_urn(s)?;
-        if n != "media:" && !v.contains(&n) {
-            v.push(n);
-        }
-        Ok(())
-    };
-    push(&mut referenced, cap.urn.in_spec())?;
-    push(&mut referenced, cap.urn.out_spec())?;
-    for arg in &cap.args {
-        push(&mut referenced, &arg.media_urn)?;
-        for source in &arg.sources {
-            if let ArgSource::Stdin { stdin } = source {
-                push(&mut referenced, stdin)?;
-            }
-        }
-    }
-    if let Some(out) = cap.main_output() {
-        push(&mut referenced, &out.media_urn)?;
-    }
+    let referenced = referenced_media_urns(&cap)?;
 
     for media_urn in &referenced {
         let already_cached = cached_media_defs
@@ -3200,6 +3282,114 @@ mod alias_tests {
             supported_model_types: Vec::new(),
             default_model_spec: None,
         }
+    }
+
+    // TEST12816: fetching a cap requires the definition of every media URN a
+    // machine can meet through it: its in= and out=, every arg's own URN and
+    // the type it accepts, and every output's URN — not the main output's
+    // alone. Each once; the wildcard names no definition; a URN that does not
+    // parse fails the footprint rather than being left out of it.
+    #[test]
+    fn test12816_a_caps_media_footprint_covers_every_output_and_accepted_type() {
+        let mut cap = cap_with_urn(r#"cap:in="media:document;ext=pdf";footprint;out="media:enc=utf-8""#);
+        cap.args.push(
+            CapArg::new(
+                "media:enc=utf-8;second".to_string(),
+                "second",
+                false,
+                vec![ArgSource::CliFlag { cli_flag: "--second".to_string() }],
+            )
+            .accepting("media:enc=utf-8;accepted"),
+        );
+        cap.args.push(CapArg::new(
+            "media:".to_string(),
+            "anything",
+            false,
+            vec![ArgSource::CliFlag { cli_flag: "--anything".to_string() }],
+        ));
+        cap.outputs.push(CapOutput::new("media:enc=utf-8;rest".to_string(), "rest", "rest".to_string()));
+        let normalized = |urn: &str| normalize_media_urn(urn).unwrap();
+        let mut expected: Vec<String> = [
+            "media:document;ext=pdf",
+            "media:enc=utf-8",
+            "media:enc=utf-8;second",
+            "media:enc=utf-8;accepted",
+            "media:enc=utf-8;rest",
+        ]
+        .iter()
+        .map(|urn| normalized(urn))
+        .collect();
+        expected.sort();
+        let mut got = referenced_media_urns(&cap).unwrap();
+        got.sort();
+        assert_eq!(got, expected);
+
+        cap.outputs.push(CapOutput::new("not a urn".to_string(), "broken", "broken".to_string()));
+        assert!(matches!(referenced_media_urns(&cap), Err(FabricRegistryError::ParseError(_))));
+    }
+
+    // TEST12817: a fabric snapshot written to a directory is what a registry
+    // serves: each object is at the path under its origin the client asks
+    // for, the cap bodies are definitions the client accepts, and the
+    // manifest names every one at the version it was written at. A snapshot
+    // that would not be self-consistent is refused: a cap whose media has no
+    // definition in it, a URN given twice, and manifest version 0.
+    #[test]
+    fn test12817_a_written_snapshot_has_the_layout_a_registry_serves() {
+        let mut cap = cap_with_urn(r#"cap:in="media:document;ext=pdf";snapshot;out="media:enc=utf-8""#);
+        cap.outputs.push(CapOutput::new("media:enc=utf-8;rest".to_string(), "rest", "rest".to_string()));
+        let media: Vec<StoredMediaDef> = ["media:document;ext=pdf", "media:enc=utf-8", "media:enc=utf-8;rest"]
+            .iter()
+            .map(|urn| media_spec(urn))
+            .collect();
+        let dir = tempfile::tempdir().unwrap();
+        write_fabric_snapshot(dir.path(), 9, std::slice::from_ref(&cap), &media).expect("writes");
+
+        let config = RegistryConfig {
+            registry_base_url: "http://fabric.test".to_string(),
+            ..RegistryConfig::default()
+        };
+        let served = |url: String| -> Vec<u8> {
+            let path = url.strip_prefix("http://fabric.test/").expect("under the origin");
+            std::fs::read(dir.path().join(path)).unwrap_or_else(|e| panic!("{path} is not served: {e}"))
+        };
+        let manifest: Manifest =
+            serde_json::from_slice(&served("http://fabric.test/manifest/9.json".to_string())).unwrap();
+        assert_eq!((manifest.version, manifest.previous), (9, 8));
+        let cap_urn = cap.urn.to_string();
+        assert_eq!(manifest.caps, HashMap::from([(cap_urn.clone(), 1)]));
+        assert_eq!(manifest.media.len(), 3);
+
+        let cache = tempfile::tempdir().unwrap();
+        let (url, _) = cap_url_and_cache_path(cache.path(), &config, &cap_urn, manifest.caps[&cap_urn]);
+        let fetched = checked_cap_definition(&served(url), &cap_urn).expect("a definition the client accepts");
+        assert_eq!(fetched.urn.to_string(), cap_urn);
+        assert_eq!(fetched.get_outputs().len(), 2);
+        for (urn, defver) in &manifest.media {
+            let (url, _) = media_url_and_cache_path(cache.path(), &config, urn, *defver);
+            let definition: StoredMediaDef = serde_json::from_slice(&served(url)).unwrap();
+            assert_eq!(&normalize_media_urn(&definition.urn).unwrap(), urn);
+        }
+
+        let refused = |version: u32, caps: &[Cap], media: &[StoredMediaDef]| {
+            write_fabric_snapshot(tempfile::tempdir().unwrap().path(), version, caps, media)
+                .expect_err("the snapshot is refused")
+        };
+        match refused(9, std::slice::from_ref(&cap), &media[..2]) {
+            FabricRegistryError::NotFound(message) => {
+                assert!(message.contains("rest"), "the missing definition is named: {message}")
+            }
+            other => panic!("{other}"),
+        }
+        assert!(matches!(
+            refused(9, &[cap.clone(), cap.clone()], &media),
+            FabricRegistryError::ValidationError(_)
+        ));
+        assert!(matches!(
+            refused(9, &[], &[media[0].clone(), media[0].clone()]),
+            FabricRegistryError::ValidationError(_)
+        ));
+        assert!(matches!(refused(0, &[], &[]), FabricRegistryError::ValidationError(_)));
     }
 
     fn media_spec(urn: &str) -> StoredMediaDef {

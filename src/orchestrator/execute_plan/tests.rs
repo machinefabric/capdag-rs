@@ -66,6 +66,8 @@ fn with_output(mut cap: Cap, name: &str, media_urn: &str, optional: bool) -> Cap
     cap
 }
 
+/// The arg of `among` that takes every item.
+const ALL: &str = "media:all-of;enc=utf-8";
 const NOW: &str = r#"cap:in="media:void";now;out="media:enc=utf-8;now-out""#;
 const SAY: &str = r#"cap:in="media:void";say;out="media:enc=utf-8;say-out""#;
 const SINK: &str = r#"cap:in="media:enc=utf-8";sink;out="media:void""#;
@@ -120,6 +122,11 @@ fn registry() -> Arc<FabricRegistry> {
         join,
         route,
         with_arg(text_cap("pair"), "other", OTHER, true),
+        {
+            let mut among = with_arg(text_cap("among"), "all", ALL, true);
+            among.args[1].is_sequence = true;
+            among
+        },
         with_arg(text_cap("label"), "hint", HINT, false),
         with_output(text_cap("headrest"), "rest", REST, false),
         void_cap(NOW, "now"),
@@ -148,7 +155,7 @@ fn headers() -> String {
     let mut headers = String::new();
     for op in [
         "upper", "exclaim", "slow", "slower", "boom", "flaky", "split", "join", "route", "pair",
-        "label", "headrest",
+        "among", "label", "headrest",
     ] {
         headers.push_str(&format!("[{op} {}]", urn(op)));
     }
@@ -308,6 +315,10 @@ impl Scripted {
             let other = call.stream(OTHER).expect("pair is sent `other`");
             assert_eq!(other.len(), 1, "`other` takes one value");
             value(format!("{}|{}", call.main(), other[0]))
+        });
+        runtime.on("among", |call| {
+            let all = call.stream(ALL).expect("among is sent `all`");
+            value(format!("{} of {}", call.main(), all.join("+")))
         });
         runtime.on("label", |call| {
             let hint = call.stream(HINT).map(|h| h.join(","));
@@ -1065,6 +1076,22 @@ async fn test12776_a_map_inside_a_map_flattens_and_a_fold_closes_one_level() {
     let inner: Vec<_> = result.body_outcomes.iter().filter(|o| !o.enclosing.is_empty()).collect();
     assert_eq!(inner.len(), 6);
     assert_eq!(result.body_outcomes.len(), 9);
+}
+
+// TEST12814: a step run once per item of a sequence, that also takes the
+// whole sequence on an arg of its own, is given both in every run: the item
+// and every item. What makes the sequence runs once.
+#[tokio::test]
+async fn test12814_a_run_of_a_map_is_given_the_item_and_the_whole_sequence() {
+    let built = build("[doc -> split -> words][(words, all=words) -> among -> out]", &[]).await;
+    let runtime = Scripted::new();
+    let result = run(&built, &runtime, &[("doc", Given::One("a b c"))]).await.unwrap();
+    assert_eq!(
+        produced(&result, &built, "out"),
+        (texts(&["a of a+b+c", "b of a+b+c", "c of a+b+c"]), true)
+    );
+    assert_eq!(runtime.runs_of("split").len(), 1);
+    assert_eq!(runtime.runs_of("among").len(), 3);
 }
 
 // TEST12777: steps that map over the same sequence run in one map, so a

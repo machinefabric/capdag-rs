@@ -52,7 +52,8 @@
 //! - URNs given to one node must be on one specialization chain
 //!   (`NodeMediaConflict` otherwise); the node has the most specific.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use pest_derive::Parser;
 
@@ -64,6 +65,9 @@ use crate::FabricRegistryError;
 
 use super::error::{MachineAbstractionError, MachineParseError, MachineSyntaxError};
 use super::graph::{BindingSource, Machine, MachineStrand, NodeId};
+use super::include::{
+    IncludedMachine, IncludedValue, MachineSource, MachineSourceError, NoMachineSource,
+};
 use super::resolve::{resolve_pre_interned, ForEachIdentity, PreInternedWiring};
 use super::syntax::{parse_syntax, StepPolicy, SyntaxStatementKind, SyntaxValue};
 
@@ -72,6 +76,7 @@ use super::syntax::{parse_syntax, StepPolicy, SyntaxStatementKind, SyntaxValue};
 pub struct MachineParser;
 
 /// What a member of a wiring gives its arg.
+#[derive(Clone)]
 enum RawValue {
     /// A node, by the name the text gives it.
     Node(String),
@@ -98,8 +103,11 @@ struct RawWiring {
     /// node it goes to.
     targets: Vec<(Option<String>, String)>,
     /// Index of this wiring in the textual input. Used to
-    /// order connected components by first appearance.
+    /// order connected components by first appearance. A step written in
+    /// from an included machine stands where the machine step stood.
     position: usize,
+    /// The machine steps this step was included through, outermost first.
+    included_as: Vec<String>,
 }
 
 impl RawWiring {
@@ -150,6 +158,36 @@ pub fn parse_machine_with_node_names(
     input: &str,
     registry: &FabricRegistry,
 ) -> Result<(Machine, Vec<StrandNodeNames>), MachineParseError> {
+    parse_machine_with_sources(input, registry, &NoMachineSource, None)
+}
+
+/// [`parse_machine_with_node_names`], resolving the machines its machine
+/// headers name through `source`. `id` is what the source knows the machine
+/// being parsed by, when it knows it: the references it writes are resolved
+/// relative to it, and an inclusion of it from inside is a circle.
+///
+/// What comes back is the inlined whole: every step of every included
+/// machine is a step of this one, and no reference is left
+/// (`capdag/docs/09-machine-notation.md`, §Machines in step position).
+pub fn parse_machine_with_sources(
+    input: &str,
+    registry: &FabricRegistry,
+    source: &dyn MachineSource,
+    id: Option<&str>,
+) -> Result<(Machine, Vec<StrandNodeNames>), MachineParseError> {
+    let mut including: Vec<String> = id.map(str::to_string).into_iter().collect();
+    parse_program(input, registry, source, id, &mut including)
+}
+
+/// Parse one machine. `including` is every machine whose parse this one is
+/// inside of, this one last when it has an id.
+fn parse_program(
+    input: &str,
+    registry: &FabricRegistry,
+    source: &dyn MachineSource,
+    id: Option<&str>,
+    including: &mut Vec<String>,
+) -> Result<(Machine, Vec<StrandNodeNames>), MachineParseError> {
     let input = input.trim();
     if input.is_empty() {
         return Err(MachineSyntaxError::Empty.into());
@@ -160,6 +198,10 @@ pub fn parse_machine_with_node_names(
 
     // Phase 2: headers and wirings.
     let mut headers: Vec<(String, CapUrn, usize)> = Vec::new();
+    let mut machine_headers: Vec<(String, String, usize)> = Vec::new();
+    // Every alias a header declares, in the order written: cap headers and
+    // machine headers name steps in one space.
+    let mut declared: Vec<(String, usize)> = Vec::new();
     let mut wirings: Vec<RawWiring> = Vec::new();
     for statement in statements {
         match statement.kind {
@@ -170,14 +212,12 @@ pub fn parse_machine_with_node_names(
                         details: format!("{}", e),
                     }
                 })?;
+                declared.push((alias.value.clone(), statement.position));
                 headers.push((alias.value, parsed, statement.position));
             }
             SyntaxStatementKind::MachineHeader { alias, reference } => {
-                return Err(MachineSyntaxError::MachineReferenceWithoutSource {
-                    alias: alias.value,
-                    reference: reference.value,
-                }
-                .into());
+                declared.push((alias.value.clone(), statement.position));
+                machine_headers.push((alias.value, reference.value, statement.position));
             }
             SyntaxStatementKind::Wiring(wiring) => wirings.push(RawWiring {
                 sources: wiring
@@ -199,28 +239,84 @@ pub fn parse_machine_with_node_names(
                     .map(|target| (target.name.map(|n| n.value), target.node.value))
                     .collect(),
                 position: statement.position,
+                included_as: Vec::new(),
             }),
         }
     }
 
     // Phase 3: alias map with duplicate check.
-    let mut alias_map: HashMap<String, (CapUrn, usize)> = HashMap::new();
-    for (alias, cap_urn, position) in &headers {
-        if let Some((_, first_pos)) = alias_map.get(alias) {
+    let mut first_declared: HashMap<&str, usize> = HashMap::new();
+    for (alias, position) in &declared {
+        if let Some(first_position) = first_declared.insert(alias.as_str(), *position) {
             return Err(MachineSyntaxError::DuplicateAlias {
                 alias: alias.clone(),
-                first_position: *first_pos,
+                first_position,
             }
             .into());
         }
-        alias_map.insert(alias.clone(), (cap_urn.clone(), *position));
     }
+    let mut alias_map: HashMap<String, (CapUrn, usize)> = headers
+        .iter()
+        .map(|(alias, cap_urn, position)| (alias.clone(), (cap_urn.clone(), *position)))
+        .collect();
 
-    if wirings.is_empty() && !headers.is_empty() {
+    if wirings.is_empty() && !declared.is_empty() {
         return Err(MachineSyntaxError::NoEdges.into());
     }
     if wirings.is_empty() {
         return Err(MachineSyntaxError::Empty.into());
+    }
+
+    // Phase 3a: the machines the machine headers name, each resolved on its
+    // own before anything here is. A machine is what it is alone: where it is
+    // included changes nothing about it.
+    let mut machines: HashMap<String, Arc<IncludedMachine>> = HashMap::new();
+    for (alias, reference, _) in &machine_headers {
+        let loaded = source.load(reference, id).map_err(|e| -> MachineParseError {
+            match e {
+                MachineSourceError::NoSource => MachineSyntaxError::MachineReferenceWithoutSource {
+                    alias: alias.clone(),
+                    reference: reference.clone(),
+                }
+                .into(),
+                MachineSourceError::NotFound(details) => {
+                    MachineAbstractionError::UnknownMachineReference {
+                        alias: alias.clone(),
+                        reference: reference.clone(),
+                        details,
+                    }
+                    .into()
+                }
+            }
+        })?;
+        if let Some(at) = including.iter().position(|machine| machine == &loaded.id) {
+            let mut chain = including[at..].to_vec();
+            chain.push(loaded.id);
+            return Err(MachineAbstractionError::CyclicMachineReference { chain }.into());
+        }
+        including.push(loaded.id.clone());
+        let parsed = parse_program(&loaded.notation, registry, source, Some(&loaded.id), including);
+        including.pop();
+        let (machine, names) = match parsed {
+            Ok(parsed) => parsed,
+            // A circle is one fact about the whole, said once: it is not a
+            // defect of each machine on the way round.
+            Err(MachineParseError::Resolution(
+                circle @ MachineAbstractionError::CyclicMachineReference { .. },
+            )) => return Err(circle.into()),
+            Err(error) => {
+                return Err(MachineAbstractionError::InvalidIncludedMachine {
+                    alias: alias.clone(),
+                    reference: reference.clone(),
+                    error: Box::new(error),
+                }
+                .into())
+            }
+        };
+        machines.insert(
+            alias.clone(),
+            Arc::new(IncludedMachine::of(&machine, &names)),
+        );
     }
 
     // Phase 3b: cap-alias resolution against the fabric registry.
@@ -242,9 +338,12 @@ pub fn parse_machine_with_node_names(
         // Collect the distinct cap-position names first to avoid mutating
         // `alias_map` while iterating the wirings.
         let mut unresolved_cap_names: Vec<String> = Vec::new();
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seen: HashSet<String> = HashSet::new();
         for w in &wirings {
-            if !alias_map.contains_key(&w.cap_alias) && seen.insert(w.cap_alias.clone()) {
+            if !alias_map.contains_key(&w.cap_alias)
+                && !machines.contains_key(&w.cap_alias)
+                && seen.insert(w.cap_alias.clone())
+            {
                 unresolved_cap_names.push(w.cap_alias.clone());
             }
         }
@@ -263,20 +362,23 @@ pub fn parse_machine_with_node_names(
             // Synthetic position past every real statement so duplicate
             // detection (which compares positions) never mistakes an
             // injected alias for a user-written header.
-            let synthetic_pos = headers.len() + wirings.len() + alias_map.len();
+            let synthetic_pos = declared.len() + wirings.len() + alias_map.len();
             alias_map.insert(name, (cap_urn, synthetic_pos));
         }
     }
 
     // Phase 4: every step is defined, and no node bears a step's name.
     for w in &wirings {
-        if !alias_map.contains_key(&w.cap_alias) {
+        if !alias_map.contains_key(&w.cap_alias) && !machines.contains_key(&w.cap_alias) {
             return Err(MachineSyntaxError::UndefinedAlias {
                 alias: w.cap_alias.clone(),
             }
             .into());
         }
-        if let Some(node) = w.nodes().find(|node| alias_map.contains_key(*node)) {
+        if let Some(node) = w
+            .nodes()
+            .find(|node| alias_map.contains_key(*node) || machines.contains_key(*node))
+        {
             return Err(MachineSyntaxError::NodeAliasCollision {
                 name: node.clone(),
                 alias: node.clone(),
@@ -285,44 +387,16 @@ pub fn parse_machine_with_node_names(
         }
     }
 
-    // Phase 5: connected-components partition by shared node
-    // name. Union-find over wiring indices, where two wirings
-    // are unioned iff they share at least one node name. A wiring that
-    // touches no node at all (`() -> tick -> ()`) is a strand of its own.
-    let n = wirings.len();
-    let mut union = UnionFind::new(n);
-
-    // Map: node name → index of the first wiring that touched
-    // it. As we process wirings in order, any wiring that
-    // touches a previously-seen node name is unioned with the
-    // earlier wiring.
-    let mut node_first_wiring: HashMap<String, usize> = HashMap::new();
-    for (w_idx, w) in wirings.iter().enumerate() {
-        for node_name in w.nodes() {
-            if let Some(&earlier) = node_first_wiring.get(node_name) {
-                union.union(earlier, w_idx);
-            } else {
-                node_first_wiring.insert(node_name.clone(), w_idx);
-            }
-        }
+    // Phase 4a: every step that is a machine is written out as the steps of
+    // that machine. From here on the wirings are of caps alone.
+    let mut included_media: HashMap<String, MediaUrn> = HashMap::new();
+    if wirings.iter().any(|w| machines.contains_key(&w.cap_alias)) {
+        wirings = include_machines(wirings, &mut alias_map, &machines, &mut included_media, registry)?;
     }
+    let no_machines: HashMap<String, Arc<IncludedMachine>> = HashMap::new();
 
-    // Group wirings by their union-find root. Order roots by
-    // the smallest wiring index in each group (= first-
-    // appearance order).
-    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
-    for w_idx in 0..n {
-        let root = union.find(w_idx);
-        groups.entry(root).or_default().push(w_idx);
-    }
-    let mut group_min_idx: Vec<(usize, usize)> = groups
-        .iter()
-        .map(|(&root, members)| {
-            let min_idx = *members.iter().min().expect("non-empty group");
-            (root, min_idx)
-        })
-        .collect();
-    group_min_idx.sort_by_key(|(_, min_idx)| *min_idx);
+    // Phase 5: connected components, in the order each first appears.
+    let components = components_of(&wirings);
 
     // Phase 6: per-component node typing, pre-interning and resolution.
     //
@@ -333,14 +407,13 @@ pub fn parse_machine_with_node_names(
     // NodeIds, plus the parallel `nodes: Vec<MediaUrn>` table. Two distinct
     // user node names that happen to share a media URN stay distinct NodeIds
     // — that's the parser's identity contract.
-    let mut strands: Vec<MachineStrand> = Vec::with_capacity(group_min_idx.len());
-    let mut strand_node_names: Vec<StrandNodeNames> = Vec::with_capacity(group_min_idx.len());
-    for (strand_index, (root, _)) in group_min_idx.iter().enumerate() {
-        let mut member_indices = groups[root].clone();
-        member_indices.sort();
+    let mut strands: Vec<MachineStrand> = Vec::with_capacity(components.len());
+    let mut strand_node_names: Vec<StrandNodeNames> = Vec::with_capacity(components.len());
+    for (strand_index, member_indices) in components.iter().enumerate() {
         let members: Vec<&RawWiring> = member_indices.iter().map(|i| &wirings[*i]).collect();
 
-        let node_media = type_nodes(&members, &alias_map, registry, strand_index)?;
+        let node_media =
+            type_nodes(&members, &alias_map, &no_machines, &included_media, registry, strand_index)?;
 
         let mut nodes: Vec<MediaUrn> = Vec::new();
         let mut name_to_id: StrandNodeNames = HashMap::new();
@@ -397,6 +470,7 @@ pub fn parse_machine_with_node_names(
                 source_node_ids,
                 targets,
                 policy: w.policy,
+                included_as: w.included_as.clone(),
             });
         }
 
@@ -406,6 +480,318 @@ pub fn parse_machine_with_node_names(
     }
 
     Ok((Machine::from_resolved_strands(strands), strand_node_names))
+}
+
+/// The connected components of a wiring set: two wirings are in one iff a
+/// path of shared node names joins them. A wiring that touches no node at
+/// all (`() -> tick -> ()`) is a component of its own. Components come in the
+/// order each first appears; each lists its wirings in the order written.
+fn components_of(wirings: &[RawWiring]) -> Vec<Vec<usize>> {
+    let n = wirings.len();
+    let mut union = UnionFind::new(n);
+    // Node name → the first wiring that touched it. A wiring that touches a
+    // name seen before is joined to that earlier wiring.
+    let mut node_first_wiring: HashMap<&String, usize> = HashMap::new();
+    for (w_idx, w) in wirings.iter().enumerate() {
+        for node_name in w.nodes() {
+            if let Some(&earlier) = node_first_wiring.get(node_name) {
+                union.union(earlier, w_idx);
+            } else {
+                node_first_wiring.insert(node_name, w_idx);
+            }
+        }
+    }
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for w_idx in 0..n {
+        let root = union.find(w_idx);
+        groups.entry(root).or_default().push(w_idx);
+    }
+    // Wirings were pushed in ascending order, so each group is sorted and
+    // its first member is its first appearance.
+    let mut components: Vec<Vec<usize>> = groups.into_values().collect();
+    components.sort_by_key(|members| members[0]);
+    components
+}
+
+/// Write every step that is a machine out as the steps of that machine
+/// (09 §Machines in step position).
+///
+/// A machine step binds like a cap step: a named member to the input of that
+/// name, the unnamed members to the inputs left by type — which is read off
+/// the wirings as they were written, machine steps and all, before anything
+/// is written out. A machine has no main input and no main output: an
+/// unnamed member with no type of its own has nothing to be matched by, and
+/// an unnamed target takes the one output the other targets leave.
+///
+/// The steps written in are the included machine's as IT resolved them: each
+/// member under the name of the arg it was bound to, each node holding the
+/// type it held there (`included_media`). A node inside the included machine
+/// becomes a node of this one under a name nothing written can bear
+/// (`alias#use/name`); an input becomes what was bound to it; an output
+/// becomes the node that takes it, and an output nothing takes is not taken
+/// from the step that produces it.
+fn include_machines(
+    mut wirings: Vec<RawWiring>,
+    alias_map: &mut HashMap<String, (CapUrn, usize)>,
+    machines: &HashMap<String, Arc<IncludedMachine>>,
+    included_media: &mut HashMap<String, MediaUrn>,
+    registry: &FabricRegistry,
+) -> Result<Vec<RawWiring>, MachineParseError> {
+    // What each machine step takes, by output name. Its unnamed target is
+    // given its name here, so that everything after reads names alone.
+    for w in &mut wirings {
+        let Some(machine) = machines.get(&w.cap_alias) else {
+            continue;
+        };
+        if !w.policy.is_default() {
+            return Err(MachineAbstractionError::PolicyOnMachine {
+                position: w.position,
+                alias: w.cap_alias.clone(),
+            }
+            .into());
+        }
+        let mut taken: HashSet<&str> = HashSet::new();
+        for (name, _) in &w.targets {
+            let Some(name) = name else { continue };
+            if machine.output(name).is_none() {
+                return Err(MachineAbstractionError::UnknownMachineOutput {
+                    position: w.position,
+                    alias: w.cap_alias.clone(),
+                    name: name.clone(),
+                    declared: machine.output_names(),
+                }
+                .into());
+            }
+            if !taken.insert(name.as_str()) {
+                return Err(MachineAbstractionError::MachineOutputTakenTwice {
+                    position: w.position,
+                    alias: w.cap_alias.clone(),
+                    output: name.clone(),
+                }
+                .into());
+            }
+        }
+        // The syntax allows one unnamed target.
+        if w.targets.iter().any(|(name, _)| name.is_none()) {
+            let left: Vec<String> = machine
+                .output_names()
+                .into_iter()
+                .filter(|output| !taken.contains(output.as_str()))
+                .collect();
+            if left.len() != 1 {
+                return Err(MachineAbstractionError::UnnamedMachineTarget {
+                    position: w.position,
+                    alias: w.cap_alias.clone(),
+                    left,
+                }
+                .into());
+            }
+            let only = left[0].clone();
+            for (name, _) in &mut w.targets {
+                if name.is_none() {
+                    *name = Some(only.clone());
+                }
+            }
+        }
+    }
+
+    // The type of every node, as the wirings were written.
+    let mut media_of: Vec<Option<HashMap<String, MediaUrn>>> = vec![None; wirings.len()];
+    for (strand_index, member_indices) in components_of(&wirings).iter().enumerate() {
+        if !member_indices
+            .iter()
+            .any(|i| machines.contains_key(&wirings[*i].cap_alias))
+        {
+            continue;
+        }
+        let members: Vec<&RawWiring> = member_indices.iter().map(|i| &wirings[*i]).collect();
+        let node_media = type_nodes(&members, alias_map, machines, included_media, registry, strand_index)?;
+        for i in member_indices {
+            if machines.contains_key(&wirings[*i].cap_alias) {
+                media_of[*i] = Some(node_media.clone());
+            }
+        }
+    }
+
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    let mut written: Vec<RawWiring> = Vec::with_capacity(wirings.len());
+    for (w, node_media) in wirings.into_iter().zip(media_of) {
+        let Some(machine) = machines.get(&w.cap_alias) else {
+            written.push(w);
+            continue;
+        };
+        let node_media = node_media.expect("a machine step's strand was typed above");
+        let alias = &w.cap_alias;
+        let position = w.position;
+
+        // Named members bind first, each to the input it names.
+        let mut bound: HashMap<String, RawValue> = HashMap::new();
+        for member in &w.sources {
+            let Some(name) = &member.name else { continue };
+            let accepts = machine.input(name).ok_or_else(|| {
+                MachineAbstractionError::UnknownMachineInput {
+                    position,
+                    alias: alias.clone(),
+                    name: name.clone(),
+                    declared: machine.input_names(),
+                }
+            })?;
+            if bound.contains_key(name) {
+                return Err(MachineAbstractionError::MachineInputBinding {
+                    position,
+                    alias: alias.clone(),
+                    input: name.clone(),
+                    count: w
+                        .sources
+                        .iter()
+                        .filter(|m| m.name.as_ref() == Some(name))
+                        .count(),
+                }
+                .into());
+            }
+            if let RawValue::Node(node) = &member.value {
+                let source = &node_media[node];
+                if !source.conforms_to(accepts).unwrap_or(false) {
+                    return Err(MachineAbstractionError::SourceDoesNotConformToMachineInput {
+                        position,
+                        alias: alias.clone(),
+                        name: name.clone(),
+                        accepts: accepts.to_string(),
+                        source_urn: source.to_string(),
+                    }
+                    .into());
+                }
+            }
+            bound.insert(name.clone(), member.value.clone());
+        }
+
+        // The unnamed members, to the inputs left, by type alone.
+        let unnamed: Vec<&String> = w
+            .sources
+            .iter()
+            .filter_map(|m| match (&m.name, &m.value) {
+                (None, RawValue::Node(node)) => Some(node),
+                _ => None,
+            })
+            .collect();
+        if !unnamed.is_empty() {
+            let free: Vec<&(String, MediaUrn)> = machine
+                .inputs
+                .iter()
+                .filter(|(name, _)| !bound.contains_key(name))
+                .collect();
+            let sources: Vec<MediaUrn> = unnamed.iter().map(|node| node_media[*node].clone()).collect();
+            let accepts: Vec<MediaUrn> = free.iter().map(|(_, media)| media.clone()).collect();
+            let pairs = super::resolve::match_sources_to_args(
+                &sources,
+                &accepts,
+                &vec![false; accepts.len()],
+                None,
+                alias,
+                0,
+            )
+            .map_err(|e| match e {
+                MachineAbstractionError::UnmatchedSourceInCapArgs { source_urn, .. } => {
+                    MachineAbstractionError::UnmatchedMachineMember {
+                        position,
+                        alias: alias.clone(),
+                        source_urn,
+                    }
+                }
+                MachineAbstractionError::AmbiguousMachineNotation { .. } => {
+                    MachineAbstractionError::AmbiguousMachineMembers {
+                        position,
+                        alias: alias.clone(),
+                    }
+                }
+                other => other,
+            })?;
+            // The matching answers in types. Where it is unique no two
+            // members and no two inputs it paired hold one type — two that
+            // did would swap — so each pair names one member and one input.
+            let mut placed = vec![false; unnamed.len()];
+            for (accepted, source_urn) in pairs {
+                let (input, _) = free
+                    .iter()
+                    .find(|(name, media)| !bound.contains_key(name) && media.to_string() == accepted.to_string())
+                    .expect("the matching pairs every member with an input it was given");
+                let member = (0..unnamed.len())
+                    .find(|i| !placed[*i] && sources[*i].to_string() == source_urn.to_string())
+                    .expect("the matching pairs every member it was given");
+                placed[member] = true;
+                bound.insert(input.clone(), RawValue::Node(unnamed[member].clone()));
+            }
+        }
+        if let Some((input, _)) = machine.inputs.iter().find(|(name, _)| !bound.contains_key(name)) {
+            return Err(MachineAbstractionError::MachineInputBinding {
+                position,
+                alias: alias.clone(),
+                input: input.clone(),
+                count: 0,
+            }
+            .into());
+        }
+
+        let taken: HashMap<&str, &String> = w
+            .targets
+            .iter()
+            .map(|(name, node)| {
+                (
+                    name.as_deref().expect("every target of a machine step was named above"),
+                    node,
+                )
+            })
+            .collect();
+
+        // The steps, written in.
+        let used = uses.entry(alias.clone()).or_insert(0);
+        *used += 1;
+        let instance = format!("{alias}#{used}");
+        let inside = |node: &str| format!("{instance}/{node}");
+        for (name, media) in &machine.node_media {
+            if machine.input(name).is_none() && !taken.contains_key(name.as_str()) {
+                included_media.insert(inside(name), media.clone());
+            }
+        }
+        for (index, step) in machine.steps.iter().enumerate() {
+            let step_alias = format!("{instance}/{index}");
+            alias_map.insert(step_alias.clone(), (step.cap_urn.clone(), position));
+            let mut included_as = w.included_as.clone();
+            included_as.push(instance.clone());
+            included_as.extend(step.included_as.iter().cloned());
+            written.push(RawWiring {
+                sources: step
+                    .members
+                    .iter()
+                    .map(|(arg, value)| RawMember {
+                        name: Some(arg.clone()),
+                        value: match value {
+                            IncludedValue::Constant(constant) => RawValue::Constant(constant.clone()),
+                            IncludedValue::Node(node) => match bound.get(node) {
+                                Some(given) => given.clone(),
+                                None => RawValue::Node(inside(node)),
+                            },
+                        },
+                    })
+                    .collect(),
+                cap_alias: step_alias,
+                policy: step.policy,
+                targets: step
+                    .targets
+                    .iter()
+                    .filter_map(|(output, node)| match taken.get(node.as_str()) {
+                        Some(taker) => Some((Some(output.clone()), (*taker).clone())),
+                        // An output of the machine that nothing here takes.
+                        None if machine.output(node).is_some() => None,
+                        None => Some((Some(output.clone()), inside(node))),
+                    })
+                    .collect(),
+                position,
+                included_as,
+            });
+        }
+    }
+    Ok(written)
 }
 
 /// Give `node` the URN `urn`, beside any URN it was already given: the two must
@@ -441,9 +827,17 @@ fn give(
 /// wirings: what produces a node and what names it are read first, for every
 /// wiring; only then is each wiring asked for the one unnamed machine input
 /// its main input can type, against what the first two passes left untyped.
+///
+/// A node written in from an included machine comes with the type it held
+/// there (`included_media`), given before anything else. A step that is a
+/// machine (`machines`) gives each node it produces the type of the output
+/// that node takes, and each input of this machine it is given BY NAME the
+/// type of that input; it has no main input to type an unnamed one by.
 fn type_nodes(
     wirings: &[&RawWiring],
     alias_map: &HashMap<String, (CapUrn, usize)>,
+    machines: &HashMap<String, Arc<IncludedMachine>>,
+    included_media: &HashMap<String, MediaUrn>,
     registry: &FabricRegistry,
     strand_index: usize,
 ) -> Result<HashMap<String, MediaUrn>, MachineParseError> {
@@ -473,13 +867,43 @@ fn type_nodes(
     };
 
     let mut node_media: HashMap<String, MediaUrn> = HashMap::new();
+    for node in wirings.iter().flat_map(|w| w.nodes()) {
+        if let Some(urn) = included_media.get(node) {
+            give(&mut node_media, node, urn.clone())?;
+        }
+    }
 
     // What produces a node, and — for a node nothing produces — what names it.
-    let produced: std::collections::HashSet<&String> = wirings
+    let produced: HashSet<&String> = wirings
         .iter()
         .flat_map(|w| w.targets.iter().map(|(_, node)| node))
         .collect();
     for w in wirings {
+        if let Some(machine) = machines.get(&w.cap_alias) {
+            for (name, node) in &w.targets {
+                // `include_machines` named every target, against the outputs.
+                let name = name.as_deref().expect("a machine step's targets are named");
+                let urn = machine.output(name).expect("a machine step's targets name its outputs");
+                give(&mut node_media, node, urn.clone())?;
+            }
+            for member in &w.sources {
+                let (Some(name), RawValue::Node(node)) = (&member.name, &member.value) else {
+                    continue;
+                };
+                let accepts = machine.input(name).ok_or_else(|| {
+                    MachineAbstractionError::UnknownMachineInput {
+                        position: w.position,
+                        alias: w.cap_alias.clone(),
+                        name: name.clone(),
+                        declared: machine.input_names(),
+                    }
+                })?;
+                if !produced.contains(node) {
+                    give(&mut node_media, node, accepts.clone())?;
+                }
+            }
+            continue;
+        }
         let (cap_urn, cap) = cap_of(w)?;
         for (name, node) in &w.targets {
             let urn = match name {
@@ -543,6 +967,9 @@ fn type_nodes(
     // of it is applied: the order of the wirings changes nothing.
     let mut from_main_input: Vec<(String, MediaUrn)> = Vec::new();
     for w in wirings {
+        if machines.contains_key(&w.cap_alias) {
+            continue;
+        }
         let unnamed: Vec<&String> = w
             .sources
             .iter()
@@ -594,6 +1021,30 @@ fn type_nodes(
     }
     for (node, urn) in from_main_input {
         give(&mut node_media, &node, urn)?;
+    }
+
+    // A machine step has no main input: an unnamed member that nothing above
+    // gave a type has none to be matched by.
+    for w in wirings {
+        if !machines.contains_key(&w.cap_alias) {
+            continue;
+        }
+        let untyped: Vec<String> = w
+            .sources
+            .iter()
+            .filter_map(|m| match (&m.name, &m.value) {
+                (None, RawValue::Node(node)) if !node_media.contains_key(node) => Some(node.clone()),
+                _ => None,
+            })
+            .collect();
+        if !untyped.is_empty() {
+            return Err(MachineAbstractionError::UntypedMachineMember {
+                position: w.position,
+                alias: w.cap_alias.clone(),
+                members: untyped,
+            }
+            .into());
+        }
     }
 
     Ok(node_media)
@@ -653,14 +1104,79 @@ fn extract_unresolved_cap_alias_names(input: &str) -> Result<Vec<String>, Machin
 }
 
 /// Async parallel of `parse_machine_with_node_names`.
-///
-/// The cap definitions the notation names are fetched into the registry's
-/// cache first — every header's cap, and every registered cap alias used in
-/// step position — so the synchronous resolver finds them there.
 pub async fn parse_machine_with_node_names_async(
     input: &str,
     registry: &FabricRegistry,
 ) -> Result<(Machine, Vec<StrandNodeNames>), MachineParseError> {
+    parse_machine_with_sources_async(input, registry, &NoMachineSource, None).await
+}
+
+/// Async parallel of `parse_machine_with_sources`.
+///
+/// The cap definitions the notation names are fetched into the registry's
+/// cache first — every header's cap, and every registered cap alias used in
+/// step position, of this machine and of every machine it includes — so the
+/// synchronous resolver finds them there.
+pub async fn parse_machine_with_sources_async(
+    input: &str,
+    registry: &FabricRegistry,
+    source: &dyn MachineSource,
+    id: Option<&str>,
+) -> Result<(Machine, Vec<StrandNodeNames>), MachineParseError> {
+    fetch_named_caps(input, registry).await?;
+    for (alias, reference, notation) in included_notations(input, source, id) {
+        fetch_named_caps(&notation, registry).await.map_err(|error| {
+            MachineAbstractionError::InvalidIncludedMachine {
+                alias,
+                reference,
+                error: Box::new(error),
+            }
+        })?;
+    }
+    parse_machine_with_sources(input, registry, source, id)
+}
+
+/// The notation of every machine `input` includes, directly or through
+/// others, each once, with the header that first named it. What does not
+/// load or does not read is left out: the parse that follows says so, in
+/// its place.
+fn included_notations(
+    input: &str,
+    source: &dyn MachineSource,
+    id: Option<&str>,
+) -> Vec<(String, String, String)> {
+    fn walk(
+        input: &str,
+        source: &dyn MachineSource,
+        id: Option<&str>,
+        seen: &mut HashSet<String>,
+        found: &mut Vec<(String, String, String)>,
+    ) {
+        let Ok(statements) = parse_syntax(input.trim()) else {
+            return;
+        };
+        for statement in statements {
+            let SyntaxStatementKind::MachineHeader { alias, reference } = statement.kind else {
+                continue;
+            };
+            let Ok(loaded) = source.load(&reference.value, id) else {
+                continue;
+            };
+            if seen.insert(loaded.id.clone()) {
+                found.push((alias.value, reference.value, loaded.notation.clone()));
+                walk(&loaded.notation, source, Some(&loaded.id), seen, found);
+            }
+        }
+    }
+    let mut seen: HashSet<String> = id.map(str::to_string).into_iter().collect();
+    let mut found = Vec::new();
+    walk(input, source, id, &mut seen, &mut found);
+    found
+}
+
+/// Fetch into the registry's cache the cap definitions one notation names:
+/// every header's cap, and every registered cap alias used in step position.
+async fn fetch_named_caps(input: &str, registry: &FabricRegistry) -> Result<(), MachineParseError> {
     let cap_urns = extract_header_cap_urns(input)?;
     for urn in &cap_urns {
         registry
@@ -716,7 +1232,7 @@ pub async fn parse_machine_with_node_names_async(
         }
     }
 
-    parse_machine_with_node_names(input, registry)
+    Ok(())
 }
 
 /// Async parallel of `parse_machine`.

@@ -592,7 +592,15 @@ async fn cmd_dag_viz(args: &[String]) -> ! {
             process::exit(1);
         }
     };
-    let plans = match build_plans_from_notation(&notation, registry.clone()).await {
+    let (machines, machine_id) = machines_beside(Some(Path::new(machine_file)));
+    let plans = match capdag::orchestrator::build_plans_from_notation_from(
+        &notation,
+        registry.clone(),
+        &machines,
+        machine_id.as_deref(),
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Validation failed: {}", e);
@@ -931,6 +939,7 @@ async fn cmd_run(args: &[String]) -> ! {
     execute_notation(
         notation,
         machine_file,
+        Some(Path::new(machine_file)),
         &positionals[1..],
         named_inputs,
         selector,
@@ -940,6 +949,24 @@ async fn cmd_run(args: &[String]) -> ! {
         force_overwrite,
     )
     .await
+}
+
+/// Where the machines a machine file includes are read from, and what the
+/// file itself is known by there: a reference in a machine header is a path
+/// relative to the file that wrote it. Notation that came from no file reads
+/// its references relative to the working directory.
+fn machines_beside(machine_file: Option<&Path>) -> (capdag::FileMachineSource, Option<String>) {
+    let working_directory = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("Error reading the working directory: {e}");
+        process::exit(1);
+    });
+    let id = machine_file.map(|path| {
+        capdag::FileMachineSource::id_of(path).unwrap_or_else(|e| {
+            eprintln!("Error reading machine file '{}': {e}", path.display());
+            process::exit(1);
+        })
+    });
+    (capdag::FileMachineSource::new(working_directory), id)
 }
 
 /// How a run ended, least to most severe: the process's exit status is the
@@ -1192,6 +1219,7 @@ enum InputGiven {
 async fn execute_notation(
     notation: String,
     machine_label: &str,
+    machine_file: Option<&Path>,
     input_args: &[String],
     named_inputs: Vec<(String, String)>,
     selector: Option<String>,
@@ -1214,14 +1242,21 @@ async fn execute_notation(
     // Resolve the notation once: what the machine takes and gives, by name.
     // Its plans are built per run, once the run's inputs say which of them
     // are sequences.
-    let resolved =
-        match capdag::orchestrator::ResolvedNotation::resolve(&notation, registry.clone()).await {
-            Ok(resolved) => resolved,
-            Err(e) => {
-                eprintln!("Validation failed: {}", e);
-                process::exit(1);
-            }
-        };
+    let (machines, machine_id) = machines_beside(machine_file);
+    let resolved = match capdag::orchestrator::ResolvedNotation::resolve_from(
+        &notation,
+        registry.clone(),
+        &machines,
+        machine_id.as_deref(),
+    )
+    .await
+    {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Validation failed: {}", e);
+            process::exit(1);
+        }
+    };
     let (inputs, outputs) = match (resolved.inputs(), resolved.outputs()) {
         (Ok(inputs), Ok(outputs)) => (inputs, outputs),
         (Err(e), _) | (_, Err(e)) => {
@@ -2279,6 +2314,8 @@ async fn cmd_plan(args: &[String]) -> ! {
         execute_notation(
             chosen.notation.clone(),
             &format!("plan candidate [{pick}]"),
+            // A planned path is of caps alone: it names no other machine.
+            None,
             &file_strings,
             Vec::new(),
             None,

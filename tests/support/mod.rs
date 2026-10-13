@@ -327,11 +327,32 @@ impl Machines {
         inputs: &[(&str, Given<'_>)],
         arguments: &[(&str, &str, &[u8])],
     ) -> Result<Ran, capdag::ExecutionError> {
+        self.run_from(notation, &capdag::NoMachineSource, inputs, arguments).await
+    }
+
+    /// [`run`](Self::run) for a machine that includes others: its machine
+    /// headers name machines `machines` holds.
+    pub async fn run_including(
+        &self,
+        notation: &str,
+        machines: &dyn capdag::MachineSource,
+        inputs: &[(&str, Given<'_>)],
+    ) -> Result<Ran, capdag::ExecutionError> {
+        self.run_from(notation, machines, inputs, &[]).await
+    }
+
+    async fn run_from(
+        &self,
+        notation: &str,
+        machines: &dyn capdag::MachineSource,
+        inputs: &[(&str, Given<'_>)],
+        arguments: &[(&str, &str, &[u8])],
+    ) -> Result<Ran, capdag::ExecutionError> {
         use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput, ResolvedNotation};
         use std::collections::{HashMap, HashSet};
         use std::sync::Arc;
 
-        let resolved = ResolvedNotation::resolve(notation, self.registry.clone())
+        let resolved = ResolvedNotation::resolve_from(notation, self.registry.clone(), machines, None)
             .await
             .unwrap_or_else(|e| panic!("the notation does not resolve: {e}\n{notation}"));
         assert_eq!(resolved.strand_count(), 1, "these tests run one strand");

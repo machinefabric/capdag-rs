@@ -167,6 +167,115 @@ pub enum MachineAbstractionError {
         members: Vec<String>,
     },
 
+    /// A machine header's reference does not resolve: the host's machine
+    /// source holds no machine under it.
+    #[error("machine header '{alias}' refers to \"{reference}\", which does not resolve: {details}")]
+    UnknownMachineReference {
+        alias: String,
+        reference: String,
+        details: String,
+    },
+
+    /// A machine includes itself, directly or through others. `chain` is
+    /// every machine on the way round, from the first to the one that closes
+    /// the circle.
+    #[error("a machine includes itself: {}", chain.join(" -> "))]
+    CyclicMachineReference { chain: Vec<String> },
+
+    /// A machine named in a header is not itself a valid machine.
+    #[error("machine '{alias}' (\"{reference}\") is not a valid machine: {error}")]
+    InvalidIncludedMachine {
+        alias: String,
+        reference: String,
+        error: Box<MachineParseError>,
+    },
+
+    /// A policy is written on a step that is another machine. It would have
+    /// to mean one thing for every step inside.
+    #[error("statement {position}: '{alias}' is a machine, and a policy is written on it — write it on the steps inside")]
+    PolicyOnMachine { position: usize, alias: String },
+
+    /// A member names an input the machine in step position does not have.
+    #[error("statement {position}: machine '{alias}' has no input named '{name}' (its inputs: {})", declared.join(", "))]
+    UnknownMachineInput {
+        position: usize,
+        alias: String,
+        name: String,
+        declared: Vec<String>,
+    },
+
+    /// A target names an output the machine in step position does not have.
+    #[error("statement {position}: machine '{alias}' has no output named '{name}' (its outputs: {})", declared.join(", "))]
+    UnknownMachineOutput {
+        position: usize,
+        alias: String,
+        name: String,
+        declared: Vec<String>,
+    },
+
+    /// An input of a machine in step position is not bound by exactly one
+    /// member: nothing is given to it, or more than one member is.
+    #[error("statement {position}: input '{input}' of machine '{alias}' is given {count} members — every input of a machine takes exactly one")]
+    MachineInputBinding {
+        position: usize,
+        alias: String,
+        input: String,
+        count: usize,
+    },
+
+    /// Two targets of one wiring take the same output of a machine.
+    #[error("statement {position}: output '{output}' of machine '{alias}' is taken twice in one wiring")]
+    MachineOutputTakenTwice {
+        position: usize,
+        alias: String,
+        output: String,
+    },
+
+    /// An unnamed target of a machine in step position, where the wiring's
+    /// other targets leave more than one output, or none. A machine has no
+    /// main output: an unnamed target takes the one output left.
+    #[error("statement {position}: an unnamed target of machine '{alias}' has {} output(s) left to take ({}) — name it", left.len(), left.join(", "))]
+    UnnamedMachineTarget {
+        position: usize,
+        alias: String,
+        left: Vec<String>,
+    },
+
+    /// An unnamed member of a machine in step position that nothing gives a
+    /// type. A machine has no main input, so its unnamed members are matched
+    /// by type alone, and this one has none to be matched by.
+    #[error("statement {position}: machine '{alias}' is given unnamed members that have no type to be matched by ({}) — name them", members.join(", "))]
+    UntypedMachineMember {
+        position: usize,
+        alias: String,
+        members: Vec<String>,
+    },
+
+    /// An unnamed member of a machine in step position conforms to no input
+    /// left for it.
+    #[error("statement {position}: a member of type '{source_urn}' fits no input left of machine '{alias}'")]
+    UnmatchedMachineMember {
+        position: usize,
+        alias: String,
+        source_urn: String,
+    },
+
+    /// The unnamed members of a machine in step position fit its inputs in
+    /// more than one way.
+    #[error("statement {position}: the unnamed members of machine '{alias}' fit its inputs in more than one way — name them")]
+    AmbiguousMachineMembers { position: usize, alias: String },
+
+    /// A named member's URN does not conform to the type of the machine
+    /// input it names.
+    #[error("statement {position}: input '{name}' of machine '{alias}' holds '{accepts}', and its source is '{source_urn}'")]
+    SourceDoesNotConformToMachineInput {
+        position: usize,
+        alias: String,
+        name: String,
+        accepts: String,
+        source_urn: String,
+    },
+
     /// The wirings that touch a node give it URNs that are not on one
     /// specialization chain.
     #[error("node '{node}' is given media URNs that are not on one specialization chain: '{first}' and '{second}'")]

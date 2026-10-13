@@ -589,6 +589,44 @@ async fn test11011_live_synthetic_foreach_region_end_to_end() {
 }
 
 // =============================================================================
+// Machines in step position
+// =============================================================================
+
+// TEST12815: a machine used as a step of another runs as its own steps, in
+// place: each use is given what was bound to its inputs and gives what its
+// outputs made, and two uses of one machine do not share anything. Here
+// `loud` — words, each in capitals, joined — is run on two inputs, one use
+// named throughout and one taking its only output unnamed, and a step of the
+// including machine is given both results.
+#[tokio::test]
+async fn test12815_a_machine_runs_as_a_step_of_another() {
+    let machines = Machines::new(TAG);
+    let mut library = capdag::MapMachineSource::new();
+    library.insert(
+        "loud",
+        format!("{}[doc -> words -> w][w -> shout -> s][s -> join -> line]", dag_headers()),
+    );
+    let ran = machines
+        .run_including(
+            &format!(
+                "{}[loud machine \"loud\"][(doc=a) -> loud -> (line=x)][(doc=b) -> loud -> y][(x, right=y) -> pair -> p]",
+                dag_headers()
+            ),
+            &library,
+            &[("a", Given::One(b"one two")), ("b", Given::One(b"three"))],
+        )
+        .await
+        .expect("Execution failed");
+    assert_eq!(ran.text("p"), "ONE+TWO|THREE");
+    assert_eq!(
+        ran.plan.nodes.values().filter(|node| node.is_cap()).count(),
+        7,
+        "three steps for each use, and the step that takes both"
+    );
+    assert_eq!(ran.result.verdict, RunVerdict::Completed);
+}
+
+// =============================================================================
 // Scheduling and step policy
 // =============================================================================
 

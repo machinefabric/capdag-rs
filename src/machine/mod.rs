@@ -30,6 +30,7 @@
 
 pub mod error;
 pub mod graph;
+pub mod include;
 pub mod iteration;
 pub mod notation_ast;
 pub mod parser;
@@ -41,6 +42,8 @@ pub mod syntax;
 pub(crate) mod test_fixtures;
 #[cfg(test)]
 mod notation_tests;
+#[cfg(test)]
+mod include_tests;
 
 pub use error::{MachineAbstractionError, MachineParseError, MachineSyntaxError};
 pub use graph::{
@@ -54,9 +57,14 @@ pub use notation_ast::{
     ParsedHeader, ParsedMachineHeader, ParsedMember, ParsedStatement, ParsedTarget, ParsedValue,
     ParsedWiring, SemanticTokenInfo, SemanticTokenType,
 };
+pub use include::{
+    FileMachineSource, LoadedMachine, MachineSource, MachineSourceError, MapMachineSource,
+    NoMachineSource,
+};
 pub use parser::{
     parse_machine, parse_machine_async, parse_machine_with_node_names,
-    parse_machine_with_node_names_async, StrandNodeNames,
+    parse_machine_with_node_names_async, parse_machine_with_sources,
+    parse_machine_with_sources_async, StrandNodeNames,
 };
 pub use resolve::assign_sources_to_anchors;
 pub use serializer::NotationFormat;

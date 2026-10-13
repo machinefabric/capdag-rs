@@ -200,6 +200,13 @@ pub struct MachineEdge {
     /// What the step does when it fails. Part of what the machine is: two
     /// machines that differ in it behave differently.
     pub policy: super::syntax::StepPolicy,
+    /// The machine steps this step was included through, outermost first,
+    /// each as `alias#use`: the alias its header gave the included machine
+    /// and which use of it this is, counted from one in the order written.
+    /// Empty for a step the machine wrote itself. It says where a step of
+    /// the inlined whole came from — a label, like `arg_name`: equivalence
+    /// never reads it, and canonical notation does not write it.
+    pub included_as: Vec<String>,
     pub is_loop: bool,
     /// Stable identity of the cardinality boundary that maps this edge over a
     /// sequence. Present exactly when `is_loop` is true. This is distinct from

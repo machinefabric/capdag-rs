@@ -114,6 +114,10 @@ pub struct PreInternedWiring {
     pub targets: Vec<(Option<String>, NodeId)>,
     /// What the step does when it fails.
     pub policy: StepPolicy,
+    /// The machine steps this step was included through, outermost first;
+    /// empty for a step the machine wrote itself (see
+    /// `MachineEdge::included_as`).
+    pub included_as: Vec<String>,
 }
 
 impl PreInternedWiring {
@@ -231,6 +235,7 @@ pub fn resolve_strand(
                     // A strand step produces its cap's main output.
                     targets: vec![(None, target_id)],
                     policy: StepPolicy::default(),
+                    included_as: Vec::new(),
                 });
 
                 producer_node.insert(step.token_id.clone(), target_id);
@@ -508,7 +513,7 @@ pub fn resolve_pre_interned(
                 &free_is_sequence,
                 // The main input, when no named member bound it.
                 primary_arg_index.and_then(|main| free.iter().position(|arg| *arg == main)),
-                &wiring.cap_urn,
+                &wiring.cap_urn.to_string(),
                 strand_index,
             )?
         };
@@ -664,6 +669,7 @@ pub fn resolve_pre_interned(
             assignment: bindings,
             outputs,
             policy: wiring.policy,
+            included_as: wiring.included_as.clone(),
             is_loop,
         });
     }
@@ -801,6 +807,8 @@ fn check_constant(
 ///    "how many items feed this sequence slot" is a run/wiring fact, never
 ///    authored syntax.
 ///
+/// `step` is what the errors name the step by: its cap URN.
+///
 /// Returns the matched pairs as `(cap_arg_media_urn, source_urn)`,
 /// sorted by `cap_arg_media_urn` (stable: several sources gathered into one
 /// arg keep their source-declaration order, which fixes the gathered
@@ -810,12 +818,12 @@ fn check_constant(
 ///   capacity rules (`UnmatchedSourceInCapArgs`).
 /// - The minimum-cost assignment of the winning phase is not unique
 ///   (`AmbiguousMachineNotation`).
-fn match_sources_to_args(
+pub(crate) fn match_sources_to_args(
     sources: &[MediaUrn],
     args: &[MediaUrn],
     arg_is_sequence: &[bool],
     must_bind: Option<usize>,
-    cap_urn: &CapUrn,
+    step: &str,
     strand_index: usize,
 ) -> Result<Vec<(MediaUrn, MediaUrn)>, MachineAbstractionError> {
     debug_assert_eq!(args.len(), arg_is_sequence.len());
@@ -831,7 +839,7 @@ fn match_sources_to_args(
             if !args.iter().any(|a| source.conforms_to(a).unwrap_or(false)) {
                 return Err(MachineAbstractionError::UnmatchedSourceInCapArgs {
                     strand_index,
-                    cap_urn: cap_urn.to_string(),
+                    cap_urn: step.to_string(),
                     source_urn: source.to_string(),
                 });
             }
@@ -841,7 +849,7 @@ fn match_sources_to_args(
         // unmatched. Treat the first source as unmatched.
         return Err(MachineAbstractionError::UnmatchedSourceInCapArgs {
             strand_index,
-            cap_urn: cap_urn.to_string(),
+            cap_urn: step.to_string(),
             source_urn: sources[0].to_string(),
         });
     }
@@ -869,7 +877,7 @@ fn match_sources_to_args(
         if cost[s_idx].iter().all(|c| c.is_none()) {
             return Err(MachineAbstractionError::UnmatchedSourceInCapArgs {
                 strand_index,
-                cap_urn: cap_urn.to_string(),
+                cap_urn: step.to_string(),
                 source_urn: source.to_string(),
             });
         }
@@ -921,7 +929,7 @@ fn match_sources_to_args(
             if best_assignments.len() != 1 {
                 return Err(MachineAbstractionError::AmbiguousMachineNotation {
                     strand_index,
-                    cap_urn: cap_urn.to_string(),
+                    cap_urn: step.to_string(),
                 });
             }
             return Ok(assignment_to_pairs(&best_assignments[0], sources, args));
@@ -937,7 +945,7 @@ fn match_sources_to_args(
         // first source as the canonical "unmatched" representative.
         return Err(MachineAbstractionError::UnmatchedSourceInCapArgs {
             strand_index,
-            cap_urn: cap_urn.to_string(),
+            cap_urn: step.to_string(),
             source_urn: sources[0].to_string(),
         });
     }
@@ -958,14 +966,14 @@ fn match_sources_to_args(
     if best_cost.is_none() {
         return Err(MachineAbstractionError::UnmatchedSourceInCapArgs {
             strand_index,
-            cap_urn: cap_urn.to_string(),
+            cap_urn: step.to_string(),
             source_urn: sources[0].to_string(),
         });
     }
     if best_assignments.len() != 1 {
         return Err(MachineAbstractionError::AmbiguousMachineNotation {
             strand_index,
-            cap_urn: cap_urn.to_string(),
+            cap_urn: step.to_string(),
         });
     }
     Ok(assignment_to_pairs(&best_assignments[0], sources, args))
@@ -1314,7 +1322,7 @@ mod tests {
         let sources = vec![media("media:document;ext=pdf")];
         let args = vec![media("media:document;ext=pdf")];
         let cap_urn = cap("cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 0)
             .expect("trivial single-source match must succeed");
         assert_eq!(pairs.len(), 1);
         assert!(pairs[0].0.is_equivalent(&media("media:document;ext=pdf")).unwrap());
@@ -1332,7 +1340,7 @@ mod tests {
         let args = vec![media("media:enc=utf-8")];
         let cap_urn =
             cap("cap:in=\"media:enc=utf-8\";make-decision;out=\"media:decision;enc=utf-8\"");
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 0)
             .expect("more-specific source must be matched to its arg");
         assert!(pairs[0].0.is_equivalent(&media("media:enc=utf-8")).unwrap());
         assert!(pairs[0]
@@ -1350,7 +1358,7 @@ mod tests {
         let sources = vec![media("media:numeric")];
         let args = vec![media("media:enc=utf-8")];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 7)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 7)
             .unwrap_err();
         match err {
             MachineAbstractionError::UnmatchedSourceInCapArgs {
@@ -1391,7 +1399,7 @@ mod tests {
             "cap:in=\"media:ext=png;image\";describe;out=\"media:enc=utf-8;image-description\"",
         );
         let pairs =
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0).unwrap();
+            match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 0).unwrap();
         assert_eq!(pairs.len(), 2);
         // Pairs are sorted by cap_arg_media_urn structurally.
         // image;png and enc=utf-8: structural Ord places
@@ -1427,7 +1435,7 @@ mod tests {
         let sources = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
         let args = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 0)
             .unwrap_err();
         assert!(
             matches!(
@@ -1449,7 +1457,7 @@ mod tests {
         ];
         let args = vec![media("media:document;ext=pdf"), media("media:document;ext=pdf")];
         let cap_urn = cap("cap:in=\"media:document;ext=pdf\";t;out=\"media:document;ext=pdf\"");
-        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn, 0)
+        let err = match_sources_to_args(&sources, &args, &vec![false; args.len()], None, &cap_urn.to_string(), 0)
             .unwrap_err();
         assert!(matches!(
             err,
@@ -1880,6 +1888,7 @@ mod tests {
             named_sources: Vec::new(),
             targets: vec![(None, 2)],
             policy: StepPolicy::default(),
+            included_as: Vec::new(),
         }];
 
         let strand = resolve_pre_interned(nodes, &wirings, &registry, 0).unwrap();
@@ -1923,6 +1932,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 1)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
             PreInternedWiring {
                 token_id: "tok-3".parse().unwrap(),
@@ -1932,6 +1942,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 0)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
         ];
 
@@ -1959,7 +1970,7 @@ mod tests {
         let args = vec![media("media:enc=utf-8")];
         let arg_seq = vec![true];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn.to_string(), 0)
             .expect("three sources must gather into the sequence arg");
         assert_eq!(pairs.len(), 3, "one binding per gathered source");
         for (arg, src) in &pairs {
@@ -1981,7 +1992,7 @@ mod tests {
         let arg_seq = vec![false, true];
         let cap_urn =
             cap("cap:in=\"media:enc=utf-8;page\";compose;out=\"media:enc=utf-8;ext=txt\"");
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0)
+        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn.to_string(), 0)
             .expect("unique injection must resolve");
         assert_eq!(pairs.len(), 2);
         // The page source must claim the scalar page arg (injection), NOT be
@@ -2023,7 +2034,7 @@ mod tests {
         ];
         let arg_seq = vec![true, true];
         let cap_urn = cap("cap:in=\"media:enc=utf-8\";t;out=\"media:enc=utf-8\"");
-        let err = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn, 0).unwrap_err();
+        let err = match_sources_to_args(&sources, &args, &arg_seq, None, &cap_urn.to_string(), 0).unwrap_err();
         assert!(
             matches!(
                 err,
@@ -2079,6 +2090,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 2)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
             PreInternedWiring {
                 token_id: "tok-b".parse().unwrap(),
@@ -2091,6 +2103,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 3)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
             PreInternedWiring {
                 token_id: "tok-concat".parse().unwrap(),
@@ -2103,6 +2116,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 4)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
         ];
 
@@ -2185,6 +2199,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 2)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
             PreInternedWiring {
                 token_id: "tok-b".parse().unwrap(),
@@ -2197,6 +2212,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 3)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
             PreInternedWiring {
                 token_id: "tok-concat".parse().unwrap(),
@@ -2209,6 +2225,7 @@ mod tests {
                 named_sources: Vec::new(),
                 targets: vec![(None, 4)],
                 policy: StepPolicy::default(),
+                included_as: Vec::new(),
             },
         ];
 

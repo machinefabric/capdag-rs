@@ -37,7 +37,10 @@ pub use types::{
     ParseOrchestrationError, ResolvedGraph, ResolvedStep, StepInput, StepOutput, StepSource,
 };
 
-pub use machine_plan::{build_plans_from_notation, MachineAnchor, ResolvedNotation, StrandPlan};
+pub use machine_plan::{
+    build_plans_from_notation, build_plans_from_notation_from, MachineAnchor, ResolvedNotation,
+    StrandPlan,
+};
 
 pub use execute_plan::{
     execute_plan, BodyOutcomeFn, EngineRuntime, ForEachBodyCoordinate, ForEachItemSnapshot,

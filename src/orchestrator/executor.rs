@@ -654,8 +654,9 @@ pub(crate) fn decompose_step_chains(
             };
             let src = *produced_by.get(from.as_str())?;
             let producer = &steps[src];
+            // A producer with no other taken output produces one node, its
+            // main output: `from` is that.
             let pipelined = src != i
-                && producer.node == *from
                 && readers[src] == 1
                 && producer.outputs.is_empty()
                 && !keep.contains(&producer.node)

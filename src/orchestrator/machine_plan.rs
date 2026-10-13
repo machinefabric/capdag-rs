@@ -13,7 +13,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::cap::registry::FabricRegistry;
-use crate::machine::{parse_machine_with_node_names_async, Machine, NodeId, StrandNodeNames};
+use crate::machine::{
+    parse_machine_with_sources_async, Machine, MachineSource, NoMachineSource, NodeId,
+    StrandNodeNames,
+};
 use crate::planner::{InputCardinality, MachinePlan, MachinePlanBuilder};
 use crate::MediaUrn;
 
@@ -79,11 +82,26 @@ pub struct ResolvedNotation {
 }
 
 impl ResolvedNotation {
+    /// Resolve notation that includes no other machine: a machine header in
+    /// it is refused, for want of anything to resolve its reference against.
     pub async fn resolve(
         notation: &str,
         registry: Arc<FabricRegistry>,
     ) -> Result<Self, ParseOrchestrationError> {
-        let (machine, names) = parse_machine_with_node_names_async(notation, &registry)
+        Self::resolve_from(notation, registry, &NoMachineSource, None).await
+    }
+
+    /// Resolve notation whose machine headers name machines `source` holds.
+    /// `id` is what the source knows this notation by, when it knows it.
+    /// What is resolved is the inlined whole: the steps of every included
+    /// machine are steps of this one.
+    pub async fn resolve_from(
+        notation: &str,
+        registry: Arc<FabricRegistry>,
+        source: &dyn MachineSource,
+        id: Option<&str>,
+    ) -> Result<Self, ParseOrchestrationError> {
+        let (machine, names) = parse_machine_with_sources_async(notation, &registry, source, id)
             .await
             .map_err(translate_machine_parse_error)?;
         if machine.strands().is_empty() {
@@ -216,7 +234,18 @@ pub async fn build_plans_from_notation(
     notation: &str,
     registry: Arc<FabricRegistry>,
 ) -> Result<Vec<MachinePlan>, ParseOrchestrationError> {
-    let resolved = ResolvedNotation::resolve(notation, registry).await?;
+    build_plans_from_notation_from(notation, registry, &NoMachineSource, None).await
+}
+
+/// [`build_plans_from_notation`], for notation whose machine headers name
+/// machines `source` holds (see [`ResolvedNotation::resolve_from`]).
+pub async fn build_plans_from_notation_from(
+    notation: &str,
+    registry: Arc<FabricRegistry>,
+    source: &dyn MachineSource,
+    id: Option<&str>,
+) -> Result<Vec<MachinePlan>, ParseOrchestrationError> {
+    let resolved = ResolvedNotation::resolve_from(notation, registry, source, id).await?;
     let mut plans = Vec::with_capacity(resolved.strand_count());
     for strand in 0..resolved.strand_count() {
         plans.push(resolved.plan(strand, &HashSet::new()).await?.plan);
@@ -701,6 +730,35 @@ mod tests {
         };
         assert_eq!(item_of(&wired(&plan, &pair, None)), texts, "the main input is the text's item");
         assert_eq!(item_of(&wired(&plan, &pair, Some(PAIR_TITLE))), titles);
+    }
+
+    // TEST12813: a step inside a map may also be given the WHOLE of the
+    // sequence the map iterates, on an arg that takes a sequence: every run
+    // is wired the item on the arg that takes one value, and the sequence
+    // itself on the arg that takes them all. The sequence is iterated once.
+    #[tokio::test]
+    async fn test12813_a_sequence_arg_inside_a_map_is_given_the_whole_sequence() {
+        const TEXTS: &str = r#"cap:in="media:document;ext=pdf";texts;out="media:enc=utf-8;ocr""#;
+        const ALL: &str = "media:all-texts;enc=utf-8";
+        let mut among = with_arg(cap(PAIR, false), "all", ALL, Some("media:enc=utf-8;ocr"));
+        among.args.last_mut().unwrap().is_sequence = true;
+        let reg = registry(vec![cap(TEXTS, true), among]);
+        let notation = format!(
+            "{}{}[doc -> texts -> text][(text, all=text) -> pair -> out]",
+            header("texts", TEXTS),
+            header("pair", PAIR)
+        );
+        let plan = one_plan(&notation, reg).await;
+        let (texts, pair) = (step_of(&plan, TEXTS), step_of(&plan, PAIR));
+        let maps = maps(&plan);
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].1, vec![texts.clone()], "one source, whatever else reads it");
+        assert_eq!(maps[0].2, vec![pair.clone()]);
+        match &plan.nodes[&wired(&plan, &pair, None)].node_type {
+            ExecutionNodeType::Item { source, .. } => assert_eq!(source, &texts),
+            other => panic!("the main input is the item, got {other:?}"),
+        }
+        assert_eq!(wired(&plan, &pair, Some(ALL)), texts, "the sequence arg is wired the sequence itself");
     }
 
     // TEST12764: a sequence produced inside a map and bound to an arg that

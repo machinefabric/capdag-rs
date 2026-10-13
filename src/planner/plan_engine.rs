@@ -149,6 +149,7 @@ impl Assembler {
             // A path step produces its cap's main output.
             targets: vec![(None, target)],
             policy: crate::machine::StepPolicy::default(),
+            included_as: Vec::new(),
         });
         (target, token_id)
     }
