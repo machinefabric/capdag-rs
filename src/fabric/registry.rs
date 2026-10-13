@@ -2163,6 +2163,16 @@ impl FabricRegistry {
                     let _ = fs::remove_file(&path);
                     continue;
                 }
+                // Only a checked definition is written to the cache, so one
+                // that fails the rules was written by a capdag with other
+                // rules: it is dropped like an unparseable one and fetched anew.
+                if let Err(e) =
+                    crate::cap::validation::validate_cap_definition(&cache_entry.definition)
+                {
+                    tracing::warn!("Dropping cap cache file {:?}: {}", path, e);
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
                 let urn = cache_entry.definition.urn_string();
                 // A cached entry whose URN no longer parses is a corrupt cache
                 // entry; surface it as an error rather than silently insert it
@@ -2489,6 +2499,21 @@ async fn fetch_body(
     .await
 }
 
+/// A cap definition as a registry served it: parsed, then held to the
+/// definition rules (`capdag/docs/10-validation-rules.md`).
+///
+/// The publisher holds a definition to the rules before it is served; a
+/// registry is still another program's word, so it is checked on arrival and
+/// never cached or returned unchecked.
+fn checked_cap_definition(body: &[u8], normalized_urn: &str) -> Result<Cap, FabricRegistryError> {
+    let cap: Cap = serde_json::from_slice(body).map_err(|e| {
+        FabricRegistryError::ParseError(format!("Failed to parse cap '{}': {}", normalized_urn, e))
+    })?;
+    crate::cap::validation::validate_cap_definition(&cap)
+        .map_err(|e| FabricRegistryError::ValidationError(e.to_string()))?;
+    Ok(cap)
+}
+
 /// Build the R2 URL for a per-alias object at the given defver. Aliases
 /// are keyed by `sha256(normalized_name)` and are versioned-only (defver
 /// >= 1); there is no v0 flat path.
@@ -2678,9 +2703,7 @@ async fn fetch_one_cap_atomic(
             normalized_urn, defver, status, url
         )));
     }
-    let cap: Cap = serde_json::from_slice(&body).map_err(|e| {
-        FabricRegistryError::ParseError(format!("Failed to parse cap '{}': {}", normalized_urn, e))
-    })?;
+    let cap = checked_cap_definition(&body, normalized_urn)?;
 
     // Walk every media URN referenced by the cap. Empty/wildcard URN
     // (`media:`) is the identity / wildcard sentinel — it has no
@@ -2706,7 +2729,7 @@ async fn fetch_one_cap_atomic(
             }
         }
     }
-    if let Some(out) = &cap.output {
+    if let Some(out) = cap.main_output() {
         push(&mut referenced, &out.media_urn)?;
     }
 
@@ -3162,16 +3185,16 @@ mod alias_tests {
             aliases: vec!["test://cap".to_string()],
             is_abstract: false,
             args: vec![CapArg::new(
-                "media:document;ext=pdf".to_string(),
+                "media:document;ext=pdf".to_string(), "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:document;ext=pdf".to_string(),
                 }],
             )],
-            output: Some(CapOutput::new(
-                "media:enc=utf-8".to_string(),
+            outputs: vec![CapOutput::new(
+                "media:enc=utf-8".to_string(), "output",
                 "out".to_string(),
-            )),
+            )],
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -3789,7 +3812,7 @@ mod parity_port_tests {
             aliases: vec!["test".to_string()],
             is_abstract: false,
             args: Vec::<CapArg>::new(),
-            output: Some(CapOutput::new("media:void".to_string(), "void".to_string())),
+            outputs: vec![CapOutput::new("media:void".to_string(), "output", "void".to_string())],
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -3818,17 +3841,100 @@ mod parity_port_tests {
     // TEST138: Test parsing registry JSON with stdin args verifies stdin media URN extraction
     #[test]
     fn test138_parse_registry_json_with_stdin() {
-        let json = r#"{"urn":"cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:document;ext=pdf","required":true,"sources":[{"stdin":"media:document;ext=pdf"}]}]}"#;
+        let json = r#"{"urn":"cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:document;ext=pdf","name":"input","required":true,"sources":[{"stdin":"media:document;ext=pdf"}]}]}"#;
         let cap: Cap = serde_json::from_str(json).expect("cap parses");
         assert_eq!(cap.title, "Disbind PDF");
         assert!(cap.accepts_stdin());
         assert_eq!(cap.get_stdin_media_urn(), Some("media:document;ext=pdf"));
     }
 
+    // TEST12714: a definition a registry serves is held to the definition rules
+    // before it is cached or returned. One that does not parse is a parse
+    // error; one that parses and breaks a rule is a validation error naming
+    // the cap and the rule.
+    #[test]
+    fn test12714_a_served_definition_is_held_to_the_definition_rules() {
+        let urn = r#"cap:in="media:document;ext=pdf";disbind;out="media:enc=utf-8;page""#;
+        let definition = |args: serde_json::Value, outputs: serde_json::Value| {
+            serde_json::json!({
+                "urn": urn, "aliases": ["disbind"], "title": "Disbind PDF",
+                "args": args, "outputs": outputs,
+            })
+            .to_string()
+        };
+        let main = serde_json::json!({
+            "media_urn": "media:enc=utf-8;file-path", "name": "document", "required": true,
+            "sources": [{"stdin": "media:document;ext=pdf"}],
+        });
+        let page = serde_json::json!({"media_urn": "media:enc=utf-8;page", "name": "pages", "output_description": "Pages"});
+
+        let good = definition(serde_json::json!([main]), serde_json::json!([page]));
+        let cap = checked_cap_definition(good.as_bytes(), urn).expect("a valid definition");
+        assert_eq!(cap.main_output().map(|o| o.get_name()), Some("pages"));
+
+        let err = checked_cap_definition(b"{not json", urn).unwrap_err();
+        assert!(matches!(err, FabricRegistryError::ParseError(_)), "{err:?}");
+
+        // The cap URN says it produces pages, and the definition declares no such output.
+        let no_output = definition(serde_json::json!([main]), serde_json::json!([]));
+        let err = checked_cap_definition(no_output.as_bytes(), urn).unwrap_err();
+        assert!(matches!(err, FabricRegistryError::ValidationError(_)), "{err:?}");
+        let text = err.to_string();
+        assert!(text.contains("RULE21") && text.contains("disbind"), "{text}");
+
+        // The main input is declared under a type that is not the cap's `in=`.
+        let mut wrong = main.clone();
+        wrong["sources"] = serde_json::json!([{"stdin": "media:document"}]);
+        let wrong_input = definition(serde_json::json!([wrong]), serde_json::json!([page]));
+        let err = checked_cap_definition(wrong_input.as_bytes(), urn).unwrap_err();
+        assert!(matches!(err, FabricRegistryError::ValidationError(_)), "{err:?}");
+        assert!(err.to_string().contains("RULE15"), "{err}");
+    }
+
+    // TEST12715: the cache holds only checked definitions, so one on disk that
+    // breaks a rule was written under other rules: loading drops its file and
+    // keeps the rest, and the definition is fetched anew when next asked for.
+    #[test]
+    fn test12715_a_cached_definition_that_breaks_a_rule_is_dropped() {
+        let scratch = tempfile::tempdir().unwrap();
+        let caps_dir = scratch.path().join("caps");
+        let entry = |cap: &Cap| {
+            serde_json::to_string(&CapCacheEntry {
+                definition: cap.clone(),
+                cached_at: 0,
+                ttl_hours: 0,
+            })
+            .unwrap()
+        };
+        let urn = |op: &str| {
+            crate::CapUrn::from_string(&format!(r#"cap:in="media:void";{op};out="media:record""#)).unwrap()
+        };
+        let mut kept = Cap::new(urn("kept"), "Kept".to_string(), vec!["kept".to_string()]);
+        kept.version = 3;
+        kept.add_output(crate::cap::definition::CapOutput::new("media:record", "record", "The record"));
+        // The same shape without the output its URN states (RULE21).
+        let mut stale = Cap::new(urn("stale"), "Stale".to_string(), vec!["stale".to_string()]);
+        stale.version = 3;
+
+        let kept_file = caps_dir.join("aa").join("3.json");
+        let stale_file = caps_dir.join("bb").join("3.json");
+        for (file, cap) in [(&kept_file, &kept), (&stale_file, &stale)] {
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, entry(cap)).unwrap();
+        }
+
+        let loaded = FabricRegistry::load_all_cached_caps(&caps_dir).unwrap();
+        let urns: Vec<&String> = loaded.keys().collect();
+        assert_eq!(loaded.len(), 1, "only the valid definition is loaded: {urns:?}");
+        assert!(loaded.values().all(|cap| cap.title == "Kept"));
+        assert!(kept_file.is_file());
+        assert!(!stale_file.exists(), "the stale entry's file is removed");
+    }
+
     // TEST6382: Test parsing registry JSON without stdin args verifies cap structure
     #[test]
     fn test6382_parse_registry_json_no_stdin() {
-        let json = r#"{"urn":"cap:in=\"media:listing-id\";use-grinder;out=\"media:id;task\"","aliases": ["grinder_task"],"title":"Create Grinder Tool Task","args":[{"media_urn":"media:listing-id","required":true,"sources":[{"cli_flag":"--listing-id"}]}]}"#;
+        let json = r#"{"urn":"cap:in=\"media:listing-id\";use-grinder;out=\"media:id;task\"","aliases": ["grinder_task"],"title":"Create Grinder Tool Task","args":[{"media_urn":"media:listing-id","name":"opt1","required":true,"sources":[{"cli_flag":"--listing-id"}]}]}"#;
         let cap: Cap = serde_json::from_str(json).expect("cap parses");
         assert_eq!(cap.title, "Create Grinder Tool Task");
         assert_eq!(cap.primary_alias(), "grinder_task");

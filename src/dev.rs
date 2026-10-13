@@ -59,6 +59,11 @@ pub enum DevError {
         entry: PathBuf,
         source: String,
     },
+    /// The manifest parsed, and a cap definition in it breaks a definition rule.
+    ManifestInvalid {
+        entry: PathBuf,
+        reason: String,
+    },
     NotDev {
         registry_url: String,
     },
@@ -126,6 +131,11 @@ impl std::fmt::Display for DevError {
             DevError::ManifestParse { entry, source } => write!(
                 f,
                 "the cartridge entry '{}' printed a manifest capdag could not parse: {source}",
+                entry.display()
+            ),
+            DevError::ManifestInvalid { entry, reason } => write!(
+                f,
+                "the cartridge entry '{}' printed a manifest with an invalid cap definition: {reason}",
                 entry.display()
             ),
             DevError::NotDev { registry_url } => write!(
@@ -319,9 +329,16 @@ pub fn read_entry_manifest(entry: &Path) -> Result<CapManifest, DevError> {
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
-    serde_json::from_slice::<CapManifest>(&output.stdout).map_err(|e| DevError::ManifestParse {
-        entry: entry.to_path_buf(),
-        source: e.to_string(),
+    use crate::bifaci::manifest::ManifestLoadError;
+    CapManifest::from_advertised(&output.stdout).map_err(|e| match e {
+        ManifestLoadError::Unparseable(source) => DevError::ManifestParse {
+            entry: entry.to_path_buf(),
+            source,
+        },
+        ManifestLoadError::InvalidDefinition(reason) => DevError::ManifestInvalid {
+            entry: entry.to_path_buf(),
+            reason,
+        },
     })
 }
 
@@ -801,11 +818,37 @@ mod tests {
     /// testing a path no real cartridge takes.
     #[cfg(unix)]
     fn write_stub_entry(dir: &Path, name: &str, alias: &str, urn: &str) -> PathBuf {
-        // The cap URN quotes its media specs; escape those quotes for JSON.
-        let urn_json = urn.replace('"', "\\\"");
-        let manifest = format!(
-            r#"{{"name":"{name}","version":"0.1.0","channel":"nightly","registry_url":null,"description":"stub","cap_groups":[{{"name":"default","caps":[{{"urn":"cap:effect=none","title":"Identity","aliases":["identity"]}},{{"urn":"{urn_json}","title":"{name}","aliases":["{alias}"]}}]}}]}}"#
-        );
+        // A complete definition: the argument that receives the cap's `in=`
+        // and the output its `out=` states, as the definition rules require.
+        let cap_urn = CapUrn::from_string(urn).expect("test passes a valid cap URN");
+        let (in_spec, out_spec) = (cap_urn.in_spec().to_string(), cap_urn.out_spec().to_string());
+        let mut cap = Cap::new(cap_urn, name.to_string(), vec![alias.to_string()]);
+        cap.add_arg(crate::cap::definition::CapArg::new(
+            in_spec.clone(), "input",
+            true,
+            vec![crate::cap::definition::ArgSource::Stdin { stdin: in_spec }],
+        ));
+        cap.add_output(crate::cap::definition::CapOutput::new(out_spec, "output", "The output"));
+        write_stub_entry_with(dir, name, cap)
+    }
+
+    /// The same stub entry, printing a manifest that declares identity and
+    /// `cap` exactly as given — complete or not.
+    #[cfg(unix)]
+    fn write_stub_entry_with(dir: &Path, name: &str, cap: Cap) -> PathBuf {
+        let manifest = serde_json::to_string(&CapManifest::new(
+            name.to_string(),
+            "0.1.0".to_string(),
+            crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
+            None,
+            "stub".to_string(),
+            vec![crate::CapGroup {
+                name: "default".to_string(),
+                caps: vec![crate::standard::caps::identity_cap(), cap],
+                adapter_urns: Vec::new(),
+            }],
+        ))
+        .unwrap();
         // The manifest as a Python string literal. It is JSON, so the only
         // characters needing escapes are the quote and the backslash, and
         // escaping both is what makes this a literal rather than a heredoc
@@ -866,6 +909,35 @@ mod tests {
         assert!(cap.get_aliases().iter().any(|a| a == "greet"));
         // An alias no dev cartridge advertises resolves to nothing.
         assert!(find_dev_cap_by_alias(&user_dir, "nope").unwrap().is_none());
+    }
+
+    // TEST12716: a manifest a cartridge entry prints is held to the definition
+    // rules when it is read. One that parses and declares a cap breaking a rule
+    // is refused as an invalid manifest, naming the entry, the cap and the
+    // rule — not reported as unparseable, and never staged.
+    #[cfg(unix)]
+    #[test]
+    fn test12716_an_entry_manifest_with_an_invalid_definition_is_refused() {
+        let root = temp_root("invalid-definition");
+        let project = root.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        // `out=` states a greeting and the definition declares no output.
+        let urn = CapUrn::from_string("cap:greet;in=\"media:void\";out=\"media:enc=utf-8;greeting\"")
+            .unwrap();
+        let bare = Cap::new(urn, "Greeter".to_string(), vec!["greet".to_string()]);
+        write_stub_entry_with(&project, "greeter", bare);
+
+        let entry = project_entry(&project).unwrap();
+        let err = read_entry_manifest(&entry).expect_err("an invalid definition must be refused");
+        match &err {
+            DevError::ManifestInvalid { entry: named, reason } => {
+                assert_eq!(named, &entry);
+                assert!(reason.contains("RULE21") && reason.contains("greet"), "{reason}");
+            }
+            other => panic!("expected ManifestInvalid, got {other}"),
+        }
+        let text = err.to_string();
+        assert!(text.contains("invalid cap definition") && text.contains("RULE21"), "{text}");
     }
 
     // TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null

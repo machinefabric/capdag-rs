@@ -1676,9 +1676,9 @@ mod tests {
             metadata: Default::default(),
             aliases: vec!["test".to_string()],
             is_abstract: false,
-            output: None,
+            outputs: Vec::new(),
             args: vec![CapArg::new(
-                in_spec.to_string(),
+                in_spec.to_string(), "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: in_spec.to_string(),
@@ -1698,7 +1698,7 @@ mod tests {
         use crate::cap::definition::CapOutput;
 
         let mut cap = make_test_cap(in_spec, out_spec, op, title);
-        cap.output = Some(CapOutput::new(out_spec.to_string(), title.to_string()));
+        cap.outputs = vec![CapOutput::new(out_spec.to_string(), "output", title.to_string())];
         cap
     }
 

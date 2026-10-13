@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            if let Some(output) = &cap.output {
+            if let Some(output) = cap.main_output() {
                 println!(
                     "  Output: {} - {}",
                     output.media_urn, output.output_description

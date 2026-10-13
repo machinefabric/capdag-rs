@@ -146,7 +146,7 @@ pub async fn probe_cartridge_cap_groups(path: &Path) -> anyhow::Result<Vec<CapGr
         warn!(path = %path.display(), error = %e, "probe_cartridge_cap_groups: start_kill failed (process may have already exited)");
     }
 
-    let manifest: CapManifest = serde_json::from_slice(&result.manifest).map_err(|e| {
+    let manifest = CapManifest::from_advertised(&result.manifest).map_err(|e| {
         let preview = String::from_utf8_lossy(&result.manifest[..result.manifest.len().min(500)]);
         anyhow::anyhow!("cartridge {:?} invalid manifest ({}): {}", path, e, preview)
     })?;

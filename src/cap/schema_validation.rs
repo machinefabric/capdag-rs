@@ -259,7 +259,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:fmt=json;record;user-data",
+            "media:fmt=json;record;user-data", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -302,7 +302,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:fmt=json;record;user-data",
+            "media:fmt=json;record;user-data", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -345,7 +345,7 @@ mod tests {
             extensions: Vec::new(),
         });
 
-        let output = CapOutput::new("media:fmt=json;query-result;record", "Query result");
+        let output = CapOutput::new("media:fmt=json;query-result;record", "output", "Query result");
 
         let valid_value = json!({"result": "success", "timestamp": "2023-01-01T00:00:00Z"});
         assert!(validator
@@ -379,7 +379,7 @@ mod tests {
 
         // Argument using built-in spec ID (should resolve from registry, no schema)
         let arg = CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -400,7 +400,7 @@ mod tests {
 
         // Argument with unknown media URN - not in media_defs and not in registry
         let arg = CapArg::new(
-            "media:completely-unknown-urn-that-does-not-exist",
+            "media:completely-unknown-urn-that-does-not-exist", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -471,7 +471,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:user-data;enc=utf-8;record",
+            "media:user-data;enc=utf-8;record", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );

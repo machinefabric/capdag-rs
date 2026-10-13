@@ -125,7 +125,7 @@ fn render_option_line(arg: &CapArg) -> String {
 /// - **Input** — the MAIN input (the arg whose `Stdin` source URN is the cap
 ///   URN's `in=` spec, by tagged-URN equivalence — see
 ///   [`CapArg::is_main_input`]): how the cap is fed, via piped stdin or input
-///   file path(s). Validation RULE11 guarantees every non-void cap declares it.
+///   file path(s). Validation RULE15 guarantees every non-void cap declares it.
 /// - **Required options** — non-main args that are required and defaultless:
 ///   these MUST be supplied on every invocation.
 /// - **Options** — the remaining non-main args, with their default values.
@@ -201,15 +201,21 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
         }
     }
 
-    if let Some(output) = &cap.output {
+    // The main output first, as the one a piped invocation writes; then any
+    // others, by the name a machine takes them with.
+    let main = cap.main_output();
+    for output in main.into_iter().chain(
+        cap.get_outputs()
+            .iter()
+            .filter(|output| main.map_or(true, |m| !std::ptr::eq(*output, m))),
+    ) {
+        let is_main = main.is_some_and(|m| std::ptr::eq(output, m));
         out.push_str(&format!(
-            "\nOutput: {}{}\n",
+            "\nOutput{}: {}{}{}\n",
+            if is_main { String::new() } else { format!(" `{}`", output.name) },
             output.media_urn,
-            if output.is_sequence {
-                " [sequence]"
-            } else {
-                ""
-            }
+            if output.is_sequence { " [sequence]" } else { "" },
+            if output.optional { " [may not fire]" } else { "" },
         ));
     }
 
@@ -251,7 +257,7 @@ pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
             ))
         }
     }
-    if cap.output.is_none() {
+    if cap.main_output().is_none() {
         return Err(format!(
             "cap {} declares no output — nothing for the CLI to emit.",
             cap.urn
@@ -482,12 +488,15 @@ mod tests {
 
     fn arg(
         media_urn: &str,
+        name: &str,
         required: bool,
         sources: Vec<ArgSource>,
         default: Option<serde_json::Value>,
     ) -> CapArg {
         CapArg {
             media_urn: media_urn.to_string(),
+            name: name.to_string(),
+            accepts: None,
             required,
             is_sequence: false,
             streaming: false,
@@ -507,6 +516,7 @@ mod tests {
         cap.args = vec![
             arg(
                 "media:document;ext=pdf",
+                "document",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:document;ext=pdf".to_string(),
@@ -515,6 +525,7 @@ mod tests {
             ),
             arg(
                 "media:enc=utf-8;model-spec",
+                "model-spec",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--model-spec".to_string(),
@@ -523,6 +534,7 @@ mod tests {
             ),
             arg(
                 "media:budget;numeric",
+                "budget",
                 false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--budget".to_string(),
@@ -531,18 +543,22 @@ mod tests {
             ),
             arg(
                 "media:criterion;enc=utf-8",
+                "criterion",
                 false,
                 vec![ArgSource::Position { position: 0 }],
                 None,
             ),
         ];
-        cap.output = Some(CapOutput {
+        cap.outputs = vec![CapOutput {
             media_urn: "media:enc=utf-8;summary".to_string(),
+            name: "output".to_string(),
+            optional: false,
+            carries: None,
             output_description: String::new(),
             is_sequence: false,
             streaming: false,
             metadata: None,
-        });
+        }];
         cap
     }
 
@@ -568,7 +584,7 @@ mod tests {
         assert!(err.contains("no piped (stdin) input"), "{err}");
 
         let mut no_output = test_cap();
-        no_output.output = None;
+        no_output.outputs.clear();
         let err = synthesize_single_cap_notation(&no_output).unwrap_err();
         assert!(err.contains("declares no output"), "{err}");
     }

@@ -92,7 +92,7 @@ mod tests {
         let cap_urn = CapUrn::from_string(urn).unwrap();
         let in_spec = cap_urn.in_spec().to_string();
         let out_spec = cap_urn.out_spec().to_string();
-        let mut output = CapOutput::new(out_spec, "out".to_string());
+        let mut output = CapOutput::new(out_spec, "output", "out".to_string());
         output.is_sequence = output_is_sequence;
         Cap {
             urn: cap_urn,
@@ -104,11 +104,11 @@ mod tests {
             aliases: vec!["test".to_string()],
             is_abstract: false,
             args: vec![CapArg::new(
-                in_spec.clone(),
+                in_spec.clone(), "input",
                 true,
                 vec![ArgSource::Stdin { stdin: in_spec }],
             )],
-            output: Some(output),
+            outputs: vec![output],
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -359,7 +359,7 @@ mod tests {
             r#"cap:in="media:document;ext=pdf";render;out="media:ext=png;image""#,
             true, // sequence of page images
         );
-        render.output.as_mut().unwrap().is_sequence = true;
+        render.outputs[0].is_sequence = true;
         let upscale = cap(
             r#"cap:in="media:ext=png;image";upscale;out="media:ext=png;image;upscaled""#,
             false,

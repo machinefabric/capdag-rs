@@ -1889,7 +1889,7 @@ async fn producer_is_sequence(plan: &MachinePlan, registry: &FabricRegistry, nod
     match plan.nodes.get(node).map(|n| &n.node_type) {
         Some(ExecutionNodeType::Cap { cap_urn, .. }) => registry
             .get_cached_cap(cap_urn)
-            .and_then(|c| c.output.as_ref().map(|o| o.is_sequence))
+            .and_then(|c| c.main_output().map(|o| o.is_sequence))
             .unwrap_or(false),
         Some(ExecutionNodeType::InputSlot { cardinality, .. }) => {
             matches!(cardinality, InputCardinality::Sequence)
@@ -1929,7 +1929,7 @@ mod tests {
     fn test_cap(urn: &str, output_is_sequence: bool) -> Cap {
         let cap_urn = CapUrn::from_string(urn).expect("valid test cap URN");
         let input = cap_urn.in_spec().to_string();
-        let mut output = CapOutput::new(cap_urn.out_spec().to_string(), "output".to_string());
+        let mut output = CapOutput::new(cap_urn.out_spec().to_string(), "output", "output".to_string());
         output.is_sequence = output_is_sequence;
         Cap {
             urn: cap_urn,
@@ -1941,11 +1941,11 @@ mod tests {
             aliases: vec!["test".to_string()],
             is_abstract: false,
             args: vec![CapArg::new(
-                input.clone(),
+                input.clone(), "input",
                 true,
                 vec![ArgSource::Stdin { stdin: input }],
             )],
-            output: Some(output),
+            outputs: vec![output],
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),

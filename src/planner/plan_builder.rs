@@ -1501,7 +1501,7 @@ mod tests {
         let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
         cap.args = vec![
             CapArg::with_full_definition(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input", None,
             true,
             false,
             false,
@@ -1513,7 +1513,7 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-            "media:enc=utf-8;model-spec",
+            "media:enc=utf-8;model-spec", "model-spec", None,
             true,
             false,
             false,
@@ -1525,7 +1525,7 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-            "media:budget;numeric",
+            "media:budget;numeric", "budget", None,
             false,
             false,
             false,
@@ -1537,7 +1537,7 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-            "media:numeric;temperature",
+            "media:numeric;temperature", "temperature", None,
             false,
             false,
             false,
@@ -1686,7 +1686,7 @@ mod tests {
         let mut cap = Cap::new(urn, "Rewrite".to_string(), vec!["rewrite".to_string()]);
         cap.args = vec![
             CapArg::with_full_definition(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input", None,
             true,
             false,
             false,
@@ -1698,7 +1698,7 @@ mod tests {
                 None,
             ),
             CapArg::with_full_definition(
-            "media:numeric;temperature",
+            "media:numeric;temperature", "temperature", None,
             false,
             false,
             false,

@@ -731,11 +731,9 @@ impl CartridgeManager {
             .await
             .map_err(|e| ExecutionError::HostError(format!("Handshake failed: {:?}", e)))?;
 
-        let manifest: CapManifest = serde_json::from_slice(&result.manifest)
-            .map_err(|e| ExecutionError::HostError(format!("Bad manifest: {}", e)))?;
-
         let _ = child.kill().await;
-        Ok(manifest)
+        CapManifest::from_advertised(&result.manifest)
+            .map_err(|e| ExecutionError::HostError(format!("Bad manifest: {}", e)))
     }
 
     /// Resolve all cap URNs from the graph to unique (binary_path, cap_groups) pairs.

@@ -84,11 +84,11 @@ fn build_testcartridge_cap(urn_str: &str) -> Cap {
         aliases: vec!["testcartridge".to_string()],
         is_abstract: false,
         args: vec![CapArg::new(
-            in_spec.clone(),
+            in_spec.clone(), "input",
             true,
             vec![ArgSource::Stdin { stdin: in_spec }],
         )],
-        output: Some(CapOutput::new(out_spec, "testcartridge output".to_string())),
+        outputs: vec![CapOutput::new(out_spec, "output", "testcartridge output".to_string())],
         metadata_json: None,
         registered_by: None,
         // Empty model-related fields — testcartridge has no model
@@ -120,24 +120,24 @@ fn build_combine_cap() -> Cap {
         is_abstract: false,
         args: vec![
             CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:enc=utf-8;node2".to_string(),
                 }],
             ),
             CapArg::new(
-                "media:enc=utf-8;node3",
+                "media:enc=utf-8;node3", "second-input",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--second-input".to_string(),
                 }],
             ),
         ],
-        output: Some(CapOutput::new(
-            "media:enc=utf-8;combined".to_string(),
+        outputs: vec![CapOutput::new(
+            "media:enc=utf-8;combined".to_string(), "output",
             "combined output".to_string(),
-        )),
+        )],
         metadata_json: None,
         registered_by: None,
         supported_model_types: Vec::new(),

@@ -609,7 +609,7 @@ impl OutputValidator {
         let cap_urn = cap.urn_string();
 
         let output_def = cap
-            .get_output()
+            .main_output()
             .ok_or_else(|| ValidationError::InvalidCapSchema {
                 cap_urn: cap_urn.clone(),
                 issue: "No output definition specified".to_string(),
@@ -875,7 +875,7 @@ impl CapValidator {
                 })?;
         }
 
-        if let Some(output) = cap.get_output() {
+        if let Some(output) = cap.main_output() {
             resolve_media_urn(&output.media_urn, registry)
                 .await
                 .map_err(|e| ValidationError::InvalidMediaDef {
@@ -892,12 +892,144 @@ impl CapValidator {
 /// Reserved CLI flags that cannot be used
 pub const RESERVED_CLI_FLAGS: &[&str] = &["manifest", "--help", "--version", "-v", "-h"];
 
-/// Validate cap args against the 12 validation rules for the new args format
+/// Whether `name` may label an argument or an output (RULE17, RULE19): the
+/// lexical form of a machine-notation alias, and not one of the words the
+/// notation reads as a constant.
+pub fn is_valid_definition_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && !matches!(name, "true" | "false" | "null")
+}
+
+/// Validate a cap definition: its arguments ([`validate_cap_args`]) and its
+/// outputs ([`validate_cap_outputs`]). The rules are numbered as in
+/// `capdag/docs/10-validation-rules.md`; a number names one rule.
+pub fn validate_cap_definition(cap: &Cap) -> Result<(), ValidationError> {
+    validate_cap_args(cap)?;
+    validate_cap_outputs(cap)
+}
+
+/// Validate a cap's outputs.
+///
+/// # Validation Rules
+/// - RULE19: Every output has a well-formed name, unique among the cap's outputs
+/// - RULE20: No duplicate output media_urns
+/// - RULE21: `out=media:void` declares no outputs; otherwise exactly one
+///   output's media_urn is equivalent to `out=` (the main output)
+/// - RULE22: `carries = "input"` only on a non-main output of a cap that takes an input
+pub fn validate_cap_outputs(cap: &Cap) -> Result<(), ValidationError> {
+    let cap_urn = cap.urn_string();
+    let schema = |issue: String| ValidationError::InvalidCapSchema {
+        cap_urn: cap_urn.clone(),
+        issue,
+    };
+    let void_media = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
+        .expect("MEDIA_VOID is a valid MediaUrn");
+    let out_media = cap
+        .urn
+        .out_media_urn()
+        .map_err(|e| schema(format!("RULE21: Failed to parse out= spec: {}", e)))?;
+    let in_media = cap
+        .urn
+        .in_media_urn()
+        .map_err(|e| schema(format!("RULE22: Failed to parse in= spec: {}", e)))?;
+    let out_is_void = out_media.is_equivalent(&void_media).unwrap_or(false);
+    let in_is_void = in_media.is_equivalent(&void_media).unwrap_or(false);
+
+    // RULE19: names
+    let mut names: Vec<(&str, &str)> = Vec::new();
+    for output in &cap.outputs {
+        if output.name.is_empty() {
+            return Err(schema(format!("RULE19: Output '{}' has no name", output.media_urn)));
+        }
+        if !is_valid_definition_name(&output.name) {
+            return Err(schema(format!(
+                "RULE19: Output name '{}' is not a valid name",
+                output.name
+            )));
+        }
+        if let Some((_, other)) = names.iter().find(|(name, _)| *name == output.name) {
+            return Err(schema(format!(
+                "RULE19: Outputs '{}' and '{}' share the name '{}'",
+                other, output.media_urn, output.name
+            )));
+        }
+        names.push((&output.name, &output.media_urn));
+    }
+
+    // RULE20: identities, compared as media URNs (tag order is not identity)
+    let mut identities: Vec<crate::MediaUrn> = Vec::new();
+    for output in &cap.outputs {
+        let urn = crate::MediaUrn::from_string(&output.media_urn).map_err(|e| {
+            schema(format!(
+                "RULE20: Output media_urn '{}' is not a media URN: {}",
+                output.media_urn, e
+            ))
+        })?;
+        if identities.iter().any(|seen| seen.is_equivalent(&urn).unwrap_or(false)) {
+            return Err(schema(format!(
+                "RULE20: Duplicate output media_urn '{}'",
+                output.media_urn
+            )));
+        }
+        identities.push(urn);
+    }
+
+    // RULE21: the main output
+    if out_is_void {
+        if !cap.outputs.is_empty() {
+            return Err(schema(format!(
+                "RULE21: out= is 'media:void' but {} output(s) are declared",
+                cap.outputs.len()
+            )));
+        }
+        return Ok(());
+    }
+    let main: Vec<usize> = identities
+        .iter()
+        .enumerate()
+        .filter(|(_, urn)| urn.is_equivalent(&out_media).unwrap_or(false))
+        .map(|(index, _)| index)
+        .collect();
+    if main.len() != 1 {
+        return Err(schema(format!(
+            "RULE21: out= is '{}' but {} outputs are equivalent to it; exactly one must be",
+            cap.urn.out_spec(),
+            main.len()
+        )));
+    }
+
+    // RULE22: what an output carries
+    for (index, output) in cap.outputs.iter().enumerate() {
+        if output.carries.is_none() {
+            continue;
+        }
+        if index == main[0] {
+            return Err(schema(format!(
+                "RULE22: The main output '{}' declares carries",
+                output.media_urn
+            )));
+        }
+        if in_is_void {
+            return Err(schema(format!(
+                "RULE22: Output '{}' carries the input but the cap takes none",
+                output.media_urn
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Validate cap args against the argument rules
 ///
 /// # Validation Rules
 /// - RULE1: No duplicate media_urns
 /// - RULE2: sources must not be null or empty
-/// - RULE3: If multiple args have stdin source, stdin media_urns must be identical
+/// - RULE3: At most one arg declares a stdin source
 /// - RULE4: No arg may specify same source type more than once
 /// - RULE5: No two args may have same position
 /// - RULE6: Positions must be sequential (0-based, no gaps when aggregated)
@@ -906,8 +1038,11 @@ pub const RESERVED_CLI_FLAGS: &[&str] = &["manifest", "--help", "--version", "-v
 /// - RULE9: No two args may have same cli_flag
 /// - RULE10: Reserved cli_flags cannot be used
 /// - RULE11: cli_flag used verbatim as specified (enforced by design)
-/// - RULE12: media_urn is the key, no name field (enforced by CapArg structure)
+/// - RULE12: media_urn is the key; a name is a label (enforced by what bindings key on)
 /// - RULE14: Only the main input argument may declare streaming=true
+/// - RULE15: The stdin argument's URN is `in=`; `in=media:void` has none
+/// - RULE17: Every arg has a well-formed name, unique among the cap's args
+/// - RULE18: `accepts` never beside a stdin source
 pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
     let cap_urn = cap.urn_string();
     let args = cap.get_args();
@@ -995,32 +1130,72 @@ pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
         }
     }
 
-    // RULE3: If multiple args have stdin source, stdin media_urns must be identical
-    if stdin_urns.len() > 1 {
-        let first_stdin = &stdin_urns[0];
-        for stdin in &stdin_urns[1..] {
-            if stdin != first_stdin {
-                return Err(ValidationError::InvalidCapSchema {
-                    cap_urn,
-                    issue: format!(
-                        "RULE3: Multiple args have different stdin media_urns: '{}' vs '{}'",
-                        first_stdin, stdin
-                    ),
-                });
-            }
+    // RULE3: At most one arg declares a stdin source. `stdin` is a command
+    // line's one piped input, and the arg that declares it is the main input.
+    let stdin_args: Vec<&str> = args
+        .iter()
+        .filter(|arg| arg.sources.iter().any(|s| matches!(s, ArgSource::Stdin { .. })))
+        .map(|arg| arg.media_urn.as_str())
+        .collect();
+    if stdin_args.len() > 1 {
+        return Err(ValidationError::InvalidCapSchema {
+            cap_urn,
+            issue: format!(
+                "RULE3: Arguments '{}' and '{}' both declare a stdin source; a cap has one main input",
+                stdin_args[0], stdin_args[1]
+            ),
+        });
+    }
+
+    // RULE17: names
+    let mut names: Vec<(&str, &str)> = Vec::new();
+    for arg in args {
+        if arg.name.is_empty() {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!("RULE17: Argument '{}' has no name", arg.media_urn),
+            });
+        }
+        if !is_valid_definition_name(&arg.name) {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!("RULE17: Argument name '{}' is not a valid name", arg.name),
+            });
+        }
+        if let Some((_, other)) = names.iter().find(|(name, _)| *name == arg.name) {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!(
+                    "RULE17: Arguments '{}' and '{}' share the name '{}'",
+                    other, arg.media_urn, arg.name
+                ),
+            });
+        }
+        names.push((&arg.name, &arg.media_urn));
+    }
+
+    // RULE18: an arg says what it accepts in one place.
+    for arg in args {
+        if arg.accepts.is_some() && arg.sources.iter().any(|s| matches!(s, ArgSource::Stdin { .. })) {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!(
+                    "RULE18: Argument '{}' declares both a stdin source and accepts",
+                    arg.media_urn
+                ),
+            });
         }
     }
 
-    // RULE11: Stdin source consistency with in= spec.
-    // If in= is media:void, no args may have stdin sources (the cap takes no data-flow input).
-    // If in= is anything else, at least one arg must have a stdin source (the cap's declared
-    // data-flow input must be receivable).
+    // RULE15: The main input matches in=.
+    // If in= is media:void, no arg may have a stdin source (the cap takes no data-flow input).
+    // Otherwise exactly one does (RULE3 caps it at one), and its URN is in=.
     let in_media = cap
         .urn
         .in_media_urn()
         .map_err(|e| ValidationError::InvalidCapSchema {
             cap_urn: cap_urn.clone(),
-            issue: format!("RULE11: Failed to parse in= spec: {}", e),
+            issue: format!("RULE15: Failed to parse in= spec: {}", e),
         })?;
     let void_media = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
         .expect("MEDIA_VOID is a valid MediaUrn");
@@ -1030,19 +1205,28 @@ pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
         return Err(ValidationError::InvalidCapSchema {
             cap_urn,
             issue: format!(
-                "RULE11: Cap has in=media:void but {} arg(s) declare stdin sources — void-input caps must not accept stdin",
+                "RULE15: in= is 'media:void' but {} arg(s) declare a stdin source",
                 stdin_urns.len()
             ),
         });
     }
-    if !in_is_void && stdin_urns.is_empty() {
-        return Err(ValidationError::InvalidCapSchema {
-            cap_urn,
-            issue: format!(
-                "RULE11: Cap has in='{}' but no args declare a stdin source — the main input is the value piped in on stdin, so at least one arg must accept stdin",
-                cap.urn.in_spec()
-            ),
+    if !in_is_void {
+        // The stdin arg IS the main input, so its URN is `in=` — compared as
+        // tagged URNs, never as strings.
+        let matches_in = stdin_urns.iter().any(|stdin| {
+            crate::MediaUrn::from_string(stdin)
+                .map(|urn| urn.is_equivalent(&in_media).unwrap_or(false))
+                .unwrap_or(false)
         });
+        if !matches_in {
+            return Err(ValidationError::InvalidCapSchema {
+                cap_urn,
+                issue: format!(
+                    "RULE15: in= is '{}' but no arg declares a stdin source equivalent to it",
+                    cap.urn.in_spec()
+                ),
+            });
+        }
     }
 
     // RULE14: Only the main input may stream. `streaming: true` declares that an
@@ -1248,7 +1432,7 @@ mod tests {
         );
 
         let arg = CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -1276,7 +1460,7 @@ mod tests {
         );
 
         let arg = CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -1326,7 +1510,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            MEDIA_INTEGER,
+            MEDIA_INTEGER, "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -1382,12 +1566,12 @@ mod tests {
     fn test578_rule1_duplicate_media_urns() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "arg1",
                 true,
                 vec![ArgSource::Position { position: 1 }],
             ),
@@ -1402,7 +1586,7 @@ mod tests {
     #[test]
     fn test579_rule2_empty_sources() {
         let cap = make_test_cap_with_args(vec![
-            CapArg::new(MEDIA_STRING, true, vec![]), // empty sources
+            CapArg::new(MEDIA_STRING, "option", true, vec![]), // empty sources
         ]);
         let result = validate_cap_args(&cap);
         assert!(result.is_err());
@@ -1410,63 +1594,63 @@ mod tests {
         assert!(err.contains("RULE2"), "Error should mention RULE2: {}", err);
     }
 
-    // TEST580: RULE3 - multiple stdin sources with different URNs rejected
+    // TEST580: RULE3 - two args that declare a stdin source are rejected
     #[test]
-    fn test580_rule3_different_stdin_urns() {
+    fn test580_rule3_two_stdin_args_rejected() {
         let cap = make_test_cap_with_stdin_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "input",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8;ext=txt".to_string(),
+                    stdin: "media:enc=utf-8".to_string(),
                 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "other",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:".to_string(),
                 }],
             ),
         ]);
-        let result = validate_cap_args(&cap);
-        assert!(result.is_err());
-        let err = format!("{}", result.unwrap_err());
+        let err = format!("{}", validate_cap_args(&cap).unwrap_err());
         assert!(err.contains("RULE3"), "Error should mention RULE3: {}", err);
+        // Both arguments are named, by the URNs that identify them.
+        assert!(err.contains(MEDIA_STRING) && err.contains(MEDIA_INTEGER), "{}", err);
     }
 
-    // TEST581: RULE3 - multiple stdin sources with same URN is OK
+    // TEST581: RULE3 - two stdin args are rejected even when their stdin URNs are identical
+    //
+    // The rule used to allow this ("multiple stdin sources with the same URN is OK"), on the
+    // reasoning that one stdin stream can only be one type. A cap has one main input: two args
+    // that both claim it leave nothing to say which of them a piped value is.
     #[test]
-    fn test581_rule3_same_stdin_urns_ok() {
+    fn test581_rule3_identical_stdin_urns_are_still_two_main_inputs() {
         let cap = make_test_cap_with_stdin_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "input",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8;ext=txt".to_string(),
+                    stdin: "media:enc=utf-8".to_string(),
                 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "other",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8;ext=txt".to_string(),
+                    stdin: "media:enc=utf-8".to_string(),
                 }],
             ),
         ]);
-        let result = validate_cap_args(&cap);
-        assert!(
-            result.is_ok(),
-            "Same stdin URNs should be allowed: {:?}",
-            result.err()
-        );
+        let err = format!("{}", validate_cap_args(&cap).unwrap_err());
+        assert!(err.contains("RULE3"), "Error should mention RULE3: {}", err);
     }
 
     // TEST582: RULE4 - duplicate source type in single arg rejected
     #[test]
     fn test582_rule4_duplicate_source_type() {
         let cap = make_test_cap_with_args(vec![CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "arg0",
             true,
             vec![
                 ArgSource::Position { position: 0 },
@@ -1484,12 +1668,12 @@ mod tests {
     fn test583_rule5_duplicate_position() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "arg0-2",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
@@ -1505,12 +1689,12 @@ mod tests {
     fn test584_rule6_position_gap() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "arg2",
                 true,
                 vec![ArgSource::Position { position: 2 }],
             ),
@@ -1526,12 +1710,12 @@ mod tests {
     fn test585_rule6_sequential_ok() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "arg1",
                 true,
                 vec![ArgSource::Position { position: 1 }],
             ),
@@ -1548,7 +1732,7 @@ mod tests {
     #[test]
     fn test586_rule7_position_and_cli_flag() {
         let cap = make_test_cap_with_args(vec![CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "file",
             true,
             vec![
                 ArgSource::Position { position: 0 },
@@ -1568,14 +1752,14 @@ mod tests {
     fn test587_rule9_duplicate_cli_flag() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "file",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--file".to_string(),
                 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "file-2",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--file".to_string(),
@@ -1593,7 +1777,7 @@ mod tests {
     fn test588_rule10_reserved_cli_flags() {
         for &reserved in RESERVED_CLI_FLAGS {
             let cap = make_test_cap_with_args(vec![CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "option",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: reserved.to_string(),
@@ -1620,17 +1804,17 @@ mod tests {
     fn test589_all_rules_pass() {
         let cap = make_test_cap_with_stdin_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "input",
                 true,
                 vec![
                     ArgSource::Position { position: 0 },
                     ArgSource::Stdin {
-                        stdin: "media:enc=utf-8;ext=txt".to_string(),
+                        stdin: "media:enc=utf-8".to_string(),
                     },
                 ],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "arg1",
                 false,
                 vec![ArgSource::Position { position: 1 }],
             ),
@@ -1643,11 +1827,11 @@ mod tests {
         );
     }
 
-    // TEST1294: RULE11 - void-input cap with stdin source rejected
+    // TEST1294: RULE15 - void-input cap with stdin source rejected
     #[test]
-    fn test1294_rule11_void_input_with_stdin_rejected() {
+    fn test1294_rule15_void_input_with_stdin_rejected() {
         let cap = make_test_cap_with_args(vec![CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8".to_string(),
@@ -1657,20 +1841,20 @@ mod tests {
         assert!(result.is_err());
         let err = format!("{}", result.unwrap_err());
         assert!(
-            err.contains("RULE11"),
-            "Error should mention RULE11: {}",
+            err.contains("RULE15"),
+            "Error should mention RULE15: {}",
             err
         );
     }
 
-    // TEST1295: RULE11 - non-void-input cap without stdin source rejected
+    // TEST1295: RULE15 - non-void-input cap without stdin source rejected
     #[test]
-    fn test1295_rule11_non_void_input_without_stdin_rejected() {
+    fn test1295_rule15_non_void_input_without_stdin_rejected() {
         let urn =
             CapUrn::from_string(r#"cap:in="media:enc=utf-8";test;out="media:record""#).unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
         cap.add_arg(CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "input",
             true,
             vec![ArgSource::CliFlag {
                 cli_flag: "--input".to_string(),
@@ -1680,17 +1864,17 @@ mod tests {
         assert!(result.is_err());
         let err = format!("{}", result.unwrap_err());
         assert!(
-            err.contains("RULE11"),
-            "Error should mention RULE11: {}",
+            err.contains("RULE15"),
+            "Error should mention RULE15: {}",
             err
         );
     }
 
-    // TEST1296: RULE11 - void-input cap with only cli_flag sources passes
+    // TEST1296: RULE15 - void-input cap with only cli_flag sources passes
     #[test]
-    fn test1296_rule11_void_input_cli_only_ok() {
+    fn test1296_rule15_void_input_cli_only_ok() {
         let cap = make_test_cap_with_args(vec![CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "input",
             true,
             vec![ArgSource::CliFlag {
                 cli_flag: "--input".to_string(),
@@ -1704,11 +1888,11 @@ mod tests {
         );
     }
 
-    // TEST1297: RULE11 - non-void-input cap with stdin source passes
+    // TEST1297: RULE15 - non-void-input cap with stdin source passes
     #[test]
-    fn test1297_rule11_non_void_input_with_stdin_ok() {
+    fn test1297_rule15_non_void_input_with_stdin_ok() {
         let cap = make_test_cap_with_stdin_args(vec![CapArg::new(
-            MEDIA_STRING,
+            MEDIA_STRING, "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8".to_string(),
@@ -1722,6 +1906,189 @@ mod tests {
         );
     }
 
+    // TEST12705: RULE15 - the stdin argument's URN is the cap's `in=`, as a
+    // tagged URN: the same tags in another order pass, another type does not.
+    #[test]
+    fn test12705_rule15_the_stdin_argument_is_the_caps_input() {
+        let cap_of = |stdin: &str| {
+            let urn = CapUrn::from_string(
+                r#"cap:in="media:document;ext=pdf";test;out="media:record""#,
+            )
+            .unwrap();
+            let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
+            cap.add_arg(CapArg::new(
+                "media:enc=utf-8;file-path", "document",
+                true,
+                vec![ArgSource::Stdin { stdin: stdin.to_string() }],
+            ));
+            cap
+        };
+        assert!(validate_cap_args(&cap_of("media:document;ext=pdf")).is_ok());
+        assert!(
+            validate_cap_args(&cap_of("media:ext=pdf;document")).is_ok(),
+            "tag order is not identity"
+        );
+        let err = format!("{}", validate_cap_args(&cap_of("media:document")).unwrap_err());
+        assert!(err.contains("RULE15") && err.contains("media:document;ext=pdf"), "{}", err);
+    }
+
+    // TEST12706: RULE17 - every argument has a well-formed name, unique in its cap.
+    #[test]
+    fn test12706_rule17_argument_names() {
+        let flag = |urn: &str, name: &str, flag: &str| {
+            CapArg::new(urn, name, false, vec![ArgSource::CliFlag { cli_flag: flag.to_string() }])
+        };
+        // Two args, two names: fine. A name says nothing of the URN it labels.
+        let cap = make_test_cap_with_args(vec![
+            flag(MEDIA_STRING, "window", "--a"),
+            flag(MEDIA_INTEGER, "benchmark", "--b"),
+        ]);
+        assert!(validate_cap_args(&cap).is_ok(), "{:?}", validate_cap_args(&cap).err());
+
+        let refused = |args: Vec<CapArg>| format!("{}", validate_cap_args(&make_test_cap_with_args(args)).unwrap_err());
+        let err = refused(vec![flag(MEDIA_STRING, "", "--a")]);
+        assert!(err.contains("RULE17") && err.contains("has no name"), "{}", err);
+        for bad in ["9lives", "has space", "dotted.name", "a=b", "true", "false", "null", "-lead"] {
+            let err = refused(vec![flag(MEDIA_STRING, bad, "--a")]);
+            assert!(err.contains("RULE17") && err.contains("not a valid name"), "{bad}: {err}");
+        }
+        for good in ["x", "_x", "model-spec", "top_k", "A1"] {
+            let cap = make_test_cap_with_args(vec![flag(MEDIA_STRING, good, "--a")]);
+            assert!(validate_cap_args(&cap).is_ok(), "{good}: {:?}", validate_cap_args(&cap).err());
+        }
+        let err = refused(vec![flag(MEDIA_STRING, "same", "--a"), flag(MEDIA_INTEGER, "same", "--b")]);
+        assert!(err.contains("RULE17") && err.contains("share the name 'same'"), "{}", err);
+        assert!(err.contains(MEDIA_STRING) && err.contains(MEDIA_INTEGER), "both args are named by URN: {}", err);
+    }
+
+    // TEST12707: RULE18 - an argument says what it accepts in one place; and what
+    // it accepts is not what it is delivered under.
+    #[test]
+    fn test12707_rule18_accepts_and_the_two_urns_of_an_argument() {
+        let series = "media:fmt=json;list;record;time-series";
+        let benchmark = CapArg::new(
+            "media:benchmark;fmt=json;list;record;time-series", "benchmark",
+            true,
+            vec![ArgSource::CliFlag { cli_flag: "--benchmark".to_string() }],
+        )
+        .accepting(series);
+        // It accepts a plain series, and is delivered under its own URN: two
+        // args accepting one type stay distinct on the wire.
+        assert_eq!(benchmark.accepted_urn(), series);
+        assert_eq!(benchmark.stream_urn(), "media:benchmark;fmt=json;list;record;time-series");
+
+        // The main input accepts, and is delivered under, its stdin URN.
+        let main = CapArg::new(
+            "media:enc=utf-8;file-path", "path",
+            true,
+            vec![ArgSource::Stdin { stdin: series.to_string() }],
+        );
+        assert_eq!(main.accepted_urn(), series);
+        assert_eq!(main.stream_urn(), series);
+
+        // An arg with neither accepts its own URN.
+        let plain = CapArg::new(MEDIA_INTEGER, "window", false, vec![ArgSource::CliFlag { cli_flag: "--window".to_string() }]);
+        assert_eq!(plain.accepted_urn(), MEDIA_INTEGER);
+        assert_eq!(plain.stream_urn(), MEDIA_INTEGER);
+
+        let urn = CapUrn::from_string(&format!(r#"cap:in="{series}";compare;out="media:record""#)).unwrap();
+        let mut cap = Cap::new(urn.clone(), "Compare".to_string(), vec!["compare".to_string()]);
+        cap.add_arg(main.clone());
+        cap.add_arg(benchmark);
+        assert!(validate_cap_args(&cap).is_ok(), "{:?}", validate_cap_args(&cap).err());
+
+        // `accepts` beside a stdin source says it twice.
+        let mut twice = Cap::new(urn, "Compare".to_string(), vec!["compare".to_string()]);
+        twice.add_arg(main.accepting(series));
+        let err = format!("{}", validate_cap_args(&twice).unwrap_err());
+        assert!(err.contains("RULE18") && err.contains("media:enc=utf-8;file-path"), "{}", err);
+    }
+
+    fn cap_with_outputs(out_spec: &str, outputs: Vec<CapOutput>) -> Cap {
+        let urn = CapUrn::from_string(&format!(r#"cap:in="media:enc=utf-8";test;out="{out_spec}""#)).unwrap();
+        let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
+        cap.set_outputs(outputs);
+        cap
+    }
+
+    // TEST12708: RULE19, RULE20 - outputs have well-formed, distinct names and
+    // distinct media URNs, compared as URNs.
+    #[test]
+    fn test12708_rule19_rule20_output_names_and_identities() {
+        let fit = || CapOutput::new("media:fmt=json;record;regression", "fit", "the fit");
+        let ok = cap_with_outputs(
+            "media:fmt=json;record;regression",
+            vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "residuals", "")],
+        );
+        assert!(validate_cap_outputs(&ok).is_ok(), "{:?}", validate_cap_outputs(&ok).err());
+
+        let refused = |outputs: Vec<CapOutput>| {
+            format!("{}", validate_cap_outputs(&cap_with_outputs("media:fmt=json;record;regression", outputs)).unwrap_err())
+        };
+        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "", "")]);
+        assert!(err.contains("RULE19") && err.contains("has no name"), "{}", err);
+        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "null", "")]);
+        assert!(err.contains("RULE19") && err.contains("not a valid name"), "{}", err);
+        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "fit", "")]);
+        assert!(err.contains("RULE19") && err.contains("share the name 'fit'"), "{}", err);
+        // The same URN with its tags in another order is the same output.
+        let err = refused(vec![fit(), CapOutput::new("media:regression;record;fmt=json", "again", "")]);
+        assert!(err.contains("RULE20"), "{}", err);
+    }
+
+    // TEST12709: RULE21 - exactly one output is the main one, the cap's `out=`;
+    // a cap whose `out=` is void declares none.
+    #[test]
+    fn test12709_rule21_exactly_one_main_output() {
+        let fit = "media:fmt=json;record;regression";
+        let none = cap_with_outputs(fit, vec![CapOutput::new("media:fmt=json;list;record;residual", "residuals", "")]);
+        let err = format!("{}", validate_cap_outputs(&none).unwrap_err());
+        assert!(err.contains("RULE21") && err.contains("0 outputs"), "{}", err);
+        let bare = cap_with_outputs(fit, vec![]);
+        assert!(format!("{}", validate_cap_outputs(&bare).unwrap_err()).contains("RULE21"));
+
+        let one = cap_with_outputs(fit, vec![CapOutput::new("media:regression;fmt=json;record", "fit", "")]);
+        assert!(validate_cap_outputs(&one).is_ok(), "the main output is found by URN equivalence");
+        assert_eq!(one.main_output().map(|o| o.name.as_str()), Some("fit"));
+
+        let void = cap_with_outputs("media:void", vec![]);
+        assert!(validate_cap_outputs(&void).is_ok());
+        assert!(void.main_output().is_none());
+        let void_with = cap_with_outputs("media:void", vec![CapOutput::new("media:enc=utf-8", "text", "")]);
+        let err = format!("{}", validate_cap_outputs(&void_with).unwrap_err());
+        assert!(err.contains("RULE21") && err.contains("media:void"), "{}", err);
+    }
+
+    // TEST12710: RULE22 - only a non-main output of a cap that takes an input
+    // may carry that input's type.
+    #[test]
+    fn test12710_rule22_what_an_output_carries() {
+        let router = cap_with_outputs(
+            "media:enc=utf-8;kept",
+            vec![
+                CapOutput::new("media:enc=utf-8;kept", "yes", "").optional(true),
+                CapOutput::new("media:enc=utf-8;dropped", "no", "").optional(true).carrying_input(),
+            ],
+        );
+        assert!(validate_cap_outputs(&router).is_ok(), "{:?}", validate_cap_outputs(&router).err());
+
+        let main_carries = cap_with_outputs(
+            "media:enc=utf-8;kept",
+            vec![CapOutput::new("media:enc=utf-8;kept", "yes", "").carrying_input()],
+        );
+        let err = format!("{}", validate_cap_outputs(&main_carries).unwrap_err());
+        assert!(err.contains("RULE22") && err.contains("main output"), "{}", err);
+
+        let urn = CapUrn::from_string(r#"cap:in="media:void";now;out="media:enc=utf-8;stamp""#).unwrap();
+        let mut source = Cap::new(urn, "Now".to_string(), vec!["now".to_string()]);
+        source.set_outputs(vec![
+            CapOutput::new("media:enc=utf-8;stamp", "stamp", ""),
+            CapOutput::new("media:enc=utf-8;echo", "echo", "").carrying_input(),
+        ]);
+        let err = format!("{}", validate_cap_outputs(&source).unwrap_err());
+        assert!(err.contains("RULE22") && err.contains("takes none"), "{}", err);
+    }
+
     // TEST1953: RULE14 — `streaming: true` is accepted on the main input (the
     // stdin arg equivalent to `in=`) and refused on any other argument: a
     // side option has no wire stream, so it has nothing to consume
@@ -1729,7 +2096,7 @@ mod tests {
     #[test]
     fn test1953_rule14_streaming_only_on_main_input() {
         let main = CapArg::new(
-            "media:enc=utf-8",
+            "media:enc=utf-8", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8".to_string(),
@@ -1745,7 +2112,7 @@ mod tests {
         assert_eq!(ok.streaming_shape(), (true, false));
 
         let side = CapArg::new(
-            MEDIA_INTEGER,
+            MEDIA_INTEGER, "count",
             false,
             vec![ArgSource::CliFlag {
                 cli_flag: "--count".to_string(),
@@ -1764,14 +2131,14 @@ mod tests {
     fn test590_cli_flag_only_args() {
         let cap = make_test_cap_with_args(vec![
             CapArg::new(
-                MEDIA_STRING,
+                MEDIA_STRING, "input",
                 true,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--input".to_string(),
                 }],
             ),
             CapArg::new(
-                MEDIA_INTEGER,
+                MEDIA_INTEGER, "count",
                 false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--count".to_string(),
@@ -1882,7 +2249,7 @@ pub async fn validate_media_urn_references(
     }
 
     // Check output media URN
-    if let Some(output) = cap.get_output() {
+    if let Some(output) = cap.main_output() {
         urns_to_check.push(("output".to_string(), output.media_urn.clone()));
     }
 

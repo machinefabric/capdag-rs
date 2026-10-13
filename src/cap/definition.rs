@@ -93,8 +93,22 @@ impl ArgSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CapArg {
-    /// Unique media URN for this argument
+    /// Unique media URN for this argument: its identity. Bindings, stream
+    /// delivery, run-time values and equivalence are all keyed by it.
     pub media_urn: String,
+
+    /// The label a machine selects this argument by (`name = source`), unique
+    /// within the cap (RULE17). A label and nothing more: it identifies
+    /// nothing, and nothing about `media_urn` may be read from it or the
+    /// reverse.
+    pub name: String,
+
+    /// The media type a value bound to this argument must conform to, when
+    /// that is not `media_urn` itself. What lets two arguments take values of
+    /// one type while keeping distinct identities (RULE1). Never beside a
+    /// `stdin` source, which says the same for the main input (RULE18).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepts: Option<String>,
 
     /// Whether this argument is required
     pub required: bool,
@@ -161,6 +175,34 @@ impl CapArg {
             .unwrap_or(&self.media_urn)
     }
 
+    /// The media type a value bound to this arg must conform to: its `Stdin`
+    /// source URN when it declares one (the main input), else `accepts` when the
+    /// definition gives one, else its own `media_urn`. This is what a wiring's
+    /// source is matched against; [`Self::stream_urn`] is what the value is then
+    /// delivered under, which for an arg with `accepts` is its own URN, so two
+    /// args accepting one type stay distinct on the wire.
+    pub fn accepted_urn(&self) -> &str {
+        self.sources
+            .iter()
+            .find_map(|s| match s {
+                ArgSource::Stdin { stdin } => Some(stdin.as_str()),
+                _ => None,
+            })
+            .or(self.accepts.as_deref())
+            .unwrap_or(&self.media_urn)
+    }
+
+    /// The label a machine selects this arg by.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Declare the type this arg accepts (see `accepts`).
+    pub fn accepting(mut self, accepts: impl Into<String>) -> Self {
+        self.accepts = Some(accepts.into());
+        self
+    }
+
     /// Whether this arg is the cap's MAIN input relative to `in_spec` (the cap URN's
     /// `in=` value): it declares a `Stdin` source whose URN is `in=`. The main input
     /// is always the value piped in on stdin (like a Unix command's stdin), so the
@@ -180,9 +222,16 @@ impl CapArg {
     }
 
     /// Create a new cap argument
-    pub fn new(media_urn: impl Into<String>, required: bool, sources: Vec<ArgSource>) -> Self {
+    pub fn new(
+        media_urn: impl Into<String>,
+        name: impl Into<String>,
+        required: bool,
+        sources: Vec<ArgSource>,
+    ) -> Self {
         Self {
             media_urn: media_urn.into(),
+            name: name.into(),
+            accepts: None,
             required,
             is_sequence: false,
             streaming: false,
@@ -196,12 +245,15 @@ impl CapArg {
     /// Create a new cap argument with description
     pub fn with_description(
         media_urn: impl Into<String>,
+        name: impl Into<String>,
         required: bool,
         sources: Vec<ArgSource>,
         description: impl Into<String>,
     ) -> Self {
         Self {
             media_urn: media_urn.into(),
+            name: name.into(),
+            accepts: None,
             required,
             is_sequence: false,
             streaming: false,
@@ -215,6 +267,8 @@ impl CapArg {
     /// Create a fully specified argument
     pub fn with_full_definition(
         media_urn: impl Into<String>,
+        name: impl Into<String>,
+        accepts: Option<String>,
         required: bool,
         is_sequence: bool,
         streaming: bool,
@@ -225,6 +279,8 @@ impl CapArg {
     ) -> Self {
         Self {
             media_urn: media_urn.into(),
+            name: name.into(),
+            accepts,
             required,
             is_sequence,
             streaming,
@@ -266,11 +322,27 @@ impl CapArg {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CapOutput {
-    /// Media URN referencing a media definition
-    /// e.g., "media:object" or a custom media URN like "media:my-output"
+    /// Media URN of this output: its identity, unique within the cap (RULE20).
+    /// The main output's is the cap URN's `out=` (RULE21).
     pub media_urn: String,
 
+    /// The label a machine selects this output by (`name = node`), unique
+    /// within the cap (RULE19). A label and nothing more.
+    pub name: String,
+
     pub output_description: String,
+
+    /// Whether this output may not fire: the cap ends without opening its
+    /// stream, and whatever it would have fed sees it as absent. `false` (the
+    /// default) is a contract: the output always has a stream.
+    #[serde(default)]
+    pub optional: bool,
+
+    /// What a non-main output carries when that is not its own `media_urn`
+    /// (RULE22). Absent on the main output, whose type the cap URN's effect
+    /// decides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carries: Option<OutputCarries>,
 
     /// Whether this output produces a sequence of items (is_sequence=true)
     /// or a single item (is_sequence=false, the default).
@@ -292,16 +364,31 @@ pub struct CapOutput {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// What an output's stream carries, when not its own media URN.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputCarries {
+    /// The main input's runtime type, unchanged: what a router's outputs carry.
+    Input,
+}
+
 impl CapOutput {
     /// Create a new output definition with media URN
     ///
     /// # Arguments
     /// * `media_urn` - Media URN resolved through the FabricRegistry (e.g., "media:object")
     /// * `description` - Human-readable description of the output
-    pub fn new(media_urn: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn new(
+        media_urn: impl Into<String>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
         Self {
             media_urn: media_urn.into(),
+            name: name.into(),
             output_description: description.into(),
+            optional: false,
+            carries: None,
             is_sequence: false,
             streaming: false,
             metadata: None,
@@ -311,6 +398,7 @@ impl CapOutput {
     /// Create a fully specified output
     pub fn with_full_definition(
         media_urn: impl Into<String>,
+        name: impl Into<String>,
         description: impl Into<String>,
         is_sequence: bool,
         streaming: bool,
@@ -318,11 +406,31 @@ impl CapOutput {
     ) -> Self {
         Self {
             media_urn: media_urn.into(),
+            name: name.into(),
             output_description: description.into(),
+            optional: false,
+            carries: None,
             is_sequence,
             streaming,
             metadata,
         }
+    }
+
+    /// Declare that this output may not fire (see `optional`).
+    pub fn optional(mut self, optional: bool) -> Self {
+        self.optional = optional;
+        self
+    }
+
+    /// Declare that this output carries the main input's type unchanged.
+    pub fn carrying_input(mut self) -> Self {
+        self.carries = Some(OutputCarries::Input);
+        self
+    }
+
+    /// The label a machine selects this output by.
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 
     /// Declare this output a possibly-unbounded emitter (see `streaming`).
@@ -424,8 +532,10 @@ pub struct Cap {
     /// Cap arguments
     pub args: Vec<CapArg>,
 
-    /// Output definition
-    pub output: Option<CapOutput>,
+    /// The outputs this cap produces: none when `out=` is `media:void`,
+    /// otherwise exactly one main output (the one whose URN is `out=`) and any
+    /// number of others.
+    pub outputs: Vec<CapOutput>,
 
     /// Arbitrary metadata as JSON object
     pub metadata_json: Option<serde_json::Value>,
@@ -489,8 +599,8 @@ impl Serialize for Cap {
             state.serialize_field("args", &self.args)?;
         }
 
-        if self.output.is_some() {
-            state.serialize_field("output", &self.output)?;
+        if !self.outputs.is_empty() {
+            state.serialize_field("outputs", &self.outputs)?;
         }
 
         if self.metadata_json.is_some() {
@@ -533,7 +643,8 @@ impl<'de> Deserialize<'de> for Cap {
             is_abstract: bool,
             #[serde(default)]
             args: Vec<CapArg>,
-            output: Option<CapOutput>,
+            #[serde(default)]
+            outputs: Vec<CapOutput>,
             metadata_json: Option<serde_json::Value>,
             registered_by: Option<RegisteredBy>,
             #[serde(default)]
@@ -572,7 +683,7 @@ impl<'de> Deserialize<'de> for Cap {
             aliases: wire.aliases,
             is_abstract: wire.is_abstract,
             args: wire.args,
-            output: wire.output,
+            outputs: wire.outputs,
             metadata_json: wire.metadata_json,
             registered_by: wire.registered_by,
             supported_model_types: wire.supported_model_types,
@@ -594,7 +705,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -619,7 +730,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -644,7 +755,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -670,7 +781,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -690,7 +801,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args,
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -706,7 +817,7 @@ impl Cap {
         metadata: HashMap<String, String>,
         aliases: Vec<String>,
         args: Vec<CapArg>,
-        output: Option<CapOutput>,
+        outputs: Vec<CapOutput>,
         metadata_json: Option<serde_json::Value>,
     ) -> Self {
         Self {
@@ -719,7 +830,7 @@ impl Cap {
             aliases,
             is_abstract: false,
             args,
-            output,
+            outputs,
             metadata_json,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -790,22 +901,18 @@ impl Cap {
         } else {
             match self.args.iter().find(|arg| arg.is_main_input(&in_spec)) {
                 Some(arg) => arg.is_sequence,
-                None => {
-                    // Publisher RULE11 guarantees every cap with arguments
-                    // declares its main input; a definition that reaches here
-                    // slipped through publish validation. Registry content
-                    // must never crash a client at graph-build, so report the
-                    // violation loudly and read the input as scalar.
-                    tracing::error!(
-                        cap_urn = %self.urn,
-                        "cap violates RULE11: it declares arguments but none is the main input \
-                         (stdin source equivalent to in=) — fix the fabric definition"
-                    );
-                    false
-                }
+                // RULE15: a cap that takes an input declares the argument
+                // that receives it. Every definition that reaches this
+                // library from a registry or a manifest is held to that on
+                // arrival, so this one was built in-process and never checked.
+                None => panic!(
+                    "cap registry invariant: '{}' violates RULE15: it declares arguments \
+                     but none is the main input (a stdin source equivalent to in=)",
+                    self.urn
+                ),
             }
         };
-        let output_is_sequence = self.output.as_ref().map_or(false, |o| o.is_sequence);
+        let output_is_sequence = self.main_output().map_or(false, |o| o.is_sequence);
         (input_is_sequence, output_is_sequence)
     }
 
@@ -827,7 +934,7 @@ impl Cap {
     /// non-streaming input: there is nothing to stream into it.
     pub fn streaming_shape(&self) -> (bool, bool) {
         let input_streams = self.main_input_arg().map_or(false, |arg| arg.streaming);
-        let output_streams = self.output.as_ref().map_or(false, |o| o.streaming);
+        let output_streams = self.main_output().map_or(false, |o| o.streaming);
         (input_streams, output_streams)
     }
 
@@ -959,14 +1066,51 @@ impl Cap {
         self.args.push(arg);
     }
 
-    /// Get the output definition if defined
-    pub fn get_output(&self) -> Option<&CapOutput> {
-        self.output.as_ref()
+    /// Every output this cap declares.
+    pub fn get_outputs(&self) -> &[CapOutput] {
+        &self.outputs
     }
 
-    /// Set the output definition
-    pub fn set_output(&mut self, output: CapOutput) {
-        self.output = Some(output);
+    /// The main output: the one whose media URN is the cap URN's `out=`, by
+    /// tagged-URN equivalence. `None` for a cap whose `out=` is `media:void`,
+    /// which declares none (RULE21).
+    pub fn main_output(&self) -> Option<&CapOutput> {
+        let out_spec = crate::urn::media_urn::MediaUrn::from_string(self.urn.out_spec()).ok()?;
+        self.outputs.iter().find(|output| {
+            crate::urn::media_urn::MediaUrn::from_string(&output.media_urn)
+                .map(|urn| urn.is_equivalent(&out_spec).unwrap_or(false))
+                .unwrap_or(false)
+        })
+    }
+
+    /// The output a media URN identifies, by tagged-URN equivalence.
+    pub fn output_by_urn(&self, media_urn: &str) -> Option<&CapOutput> {
+        let wanted = crate::urn::media_urn::MediaUrn::from_string(media_urn).ok()?;
+        self.outputs.iter().find(|output| {
+            crate::urn::media_urn::MediaUrn::from_string(&output.media_urn)
+                .map(|urn| urn.is_equivalent(&wanted).unwrap_or(false))
+                .unwrap_or(false)
+        })
+    }
+
+    /// The output a machine names (`name = node`).
+    pub fn output_named(&self, name: &str) -> Option<&CapOutput> {
+        self.outputs.iter().find(|output| output.name == name)
+    }
+
+    /// The argument a machine names (`name = source`).
+    pub fn arg_named(&self, name: &str) -> Option<&CapArg> {
+        self.args.iter().find(|arg| arg.name == name)
+    }
+
+    /// Replace the outputs this cap declares.
+    pub fn set_outputs(&mut self, outputs: Vec<CapOutput>) {
+        self.outputs = outputs;
+    }
+
+    /// Declare one more output.
+    pub fn add_output(&mut self, output: CapOutput) {
+        self.outputs.push(output);
     }
 
     /// Get metadata JSON
@@ -1122,6 +1266,8 @@ mod tests {
         // Enable stdin support by adding an arg with a stdin source
         let stdin_arg = CapArg {
             media_urn: "media:enc=utf-8".to_string(),
+            name: "input".to_string(),
+            accepts: None,
             required: true,
             is_sequence: false,
             streaming: false,
@@ -1180,6 +1326,8 @@ mod tests {
     fn test115_cap_arg_serialization() {
         let arg = CapArg {
             media_urn: "media:string".to_string(),
+            name: "input".to_string(),
+            accepts: None,
             required: true,
             is_sequence: false,
             streaming: false,
@@ -1221,7 +1369,7 @@ mod tests {
     fn test116_cap_arg_constructors() {
         // Test basic constructor
         let arg = CapArg::new(
-            "media:string",
+            "media:string", "name",
             true,
             vec![ArgSource::CliFlag {
                 cli_flag: "--name".to_string(),
@@ -1234,7 +1382,7 @@ mod tests {
 
         // Test with description
         let arg = CapArg::with_description(
-            "media:integer",
+            "media:integer", "arg0",
             false,
             vec![ArgSource::Position { position: 0 }],
             "The count argument",
@@ -1346,12 +1494,12 @@ mod tests {
         let urn = CapUrn::from_string(&test_urn("test")).unwrap();
         let args = vec![
             CapArg::new(
-                "media:string",
+                "media:string", "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }],
             ),
             CapArg::new(
-                "media:integer",
+                "media:integer", "count",
                 false,
                 vec![ArgSource::CliFlag {
                     cli_flag: "--count".to_string(),
@@ -1373,8 +1521,8 @@ mod tests {
         let urn = CapUrn::from_string(&test_urn("test")).unwrap();
         let mut metadata = HashMap::new();
         metadata.insert("env".to_string(), "prod".to_string());
-        let args = vec![CapArg::new("media:string", true, vec![])];
-        let output = CapOutput::new("media:object", "Output object");
+        let args = vec![CapArg::new("media:string", "option", true, vec![])];
+        let output = CapOutput::new("media:object", "output", "Output object");
         let json_meta = serde_json::json!({"v": 1});
 
         let cap = Cap::with_full_definition(
@@ -1384,7 +1532,7 @@ mod tests {
             metadata,
             vec!["full-cmd".to_string()],
             args,
-            Some(output),
+            vec![output],
             Some(json_meta.clone()),
         );
 
@@ -1393,8 +1541,12 @@ mod tests {
         assert_eq!(cap.get_metadata("env"), Some(&"prod".to_string()));
         assert_eq!(cap.primary_alias(), "full-cmd");
         assert_eq!(cap.get_args().len(), 1);
-        assert!(cap.get_output().is_some());
-        assert_eq!(cap.get_output().unwrap().media_urn, "media:object");
+        assert_eq!(cap.get_outputs().len(), 1);
+        assert_eq!(cap.get_outputs()[0].get_media_urn(), "media:object");
+        // `media:object` is not this cap's `out=`, so it is an output and not
+        // the main one: the constructor stores what it is given and decides
+        // nothing (RULE21 is validation's).
+        assert!(cap.main_output().is_none());
         assert_eq!(cap.get_metadata_json(), Some(&json_meta));
         // registered_by is not set by with_full_definition
         assert!(cap.get_registered_by().is_none());
@@ -1410,7 +1562,7 @@ mod tests {
         let meta = serde_json::json!({"hint": "enter name"});
 
         let arg = CapArg::with_full_definition(
-            "media:string",
+            "media:string", "name", None,
             true,
             false,
             false,
@@ -1436,28 +1588,47 @@ mod tests {
         assert_eq!(arg2.get_metadata(), Some(&serde_json::json!("new")));
     }
 
-    // TEST598: CapOutput lifecycle — set_output, set/clear metadata
+    // TEST598: CapOutput lifecycle — the outputs list, the main output, lookup by
+    // URN and by name, set/clear metadata
     #[test]
     fn test598_cap_output_lifecycle() {
-        let urn = CapUrn::from_string(&test_urn("test")).unwrap();
+        let urn = CapUrn::from_string(
+            r#"cap:in="media:enc=utf-8";regress;out="media:fmt=json;record;regression""#,
+        )
+        .unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
 
-        // Initially no output
-        assert!(cap.get_output().is_none());
+        // Initially no outputs, so no main one.
+        assert!(cap.get_outputs().is_empty());
+        assert!(cap.main_output().is_none());
 
-        // Set output
-        let mut output = CapOutput::new("media:string", "Text output");
-        output.set_metadata(serde_json::json!({"format": "plain"}));
-        cap.set_output(output);
+        // An output that is not the cap's `out=` is an output, and not the main one.
+        let mut residuals = CapOutput::new("media:fmt=json;list;record;residual", "residuals", "Residuals");
+        residuals.set_metadata(serde_json::json!({"format": "plain"}));
+        cap.add_output(residuals);
+        assert_eq!(cap.get_outputs().len(), 1);
+        assert!(cap.main_output().is_none(), "no output is the cap's out= yet");
 
-        let got = cap.get_output().expect("output should be set");
-        assert_eq!(got.get_media_urn(), "media:string");
-        assert_eq!(got.output_description, "Text output");
+        // The main output is found by URN equivalence with `out=`, wherever it
+        // stands in the list and whatever order its tags are written in.
+        cap.add_output(CapOutput::new("media:regression;record;fmt=json", "fit", "The fit"));
+        let main = cap.main_output().expect("the output whose URN is out=");
+        assert_eq!(main.get_name(), "fit");
+
+        // By the URN that identifies it, and by the name a machine uses.
+        let got = cap
+            .output_by_urn("media:record;residual;list;fmt=json")
+            .expect("an output is identified by its media URN");
+        assert_eq!(got.get_name(), "residuals");
+        assert_eq!(got.output_description, "Residuals");
         assert!(got.get_metadata().is_some());
+        assert_eq!(cap.output_named("residuals").map(|o| o.get_media_urn()), Some("media:fmt=json;list;record;residual"));
+        assert!(cap.output_named("fmt").is_none(), "a name is not read out of a URN");
+        assert!(cap.output_by_urn("media:enc=utf-8").is_none());
 
         // CapOutput with_full_definition
         let output2 = CapOutput::with_full_definition(
-            "media:fmt=json",
+            "media:fmt=json", "output",
             "JSON output",
             false,
             false,
@@ -1676,7 +1847,7 @@ mod tests {
     #[test]
     fn test7100_stream_urn_prefers_stdin_source_over_slot_urn() {
         let arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:document;ext=pdf".to_string(),
@@ -1696,7 +1867,7 @@ mod tests {
     #[test]
     fn test7101_stream_urn_falls_back_to_declared_urn_without_stdin() {
         let arg = CapArg::new(
-            "media:enc=utf-8;model-spec",
+            "media:enc=utf-8;model-spec", "model-spec",
             true,
             vec![
                 ArgSource::CliFlag {
@@ -1722,7 +1893,7 @@ mod tests {
             "precondition: the raw strings must differ so string comparison would fail"
         );
         let arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: stdin_urn.to_string(),
@@ -1742,7 +1913,7 @@ mod tests {
         let in_spec = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
         let flag_only = CapArg::new(
-            "media:document;ext=pdf",
+            "media:document;ext=pdf", "input",
             true,
             vec![ArgSource::CliFlag {
                 cli_flag: "--input".to_string(),
@@ -1754,7 +1925,7 @@ mod tests {
         );
 
         let position_only = CapArg::new(
-            "media:document;ext=pdf",
+            "media:document;ext=pdf", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -1764,7 +1935,7 @@ mod tests {
         );
 
         let wrong_stdin = CapArg::new(
-            "media:ext=png",
+            "media:ext=png", "input-2",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:ext=png".to_string(),
@@ -1783,14 +1954,14 @@ mod tests {
         let urn = CapUrn::from_string(r#"cap:in="media:enc=utf-8";ordered;out="media:enc=utf-8""#)
             .unwrap();
         let secondary = CapArg::new(
-            "media:enc=utf-8;context",
+            "media:enc=utf-8;context", "input",
             false,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8;context".to_string(),
             }],
         );
         let mut main = CapArg::new(
-            "media:enc=utf-8",
+            "media:enc=utf-8", "input-2",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8".to_string(),
@@ -1827,13 +1998,13 @@ mod tests {
     // older capdag once advertised a `streaming` input as bounded.
     #[test]
     fn test1964_unknown_definition_field_is_refused() {
-        let arg = r#"{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"chunking":"adaptive"}"#;
+        let arg = r#"{"media_urn":"media:enc=utf-8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"chunking":"adaptive"}"#;
         let err = serde_json::from_str::<CapArg>(arg).expect_err("unknown arg field must be refused");
         assert!(err.to_string().contains("chunking"), "{err}");
-        let known = r#"{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"streaming":true}"#;
+        let known = r#"{"media_urn":"media:enc=utf-8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"streaming":true}"#;
         assert!(serde_json::from_str::<CapArg>(known).unwrap().streaming);
 
-        let out = r#"{"media_urn":"media:enc=utf-8","output_description":"x","windowed":true}"#;
+        let out = r#"{"media_urn":"media:enc=utf-8","name":"output","output_description":"x","windowed":true}"#;
         let err = serde_json::from_str::<CapOutput>(out).expect_err("unknown output field must be refused");
         assert!(err.to_string().contains("windowed"), "{err}");
     }
@@ -1848,8 +2019,11 @@ mod tests {
             "tag".to_string(),
             vec!["tag".to_string()],
         );
-        cap.set_output(CapOutput {
+        cap.add_output(CapOutput {
             media_urn: "media:enc=utf-8;tag".to_string(),
+            name: "output".to_string(),
+            optional: false,
+            carries: None,
             output_description: "One of 'positive', 'neutral', or 'negative'.".to_string(),
             is_sequence: false,
             streaming: false,
@@ -1857,9 +2031,19 @@ mod tests {
         });
 
         let json = serde_json::to_value(&cap).expect("cap serializes");
-        let output = json
-            .get("output")
-            .expect("a cap that declares an output must serialize one");
+        let outputs = json
+            .get("outputs")
+            .and_then(|v| v.as_array())
+            .expect("a cap that declares an output must serialize its outputs");
+        assert_eq!(outputs.len(), 1);
+        assert!(json.get("output").is_none(), "the single-output key is gone");
+        let output = &outputs[0];
+        assert_eq!(output.get("name").and_then(|v| v.as_str()), Some("output"));
+        assert_eq!(output.get("optional").and_then(|v| v.as_bool()), Some(false));
+        assert!(
+            output.get("carries").is_none(),
+            "an output that carries its own URN says nothing about it"
+        );
         assert_eq!(
             output.get("media_urn").and_then(|v| v.as_str()),
             Some("media:enc=utf-8;tag")
@@ -1870,7 +2054,7 @@ mod tests {
         );
 
         let back: Cap = serde_json::from_value(json).expect("cap deserializes");
-        let back_output = back.output.expect("output survives the round-trip");
+        let back_output = back.main_output().expect("output survives the round-trip");
         assert_eq!(back_output.media_urn, "media:enc=utf-8;tag");
         assert_eq!(back_output.is_sequence, false);
 
@@ -1882,7 +2066,7 @@ mod tests {
         );
         let bare_json = serde_json::to_value(&bare).expect("cap serializes");
         assert!(
-            bare_json.get("output").is_none(),
+            bare_json.get("outputs").is_none(),
             "a cap without an output must omit the key"
         );
     }
@@ -1897,7 +2081,7 @@ mod tests {
     #[test]
     fn test7151_is_sequence_is_serialized_even_when_false() {
         let arg = CapArg::new(
-            "media:enc=utf-8;in",
+            "media:enc=utf-8;in", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:enc=utf-8;in".to_string(),
@@ -1912,6 +2096,9 @@ mod tests {
 
         let output = CapOutput {
             media_urn: "media:enc=utf-8;tag".to_string(),
+            name: "output".to_string(),
+            optional: false,
+            carries: None,
             output_description: "a tag".to_string(),
             is_sequence: false,
             streaming: false,

@@ -4722,7 +4722,7 @@ mod tests {
         // A cached cap the planner will traverse must declare its main input —
         // `sequence_shape()` reads that arg to decide cardinality.
         cap.args.push(crate::cap::definition::CapArg::new(
-            "media:enc=utf-8;test-source".to_string(),
+            "media:enc=utf-8;test-source".to_string(), "input",
             true,
             vec![crate::cap::definition::ArgSource::Stdin {
                 stdin: "media:enc=utf-8;test-source".to_string(),
@@ -6545,7 +6545,7 @@ mod tests {
             aliases: vec![String::new()],
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
@@ -6753,7 +6753,7 @@ mod tests {
                     aliases: vec![String::new()],
                     is_abstract: false,
                     args: Vec::new(),
-                    output: None,
+                    outputs: Vec::new(),
                     metadata_json: None,
                     registered_by: None,
                     supported_model_types: Vec::new(),
@@ -6788,7 +6788,7 @@ mod tests {
                     aliases: vec![String::new()],
                     is_abstract: false,
                     args: Vec::new(),
-                    output: None,
+                    outputs: Vec::new(),
                     metadata_json: None,
                     registered_by: None,
                     supported_model_types: Vec::new(),
@@ -7258,7 +7258,7 @@ mod tests {
                     aliases: vec![String::new()],
                     is_abstract: false,
                     args: Vec::new(),
-                    output: None,
+                    outputs: Vec::new(),
                     metadata_json: None,
                     registered_by: None,
                     supported_model_types: Vec::new(),
@@ -7284,7 +7284,7 @@ mod tests {
                     aliases: vec![String::new()],
                     is_abstract: false,
                     args: Vec::new(),
-                    output: None,
+                    outputs: Vec::new(),
                     metadata_json: None,
                     registered_by: None,
                     supported_model_types: Vec::new(),

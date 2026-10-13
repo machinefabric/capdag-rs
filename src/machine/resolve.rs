@@ -1363,7 +1363,7 @@ mod tests {
             &["media:document;ext=pdf"],
             "media:enc=utf-8;page",
         );
-        disbind.output.as_mut().unwrap().is_sequence = true;
+        disbind.outputs[0].is_sequence = true;
         let make_decision = build_cap(
             "cap:in=\"media:enc=utf-8\";make-decision;out=\"media:decision;fmt=json;record\"",
             "make_decision",
@@ -1919,7 +1919,7 @@ mod tests {
             "media:enc=utf-8;page",
         );
         // op-a emits a SEQUENCE of pages.
-        cap_a.output.as_mut().unwrap().is_sequence = true;
+        cap_a.outputs[0].is_sequence = true;
         let cap_b = build_cap(
             "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
             "op_b",

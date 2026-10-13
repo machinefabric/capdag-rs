@@ -2238,7 +2238,7 @@ mod tests {
             max_reorder_buffer: 32,
             initial_credit: DEFAULT_INITIAL_CREDIT,
         };
-        let manifest = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]}]}]}"#;
+        let manifest = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
 
         // Write cartridge's HELLO with manifest to a duplex stream
         let (mut cartridge_write, mut cartridge_read) = tokio::io::duplex(64 * 1024);
@@ -2277,7 +2277,7 @@ mod tests {
         assert_eq!(host_reorder, DEFAULT_MAX_REORDER_BUFFER);
     }
 
-    const V4_TEST_MANIFEST: &[u8] = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]}]}]}"#;
+    const V4_TEST_MANIFEST: &[u8] = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
 
     /// Run a real host↔cartridge handshake over a bidirectional duplex pair.
     /// The cartridge side proposes `cartridge_limits` in its HELLO.
@@ -2458,7 +2458,7 @@ mod tests {
     // =========================================================================
 
     /// Manifest with only CAP_IDENTITY (minimum valid manifest)
-    const IDENTITY_MANIFEST: &str = r#"{"name":"Test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[]}]}]}"#;
+    const IDENTITY_MANIFEST: &str = r#"{"name":"Test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
 
     /// Simulate cartridge side: handshake_accept, then handle one identity REQ
     /// by echoing back the payload (like the standard identity handler).

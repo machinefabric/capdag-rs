@@ -49,7 +49,7 @@ pub(crate) fn build_cap_with_slot_stdin_pairs(
         .iter()
         .map(|(slot, stdin)| {
             CapArg::new(
-                slot.to_string(),
+                slot.to_string(), "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: stdin.to_string(),
@@ -67,10 +67,10 @@ pub(crate) fn build_cap_with_slot_stdin_pairs(
         aliases: vec![format!("test-fixture://{title}")],
         is_abstract: false,
         args: arg_values,
-        output: Some(CapOutput::new(
-            output_media_urn.to_string(),
+        outputs: vec![CapOutput::new(
+            output_media_urn.to_string(), "output",
             format!("output of {title}"),
-        )),
+        )],
         metadata_json: None,
         registered_by: None,
         // Test-fixture caps have no model dependency.

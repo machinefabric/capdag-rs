@@ -1431,7 +1431,7 @@ mod tests {
             aliases: vec![String::new()],
             is_abstract: false,
             args: Vec::new(),
-            output: None,
+            outputs: Vec::new(),
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),

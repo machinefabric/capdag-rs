@@ -279,7 +279,7 @@ mod tests {
                 .iter()
                 .map(|m| {
                     CapArg::new(
-                        m.to_string(),
+                        m.to_string(), "input",
                         true,
                         vec![ArgSource::Stdin {
                             stdin: m.to_string(),
@@ -297,10 +297,10 @@ mod tests {
                 aliases: vec!["test".to_string()],
                 is_abstract: false,
                 args: arg_values,
-                output: Some(CapOutput::new(
-                    out_media_urn.to_string(),
+                outputs: vec![CapOutput::new(
+                    out_media_urn.to_string(), "output",
                     "Test output".to_string(),
-                )),
+                )],
                 metadata_json: None,
                 registered_by: None,
                 supported_model_types: Vec::new(),

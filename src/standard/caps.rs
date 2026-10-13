@@ -132,7 +132,7 @@ pub fn lookup_cap_fabric_cap() -> Cap {
     );
     cap.args
         .push(crate::cap::definition::CapArg::with_description(
-            MEDIA_CAP_URN,
+            MEDIA_CAP_URN, "input",
             true,
             vec![
                 crate::cap::definition::ArgSource::Stdin {
@@ -148,7 +148,7 @@ pub fn lookup_cap_fabric_cap() -> Cap {
     // unversioned path: 0 is not a version.
     cap.args
         .push(crate::cap::definition::CapArg::with_description(
-            MEDIA_FABRIC_DEFVER,
+            MEDIA_FABRIC_DEFVER, "defver",
             false,
             vec![crate::cap::definition::ArgSource::CliFlag {
                 cli_flag: "--defver".to_string(),
@@ -156,8 +156,8 @@ pub fn lookup_cap_fabric_cap() -> Cap {
             "Per-definition version under the caller's manifest snapshot, 1 or greater. Absent ⇒ resolved under the fabric manifest the lookup cartridge is pinned to; a URN that manifest does not list is not found."
                 .to_string(),
         ));
-    cap.set_output(crate::cap::definition::CapOutput::new(
-        MEDIA_CAP_DEFINITION,
+    cap.add_output(crate::cap::definition::CapOutput::new(
+        MEDIA_CAP_DEFINITION, "output",
         "Full flattened cap definition as published in the registry.",
     ));
     cap
@@ -178,7 +178,7 @@ pub fn lookup_media_def_fabric_cap() -> Cap {
     );
     cap.args
         .push(crate::cap::definition::CapArg::with_description(
-            MEDIA_MEDIA_URN,
+            MEDIA_MEDIA_URN, "input",
             true,
             vec![
                 crate::cap::definition::ArgSource::Stdin {
@@ -190,7 +190,7 @@ pub fn lookup_media_def_fabric_cap() -> Cap {
         ));
     cap.args
         .push(crate::cap::definition::CapArg::with_description(
-            MEDIA_FABRIC_DEFVER,
+            MEDIA_FABRIC_DEFVER, "defver",
             false,
             vec![crate::cap::definition::ArgSource::CliFlag {
                 cli_flag: "--defver".to_string(),
@@ -198,8 +198,8 @@ pub fn lookup_media_def_fabric_cap() -> Cap {
             "Per-definition version under the caller's manifest snapshot, 1 or greater. Absent ⇒ resolved under the fabric manifest the lookup cartridge is pinned to; a URN that manifest does not list is not found."
                 .to_string(),
         ));
-    cap.set_output(crate::cap::definition::CapOutput::new(
-        MEDIA_MEDIA_DEFINITION,
+    cap.add_output(crate::cap::definition::CapOutput::new(
+        MEDIA_MEDIA_DEFINITION, "output",
         "Full media definition as published in the registry.",
     ));
     cap
@@ -244,14 +244,14 @@ pub fn identity_cap() -> Cap {
     );
 
     cap.args.push(crate::cap::definition::CapArg::new(
-        "media:",
+        "media:", "input",
         true,
         vec![crate::cap::definition::ArgSource::Stdin {
             stdin: "media:".to_string(),
         }],
     ));
-    cap.set_output(crate::cap::definition::CapOutput::new(
-        "media:",
+    cap.add_output(crate::cap::definition::CapOutput::new(
+        "media:", "output",
         "The input data, unchanged",
     ));
     cap
@@ -274,16 +274,13 @@ pub fn discard_cap() -> Cap {
     );
 
     cap.args.push(crate::cap::definition::CapArg::new(
-        "media:",
+        "media:", "input",
         true,
         vec![crate::cap::definition::ArgSource::Stdin {
             stdin: "media:".to_string(),
         }],
     ));
-    cap.set_output(crate::cap::definition::CapOutput::new(
-        MEDIA_VOID,
-        "Void (no output)",
-    ));
+    // `out=media:void`: the cap declares no output (RULE21).
     cap
 }
 
@@ -311,14 +308,14 @@ pub fn adapter_selection_cap() -> Cap {
     );
 
     cap.args.push(crate::cap::definition::CapArg::new(
-        "media:",
+        "media:", "input",
         true,
         vec![crate::cap::definition::ArgSource::Stdin {
             stdin: "media:".to_string(),
         }],
     ));
-    cap.set_output(crate::cap::definition::CapOutput::new(
-        MEDIA_ADAPTER_SELECTION,
+    cap.add_output(crate::cap::definition::CapOutput::new(
+        MEDIA_ADAPTER_SELECTION, "output",
         "JSON object with media_urns array identifying the detected file type",
     ));
     cap
@@ -1408,6 +1405,26 @@ mod tests {
         );
     }
 
+    // TEST12713: every definition this library builds in passes the rules it
+    // holds everyone else's definitions to.
+    #[test]
+    fn test12713_built_in_definitions_pass_the_definition_rules() {
+        for cap in [
+            identity_cap(),
+            discard_cap(),
+            adapter_selection_cap(),
+            lookup_cap_fabric_cap(),
+            lookup_media_def_fabric_cap(),
+        ] {
+            let checked = crate::cap::validation::validate_cap_definition(&cap);
+            assert!(checked.is_ok(), "{}: {:?}", cap.urn_string(), checked.err());
+        }
+        // Discard's `out=` is void, so it declares no output; identity's is
+        // not, so it declares its one.
+        assert!(discard_cap().get_outputs().is_empty());
+        assert_eq!(identity_cap().main_output().map(|o| o.get_name()), Some("output"));
+    }
+
     // TEST1274: adapter_selection_cap() builds a valid Cap with correct args and output
     #[test]
     fn test1274_adapter_selection_cap_builder() {
@@ -1422,8 +1439,7 @@ mod tests {
 
         // Must have output
         let output = cap
-            .output
-            .as_ref()
+            .main_output()
             .expect("Adapter selection cap must have output");
         assert_eq!(
             output.media_urn,

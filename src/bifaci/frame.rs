@@ -1934,7 +1934,7 @@ mod tests {
     // TEST181: Test Frame::hello_with_manifest produces HELLO with manifest bytes for cartridge side
     #[test]
     fn test181_hello_frame_with_manifest() {
-        let manifest_json = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]}]}]}"#;
+        let manifest_json = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
         let frame = Frame::hello_with_manifest(
             &Limits {
                 max_frame: 1_000_000,
@@ -4114,7 +4114,7 @@ mod tests {
     fn test521_relay_notify_cbor_roundtrip() {
         use crate::bifaci::io::{decode_frame, encode_frame};
 
-        let manifest = br#"{"name":"Test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:in=\"media:void\";convert;out=\"media:image\"","title":"Convert","aliases": ["convert"]}]}]}"#;
+        let manifest = br#"{"name":"Test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:in=\"media:void\";convert;out=\"media:image\"","title":"Convert","aliases": ["convert"],"outputs":[{"media_urn":"media:image","name":"output","output_description":"The output"}]}]}]}"#;
         let limits = Limits {
             max_frame: 3_000_000,
             max_chunk: 256_000,
@@ -4230,7 +4230,7 @@ mod tests {
         );
         // First cap is identity (required)
         large_manifest
-            .push_str(r#"{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]}"#);
+            .push_str(r#"{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}"#);
         for i in 0..99 {
             large_manifest.push_str(&format!(
                 r#",{{"urn":"cap:in=\"media:void\";op{i};out=\"media:void\"","title":"Op{i}","aliases":["op{i}"]}}"#,

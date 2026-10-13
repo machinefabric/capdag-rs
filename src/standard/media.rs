@@ -21,8 +21,12 @@
 //! use capdag::{CapArg, ArgSource, CapOutput};
 //! use capdag::standard::media::{MEDIA_STRING, MEDIA_OBJECT};
 //!
-//! let arg = CapArg::new(MEDIA_STRING, true, vec![ArgSource::CliFlag { cli_flag: "--input".to_string() }]);
-//! let output = CapOutput::new(MEDIA_OBJECT, "JSON output");
+//! // The media URN identifies the argument or output; the name is a label a
+//! // machine may use to say which one it means.
+//! let arg = CapArg::new(MEDIA_STRING, "input", true, vec![ArgSource::CliFlag { cli_flag: "--input".to_string() }]);
+//! let output = CapOutput::new(MEDIA_OBJECT, "result", "JSON output");
+//! assert_eq!(arg.get_name(), "input");
+//! assert_eq!(output.get_name(), "result");
 //! ```
 
 // Re-export media URN constants from media_urn module

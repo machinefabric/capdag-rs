@@ -929,7 +929,7 @@ mod tests {
             &["media:enc=utf-8"],
             "media:enc=utf-8;item",
         );
-        splitter.output.as_mut().unwrap().is_sequence = true;
+        splitter.outputs[0].is_sequence = true;
         // Consumer: scalar item → scalar text.
         let texter = build_cap(
             "cap:in=\"media:enc=utf-8;item\";t;out=\"media:enc=utf-8\"",

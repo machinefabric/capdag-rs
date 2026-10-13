@@ -210,9 +210,36 @@ impl CapManifest {
         self
     }
 
-    /// Validate that CAP_IDENTITY is declared in this manifest.
-    /// Checks both top-level caps and caps within cap_groups.
-    /// Fails hard if missing — identity is mandatory in every capset.
+    /// Take a manifest another program advertised: parse it and hold every
+    /// definition in it to the definition rules. This is the one way a reader
+    /// gets a `CapManifest` from bytes it did not write, so no reader has a
+    /// manifest whose definitions nobody checked.
+    pub fn from_advertised(bytes: &[u8]) -> Result<Self, ManifestLoadError> {
+        let manifest: CapManifest = serde_json::from_slice(bytes)
+            .map_err(|e| ManifestLoadError::Unparseable(e.to_string()))?;
+        manifest
+            .validate_definitions()
+            .map_err(ManifestLoadError::InvalidDefinition)?;
+        Ok(manifest)
+    }
+
+    /// Hold every cap definition this manifest declares to the definition
+    /// rules (`capdag/docs/10-validation-rules.md`, RULE1-RULE22).
+    ///
+    /// A manifest is where a definition crosses from one program to another,
+    /// so both sides hold it to them: the cartridge before it advertises
+    /// ([`CapManifest::validate`]), the reader before it believes
+    /// ([`CapManifest::from_advertised`]).
+    pub fn validate_definitions(&self) -> Result<(), String> {
+        for cap in self.all_caps() {
+            crate::cap::validation::validate_cap_definition(cap).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Validate this manifest: CAP_IDENTITY is declared, every definition
+    /// passes the definition rules, and the pool declarations resolve.
+    /// Fails hard if identity is missing — it is mandatory in every capset.
     pub fn validate(&self) -> Result<(), String> {
         let identity_urn = CapUrn::from_string(CAP_IDENTITY)
             .map_err(|e| format!("BUG: CAP_IDENTITY constant is invalid: {}", e))?;
@@ -226,6 +253,7 @@ impl CapManifest {
                 CAP_IDENTITY
             ));
         }
+        self.validate_definitions()?;
         // Pool declarations must resolve against this manifest's caps — a
         // deserialized manifest carries them unvalidated, and an unresolved
         // pool would otherwise surface only at first dispatch.
@@ -237,6 +265,28 @@ impl CapManifest {
         Ok(())
     }
 }
+
+/// Why a manifest another program advertised was not taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestLoadError {
+    /// The bytes are not a manifest.
+    Unparseable(String),
+    /// The manifest parsed, and a cap definition in it breaks a definition rule.
+    InvalidDefinition(String),
+}
+
+impl std::fmt::Display for ManifestLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ManifestLoadError::Unparseable(reason) => write!(f, "not a manifest: {reason}"),
+            ManifestLoadError::InvalidDefinition(reason) => {
+                write!(f, "invalid cap definition: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ManifestLoadError {}
 
 /// Compile-time validation for `MFR_CARTRIDGE_REGISTRY_URL`.
 ///
@@ -462,14 +512,14 @@ mod tests {
             vec!["extract-metadata".to_string()],
         );
         cap.add_arg(CapArg::new(
-            "media:document;ext=pdf",
+            "media:document;ext=pdf", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:document;ext=pdf".to_string(),
             }],
         ));
         cap.add_arg(CapArg::with_full_definition(
-            "media:chunk-size;numeric",
+            "media:chunk-size;numeric", "chunk-size", None,
             false,
             false,
             false,
@@ -481,7 +531,7 @@ mod tests {
             Some(serde_json::json!({"unit": "words"})),
         ));
         cap.add_arg(CapArg::with_full_definition(
-            "media:bool;enc=utf-8;timestamps",
+            "media:bool;enc=utf-8;timestamps", "timestamps", None,
             false,
             false,
             false,
@@ -647,24 +697,107 @@ mod tests {
     // TEST475: validate() passes with CAP_IDENTITY in a cap group
     #[test]
     fn test475_validate_passes_with_identity() {
-        let identity_urn = CapUrn::from_string(CAP_IDENTITY).unwrap();
-        let cap = Cap::new(
-            identity_urn,
-            "Identity".to_string(),
-            vec!["identity".to_string()],
-        );
         let manifest = CapManifest::new(
             "TestCartridge".to_string(),
             "1.0.0".to_string(),
             CartridgeChannel::Release,
             None,
             "Test".to_string(),
-            vec![default_group(vec![cap])],
+            vec![default_group(vec![crate::standard::caps::identity_cap()])],
         );
-        assert!(
-            manifest.validate().is_ok(),
-            "Manifest with CAP_IDENTITY must validate"
-        );
+        assert_eq!(manifest.validate(), Ok(()), "Manifest with CAP_IDENTITY must validate");
+    }
+
+    // TEST12711: validate() holds every definition in the manifest to the
+    // definition rules: a cap in any group that breaks one is refused, naming
+    // the cap and the rule. Identity alone being present is not enough.
+    #[test]
+    fn test12711_validate_refuses_an_invalid_definition() {
+        let manifest_with = |cap: Cap| {
+            CapManifest::new(
+                "TestCartridge".to_string(),
+                "1.0.0".to_string(),
+                CartridgeChannel::Release,
+                None,
+                "Test".to_string(),
+                vec![
+                    default_group(vec![crate::standard::caps::identity_cap()]),
+                    CapGroup {
+                        name: "second".to_string(),
+                        caps: vec![cap],
+                        adapter_urns: Vec::new(),
+                    },
+                ],
+            )
+        };
+        let urn = || CapUrn::from_string(&test_urn("convert")).unwrap();
+        let complete = || {
+            let mut cap = Cap::new(urn(), "Convert".to_string(), vec!["convert".to_string()]);
+            cap.add_output(crate::cap::definition::CapOutput::new("media:record", "record", "The record"));
+            cap
+        };
+        assert_eq!(manifest_with(complete()).validate(), Ok(()));
+
+        // No output although `out=` is not void.
+        let bare = Cap::new(urn(), "Convert".to_string(), vec!["convert".to_string()]);
+        let err = manifest_with(bare).validate().unwrap_err();
+        assert!(err.contains("RULE21") && err.contains("convert"), "{err}");
+
+        // Two arguments under one name.
+        let mut twins = complete();
+        for (media, flag) in [("media:enc=utf-8", "--a"), ("media:integer", "--b")] {
+            twins.add_arg(crate::cap::definition::CapArg::new(
+                media, "same",
+                false,
+                vec![crate::cap::definition::ArgSource::CliFlag { cli_flag: flag.to_string() }],
+            ));
+        }
+        let err = manifest_with(twins).validate().unwrap_err();
+        assert!(err.contains("RULE17") && err.contains("convert"), "{err}");
+    }
+
+    // TEST12717: a manifest read from another program's bytes is parsed and
+    // held to the definition rules in one step, and the two refusals are told
+    // apart: bytes that are no manifest, and a manifest with a definition that
+    // breaks a rule.
+    #[test]
+    fn test12717_an_advertised_manifest_is_parsed_and_checked() {
+        let manifest_with = |cap: Cap| {
+            serde_json::to_vec(&CapManifest::new(
+                "TestCartridge".to_string(),
+                "1.0.0".to_string(),
+                CartridgeChannel::Release,
+                None,
+                "Test".to_string(),
+                vec![default_group(vec![crate::standard::caps::identity_cap(), cap])],
+            ))
+            .unwrap()
+        };
+        let urn = || CapUrn::from_string(&test_urn("convert")).unwrap();
+        let mut complete = Cap::new(urn(), "Convert".to_string(), vec!["convert".to_string()]);
+        complete.add_output(crate::cap::definition::CapOutput::new("media:record", "record", "The record"));
+        let taken = CapManifest::from_advertised(&manifest_with(complete)).expect("a valid manifest");
+        assert_eq!(taken.all_caps().len(), 2);
+        assert_eq!(taken.all_caps()[1].output_named("record").map(|o| o.get_media_urn()), Some("media:record"));
+
+        let bare = Cap::new(urn(), "Convert".to_string(), vec!["convert".to_string()]);
+        match CapManifest::from_advertised(&manifest_with(bare)) {
+            Err(ManifestLoadError::InvalidDefinition(reason)) => {
+                assert!(reason.contains("RULE21") && reason.contains("convert"), "{reason}");
+            }
+            other => panic!("expected InvalidDefinition, got {other:?}"),
+        }
+        assert!(matches!(
+            CapManifest::from_advertised(b"{not a manifest"),
+            Err(ManifestLoadError::Unparseable(_))
+        ));
+        // A manifest of the earlier shape (an argument without a name) is not a
+        // manifest this capdag reads.
+        let unnamed = br#"{"name":"T","version":"1.0","channel":"release","registry_url":null,"description":"T","cap_groups":[{"name":"default","caps":[{"urn":"cap:in=\"media:enc=utf-8\";t;out=\"media:void\"","title":"T","args":[{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}]}]}]}]}"#;
+        match CapManifest::from_advertised(unnamed) {
+            Err(ManifestLoadError::Unparseable(reason)) => assert!(reason.contains("name"), "{reason}"),
+            other => panic!("expected Unparseable, got {other:?}"),
+        }
     }
 
     // TEST476: validate() fails without CAP_IDENTITY

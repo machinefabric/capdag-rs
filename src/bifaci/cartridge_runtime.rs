@@ -8182,7 +8182,7 @@ mod tests {
     /// with the SYNTHETIC reference URN, is_sequence (a feed is a sequence
     /// of items), and a stdin source carrying the CONTENT urn — the exact
     /// file-path reference shape, unbounded.
-    const LIVE_FEED_MANIFEST: &str = r#"{"name":"FeedCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Live feed test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases":["identity"]},{"urn":"cap:drain;in=\"media:feed-frames\";out=\"media:fmt=json;record\"","title":"Drain","aliases":["drain"],"args":[{"media_urn":"media:live;synthetic","required":true,"is_sequence":true,"sources":[{"stdin":"media:feed-frames"}]}]}]}]}"#;
+    const LIVE_FEED_MANIFEST: &str = r#"{"name":"FeedCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Live feed test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases":["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:drain;in=\"media:feed-frames\";out=\"media:fmt=json;record\"","title":"Drain","aliases":["drain"],"args":[{"media_urn":"media:live;synthetic","name":"input","required":true,"is_sequence":true,"sources":[{"stdin":"media:feed-frames"}]}],"outputs":[{"media_urn":"media:fmt=json;record","name":"output","output_description":"The output"}]}]}]}"#;
 
     fn live_feed_ctx(
         selector_arg_is_sequence: bool,
@@ -8295,7 +8295,7 @@ mod tests {
     ) {
         let cap_urn = format!("cap:consume;in=\"{main_in}\";out=\"media:fmt=json;record\"");
         let manifest_json = format!(
-            r#"{{"name":"BlindCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Transport-blind live consumer","cap_groups":[{{"name":"default","caps":[{{"urn":"{}","title":"Consume","aliases":["consume"],"args":[{{"media_urn":"{main_in}","required":true,"is_sequence":true,"sources":[{{"stdin":"{main_in}"}}]}}]}}]}}]}}"#,
+            r#"{{"name":"BlindCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Transport-blind live consumer","cap_groups":[{{"name":"default","caps":[{{"urn":"{}","title":"Consume","aliases":["consume"],"args":[{{"media_urn":"{main_in}","name":"input","required":true,"is_sequence":true,"sources":[{{"stdin":"{main_in}"}}]}}]}}]}}]}}"#,
             cap_urn.replace('"', "\\\"")
         );
         let manifest: CapManifest =
@@ -9102,9 +9102,16 @@ mod tests {
     }
 
     /// Helper function to create a Cap for tests
+    /// A test cap with the given args, and the main output its URN states
+    /// (RULE21): a cap whose `out=` is not void declares that output.
     fn create_test_cap(urn_str: &str, title: &str, command: &str, args: Vec<CapArg>) -> Cap {
         let urn = CapUrn::from_string(urn_str).expect("Invalid cap URN");
-        Cap::with_args(urn, title.to_string(), vec![command.to_string()], args)
+        let out_spec = urn.out_spec().to_string();
+        let mut cap = Cap::with_args(urn, title.to_string(), vec![command.to_string()], args);
+        if out_spec != crate::urn::media_urn::MEDIA_VOID {
+            cap.add_output(crate::cap::definition::CapOutput::new(out_spec, "output", "The output"));
+        }
+        cap
     }
 
     /// Mock registry for tests - stores caps and returns them by URN lookup
@@ -9307,13 +9314,7 @@ mod tests {
     ) -> CapManifest {
         // Always append CAP_IDENTITY at the end - cartridges must declare it
         // (Appending instead of prepending to avoid breaking tests that reference caps[0])
-        let identity_urn = crate::CapUrn::from_string(crate::standard::caps::CAP_IDENTITY).unwrap();
-        let identity_cap = Cap::new(
-            identity_urn,
-            "Identity".to_string(),
-            vec!["identity".to_string()],
-        );
-        caps.push(identity_cap);
+        caps.push(crate::standard::caps::identity_cap());
 
         CapManifest::new(
             name.to_string(),
@@ -9331,10 +9332,10 @@ mod tests {
 
     /// Test manifest JSON with identity and a test cap.
     /// Uses cap_groups format. `cap:test` is a legal fully-generic declared transform.
-    const TEST_MANIFEST: &str = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]},{"urn":"cap:test","title":"Test","aliases": ["test"]}]}]}"#;
+    const TEST_MANIFEST: &str = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:test","title":"Test","aliases": ["test"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
 
     /// Valid manifest with proper in/out specs for tests that need parsed CapManifest
-    const VALID_MANIFEST: &str = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"]},{"urn":"cap:in=media:void;test;out=media:void","title":"Test","aliases": ["test"]}],"adapter_urns":[]}]}"#;
+    const VALID_MANIFEST: &str = r#"{"name":"TestCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:in=media:void;test;out=media:void","title":"Test","aliases": ["test"]}],"adapter_urns":[]}]}"#;
 
     // TEST248: Test register_op and find_handler by exact cap URN
     #[test]
@@ -10072,7 +10073,7 @@ mod tests {
             "Process PDF",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10146,7 +10147,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }], // NO stdin source!
             )],
@@ -10186,7 +10187,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10233,7 +10234,7 @@ mod tests {
         std::fs::write(&file2, b"content2").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -10275,7 +10276,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10342,7 +10343,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10391,7 +10392,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10419,11 +10420,11 @@ mod tests {
     fn test343_non_file_path_args_unaffected() {
         // Arg with different media type should NOT trigger file reading
         let cap = create_test_cap(
-            "cap:in=media:void;test;out=media:void",
+            "cap:in=\"media:enc=utf-8;model-spec\";test;out=media:void",
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;model-spec", // NOT file-path
+                "media:enc=utf-8;model-spec", "input", // NOT file-path
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10457,7 +10458,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10520,7 +10521,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10590,7 +10591,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10628,7 +10629,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10666,7 +10667,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Position { position: 0 }, // First
@@ -10705,41 +10706,55 @@ mod tests {
         let test_file = temp_dir.join("test349.txt");
         std::fs::write(&test_file, b"content 349").unwrap();
 
+        // A flag and a position on one argument is refused by RULE7, so the
+        // order is shown over the two an argument may hold together.
         let cap = create_test_cap(
             "cap:in=media:;test;out=media:void",
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::CliFlag {
                         cli_flag: "--file".to_string(),
                     }, // First (not provided)
-                    ArgSource::Position { position: 0 }, // Second (provided)
                     ArgSource::Stdin {
                         stdin: "media:".to_string(),
-                    }, // Third (not used)
+                    }, // Second (provided)
                 ],
             )],
         );
 
         let manifest = create_test_manifest("TestCartridge", "1.0.0", "Test", vec![cap]);
         let runtime = CartridgeRuntime::with_manifest(manifest);
-
-        // Only provide position arg, no --file flag
-        let cli_args = vec![test_file.to_string_lossy().to_string()];
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
 
-        // Use helper to properly test file-path conversion
+        // No --file flag: the first source yields nothing and the second is
+        // consulted, exactly once.
+        let mut asked = 0;
+        let (value, from_stdin) = runtime
+            .extract_arg_value(&cap.args[0], &[], &mut || {
+                asked += 1;
+                Ok(Some(b"piped 349".to_vec()))
+            })
+            .unwrap();
+        assert_eq!(value.as_deref(), Some(&b"piped 349"[..]));
+        assert!(from_stdin, "the value is reported as coming from stdin");
+        assert_eq!(asked, 1);
+
+        // The flag given: the first source wins, stdin is never read, and the
+        // path it names is read as the file's bytes.
+        let cli_args = vec!["--file".to_string(), test_file.to_string_lossy().to_string()];
+        let (value, from_stdin) = runtime
+            .extract_arg_value(&cap.args[0], &cli_args, &mut || {
+                panic!("stdin must not be read when an earlier source yields a value")
+            })
+            .unwrap();
+        assert_eq!(value, Some(test_file.to_string_lossy().as_bytes().to_vec()));
+        assert!(!from_stdin);
         let result = test_filepath_conversion(&cap, &cli_args, &runtime);
-
-        assert_eq!(
-            result, b"content 349",
-            "Should fall back to position source and read file"
-        );
-
-        std::fs::remove_file(test_file).ok();
+        assert_eq!(result, b"content 349", "the flag's path is read as the file");
     }
 
     // TEST350: Integration test - full CLI mode invocation with file-path
@@ -10760,7 +10775,7 @@ mod tests {
             "Process PDF",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10824,7 +10839,7 @@ mod tests {
     #[test]
     fn test6588_file_path_array_empty_array() {
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             false, // Not required
             vec![ArgSource::Stdin {
                 stdin: "media:".to_string(),
@@ -10915,7 +10930,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10974,7 +10989,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;text",
+                "media:enc=utf-8;text", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11047,7 +11062,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11110,7 +11125,7 @@ mod tests {
         std::fs::write(&file1, b"content1").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -11163,7 +11178,7 @@ mod tests {
         std::fs::write(&file2, b"json").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -11273,7 +11288,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11319,7 +11334,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11349,7 +11364,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11410,7 +11425,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path",
+                "media:enc=utf-8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11505,7 +11520,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                MEDIA_FILE_PATH,
+                MEDIA_FILE_PATH, "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11555,7 +11570,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:document;ext=pdf",
+                "media:document;ext=pdf", "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:document;ext=pdf".to_string(),
@@ -11630,7 +11645,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:document;ext=pdf",
+                "media:document;ext=pdf", "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:document;ext=pdf".to_string(),
@@ -11690,7 +11705,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                MEDIA_FILE_PATH,
+                MEDIA_FILE_PATH, "input",
                 true,
                 vec![ArgSource::Stdin {
                     stdin: "media:document;ext=pdf".to_string(),
@@ -11785,7 +11800,7 @@ mod tests {
         std::fs::write(&file3, b"content3").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path",
+            "media:enc=utf-8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:".to_string(),
@@ -13661,6 +13676,8 @@ mod tests {
         );
         cap.args = vec![crate::CapArg {
             media_urn: "media:live;synthetic".to_string(),
+            name: "input".to_string(),
+            accepts: None,
             required: true,
             is_sequence: true,
             streaming: true,
