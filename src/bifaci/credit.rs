@@ -1,4 +1,4 @@
-//! Credit-based per-stream flow control (protocol v4).
+//! Credit-based per-stream flow control.
 //!
 //! One credit = permission to send one CHUNK frame. A sender starts each stream
 //! with the negotiated `initial_credit` window and must wait when the window is

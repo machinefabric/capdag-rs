@@ -1,4 +1,4 @@
-//! Protocol v4 end-to-end tests (bifaci v4 — explicit diagnostic attribution,
+//! Protocol end-to-end tests (explicit diagnostic attribution,
 //! handler-capacity admission, credit-based flow control,
 //! bidirectional streaming, terminal metadata on END, pipelined chains).
 //!
@@ -25,7 +25,7 @@
 //!   upstream finishes)
 //!
 //! Deferred to the capdag-interop suite (see
-//! mfab-tests/capdag-interop/README.md, "Protocol v4 scenarios"):
+//! mfab-tests/capdag-interop/README.md, "Protocol scenarios"):
 //! - TEST7057 (credit across a relay hop with XID rewriting): the
 //!   orchestrator harness has exactly one slave hop, which every test here
 //!   exercises implicitly; the multi-hop XID-rewrite assertion needs the
@@ -56,10 +56,8 @@ use capdag::{
     RelayNotifyCapabilitiesPayload, RelaySlave, StreamMeta, DEFAULT_INITIAL_CREDIT,
 };
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -188,7 +186,7 @@ fn build_testcartridge_cap(urn_str: &str) -> Cap {
     }
 }
 
-/// Unified `FabricRegistry` pre-loaded with the v4 testcartridge caps.
+/// Unified `FabricRegistry` pre-loaded with the testcartridge caps.
 fn create_v4_fabric_registry() -> Arc<FabricRegistry> {
     let registry = FabricRegistry::new_for_test();
     let caps = vec![
@@ -204,149 +202,9 @@ fn create_v4_fabric_registry() -> Arc<FabricRegistry> {
 // testcartridge binary harness (mirrors orchestrator_integration.rs)
 // =============================================================================
 
-/// Get the testcartridge source directory.
-///
-/// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
-/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
-/// opaque spawn failure later: `Command::current_dir` on an absent directory
-/// reports only `NotFound`, which reads as a missing `cargo`.
-fn testcartridge_dir() -> PathBuf {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let dir = PathBuf::from(&manifest_dir)
-        .parent()
-        .expect("capdag-rs has a parent (the capdag superrepo)")
-        .parent()
-        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
-        .join("mfab-tests")
-        .join("testcartridge");
-    assert!(
-        dir.is_dir(),
-        "testcartridge source not found at {}; these tests need the machinefabric workspace \
-         checkout, not a standalone capdag-rs clone",
-        dir.display()
-    );
-    dir
-}
-
-/// Check if testcartridge needs rebuilding
-fn testcartridge_needs_rebuild(binary_path: &PathBuf) -> bool {
-    let binary_mtime = match binary_path.metadata().and_then(|m| m.modified()) {
-        Ok(t) => t,
-        Err(_) => return true,
-    };
-
-    let cart_dir = testcartridge_dir();
-
-    let cargo_toml = cart_dir.join("Cargo.toml");
-    if let Ok(meta) = cargo_toml.metadata() {
-        if let Ok(mtime) = meta.modified() {
-            if mtime > binary_mtime {
-                eprintln!("[V4E2ETest] Cargo.toml is newer than binary");
-                return true;
-            }
-        }
-    }
-
-    let src_dir = cart_dir.join("src");
-    if src_dir.exists() && check_dir_newer(&src_dir, &binary_mtime) {
-        eprintln!("[V4E2ETest] src/ has files newer than binary");
-        return true;
-    }
-
-    false
-}
-
-/// Check if any file in directory is newer than reference time
-fn check_dir_newer(dir: &PathBuf, reference: &std::time::SystemTime) -> bool {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if check_dir_newer(&path, reference) {
-                    return true;
-                }
-            } else if path.is_file() {
-                if let Ok(meta) = path.metadata() {
-                    if let Ok(mtime) = meta.modified() {
-                        if mtime > *reference {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Build testcartridge in release mode
-fn build_testcartridge() {
-    let cart_dir = testcartridge_dir();
-    eprintln!("[V4E2ETest] Building testcartridge in release mode...");
-    eprintln!("[V4E2ETest]   Directory: {:?}", cart_dir);
-
-    support::resolve_this_capdag(&cart_dir, "V4E2ETest");
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("--release")
-        .args(support::against_this_capdag(&cart_dir))
-        .current_dir(&cart_dir)
-        .output()
-        .expect("Failed to run cargo build for testcartridge");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        for line in stdout.lines() {
-            eprintln!("[V4E2ETest]   {}", line);
-        }
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.trim().is_empty() {
-        for line in stderr.lines() {
-            eprintln!("[V4E2ETest]   {}", line);
-        }
-    }
-
-    if !output.status.success() {
-        panic!(
-            "Failed to build testcartridge (exit code: {:?})",
-            output.status.code()
-        );
-    }
-
-    eprintln!("[V4E2ETest] Successfully built testcartridge");
-}
-
-/// Get path to testcartridge binary, building if necessary.
+/// The testcartridge binary, built against this capdag (see `support`).
 fn testcartridge_bin() -> PathBuf {
-    // Where cargo builds it, as cargo says: the build below runs under the
-    // same cargo and the same environment, so this is where it will be.
-    let target_dir = support::target_dir_of(&testcartridge_dir());
-    // With the platform's executable suffix: on Windows the build writes
-    // `testcartridge.exe`, and a path without it is never there.
-    let bin_path = target_dir
-        .join("release")
-        .join(format!("testcartridge{}", std::env::consts::EXE_SUFFIX));
-
-    let needs_build = if !bin_path.exists() {
-        eprintln!("[V4E2ETest] Binary not found at {:?}, will build", bin_path);
-        true
-    } else {
-        testcartridge_needs_rebuild(&bin_path)
-    };
-
-    if needs_build {
-        build_testcartridge();
-    }
-
-    if !bin_path.exists() {
-        panic!(
-            "testcartridge binary not found at {:?} after build attempt",
-            bin_path
-        );
-    }
-
-    bin_path
+    support::testcartridge_bin("ProtocolE2ETest")
 }
 
 fn setup_test_env() -> (TempDir, PathBuf, Vec<PathBuf>) {

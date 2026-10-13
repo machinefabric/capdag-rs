@@ -73,6 +73,12 @@ pub enum RuntimeError {
     #[error("Handler error: {0}")]
     Handler(String),
 
+    /// A handler asked for an output the cap it serves does not declare
+    /// (`Request::output_for`). A defect in the cartridge: the definition and
+    /// the handler disagree about what the cap produces.
+    #[error("Cap '{cap_urn}' declares no output '{output}'")]
+    UnknownOutput { cap_urn: String, output: String },
+
     /// A handler failure carrying its FULL identity: the machine-readable
     /// code the cartridge's typed error declares (`error_code()`), the
     /// failure class it declares (`attribution_class()` — whose problem it is),
@@ -732,11 +738,23 @@ impl InputStream {
 /// `PeerResponse::recv()` yields these interleaved in arrival order. Handlers
 /// match on each variant to decide how to react (e.g., forward progress, accumulate data).
 pub enum PeerResponseItem {
-    /// A decoded CBOR data chunk from the peer response, with optional per-chunk metadata.
+    /// A decoded CBOR data chunk of the peer's MAIN output, with optional per-chunk metadata.
     Data(Result<ciborium::Value, StreamError>, Option<StreamMeta>),
+    /// A decoded CBOR data chunk of another output the peer's cap declares,
+    /// tagged with that output's media URN as its stream named it. A caller
+    /// that wants only the cap's answer ignores these.
+    Output {
+        output: String,
+        item: Result<ciborium::Value, StreamError>,
+        meta: Option<StreamMeta>,
+    },
     /// A LOG frame from the peer (progress, status messages, etc.).
     Log(Frame),
 }
+
+/// One response stream's consumption grants, shared between the demux that
+/// sees its chunks arrive and the caller that consumes its items.
+type SharedGrants = Arc<Mutex<InputGrantEmitter>>;
 
 /// Response from a peer call — yields both data items and LOG frames from a single receiver.
 ///
@@ -746,10 +764,13 @@ pub enum PeerResponseItem {
 /// source diagnostics would violate the protocol's attribution contract. Callers
 /// that accept peer diagnostics must drain `recv()` or use a forwarding helper.
 pub struct PeerResponse {
-    rx: tokio::sync::mpsc::UnboundedReceiver<PeerResponseItem>,
-    /// Consumption grants for the responding peer's output window (L10/L14).
-    /// None = uncredited context (in-process host, synthetic test responses).
-    grants: Option<InputGrantEmitter>,
+    /// Each item with the grants of the stream it came on. `None` for a LOG
+    /// item and in an uncredited context (in-process host, synthetic test
+    /// responses).
+    rx: tokio::sync::mpsc::UnboundedReceiver<(PeerResponseItem, Option<SharedGrants>)>,
+    /// Consumption grants for the responding peer's output windows (L10/L14),
+    /// one per response stream seen so far.
+    grants: Vec<SharedGrants>,
 }
 
 impl PeerResponse {
@@ -759,24 +780,35 @@ impl PeerResponse {
     /// Data consumption replenishes the responding peer's output window —
     /// a slow consumer naturally throttles the producer (L10).
     pub async fn recv(&mut self) -> Option<PeerResponseItem> {
-        let item = match self.rx.try_recv() {
+        let next = match self.rx.try_recv() {
             Ok(item) => Some(item),
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => None,
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                 // Flush pending grants before blocking (L10) — the responding
-                // peer may be stalled on exactly this credit.
-                if let Some(grants) = self.grants.as_mut() {
-                    grants.flush();
+                // peer may be stalled on exactly this credit, on any of its
+                // streams.
+                for grants in &self.grants {
+                    grants.lock().unwrap_or_else(|e| e.into_inner()).flush();
                 }
                 self.rx.recv().await
             }
         };
-        if let (Some(PeerResponseItem::Data(Ok(_), _)), Some(grants)) =
-            (&item, self.grants.as_mut())
-        {
-            grants.consumed();
+        let (item, grants) = next?;
+        if let Some(grants) = grants {
+            if !self.grants.iter().any(|known| Arc::ptr_eq(known, &grants)) {
+                self.grants.push(Arc::clone(&grants));
+            }
+            // An item of any output was consumed from its stream: that
+            // stream's window is what is replenished.
+            let consumed = matches!(
+                item,
+                PeerResponseItem::Data(Ok(_), _) | PeerResponseItem::Output { item: Ok(_), .. }
+            );
+            if consumed {
+                grants.lock().unwrap_or_else(|e| e.into_inner()).consumed();
+            }
         }
-        item
+        Some(item)
     }
 
     /// Construct a `PeerResponse` from a fixed byte payload, for use by
@@ -795,14 +827,17 @@ impl PeerResponse {
         // appropriate — non-UTF-8 in a JSON payload is a malformed test.
         let text = String::from_utf8(bytes)
             .expect("PeerResponse::synthetic_text: payload must be valid UTF-8");
-        let _ = tx.send(PeerResponseItem::Data(
-            Ok(ciborium::Value::Text(text)),
+        let _ = tx.send((
+            PeerResponseItem::Data(Ok(ciborium::Value::Text(text)), None),
             None,
         ));
         // Dropping `tx` here closes the channel so `recv()` returns None
         // after the single data item.
         drop(tx);
-        Self { rx, grants: None }
+        Self {
+            rx,
+            grants: Vec::new(),
+        }
     }
 
     /// Collect finite peer data while preserving every peer side-channel frame.
@@ -829,6 +864,9 @@ impl PeerResponse {
                     }
                 },
                 PeerResponseItem::Data(Err(error), _) => return Err(error),
+                // Another output of the peer's cap: not what is collected.
+                PeerResponseItem::Output { item: Ok(_), .. } => {}
+                PeerResponseItem::Output { item: Err(error), .. } => return Err(error),
                 PeerResponseItem::Log(frame) => {
                     let level = frame.log_level().ok_or_else(|| {
                         StreamError::Protocol("peer LOG missing required text level".to_string())
@@ -887,6 +925,9 @@ impl PeerResponse {
                     }
                 },
                 PeerResponseItem::Data(Err(e), _) => return Err(e),
+                // Another output of the peer's cap: not what is collected.
+                PeerResponseItem::Output { item: Ok(_), .. } => {}
+                PeerResponseItem::Output { item: Err(e), .. } => return Err(e),
                 PeerResponseItem::Log(_) => {
                     return Err(StreamError::Protocol(
                         "peer response emitted a LOG frame; collect with explicit diagnostic forwarding"
@@ -912,6 +953,9 @@ impl PeerResponse {
                     }
                 }
                 PeerResponseItem::Data(Err(e), _) => return Err(e),
+                // Another output of the peer's cap: not the value asked for.
+                PeerResponseItem::Output { item: Ok(_), .. } => {}
+                PeerResponseItem::Output { item: Err(e), .. } => return Err(e),
                 PeerResponseItem::Log(_) => {
                     return Err(StreamError::Protocol(
                         "peer response emitted a LOG frame; collect with explicit diagnostic forwarding"
@@ -1341,6 +1385,11 @@ pub struct OutputStream {
     /// Write-coalescing buffer, shared with detached [`StreamSender`]s (see
     /// [`CoalesceBuf`]).
     coalesce: Arc<Mutex<CoalesceBuf>>,
+    /// The output this stream is, when it is a response stream other than the
+    /// cap's main output: that output's media URN, which its STREAM_START
+    /// names (frame key 21). `None` for the main output's stream and for an
+    /// argument of a peer call.
+    output: Option<String>,
 }
 
 /// A handler's terminal status override, carried in END terminal metadata.
@@ -1401,7 +1450,51 @@ impl OutputStream {
             credit_gate: None,
             credit_router: None,
             coalesce: Arc::new(Mutex::new(CoalesceBuf::default())),
+            output: None,
         }
+    }
+
+    /// Make this the stream of an output other than the cap's main one: the
+    /// declared output `output` identifies. Its STREAM_START names it.
+    pub(crate) fn naming_output(mut self, output: impl Into<String>) -> Self {
+        self.output = Some(output.into());
+        self
+    }
+
+    /// The output this stream names: `None` for the main output's stream.
+    pub fn output_urn(&self) -> Option<&str> {
+        self.output.as_deref()
+    }
+
+    /// Whether the handler has written to this stream (its STREAM_START is sent).
+    pub fn is_started(&self) -> bool {
+        self.stream_mode.lock().unwrap().is_some()
+    }
+
+    /// The STREAM_START this stream opens with: its data's type, the output
+    /// it is when it is not the main one, and no length promise when `unbounded`.
+    fn start_frame(&self, is_sequence: bool, unbounded: bool, meta: Option<StreamMeta>) -> Frame {
+        let mut frame = if unbounded {
+            Frame::stream_start_unbounded(
+                self.request_id.clone(),
+                self.stream_id.clone(),
+                self.media_urn.clone(),
+                Some(is_sequence),
+            )
+        } else {
+            Frame::stream_start(
+                self.request_id.clone(),
+                self.stream_id.clone(),
+                self.media_urn.clone(),
+                Some(is_sequence),
+            )
+        };
+        if let Some(output) = &self.output {
+            frame = frame.for_output(output.clone());
+        }
+        frame.routing_id = self.routing_id.clone();
+        frame.meta = meta;
+        frame
     }
 
     /// Attach a flow-control window to this stream (L9). The gate registers
@@ -1861,15 +1954,7 @@ impl OutputStream {
                 Arc::clone(gate),
             );
         }
-        let mut start_frame = Frame::stream_start_unbounded(
-            self.request_id.clone(),
-            self.stream_id.clone(),
-            self.media_urn.clone(),
-            Some(is_sequence),
-        );
-        start_frame.routing_id = self.routing_id.clone();
-        start_frame.meta = meta;
-        self.sender.send(&start_frame)
+        self.sender.send(&self.start_frame(is_sequence, true, meta))
     }
 
     pub fn start(&self, is_sequence: bool, meta: Option<StreamMeta>) -> Result<(), RuntimeError> {
@@ -1887,15 +1972,7 @@ impl OutputStream {
                 Arc::clone(gate),
             );
         }
-        let mut start_frame = Frame::stream_start(
-            self.request_id.clone(),
-            self.stream_id.clone(),
-            self.media_urn.clone(),
-            Some(is_sequence),
-        );
-        start_frame.routing_id = self.routing_id.clone();
-        start_frame.meta = meta;
-        self.sender.send(&start_frame)
+        self.sender.send(&self.start_frame(is_sequence, false, meta))
     }
 
     /// Run a blocking closure on a dedicated OS thread while emitting keepalive
@@ -2173,22 +2250,15 @@ impl PeerCall {
 
         // Start demux — returns immediately so LOG frames can be consumed
         // before data arrives (critical for keeping activity timer alive).
-        // Consumption grants keep the responding peer's output window
-        // replenished (L10/L14); single-stream response → stream-less grants.
-        let grants = self.credit_router.as_ref().map(|_| InputGrantEmitter {
+        // Consumption grants keep the responding peer's output windows
+        // replenished (L10/L14), one window per response stream: a grant
+        // names the stream it credits, since the callee may answer on several.
+        let grants = self.credit_router.as_ref().map(|_| PeerGrantSource {
             sender: Arc::clone(&self.sender),
             rid: self.request_id.clone(),
-            xid: None,
-            stream_id: None,
-            // Peer-response consumption credits the CALLEE's output streams —
-            // response direction, routed toward the handler (L11).
-            direction: crate::bifaci::frame::CreditDirection::Response,
-            // The callee's send window was negotiated on ITS link, which this
-            // side cannot see: arriving chunks are not checked against this
-            // window, which only paces the grants for what is consumed.
-            window: Arc::new(crate::bifaci::credit::CreditWindow::new(self.initial_credit)),
+            initial_credit: self.initial_credit,
         });
-        let peer_response = demux_single_stream(response_rx, grants);
+        let peer_response = demux_peer_response(response_rx, grants);
 
         Ok(peer_response)
     }
@@ -2425,17 +2495,30 @@ impl CliStreamEmitter {
 /// Adapts FrameSender trait for CLI mode using CliStreamEmitter.
 pub struct CliFrameSender {
     emitter: CliStreamEmitter,
+    /// Streams of outputs other than the main one: announced on stderr once,
+    /// their data not printed.
+    unprinted: Mutex<std::collections::HashSet<String>>,
 }
 
 impl CliFrameSender {
     pub fn new() -> Self {
-        Self {
-            emitter: CliStreamEmitter::new(),
-        }
+        Self::with_emitter(CliStreamEmitter::new())
     }
 
     pub fn with_emitter(emitter: CliStreamEmitter) -> Self {
-        Self { emitter }
+        Self {
+            emitter,
+            unprinted: Mutex::new(std::collections::HashSet::new()),
+        }
+    }
+
+    /// Whether `frame` (a STREAM_START) opens a stream standard output does
+    /// not carry. A command line has one standard output, so it carries the
+    /// cap's main output: the stream that names no output. A stream that
+    /// names one is another output — announced on stderr and not printed; a
+    /// machine is what routes a cap's other outputs.
+    fn is_unprinted_start(&self, frame: &Frame) -> bool {
+        frame.output_urn().is_some()
     }
 }
 
@@ -2443,6 +2526,11 @@ impl FrameSender for CliFrameSender {
     fn send(&self, frame: &Frame) -> Result<(), RuntimeError> {
         match frame.frame_type {
             FrameType::Chunk => {
+                if let Some(stream_id) = &frame.stream_id {
+                    if self.unprinted.lock().unwrap().contains(stream_id) {
+                        return Ok(());
+                    }
+                }
                 // Extract CBOR payload from CHUNK frame and emit to stdout
                 if let Some(ref payload) = frame.payload {
                     // Verify checksum (protocol v2 integrity check)
@@ -2487,7 +2575,22 @@ impl FrameSender for CliFrameSender {
                 self.emitter.emit_log(level, message);
                 Ok(())
             }
-            FrameType::StreamStart | FrameType::StreamEnd | FrameType::End => {
+            FrameType::StreamStart => {
+                if self.is_unprinted_start(frame) {
+                    if let Some(stream_id) = &frame.stream_id {
+                        self.unprinted.lock().unwrap().insert(stream_id.clone());
+                    }
+                    self.emitter.emit_log(
+                        "info",
+                        &format!(
+                            "output '{}' was produced and is not printed: standard output carries the main output",
+                            frame.output_urn().unwrap_or_default()
+                        ),
+                    );
+                }
+                Ok(())
+            }
+            FrameType::StreamEnd | FrameType::End => {
                 // Ignore framing messages in CLI mode
                 Ok(())
             }
@@ -2522,16 +2625,171 @@ impl FrameSender for CliFrameSender {
 /// to access streaming input, output, and peer invocation.
 pub struct Request {
     input: Mutex<Option<InputPackage>>,
-    output: Arc<OutputStream>,
+    outputs: ResponseOutputs,
     peer: Arc<dyn PeerInvoker>,
 }
 
+/// One output a request answers on (13.2 §Outputs), and its stream.
+struct ResponseOutput {
+    /// The output's media URN: its identity, and — for an output other than
+    /// the main one — what its STREAM_START names.
+    urn: MediaUrn,
+    /// A required output the handler never wrote to is sent as an empty
+    /// value when the handler returns; an optional one is not sent — it did
+    /// not fire.
+    required: bool,
+    /// The declared cardinality, which an empty stream opened by the runtime
+    /// states in the handler's place.
+    is_sequence: bool,
+    stream: OutputStream,
+}
+
+/// The outputs of the cap a request is for: its main output and every other
+/// output its definition declares, each with a stream of its own.
+pub struct ResponseOutputs {
+    cap_urn: String,
+    main: ResponseOutput,
+    others: Vec<ResponseOutput>,
+}
+
+impl ResponseOutputs {
+    /// The outputs of `cap_urn` as `manifest` defines it.
+    ///
+    /// `open` builds one stream from the media label its STREAM_START carries.
+    /// The main output carries the label the cap URN's effect derives
+    /// ([`derive_response_media`]) and names no output; another output carries
+    /// its own media URN, or the cap's declared input when it
+    /// `carries = "input"`, and names itself. A cap served
+    /// without a definition in the manifest (a built-in the cartridge did not
+    /// advertise) answers on the one output its URN states.
+    pub(crate) fn for_cap(
+        cap_urn: &str,
+        manifest: Option<&CapManifest>,
+        open: impl Fn(String) -> OutputStream,
+    ) -> Result<Self, RuntimeError> {
+        let cap = CapUrn::from_string(cap_urn)
+            .map_err(|e| RuntimeError::CapUrn(format!("'{}': {}", cap_urn, e)))?;
+        let parse = |urn: &str| {
+            MediaUrn::from_string(urn).map_err(|e| {
+                RuntimeError::Handler(format!(
+                    "cap '{}' declares an output that is not a media URN ('{}'): {}",
+                    cap_urn, urn, e
+                ))
+            })
+        };
+        let definition = manifest.and_then(|m| m.all_caps().into_iter().find(|c| c.urn == cap));
+        let declared_main = definition.and_then(|d| d.main_output());
+        let out_spec = cap.out_spec().to_string();
+        let out_is_void = parse(&out_spec)?
+            .is_equivalent(&parse(crate::urn::media_urn::MEDIA_VOID)?)
+            .unwrap_or(false);
+
+        let main_urn = declared_main.map_or(out_spec, |o| o.media_urn.clone());
+        let main = ResponseOutput {
+            urn: parse(&main_urn)?,
+            // A cap whose `out=` is void has no output: its stream exists for
+            // progress and logs, and is never opened on the handler's behalf.
+            required: !out_is_void && !declared_main.map_or(false, |o| o.optional),
+            is_sequence: declared_main.map_or(false, |o| o.is_sequence),
+            stream: open(derive_response_media(cap_urn)?),
+        };
+
+        let mut others = Vec::new();
+        for output in definition.into_iter().flat_map(|d| d.get_outputs().iter()) {
+            if declared_main.map_or(false, |main| std::ptr::eq(main, output)) {
+                continue;
+            }
+            let label = match output.carries {
+                Some(crate::cap::definition::OutputCarries::Input) => cap.in_spec().to_string(),
+                None => output.media_urn.clone(),
+            };
+            others.push(ResponseOutput {
+                urn: parse(&output.media_urn)?,
+                required: !output.optional,
+                is_sequence: output.is_sequence,
+                stream: open(label).naming_output(output.media_urn.clone()),
+            });
+        }
+        Ok(Self {
+            cap_urn: cap_urn.to_string(),
+            main,
+            others,
+        })
+    }
+
+    /// One undeclared output on a stream built elsewhere: what a request has
+    /// when it is made from a bare stream ([`Request::new`]). Nothing is known
+    /// of the output, so nothing is sent for it unless the handler writes.
+    fn undeclared(stream: OutputStream) -> Self {
+        let urn = MediaUrn::from_string(crate::urn::media_urn::MEDIA_IDENTITY)
+            .expect("MEDIA_IDENTITY is a valid MediaUrn");
+        Self {
+            cap_urn: String::new(),
+            main: ResponseOutput {
+                urn,
+                required: false,
+                is_sequence: false,
+                stream,
+            },
+            others: Vec::new(),
+        }
+    }
+
+    /// The main output's stream.
+    fn main(&self) -> &OutputStream {
+        &self.main.stream
+    }
+
+    /// The stream of the output `media_urn` identifies, by tagged-URN
+    /// equivalence — the way an input stream is found.
+    fn stream_for(&self, media_urn: &str) -> Result<&OutputStream, RuntimeError> {
+        let unknown = || RuntimeError::UnknownOutput {
+            cap_urn: self.cap_urn.clone(),
+            output: media_urn.to_string(),
+        };
+        let wanted = MediaUrn::from_string(media_urn).map_err(|_| unknown())?;
+        std::iter::once(&self.main)
+            .chain(self.others.iter())
+            .find(|output| output.urn.is_equivalent(&wanted).unwrap_or(false))
+            .map(|output| &output.stream)
+            .ok_or_else(unknown)
+    }
+
+    /// End every output once the handler has returned successfully: a stream
+    /// the handler wrote to is closed; a required output it never wrote to is
+    /// opened and closed empty, in its declared cardinality; an optional one
+    /// it never wrote to sends nothing.
+    async fn finish(&self) {
+        for output in std::iter::once(&self.main).chain(self.others.iter()) {
+            if !output.stream.is_started() {
+                if !output.required {
+                    continue;
+                }
+                if output.stream.start(output.is_sequence, None).is_err() {
+                    continue;
+                }
+            }
+            let _ = output.stream.close().await;
+        }
+    }
+}
+
 impl Request {
-    /// Create a new Request bundling input, output, and peer invoker.
+    /// Create a new Request bundling input, output, and peer invoker. The
+    /// request has the one output `output` is.
     pub fn new(input: InputPackage, output: OutputStream, peer: Arc<dyn PeerInvoker>) -> Self {
+        Self::with_outputs(input, ResponseOutputs::undeclared(output), peer)
+    }
+
+    /// Create a Request that answers on the declared outputs of its cap.
+    pub(crate) fn with_outputs(
+        input: InputPackage,
+        outputs: ResponseOutputs,
+        peer: Arc<dyn PeerInvoker>,
+    ) -> Self {
         Self {
             input: Mutex::new(Some(input)),
-            output: Arc::new(output),
+            outputs,
             peer,
         }
     }
@@ -2545,9 +2803,17 @@ impl Request {
             .ok_or_else(|| RuntimeError::Handler("Input already consumed".to_string()))
     }
 
-    /// Access the output stream.
+    /// The main output's stream: the output whose media URN is the cap URN's `out=`.
     pub fn output(&self) -> &OutputStream {
-        &self.output
+        self.outputs.main()
+    }
+
+    /// The stream of the declared output `media_urn` identifies (tagged-URN
+    /// equivalence). The main output's URN gives the same stream as
+    /// [`output`](Self::output). A URN the cap does not declare is
+    /// [`RuntimeError::UnknownOutput`].
+    pub fn output_for(&self, media_urn: &str) -> Result<&OutputStream, RuntimeError> {
+        self.outputs.stream_for(media_urn)
     }
 
     /// Access the peer invoker.
@@ -3639,6 +3905,16 @@ fn demux_multi_stream(
                         }
                     };
                     let media_urn = frame.media_urn.as_ref().cloned().unwrap_or_default();
+                    // A request stream is an argument. Only a response stream
+                    // says which output it is: one that does so here was
+                    // routed or built wrong, and is not read as an argument.
+                    if let Some(named) = frame.output_urn() {
+                        let _ = streams_tx.send(Err(StreamError::Protocol(format!(
+                            "request stream '{}' names an output ('{}'): a request stream is an argument",
+                            stream_id, named
+                        ))));
+                        break;
+                    }
 
                     // Check if file-path (only when FilePathContext provided)
                     let is_fp = file_path_ctx
@@ -4096,54 +4372,134 @@ fn demux_multi_stream(
     }
 }
 
-/// Demux for single-stream mode (peer response).
-/// Reads frames from tokio channel expecting a single stream. Returns PeerResponse
-/// that yields both data items and LOG frames through a single receiver.
+/// What a peer response's streams are credited with: one grant emitter per
+/// stream, each naming the stream it credits.
+struct PeerGrantSource {
+    sender: Arc<dyn FrameSender>,
+    rid: MessageId,
+    initial_credit: u64,
+}
+
+impl PeerGrantSource {
+    fn for_stream(&self, stream_id: &str) -> InputGrantEmitter {
+        InputGrantEmitter {
+            sender: Arc::clone(&self.sender),
+            rid: self.rid.clone(),
+            xid: None,
+            stream_id: Some(stream_id.to_string()),
+            // Peer-response consumption credits the CALLEE's output streams —
+            // response direction, routed toward the handler (L11).
+            direction: crate::bifaci::frame::CreditDirection::Response,
+            // The callee's send window was negotiated on ITS link, which this
+            // side cannot see: arriving chunks are not checked against this
+            // window, which only paces the grants for what is consumed.
+            window: Arc::new(crate::bifaci::credit::CreditWindow::new(self.initial_credit)),
+        }
+    }
+}
+
+/// One stream of a peer response.
+struct PeerStream {
+    /// The output the stream named. `None`: the main output's stream.
+    output: Option<String>,
+    /// Sequence reassembly, for a stream started with is_sequence=true.
+    /// Sequence frame payloads are RFC 8742 fragments — decoded at item
+    /// granularity.
+    seq: Option<SeqReassembly>,
+    grants: Option<SharedGrants>,
+}
+
+impl PeerStream {
+    fn item(
+        &self,
+        item: Result<ciborium::Value, StreamError>,
+        meta: Option<StreamMeta>,
+    ) -> (PeerResponseItem, Option<SharedGrants>) {
+        let item = match &self.output {
+            None => PeerResponseItem::Data(item, meta),
+            Some(output) => PeerResponseItem::Output {
+                output: output.clone(),
+                item,
+                meta,
+            },
+        };
+        (item, self.grants.clone())
+    }
+}
+
+/// Demux for a peer call's response.
+///
+/// A response has one stream per output the callee's cap answers on. The
+/// stream that names no output is its MAIN output: its items are the
+/// response's `PeerResponseItem::Data`. A stream that names an output yields
+/// `PeerResponseItem::Output` items tagged with it, so a caller that never
+/// heard of the callee's other outputs still reads the cap's answer and
+/// nothing else. The response ends at the request's END or ERR — not at a
+/// stream's end, which only ends that stream.
 ///
 /// Returns immediately — LOG frames are delivered in real-time as they arrive,
 /// not blocked until the first data frame. This is critical for keeping the
 /// engine's activity timer alive during long peer calls (e.g., model downloads).
-fn demux_single_stream(
+fn demux_peer_response(
     mut raw_rx: tokio::sync::mpsc::UnboundedReceiver<Frame>,
-    grants: Option<InputGrantEmitter>,
+    grants: Option<PeerGrantSource>,
 ) -> PeerResponse {
     let (item_tx, item_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Fragment crediting for sequence-mode responses (same scheme as
-    // `demux_multi_stream`): the caller grants one frame per consumed ITEM,
-    // so continuation fragments are credited back on arrival here.
-    let mut fragment_grants = grants.as_ref().map(|g| g.fragment_sibling());
-
     tokio::spawn(async move {
-        // Sequence reassembly for the single response stream (None until a
-        // STREAM_START with is_sequence=true arrives). Sequence frame
-        // payloads are RFC 8742 fragments — decode at item granularity.
-        let mut seq: Option<SeqReassembly> = None;
+        let mut streams: HashMap<String, PeerStream> = HashMap::new();
+        let protocol = |message: String| (PeerResponseItem::Data(Err(StreamError::Protocol(message)), None), None);
         loop {
             // A response channel that closes before the response's END was
             // cut short — the peer call was cancelled, or the connection
             // ended. It errors: a cut-short response never reads as complete.
             let Some(frame) = raw_rx.recv().await else {
-                let _ = item_tx.send(PeerResponseItem::Data(Err(StreamError::Abandoned), None));
+                let _ = item_tx.send((PeerResponseItem::Data(Err(StreamError::Abandoned), None), None));
                 break;
             };
             match frame.frame_type {
                 FrameType::StreamStart => {
-                    if frame.is_sequence.unwrap_or(false) {
-                        seq = Some(SeqReassembly {
-                            buf: Vec::new(),
-                            item_meta: None,
-                            fragment_grants: fragment_grants.take(),
-                        });
+                    let Some(stream_id) = frame.stream_id.clone() else {
+                        let _ = item_tx.send(protocol("STREAM_START missing stream_id".to_string()));
+                        break;
+                    };
+                    // Fragment crediting for sequence-mode streams (same
+                    // scheme as `demux_multi_stream`): the caller grants one
+                    // frame per consumed ITEM, so continuation fragments are
+                    // credited back on arrival here.
+                    let emitter = grants.as_ref().map(|source| source.for_stream(&stream_id));
+                    let seq = frame.is_sequence.unwrap_or(false).then(|| SeqReassembly {
+                        buf: Vec::new(),
+                        item_meta: None,
+                        fragment_grants: emitter.as_ref().map(|g| g.fragment_sibling()),
+                    });
+                    let stream = PeerStream {
+                        output: frame.output.clone(),
+                        seq,
+                        grants: emitter.map(|g| Arc::new(Mutex::new(g))),
+                    };
+                    if streams.insert(stream_id.clone(), stream).is_some() {
+                        let _ = item_tx.send(protocol(format!(
+                            "a second STREAM_START for stream '{}'",
+                            stream_id
+                        )));
+                        break;
                     }
                 }
                 FrameType::Chunk => {
+                    let Some(stream) = frame.stream_id.as_ref().and_then(|id| streams.get_mut(id)) else {
+                        let _ = item_tx.send(protocol(format!(
+                            "CHUNK for a stream that was not started ('{}')",
+                            frame.stream_id.clone().unwrap_or_default()
+                        )));
+                        break;
+                    };
                     if let Some(payload) = frame.payload {
-                        // Checksum validation (MANDATORY in protocol v2)
+                        // Checksum validation (mandatory)
                         let expected_checksum = match frame.checksum {
                             Some(c) => c,
                             None => {
-                                let _ = item_tx.send(PeerResponseItem::Data(
+                                let _ = item_tx.send(stream.item(
                                     Err(StreamError::Protocol(
                                         "CHUNK frame missing required checksum field".to_string(),
                                     )),
@@ -4154,7 +4510,7 @@ fn demux_single_stream(
                         };
                         let actual = Frame::compute_checksum(&payload);
                         if actual != expected_checksum {
-                            let _ = item_tx.send(PeerResponseItem::Data(
+                            let _ = item_tx.send(stream.item(
                                 Err(StreamError::Protocol(format!(
                                     "Checksum mismatch: expected={}, actual={}",
                                     expected_checksum, actual
@@ -4164,7 +4520,9 @@ fn demux_single_stream(
                             continue;
                         }
                         let chunk_meta = frame.meta;
-                        if let Some(seq) = seq.as_mut() {
+                        if stream.seq.is_some() {
+                            let mut decoded = Vec::new();
+                            let seq = stream.seq.as_mut().expect("checked above");
                             if seq.buf.is_empty() {
                                 seq.item_meta = chunk_meta;
                             } else if let Some(g) = seq.fragment_grants.as_mut() {
@@ -4175,51 +4533,65 @@ fn demux_single_stream(
                                 match try_decode_sequence_item(&seq.buf) {
                                     Ok(Some((value, consumed))) => {
                                         seq.buf.drain(..consumed);
-                                        let meta = seq.item_meta.take();
-                                        let _ =
-                                            item_tx.send(PeerResponseItem::Data(Ok(value), meta));
+                                        decoded.push((Ok(value), seq.item_meta.take()));
                                         if seq.buf.is_empty() {
                                             break;
                                         }
                                     }
                                     Ok(None) => break, // prefix — need more frames
                                     Err(e) => {
-                                        let _ = item_tx.send(PeerResponseItem::Data(Err(e), None));
+                                        decoded.push((Err(e), None));
                                         seq.buf.clear();
                                         break;
                                     }
                                 }
                             }
-                        } else {
-                            match ciborium::from_reader::<ciborium::Value, _>(&payload[..]) {
-                                Ok(value) => {
-                                    let _ =
-                                        item_tx.send(PeerResponseItem::Data(Ok(value), chunk_meta));
-                                }
-                                Err(e) => {
-                                    let _ = item_tx.send(PeerResponseItem::Data(
-                                        Err(StreamError::Decode(e.to_string())),
-                                        None,
-                                    ));
-                                }
+                            for (item, meta) in decoded {
+                                let _ = item_tx.send(stream.item(item, meta));
                             }
+                        } else {
+                            let item = ciborium::from_reader::<ciborium::Value, _>(&payload[..])
+                                .map_err(|e| StreamError::Decode(e.to_string()));
+                            let meta = if item.is_ok() { chunk_meta } else { None };
+                            let _ = item_tx.send(stream.item(item, meta));
                         }
                     }
                 }
                 FrameType::Log => {
-                    let _ = item_tx.send(PeerResponseItem::Log(frame));
+                    let _ = item_tx.send((PeerResponseItem::Log(frame), None));
                 }
-                FrameType::StreamEnd | FrameType::End => {
-                    if let Some(seq) = seq.take() {
-                        if !seq.buf.is_empty() {
-                            let _ = item_tx.send(PeerResponseItem::Data(
-                                Err(StreamError::Decode(format!(
-                                    "sequence stream ended mid-item: {} trailing bytes \
-                                     do not form a complete CBOR item",
-                                    seq.buf.len()
-                                ))),
-                                None,
-                            ));
+                FrameType::StreamEnd => {
+                    // The end of one stream. The response goes on until END.
+                    if let Some(stream) = frame.stream_id.as_ref().and_then(|id| streams.get_mut(id)) {
+                        if let Some(seq) = stream.seq.take() {
+                            if !seq.buf.is_empty() {
+                                let _ = item_tx.send(stream.item(
+                                    Err(StreamError::Decode(format!(
+                                        "sequence stream ended mid-item: {} trailing bytes \
+                                         do not form a complete CBOR item",
+                                        seq.buf.len()
+                                    ))),
+                                    None,
+                                ));
+                            }
+                        }
+                    }
+                }
+                FrameType::End => {
+                    // A stream the peer never ended, with part of an item
+                    // still held, ended mid-item with the request.
+                    for stream in streams.values_mut() {
+                        if let Some(seq) = stream.seq.take() {
+                            if !seq.buf.is_empty() {
+                                let _ = item_tx.send(stream.item(
+                                    Err(StreamError::Decode(format!(
+                                        "sequence stream ended mid-item: {} trailing bytes \
+                                         do not form a complete CBOR item",
+                                        seq.buf.len()
+                                    ))),
+                                    None,
+                                ));
+                            }
                         }
                     }
                     break;
@@ -4228,20 +4600,20 @@ fn demux_single_stream(
                     let (code, class, message, arg_urn) = match remote_error_fields(&frame) {
                         Ok(fields) => fields,
                         Err(message) => {
-                            let _ = item_tx.send(PeerResponseItem::Data(
-                                Err(StreamError::Protocol(message)),
-                                None,
-                            ));
+                            let _ = item_tx.send(protocol(message));
                             break;
                         }
                     };
-                    let _ = item_tx.send(PeerResponseItem::Data(
-                        Err(StreamError::RemoteError {
-                            code,
-                            class,
-                            message,
-                            arg_urn,
-                        }),
+                    let _ = item_tx.send((
+                        PeerResponseItem::Data(
+                            Err(StreamError::RemoteError {
+                                code,
+                                class,
+                                message,
+                                arg_urn,
+                            }),
+                            None,
+                        ),
                         None,
                     ));
                     break;
@@ -4253,7 +4625,7 @@ fn demux_single_stream(
 
     PeerResponse {
         rx: item_rx,
-        grants,
+        grants: Vec::new(),
     }
 }
 
@@ -4713,14 +5085,14 @@ pub struct CartridgeRuntime {
 }
 
 /// Dispatch an Op with a Request via WetContext.
-/// Closes the output stream on success (sends STREAM_END if stream was started).
+/// Ends every output on success (see [`ResponseOutputs::finish`]).
 async fn dispatch_op(
     op: Box<dyn Op<()>>,
     input: InputPackage,
-    output: OutputStream,
+    outputs: ResponseOutputs,
     peer: Arc<dyn PeerInvoker>,
 ) -> Result<(), RuntimeError> {
-    let req = Arc::new(Request::new(input, output, peer));
+    let req = Arc::new(Request::with_outputs(input, outputs, peer));
     let mut dry = DryContext::new();
     let mut wet = WetContext::new();
     wet.insert_arc(WET_KEY_REQUEST, req.clone());
@@ -4741,7 +5113,7 @@ async fn dispatch_op(
     });
 
     if result.is_ok() {
-        let _ = req.output().close().await;
+        req.outputs.finish().await;
     }
     result
 }
@@ -4915,6 +5287,7 @@ fn spawn_handler(
     let live_feed_handles = Arc::clone(live_feed_handles);
 
     tokio::spawn(async move {
+        let manifest_for_outputs = manifest_clone.clone();
         let fp_ctx = FilePathContext::new(&cap_urn, manifest_clone.clone()).ok();
         let lf_ctx = LiveFeedContext::new(
             &cap_urn,
@@ -4940,12 +5313,23 @@ fn spawn_handler(
                 initial_credit,
             }),
         );
-        let stream_id = uuid::Uuid::new_v4().to_string();
-        // The response label is DERIVED from the cap's declared effect — not
-        // chosen by the op — so an honest lib-runtime cartridge satisfies the
-        // engine's effect audit by construction. An underivable label is a
+        // One stream per output the cap declares, each naming its output.
+        // The main output's label is DERIVED from the cap's declared effect —
+        // not chosen by the op — so an honest lib-runtime cartridge satisfies
+        // the engine's effect audit by construction. An underivable label is a
         // broken cap declaration: fail the request, never fall back.
-        let out_media = match derive_response_media(&cap_urn) {
+        let outputs = ResponseOutputs::for_cap(&cap_urn, manifest_for_outputs.as_ref(), |label| {
+            OutputStream::new(
+                Arc::clone(&sender),
+                uuid::Uuid::new_v4().to_string(),
+                label,
+                request_id.clone(),
+                routing_id.clone(),
+                max_chunk,
+            )
+            .with_credit(initial_credit, credit_router.clone())
+        });
+        let outputs = match outputs {
             Ok(m) => m,
             Err(e) => {
                 tracing::error!(
@@ -4969,16 +5353,7 @@ fn spawn_handler(
                 return;
             }
         };
-        let output = OutputStream::new(
-            Arc::clone(&sender),
-            stream_id,
-            out_media,
-            request_id.clone(),
-            routing_id.clone(),
-            max_chunk,
-        )
-        .with_credit(initial_credit, credit_router.clone());
-        let final_status = output.final_status_handle();
+        let final_status = outputs.main().final_status_handle();
 
         let peer_invoker = PeerInvokerImpl {
             output_tx: output_tx_clone.clone(),
@@ -4993,7 +5368,7 @@ fn spawn_handler(
 
         let op = factory();
         let peer_arc: Arc<dyn PeerInvoker> = Arc::new(peer_invoker);
-        let result = dispatch_op(op, input_package, output, peer_arc).await;
+        let result = dispatch_op(op, input_package, outputs, peer_arc).await;
 
         // A cancel that claimed the request first ends it with its own ERR,
         // sent by the main loop once this task reports done.
@@ -5528,19 +5903,20 @@ impl CartridgeRuntime {
         // Same derived response label as the wire path (spawn_handler): the
         // CLI mode is a debugging surface for the same contract, not a
         // wildcard-labeled side channel.
-        let out_media = derive_response_media(&cap.urn_string())?;
-        let output = OutputStream::new(
-            cli_sender.clone(),
-            uuid::Uuid::new_v4().to_string(),
-            out_media,
-            request_id.clone(),
-            None,
-            Limits::default().max_chunk,
-        );
+        let outputs = ResponseOutputs::for_cap(&cap.urn_string(), self.manifest.as_ref(), |label| {
+            OutputStream::new(
+                cli_sender.clone(),
+                uuid::Uuid::new_v4().to_string(),
+                label,
+                request_id.clone(),
+                None,
+                Limits::default().max_chunk,
+            )
+        })?;
 
         let op = factory();
         let peer_arc: Arc<dyn PeerInvoker> = Arc::new(peer);
-        dispatch_op(op, input_package, output, peer_arc).await
+        dispatch_op(op, input_package, outputs, peer_arc).await
     }
 
     /// Find a cap by one of its aliases (the CLI subcommand). Aliases are
@@ -9036,7 +9412,7 @@ mod tests {
     ) -> Result<(), RuntimeError> {
         let op = factory();
         let peer: Arc<dyn PeerInvoker> = Arc::new(NoPeerInvoker);
-        dispatch_op(op, input, output, peer).await
+        dispatch_op(op, input, ResponseOutputs::undeclared(output), peer).await
     }
 
     /// Create an InputPackage from a list of streams for testing.
@@ -12489,6 +12865,466 @@ mod tests {
         }
     }
 
+    const SERIES: &str = "media:enc=utf-8;series";
+    const FIT: &str = "media:fmt=json;record;regression";
+    const RESIDUALS: &str = "media:fmt=json;list;record;residual";
+    const NOTE: &str = "media:enc=utf-8;note";
+    const REJECTED: &str = "media:enc=utf-8;rejected";
+
+    /// A cap with four outputs: the main one, a required sequence, an optional
+    /// one, and an optional one that carries the input's type unchanged.
+    fn regress_cap() -> Cap {
+        use crate::cap::definition::CapOutput;
+        let urn = CapUrn::from_string(&format!(r#"cap:in="{SERIES}";regress;out="{FIT}""#)).unwrap();
+        let mut cap = Cap::new(urn, "Regress".to_string(), vec!["regress".to_string()]);
+        cap.add_arg(CapArg::new(
+            SERIES, "series",
+            true,
+            vec![ArgSource::Stdin { stdin: SERIES.to_string() }],
+        ));
+        // The main output is not the first declared: it is found by its URN.
+        let mut residuals = CapOutput::new(RESIDUALS, "residuals", "Residuals");
+        residuals.is_sequence = true;
+        cap.add_output(residuals);
+        cap.add_output(CapOutput::new(FIT, "fit", "The fit"));
+        cap.add_output(CapOutput::new(NOTE, "note", "A note").optional(true));
+        cap.add_output(CapOutput::new(REJECTED, "rejected", "Rejected input").optional(true).carrying_input());
+        crate::cap::validation::validate_cap_definition(&cap).expect("the fixture is a valid definition");
+        cap
+    }
+
+    /// The outputs of `cap_urn` on streams that record every frame they send.
+    fn recorded_outputs(
+        cap_urn: &str,
+        manifest: Option<&CapManifest>,
+    ) -> (ResponseOutputs, Arc<Mutex<Vec<Frame>>>) {
+        let (sender, frames) = MockFrameSender::new();
+        let sender: Arc<dyn FrameSender> = Arc::new(sender);
+        let rid = MessageId::new_uuid();
+        let outputs = ResponseOutputs::for_cap(cap_urn, manifest, |label| {
+            OutputStream::new(
+                Arc::clone(&sender),
+                uuid::Uuid::new_v4().to_string(),
+                label,
+                rid.clone(),
+                None,
+                Limits::default().max_chunk,
+            )
+        })
+        .expect("the cap's outputs");
+        (outputs, frames)
+    }
+
+    /// (output named, media label, is_sequence, stream id) of every STREAM_START sent.
+    fn starts(frames: &Arc<Mutex<Vec<Frame>>>) -> Vec<(Option<String>, String, Option<bool>, String)> {
+        frames
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|f| f.frame_type == FrameType::StreamStart)
+            .map(|f| {
+                (
+                    f.output.clone(),
+                    f.media_urn.clone().unwrap_or_default(),
+                    f.is_sequence,
+                    f.stream_id.clone().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    // TEST12719: a request answers on every output its cap declares. Each has a
+    // stream of its own, carrying the label of what it holds: the main output
+    // the label the cap's effect derives, another output its own URN, and one
+    // that carries the input the cap's declared input. The main output's
+    // stream names no output — it is the cap's answer — and every other stream
+    // names the output it is. An output is found by its media URN as a tagged
+    // URN; one the cap does not declare is UnknownOutput.
+    #[tokio::test]
+    async fn test12719_a_request_answers_on_every_declared_output() {
+        let cap = regress_cap();
+        let manifest = create_test_manifest("Regress", "1.0.0", "Test", vec![cap.clone()]);
+        let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
+        let (input_tx, input_rx) = crossbeam_channel::unbounded();
+        drop(input_tx);
+        let req = Request::with_outputs(
+            demux_multi_stream(input_rx, None, None, None),
+            outputs,
+            Arc::new(NoPeerInvoker),
+        );
+
+        // The main output is the one whose URN is `out=`, wherever it is declared.
+        assert!(std::ptr::eq(req.output(), req.output_for(FIT).unwrap()));
+        assert!(std::ptr::eq(req.output(), req.output_for("media:regression;record;fmt=json").unwrap()));
+        // Another output, with its tags in another order, is the same stream.
+        let residuals = req.output_for(RESIDUALS).unwrap();
+        assert!(std::ptr::eq(residuals, req.output_for("media:residual;record;list;fmt=json").unwrap()));
+        assert!(!std::ptr::eq(residuals, req.output()));
+
+        for (urn, sequence) in [(FIT, false), (RESIDUALS, true), (NOTE, false), (REJECTED, false)] {
+            let stream = req.output_for(urn).unwrap();
+            assert!(!stream.is_started());
+            stream.start(sequence, None).unwrap();
+            assert!(stream.is_started());
+            stream.close().await.unwrap();
+        }
+        let sent = starts(&frames);
+        let named = |urn: &str| {
+            sent.iter()
+                .find(|(output, ..)| output.as_deref() == Some(urn))
+                .unwrap_or_else(|| panic!("no STREAM_START names {urn}: {sent:?}"))
+                .clone()
+        };
+        assert_eq!(sent.len(), 4);
+        // Exactly one stream names no output: the main one.
+        let unnamed: Vec<_> = sent.iter().filter(|(output, ..)| output.is_none()).collect();
+        assert_eq!(unnamed.len(), 1, "{sent:?}");
+        assert_eq!(unnamed[0].1, FIT, "the main output carries the label the effect derives");
+        assert!(sent.iter().all(|(output, ..)| output.as_deref() != Some(FIT)), "the main output is not named: {sent:?}");
+        assert_eq!(named(RESIDUALS).1, RESIDUALS, "another output carries its own URN");
+        assert_eq!(named(NOTE).1, NOTE);
+        assert_eq!(named(REJECTED).1, SERIES, "an output that carries the input is labelled with it");
+        let mut ids: Vec<String> = sent.iter().map(|(.., id)| id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 4, "each output has a stream of its own");
+
+        // What the cap does not declare is not an output of it — a tag short
+        // or a tag more is another URN.
+        for unknown in ["media:enc=utf-8", "media:fmt=json;record", "media:enc=utf-8;note;extra", "not a urn"] {
+            match req.output_for(unknown) {
+                Err(RuntimeError::UnknownOutput { cap_urn, output }) => {
+                    assert_eq!(cap_urn, cap.urn_string());
+                    assert_eq!(output, unknown);
+                }
+                other => panic!("{unknown}: expected UnknownOutput, got {:?}", other.map(|_| ())),
+            }
+        }
+    }
+
+    /// An op that writes two residual rows and nothing else, or fails.
+    struct ResidualsOnlyOp {
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl Op<()> for ResidualsOnlyOp {
+        async fn perform(&self, _dry: &mut DryContext, wet: &mut WetContext) -> OpResult<()> {
+            let req: Arc<Request> = wet
+                .get_required(WET_KEY_REQUEST)
+                .map_err(|e| OpError::ExecutionFailed(e.to_string()))?;
+            let residuals = req
+                .output_for(RESIDUALS)
+                .map_err(|e| OpError::ExecutionFailed(e.to_string()))?;
+            residuals
+                .start(true, None)
+                .map_err(|e| OpError::ExecutionFailed(e.to_string()))?;
+            for row in [1, 2] {
+                residuals
+                    .emit_list_item(&ciborium::Value::Integer(row.into()), None)
+                    .await
+                    .map_err(|e| OpError::ExecutionFailed(e.to_string()))?;
+            }
+            if self.fail {
+                return Err(OpError::ExecutionFailed("no fit".to_string()));
+            }
+            Ok(())
+        }
+        fn metadata(&self) -> OpMetadata {
+            OpMetadata::builder("ResidualsOnlyOp").build()
+        }
+    }
+
+    // TEST12720: what the runtime sends for outputs the handler did not write
+    // to, once it has returned. A required output is sent empty in its declared
+    // cardinality, so its consumers get a value; an optional one is not sent —
+    // it did not fire. A handler that failed gets nothing sent on its behalf.
+    #[tokio::test]
+    async fn test12720_unwritten_outputs_when_the_handler_returns() {
+        let cap = regress_cap();
+        let manifest = create_test_manifest("Regress", "1.0.0", "Test", vec![cap.clone()]);
+        let empty_input = || {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            drop(tx);
+            demux_multi_stream(rx, None, None, None)
+        };
+        let peer = || -> Arc<dyn PeerInvoker> { Arc::new(NoPeerInvoker) };
+
+        let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
+        dispatch_op(Box::new(ResidualsOnlyOp { fail: false }), empty_input(), outputs, peer())
+            .await
+            .unwrap();
+        let sent = starts(&frames);
+        let outputs_named: Vec<&str> = sent.iter().filter_map(|(o, ..)| o.as_deref()).collect();
+        assert_eq!(sent.len(), 2, "the written output and the required unwritten one: {sent:?}");
+        assert_eq!(outputs_named, vec![RESIDUALS], "the residuals are named; optional outputs did not fire: {sent:?}");
+        // The other stream is the main output's: it names none.
+        let fit = sent.iter().find(|(o, ..)| o.is_none()).expect("the main output's stream");
+        assert_eq!(fit.1, FIT);
+        assert_eq!(fit.2, Some(false), "the fit is declared a single value");
+        // The empty stream is a whole stream: STREAM_END promising no chunks.
+        let all = frames.lock().unwrap().clone();
+        let fit_frames: Vec<&Frame> = all.iter().filter(|f| f.stream_id.as_deref() == Some(fit.3.as_str())).collect();
+        assert_eq!(fit_frames.len(), 2, "STREAM_START and STREAM_END only");
+        assert_eq!(fit_frames[1].frame_type, FrameType::StreamEnd);
+        assert_eq!(fit_frames[1].chunk_count, Some(0));
+        // Every stream that was opened was closed.
+        let ended = all.iter().filter(|f| f.frame_type == FrameType::StreamEnd).count();
+        assert_eq!(ended, 2);
+
+        // A required SEQUENCE output nobody wrote to is an empty sequence.
+        struct Silent;
+        #[async_trait]
+        impl Op<()> for Silent {
+            async fn perform(&self, _dry: &mut DryContext, _wet: &mut WetContext) -> OpResult<()> {
+                Ok(())
+            }
+            fn metadata(&self) -> OpMetadata {
+                OpMetadata::builder("Silent").build()
+            }
+        }
+        let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        let residuals = sent.iter().find(|(o, ..)| o.as_deref() == Some(RESIDUALS)).unwrap();
+        assert_eq!(residuals.2, Some(true), "the residuals are declared a sequence");
+
+        // A failed handler: only what it wrote itself, and that left open —
+        // the request ends with ERR, not with outputs made up for it.
+        let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
+        dispatch_op(Box::new(ResidualsOnlyOp { fail: true }), empty_input(), outputs, peer())
+            .await
+            .expect_err("the handler failed");
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0].0.as_deref(), Some(RESIDUALS));
+        assert!(frames.lock().unwrap().iter().all(|f| f.frame_type != FrameType::StreamEnd));
+
+        // A cap whose `out=` is void has no output: nothing is opened for it.
+        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";sink;out=media:void"#, None);
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        assert!(frames.lock().unwrap().is_empty());
+
+        // The main output's label follows the cap's effect, and is not its
+        // name: a cap that passes its input through labels the stream with the
+        // input's type and names the output its `out=`.
+        let pass = r#"cap:effect=none;in="media:enc=utf-8;line";out="media:enc=utf-8";pass"#;
+        let (outputs, frames) = recorded_outputs(pass, None);
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, None, "the main output's stream names no output");
+        assert_eq!(sent[0].1, derive_response_media(pass).unwrap());
+        assert_ne!(sent[0].1, "media:enc=utf-8", "the label is the input's type: {}", sent[0].1);
+
+        // A cap served without a definition answers on the one output its URN states.
+        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";count;out="media:integer""#, None);
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 1);
+        assert_eq!((sent[0].0.as_deref(), sent[0].1.as_str()), (None, "media:integer"));
+    }
+
+    // TEST12721: a request stream names no output: the argument of a peer call
+    // is identified by its media URN alone. And a request stream that does name
+    // one is refused where it is read — it is not an argument.
+    #[test]
+    fn test12721_a_request_stream_names_no_output() {
+        let (sender, frames) = MockFrameSender::new();
+        let call = PeerCall {
+            sender: Arc::new(sender),
+            request_id: MessageId::new_uuid(),
+            max_chunk: Limits::default().max_chunk,
+            response_rx: None,
+            credit_router: None,
+            initial_credit: 0,
+        };
+        let arg = call.arg("media:enc=utf-8;prompt");
+        assert_eq!(arg.output_urn(), None);
+        arg.start(false, None).unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].0, None, "an argument stream does not carry key 21");
+        assert_eq!(sent[0].1, "media:enc=utf-8;prompt");
+    }
+
+    #[tokio::test]
+    async fn test12731_a_request_stream_that_names_an_output_is_refused() {
+        let rid = MessageId::new_uuid();
+        let payload = {
+            let mut cbor = Vec::new();
+            ciborium::into_writer(&ciborium::Value::Bytes(b"x".to_vec()), &mut cbor).unwrap();
+            cbor
+        };
+        let feed = |named: Option<&str>| {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            let mut start = Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None);
+            if let Some(output) = named {
+                start = start.for_output(output);
+            }
+            tx.send(start).unwrap();
+            tx.send(Frame::chunk(rid.clone(), "arg0".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload)))
+                .unwrap();
+            tx.send(Frame::stream_end(rid.clone(), "arg0".into(), 1)).unwrap();
+            tx.send(Frame::end(rid.clone(), None)).unwrap();
+            drop(tx);
+            demux_multi_stream(rx, None, None, None)
+        };
+
+        // An argument, as every request stream is.
+        let mut plain = feed(None);
+        let mut stream = plain.recv().await.unwrap().expect("an argument stream");
+        assert!(stream.recv().await.unwrap().is_ok());
+
+        // The same stream naming an output: a response stream where an
+        // argument belongs.
+        let mut named = feed(Some("media:enc=utf-8;kept"));
+        match named.recv().await {
+            Some(Err(StreamError::Protocol(message))) => {
+                assert!(message.contains("names an output") && message.contains("media:enc=utf-8;kept"), "{message}");
+            }
+            other => panic!("expected a protocol error, got {:?}", other.map(|r| r.map(|_| ()))),
+        }
+        assert!(named.recv().await.is_none(), "nothing of the request is read as an argument");
+    }
+
+    // TEST12722: a command line has one standard output, and it carries the
+    // cap's main output: the stream that names no output. A stream that names
+    // one is another output — recognised by naming it, not by what it carries,
+    // which may be the same type — and its data is not printed.
+    #[test]
+    fn test12722_standard_output_carries_the_main_output() {
+        let rid = MessageId::new_uuid();
+        let main = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf-8".to_string(), Some(false));
+        let other = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf-8".to_string(), Some(false))
+            .for_output("media:enc=utf-8;dropped");
+        let sender = CliFrameSender::with_emitter(CliStreamEmitter::without_ndjson());
+        assert!(!sender.is_unprinted_start(&main));
+        assert!(sender.is_unprinted_start(&other));
+
+        sender.send(&main).unwrap();
+        sender.send(&other).unwrap();
+        let unprinted = sender.unprinted.lock().unwrap().clone();
+        assert!(unprinted.contains("s2") && !unprinted.contains("s1"), "{unprinted:?}");
+        // A chunk of an unprinted stream is consumed without being decoded or
+        // printed: this one is not even CBOR, and is accepted.
+        let mut junk = Frame::chunk(rid.clone(), "s2".to_string(), 0, vec![0xff], 0, 0);
+        junk.checksum = Some(Frame::compute_checksum(&[0xff]));
+        sender.send(&junk).expect("an unprinted stream's chunk is skipped");
+        // The same bytes on the printed stream are read, and refused.
+        let mut junk_main = junk.clone();
+        junk_main.stream_id = Some("s1".to_string());
+        assert!(sender.send(&junk_main).is_err());
+    }
+
+    /// One CHUNK of `stream` carrying `value`.
+    fn value_chunk(rid: &MessageId, stream: &str, index: u64, value: ciborium::Value) -> Frame {
+        let mut cbor = Vec::new();
+        ciborium::into_writer(&value, &mut cbor).unwrap();
+        let checksum = Frame::compute_checksum(&cbor);
+        Frame::chunk(rid.clone(), stream.to_string(), 0, cbor, index, checksum)
+    }
+
+    // TEST12730: a peer call's response has one stream per output the callee
+    // answers on. The stream that names no output is the callee's main output:
+    // its items are the response's data. A stream that names an output yields
+    // items tagged with it, and they are not part of the data a caller
+    // collects. The response ends at the request's END, not at the first
+    // stream's end — it used to stop there, and lose whatever came after — and
+    // each stream is credited by name, since a grant that names no stream
+    // reaches a callee with several only by guessing.
+    #[tokio::test]
+    async fn test12730_a_peer_response_has_a_stream_per_output() {
+        let rid = MessageId::new_uuid();
+        let text = |t: &str| ciborium::Value::Bytes(t.as_bytes().to_vec());
+        let frames = || {
+            vec![
+                // The other output starts first, ends first, and carries the
+                // same type as the main one.
+                Frame::stream_start(rid.clone(), "rest".into(), "media:enc=utf-8".into(), Some(false))
+                    .for_output("media:enc=utf-8;split-rest"),
+                value_chunk(&rid, "rest", 0, text("R1")),
+                Frame::stream_start(rid.clone(), "head".into(), "media:enc=utf-8".into(), Some(false)),
+                value_chunk(&rid, "head", 0, text("H1")),
+                value_chunk(&rid, "rest", 1, text("R2")),
+                Frame::stream_end(rid.clone(), "rest".into(), 2),
+                value_chunk(&rid, "head", 1, text("H2")),
+                Frame::stream_end(rid.clone(), "head".into(), 2),
+                Frame::end_ok(rid.clone(), None),
+            ]
+        };
+        let feed = |grants: Option<PeerGrantSource>| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            for frame in frames() {
+                tx.send(frame).unwrap();
+            }
+            drop(tx);
+            demux_peer_response(rx, grants)
+        };
+
+        // Item by item: which output each belongs to, in arrival order.
+        let mut response = feed(None);
+        let mut seen = Vec::new();
+        while let Some(item) = response.recv().await {
+            match item {
+                PeerResponseItem::Data(Ok(ciborium::Value::Bytes(b)), _) => {
+                    seen.push(("main".to_string(), String::from_utf8(b).unwrap()))
+                }
+                PeerResponseItem::Output { output, item: Ok(ciborium::Value::Bytes(b)), .. } => {
+                    seen.push((output, String::from_utf8(b).unwrap()))
+                }
+                other => panic!("unexpected item: {:?}", std::mem::discriminant(&other)),
+            }
+        }
+        let rest = "media:enc=utf-8;split-rest".to_string();
+        assert_eq!(
+            seen,
+            vec![
+                (rest.clone(), "R1".to_string()),
+                ("main".to_string(), "H1".to_string()),
+                (rest.clone(), "R2".to_string()),
+                ("main".to_string(), "H2".to_string()),
+            ],
+            "everything up to END, each item under its own output"
+        );
+
+        // A caller that collects the cap's answer gets the main output only.
+        assert_eq!(feed(None).collect_bytes().await.unwrap(), b"H1H2");
+
+        // Each stream is credited by name as its items are consumed.
+        let (sender, sent) = MockFrameSender::new();
+        let mut credited = feed(Some(PeerGrantSource {
+            sender: Arc::new(sender),
+            rid: rid.clone(),
+            initial_credit: 2,
+        }));
+        while credited.recv().await.is_some() {}
+        let grants: Vec<(Option<String>, Option<u64>)> = sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|f| f.frame_type == FrameType::Credit)
+            .map(|f| (f.stream_id.clone(), f.credit))
+            .collect();
+        let granted = |stream: &str| -> u64 {
+            grants.iter().filter(|(s, _)| s.as_deref() == Some(stream)).filter_map(|(_, n)| *n).sum()
+        };
+        assert!(grants.iter().all(|(s, _)| s.is_some()), "every grant names its stream: {grants:?}");
+        assert!(granted("rest") >= 1 && granted("head") >= 1, "{grants:?}");
+
+        // A chunk for a stream that was never started is not data of any output.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(value_chunk(&rid, "ghost", 0, text("?"))).unwrap();
+        tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+        drop(tx);
+        let mut stray = demux_peer_response(rx, None);
+        assert!(matches!(
+            stray.recv().await,
+            Some(PeerResponseItem::Data(Err(StreamError::Protocol(_)), _))
+        ));
+    }
+
     // TEST8126: derive_response_media — the response label is the effect
     // inference over the declared input, per effect value; an unparseable
     // cap URN fails hard instead of falling back.
@@ -12777,7 +13613,8 @@ mod tests {
             ))
             .unwrap();
 
-        // STREAM_END
+        // STREAM_END, then the END that ends the response: a stream's end
+        // ends that stream, and the response goes on until the request ends.
         response_tx
             .send(Frame::stream_end(
                 req_id.clone(),
@@ -12785,6 +13622,7 @@ mod tests {
                 1,
             ))
             .unwrap();
+        response_tx.send(Frame::end_ok(req_id.clone(), None)).unwrap();
         drop(response_tx);
 
         let peer = PeerCall {
@@ -12812,7 +13650,7 @@ mod tests {
     // (StreamStart + Chunk). The handler must receive these LOGs in real-time so it
     // can re-emit progress and keep the engine's activity timer alive.
     //
-    // Previously, demux_single_stream blocked on awaiting StreamStart before returning
+    // Previously, the peer response demux blocked on awaiting StreamStart before returning
     // PeerResponse, which meant the handler couldn't call recv() until data arrived —
     // causing 120s activity timeouts during long downloads.
     #[tokio::test]
@@ -12867,7 +13705,7 @@ mod tests {
                 assert_eq!(f.log_progress(), Some(0.1));
                 assert_eq!(f.log_message(), Some("downloading file 1/10"));
             }
-            PeerResponseItem::Data(..) => panic!("expected LOG frame, got Data"),
+            other => panic!("expected LOG frame, got {:?}", std::mem::discriminant(&other)),
         }
 
         let item2 = response.recv().await.expect("second LOG must arrive");
@@ -12876,7 +13714,7 @@ mod tests {
                 assert_eq!(f.log_progress(), Some(0.5));
                 assert_eq!(f.log_message(), Some("downloading file 5/10"));
             }
-            PeerResponseItem::Data(..) => panic!("expected LOG frame, got Data"),
+            other => panic!("expected LOG frame, got {:?}", std::mem::discriminant(&other)),
         }
 
         let item3 = response.recv().await.expect("third LOG must arrive");
@@ -12884,7 +13722,7 @@ mod tests {
             PeerResponseItem::Log(f) => {
                 assert_eq!(f.log_message(), Some("large file in progress"));
             }
-            PeerResponseItem::Data(..) => panic!("expected LOG frame, got Data"),
+            other => panic!("expected LOG frame, got {:?}", std::mem::discriminant(&other)),
         }
 
         // Now send the actual data (StreamStart, Chunk, StreamEnd, End)
@@ -12911,6 +13749,7 @@ mod tests {
         response_tx
             .send(Frame::stream_end(req_id.clone(), "s1".to_string(), 1))
             .unwrap();
+        response_tx.send(Frame::end_ok(req_id.clone(), None)).unwrap();
         drop(response_tx);
 
         // Data must arrive after the LOGs
@@ -12920,12 +13759,12 @@ mod tests {
                 assert_eq!(value, Value::Bytes(b"model output".to_vec()));
             }
             PeerResponseItem::Data(Err(e), _) => panic!("expected data, got error: {}", e),
-            PeerResponseItem::Log(_) => panic!("expected Data, got LOG"),
+            other => panic!("expected data, got {:?}", std::mem::discriminant(&other)),
         }
 
         assert!(
             response.recv().await.is_none(),
-            "stream must end after STREAM_END"
+            "the response ends at the request's END"
         );
     }
 
@@ -12937,24 +13776,26 @@ mod tests {
         let request_id = MessageId::new_uuid();
         let (item_tx, item_rx) = unbounded_channel();
         item_tx
-            .send(PeerResponseItem::Log(Frame::progress(
-                request_id.clone(),
-                0.5,
-                "halfway",
-            )))
+            .send((
+                PeerResponseItem::Log(Frame::progress(request_id.clone(), 0.5, "halfway")),
+                None,
+            ))
             .unwrap();
         item_tx
-            .send(PeerResponseItem::Log(Frame::log(
-                request_id,
-                "warn",
-                crate::failure::AttributionClass::Resource,
-                "cache pressure",
-                Some("media:model-spec"),
-            )))
+            .send((
+                PeerResponseItem::Log(Frame::log(
+                    request_id,
+                    "warn",
+                    crate::failure::AttributionClass::Resource,
+                    "cache pressure",
+                    Some("media:model-spec"),
+                )),
+                None,
+            ))
             .unwrap();
         item_tx
-            .send(PeerResponseItem::Data(
-                Ok(ciborium::Value::Text("payload".to_string())),
+            .send((
+                PeerResponseItem::Data(Ok(ciborium::Value::Text("payload".to_string())), None),
                 None,
             ))
             .unwrap();
@@ -12962,7 +13803,7 @@ mod tests {
 
         let response = PeerResponse {
             rx: item_rx,
-            grants: None,
+            grants: Vec::new(),
         };
         let (sender, frames) = MockFrameSender::new();
         let output = OutputStream::new(
@@ -13015,12 +13856,12 @@ mod tests {
             ciborium::Value::Text("no number here".to_string()),
         );
         malformed.meta = Some(meta);
-        item_tx.send(PeerResponseItem::Log(malformed)).unwrap();
+        item_tx.send((PeerResponseItem::Log(malformed), None)).unwrap();
         drop(item_tx);
 
         let response = PeerResponse {
             rx: item_rx,
-            grants: None,
+            grants: Vec::new(),
         };
         let (sender, frames) = MockFrameSender::new();
         let output = OutputStream::new(
@@ -13638,7 +14479,7 @@ mod tests {
         tx.send(Frame::chunk(rid.clone(), "r".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload)))
             .unwrap();
         drop(tx);
-        let mut response = demux_single_stream(rx, None);
+        let mut response = demux_peer_response(rx, None);
         assert!(matches!(response.recv().await, Some(PeerResponseItem::Data(Ok(_), _))));
         assert!(
             matches!(response.recv().await, Some(PeerResponseItem::Data(Err(StreamError::Abandoned), _))),

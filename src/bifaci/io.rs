@@ -198,6 +198,13 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, CborError> {
         ));
     }
 
+    if let Some(output) = &frame.output {
+        map.push((
+            Value::Integer(keys::OUTPUT.into()),
+            Value::Text(output.clone()),
+        ));
+    }
+
     let value = Value::Map(map);
     let mut buf = Vec::new();
     ciborium::into_writer(&value, &mut buf).map_err(|e| CborError::Encode(e.to_string()))?;
@@ -432,6 +439,21 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, CborError> {
         _ => None,
     });
 
+    // Which output a response stream is. Present and not a text string is a
+    // malformed frame, not an absent name: a stream that says which output it
+    // is must be readable.
+    let output = match lookup.get(&keys::OUTPUT) {
+        None => None,
+        Some(Value::Text(s)) => Some(s.clone()),
+        Some(other) => {
+            return Err(CborError::InvalidFrame(format!(
+                "output (key {}) must be a text string, got {:?}",
+                keys::OUTPUT,
+                other
+            )));
+        }
+    };
+
     let frame = Frame {
         version,
         frame_type,
@@ -454,7 +476,18 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, CborError> {
         force_kill,
         credit,
         unbounded,
+        output,
     };
+
+    // Only a STREAM_START says which output it is; the stream's other frames
+    // are tied to it by stream_id.
+    if frame.output.is_some() && frame.frame_type != FrameType::StreamStart {
+        return Err(CborError::InvalidFrame(format!(
+            "{} frame carries output (key {}), which only STREAM_START may",
+            frame.frame_type.as_str(),
+            keys::OUTPUT
+        )));
+    }
 
     // Validate required fields based on frame type
     match frame.frame_type {
@@ -1055,7 +1088,7 @@ pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             // Control/side-channel frames are legal ANYWHERE during the
             // probe (spec 12.4: LOG interleaves without affecting data
             // flow; CREDIT/HEARTBEAT are the control plane the writer
-            // gate itself exempts, L4). A v4 cartridge crediting its
+            // gate itself exempts, L4). A cartridge crediting its
             // probe input as it consumes (L10) must not fail identity
             // verification.
             FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
@@ -2277,7 +2310,7 @@ mod tests {
         assert_eq!(host_reorder, DEFAULT_MAX_REORDER_BUFFER);
     }
 
-    const V4_TEST_MANIFEST: &[u8] = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
+    const HANDSHAKE_TEST_MANIFEST: &[u8] = br#"{"name":"test","version":"1.0","channel":"release","description":"Test","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]}]}]}"#;
 
     /// Run a real host↔cartridge handshake over a bidirectional duplex pair.
     /// The cartridge side proposes `cartridge_limits` in its HELLO.
@@ -2318,7 +2351,7 @@ mod tests {
             writer
                 .write(&Frame::hello_with_manifest(
                     &cartridge_limits,
-                    V4_TEST_MANIFEST,
+                    HANDSHAKE_TEST_MANIFEST,
                     &crate::bifaci::pools::PoolStates::new(),
                 ))
                 .await?;
@@ -2348,7 +2381,7 @@ mod tests {
         (host_result, cart_result)
     }
 
-    // TEST7000: v4 handshake negotiates all limits and required handler capacity.
+    // TEST7000: the handshake negotiates all limits and required handler capacity.
     #[tokio::test]
     async fn test7000_v4_handshake_negotiates_all_four_limits() {
         let cartridge_limits = Limits {
@@ -2359,7 +2392,7 @@ mod tests {
         };
         let (host_result, cart_result) = run_v4_handshake(cartridge_limits).await;
 
-        let host = host_result.expect("v4 handshake must succeed");
+        let host = host_result.expect("the handshake must succeed");
         assert_eq!(host.limits.max_frame, 2_000_000, "min(3.5MB, 2MB)");
         assert_eq!(host.limits.max_chunk, 128_000, "min(256KB, 128KB)");
         assert_eq!(host.limits.max_reorder_buffer, 32, "min(64, 32)");
@@ -2371,22 +2404,25 @@ mod tests {
         assert_eq!(cart.max_reorder_buffer, 32);
     }
 
-    // TEST7001: HELLO carrying protocol version 2 is rejected at handshake with a version-mismatch error
+    // TEST7001: HELLO carrying another protocol version is rejected at handshake
+    // with a version-mismatch error naming both — the version this one replaced
+    // included: a cartridge built for it does not name its response streams'
+    // outputs, and nothing downstream could read it.
     #[tokio::test]
-    async fn test7001_handshake_rejects_version_2() {
+    async fn test7001_handshake_rejects_another_version() {
         let (host_side, cartridge_side) = tokio::io::duplex(64 * 1024);
         let (host_r, host_w) = tokio::io::split(host_side);
         let (cart_r, cart_w) = tokio::io::split(cartridge_side);
 
-        // Fake v2 cartridge: replies to the host HELLO with a version=2 HELLO.
+        // A cartridge of the previous protocol: replies to the host HELLO with a version=4 HELLO.
         let cart_task = tokio::spawn(async move {
             let mut reader = FrameReader::new(cart_r);
             let mut writer = FrameWriter::new(cart_w);
             let _host_hello = reader.read().await.unwrap().unwrap();
-            let mut hello = Frame::hello_with_manifest(&Limits::default(), V4_TEST_MANIFEST, &crate::bifaci::pools::PoolStates::new());
-            hello.version = 2;
+            let mut hello = Frame::hello_with_manifest(&Limits::default(), HANDSHAKE_TEST_MANIFEST, &crate::bifaci::pools::PoolStates::new());
+            hello.version = 4;
             if let Some(meta) = hello.meta.as_mut() {
-                meta.insert("version".to_string(), ciborium::Value::Integer(2.into()));
+                meta.insert("version".to_string(), ciborium::Value::Integer(4.into()));
             }
             writer.write(&hello).await.unwrap();
         });
@@ -2396,7 +2432,7 @@ mod tests {
         let result = handshake(&mut reader, &mut writer).await;
         cart_task.await.unwrap();
 
-        let err = result.expect_err("v2 HELLO must be rejected");
+        let err = result.expect_err("a HELLO of another version must be rejected");
         let msg = err.to_string();
         assert!(
             msg.contains("version"),
@@ -2404,7 +2440,7 @@ mod tests {
             msg
         );
         assert!(
-            msg.contains('2') && msg.contains('4'),
+            msg.contains("ours 5") && msg.contains("theirs 4"),
             "error must state both versions: {}",
             msg
         );

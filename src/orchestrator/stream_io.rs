@@ -17,6 +17,7 @@ use crate::orchestrator::executor::CapProgressFn;
 use crate::planner::StepToken;
 use crate::StreamMeta;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -100,9 +101,20 @@ pub enum StreamIoError {
         emitted_is_sequence: bool,
         emitted_unbounded: bool,
     },
+
+    /// A cap's response broke what its definition declares of its outputs
+    /// (13.2 §Outputs): a stream for a main output the cap does not have; a
+    /// stream naming an output the cap does not declare, or its main output;
+    /// a second stream for one output; an output that is not the
+    /// main one carrying a type other than its own (or other than the input,
+    /// when it carries the input); a request that ended without a stream for
+    /// a required output. Fails hard at receipt, attributed Internal: the
+    /// cartridge broke its own declaration.
+    #[error("Cap '{cap_urn}' violated its output contract: {detail}")]
+    OutputContract { cap_urn: String, detail: String },
 }
 
-/// The declared shape of a cap's output stream — `CapOutput::is_sequence`
+/// The declared shape of one output's stream — `CapOutput::is_sequence`
 /// and `CapOutput::streaming` — carried to the receipt points so every
 /// STREAM_START is audited against the definition the plan was built on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,13 +124,113 @@ pub struct OutputContract {
 }
 
 impl OutputContract {
-    /// The contract of a cap definition's output. A cap with no output
-    /// (`out=media:void`) has nothing to audit: both flags are false, and an
-    /// emission from it is caught by the effect audit.
+    /// The shape of a cap definition's MAIN output. A cap with no output
+    /// (`out=media:void`) has nothing to audit: both flags are false.
     pub fn of(cap: &crate::Cap) -> Self {
         let (_, streaming) = cap.streaming_shape();
         let (_, is_sequence) = cap.sequence_shape();
         Self { is_sequence, streaming }
+    }
+}
+
+/// One output a cap declares, as the engine holds the cap's response to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclaredOutput {
+    /// The output's media URN: its identity, and — for an output other than
+    /// the main one — what its stream names.
+    pub urn: crate::MediaUrn,
+    /// Its label in the definition (RULE19). Never consulted to find it.
+    pub name: String,
+    pub shape: OutputContract,
+    /// An optional output may send no stream: it did not fire.
+    pub optional: bool,
+    /// The output carries the cap's input, type unchanged, not its own URN.
+    pub carries_input: bool,
+    /// The output whose URN is the cap URN's `out=`.
+    pub main: bool,
+}
+
+/// The outputs a cap declares: what its response is held to (13.2 §Outputs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseContract {
+    outputs: Vec<DeclaredOutput>,
+}
+
+impl ResponseContract {
+    /// The contract of a cap definition: every output it declares.
+    pub fn of(cap: &crate::Cap) -> Result<Self, StreamIoError> {
+        let main = cap.main_output();
+        let mut outputs = Vec::with_capacity(cap.get_outputs().len());
+        for output in cap.get_outputs() {
+            let urn = crate::MediaUrn::from_string(&output.media_urn).map_err(|e| {
+                StreamIoError::Protocol(format!(
+                    "cap '{}' declares an output that is not a media URN ('{}'): {}",
+                    cap.urn, output.media_urn, e
+                ))
+            })?;
+            outputs.push(DeclaredOutput {
+                urn,
+                name: output.name.clone(),
+                shape: OutputContract {
+                    is_sequence: output.is_sequence,
+                    streaming: output.streaming,
+                },
+                optional: output.optional,
+                carries_input: output.carries.is_some(),
+                main: main.map_or(false, |m| std::ptr::eq(m, output)),
+            });
+        }
+        Ok(Self { outputs })
+    }
+
+    /// The contract of a cap known by its URN alone: the one output the URN
+    /// states, required and in the given shape — none when `out=` is void.
+    pub fn main_only(cap_urn: &str, shape: OutputContract) -> Result<Self, StreamIoError> {
+        let cap = crate::CapUrn::from_string(cap_urn).map_err(|e| {
+            StreamIoError::Protocol(format!("cap URN '{}' does not parse: {}", cap_urn, e))
+        })?;
+        let out = cap.out_media_urn().map_err(|e| {
+            StreamIoError::Protocol(format!(
+                "cap '{}' declared output is not a valid media URN: {}",
+                cap_urn, e
+            ))
+        })?;
+        let void = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
+            .expect("MEDIA_VOID is a valid MediaUrn");
+        if out.is_equivalent(&void).unwrap_or(false) {
+            return Ok(Self { outputs: Vec::new() });
+        }
+        Ok(Self {
+            outputs: vec![DeclaredOutput {
+                urn: out,
+                name: "output".to_string(),
+                shape,
+                optional: false,
+                carries_input: false,
+                main: true,
+            }],
+        })
+    }
+
+    /// Every declared output, in declaration order.
+    pub fn outputs(&self) -> &[DeclaredOutput] {
+        &self.outputs
+    }
+
+    /// The main output, if the cap has one.
+    pub fn main(&self) -> Option<&DeclaredOutput> {
+        self.outputs.iter().find(|o| o.main)
+    }
+
+    /// The main output's shape; both flags false for a cap with no output.
+    pub fn main_shape(&self) -> OutputContract {
+        self.main().map_or(
+            OutputContract {
+                is_sequence: false,
+                streaming: false,
+            },
+            |o| o.shape,
+        )
     }
 }
 
@@ -136,21 +248,25 @@ impl OutputContract {
 /// basis its emission can honestly be derived from. The decision itself is
 /// `CapUrn::is_conformant_runtime_output` — the ONE effect-conformance
 /// predicate — never re-derived here.
-pub struct EffectAudit {
+pub struct ResponseAudit {
     cap_urn_str: String,
     cap: crate::CapUrn,
     runtime_input: crate::MediaUrn,
-    /// The declared output shape — audited on the same STREAM_START as the
-    /// effect, so a cap lying about boundedness or cardinality fails at the
-    /// same boundary as a cap lying about its output type.
-    contract: OutputContract,
+    /// The outputs the cap declares. Each stream is audited against the one
+    /// it names — type, cardinality and boundedness on the same STREAM_START,
+    /// so a cap lying about any of them fails at the same boundary.
+    contract: ResponseContract,
+    /// Which declared output each response stream is, by stream id.
+    streams: HashMap<String, usize>,
+    /// Which declared outputs have a stream.
+    opened: Vec<bool>,
 }
 
-impl EffectAudit {
+impl ResponseAudit {
     /// Build the audit for one cap invocation. Fails when the cap URN does
     /// not parse or its declared `in=` is not a valid media URN — engine-side
     /// inconsistencies that must fail hard, not skip the audit.
-    pub fn new(cap_urn: &str, contract: OutputContract) -> Result<Self, StreamIoError> {
+    pub fn new(cap_urn: &str, contract: ResponseContract) -> Result<Self, StreamIoError> {
         let cap = crate::CapUrn::from_string(cap_urn).map_err(|e| {
             StreamIoError::Protocol(format!(
                 "effect audit: cap URN '{}' does not parse: {}",
@@ -163,51 +279,164 @@ impl EffectAudit {
                 cap_urn, e
             ))
         })?;
+        let opened = vec![false; contract.outputs.len()];
         Ok(Self {
             cap_urn_str: cap_urn.to_string(),
             cap,
             runtime_input,
             contract,
+            streams: HashMap::new(),
+            opened,
         })
     }
 
-    /// The declared output contract this audit enforces.
-    pub fn contract(&self) -> OutputContract {
-        self.contract
+    /// The declared outputs this audit enforces.
+    pub fn contract(&self) -> &ResponseContract {
+        &self.contract
     }
 
-    /// Audit one emitted output STREAM_START frame — its media label against
-    /// the effect contract, its `is_sequence` and `unbounded` flags against
-    /// the declared output shape. Both must hold; the effect is checked first
-    /// (an emission of the wrong TYPE is the graver lie).
-    pub fn audit_frame(&self, frame: &crate::bifaci::frame::Frame) -> Result<(), StreamIoError> {
-        self.audit(frame.media_urn.as_deref())?;
+    fn breach(&self, detail: String) -> StreamIoError {
+        StreamIoError::OutputContract {
+            cap_urn: self.cap_urn_str.clone(),
+            detail,
+        }
+    }
+
+    /// Audit one response STREAM_START and say which declared output it is.
+    ///
+    /// A stream that names no output is the main output's; one that names an
+    /// output is that declared output's, and never the main one. The output
+    /// must have no stream yet; what the stream carries must be what that
+    /// output carries (the main output per the cap's
+    /// effect, another output its own URN, an output that carries the input
+    /// the input's type); and its `is_sequence` and `unbounded` flags must be
+    /// that output's declared shape. The type is checked before the shape (an
+    /// emission of the wrong TYPE is the graver lie).
+    pub fn audit_frame(
+        &mut self,
+        frame: &crate::bifaci::frame::Frame,
+    ) -> Result<&DeclaredOutput, StreamIoError> {
+        let stream_id = frame.stream_id.clone().unwrap_or_default();
+        let index = match frame.output_urn() {
+            // The stream that names no output is the main output's.
+            None => self.contract.outputs.iter().position(|o| o.main).ok_or_else(|| {
+                self.breach(format!(
+                    "response stream '{}' is a main output's (it names no output), and the cap declares none",
+                    stream_id
+                ))
+            })?,
+            Some(named) => {
+                let named_urn = crate::MediaUrn::from_string(named).map_err(|e| {
+                    self.breach(format!(
+                        "response stream '{}' names an output that is not a media URN ('{}'): {}",
+                        stream_id, named, e
+                    ))
+                })?;
+                let index = self
+                    .contract
+                    .outputs
+                    .iter()
+                    .position(|o| o.urn.is_equivalent(&named_urn).unwrap_or(false))
+                    .ok_or_else(|| {
+                        self.breach(format!(
+                            "a response stream names output '{}', which the cap does not declare",
+                            named
+                        ))
+                    })?;
+                if self.contract.outputs[index].main {
+                    return Err(self.breach(format!(
+                        "a response stream names the main output ('{}') — the main output's stream names none",
+                        named
+                    )));
+                }
+                index
+            }
+        };
+        let named = self.contract.outputs[index].urn.to_string();
+        if self.opened[index] {
+            return Err(self.breach(format!("a second response stream for output '{}'", named)));
+        }
+
+        let output = &self.contract.outputs[index];
+        if output.main {
+            self.audit(frame.media_urn.as_deref())?;
+        } else {
+            let emitted = self.emitted_media(frame.media_urn.as_deref())?;
+            let (expected, holds) = if output.carries_input {
+                (&self.runtime_input, emitted.is_equivalent(&self.runtime_input))
+            } else {
+                (&output.urn, emitted.satisfies(&output.urn))
+            };
+            let holds = holds.map_err(|e| {
+                StreamIoError::Protocol(format!(
+                    "output audit for cap '{}' could not run: {}",
+                    self.cap_urn_str, e
+                ))
+            })?;
+            if !holds {
+                return Err(self.breach(format!(
+                    "output '{}' carries '{}', expected '{}'{}",
+                    named,
+                    emitted,
+                    expected,
+                    if output.carries_input { " (the cap's input, unchanged)" } else { "" }
+                )));
+            }
+        }
+
         // An emission that does not state its cardinality mode is an empty
         // stream (no items were ever written): it can be neither a lie about
         // sequence mode nor unbounded in any consequential way — but an
         // unbounded flag on it is still a contract question.
-        let emitted_is_sequence = frame.is_sequence.unwrap_or(self.contract.is_sequence);
+        let emitted_is_sequence = frame.is_sequence.unwrap_or(output.shape.is_sequence);
         let emitted_unbounded = frame.is_unbounded();
-        let sequence_lie = emitted_is_sequence != self.contract.is_sequence;
-        let boundedness_lie = emitted_unbounded && !self.contract.streaming;
+        let sequence_lie = emitted_is_sequence != output.shape.is_sequence;
+        let boundedness_lie = emitted_unbounded && !output.shape.streaming;
         if sequence_lie || boundedness_lie {
             return Err(StreamIoError::StreamContract {
                 cap_urn: self.cap_urn_str.clone(),
-                declared_is_sequence: self.contract.is_sequence,
-                declared_streaming: self.contract.streaming,
+                declared_is_sequence: output.shape.is_sequence,
+                declared_streaming: output.shape.streaming,
                 emitted_is_sequence,
                 emitted_unbounded,
             });
         }
+
+        self.opened[index] = true;
+        self.streams.insert(stream_id, index);
+        Ok(&self.contract.outputs[index])
+    }
+
+    /// The declared output the audited stream `stream_id` is. `None` for a
+    /// stream this audit has not seen a STREAM_START for.
+    pub fn output_of(&self, stream_id: Option<&str>) -> Option<&DeclaredOutput> {
+        self.streams
+            .get(stream_id.unwrap_or_default())
+            .map(|&index| &self.contract.outputs[index])
+    }
+
+    /// Whether `stream_id` is the stream of the cap's main output.
+    pub fn is_main_stream(&self, stream_id: Option<&str>) -> bool {
+        self.output_of(stream_id).map_or(false, |o| o.main)
+    }
+
+    /// Audit a successful end of the request: every required output has a
+    /// stream. An optional output without one did not fire.
+    pub fn audit_end(&self) -> Result<(), StreamIoError> {
+        for (output, opened) in self.contract.outputs.iter().zip(&self.opened) {
+            if !output.optional && !opened {
+                return Err(self.breach(format!(
+                    "the request ended without a stream for required output '{}'",
+                    output.urn
+                )));
+            }
+        }
         Ok(())
     }
 
-    /// Audit one emitted output STREAM_START label. `Ok(())` iff the
-    /// emission satisfies the declared effect contract. An unlabeled or
-    /// unparseable emission, and an audit that cannot run (inference
-    /// impossible — an upstream inconsistency), are `Protocol` errors; a
-    /// clean contract violation is `EffectContract`. Both fail hard.
-    pub fn audit(&self, emitted: Option<&str>) -> Result<(), StreamIoError> {
+    /// The media URN a STREAM_START carries, parsed. An unlabeled or
+    /// unparseable emission is a `Protocol` error.
+    fn emitted_media(&self, emitted: Option<&str>) -> Result<crate::MediaUrn, StreamIoError> {
         let emitted_str = match emitted {
             Some(s) if !s.is_empty() => s,
             _ => {
@@ -218,12 +447,22 @@ impl EffectAudit {
                 )));
             }
         };
-        let emitted_urn = crate::MediaUrn::from_string(emitted_str).map_err(|e| {
+        crate::MediaUrn::from_string(emitted_str).map_err(|e| {
             StreamIoError::Protocol(format!(
                 "cap '{}' emitted an output STREAM_START with invalid media URN '{}': {}",
                 self.cap_urn_str, emitted_str, e
             ))
-        })?;
+        })
+    }
+
+    /// Audit the label of the MAIN output's STREAM_START. `Ok(())` iff the
+    /// emission satisfies the declared effect contract. An unlabeled or
+    /// unparseable emission, and an audit that cannot run (inference
+    /// impossible — an upstream inconsistency), are `Protocol` errors; a
+    /// clean contract violation is `EffectContract`. Both fail hard.
+    pub fn audit(&self, emitted: Option<&str>) -> Result<(), StreamIoError> {
+        let emitted_urn = self.emitted_media(emitted)?;
+        let emitted_str = emitted.unwrap_or_default();
         let conformant = self
             .cap
             .is_conformant_runtime_output(&self.runtime_input, &emitted_urn)
@@ -1347,7 +1586,7 @@ pub struct TerminalOutput {
     unbounded: bool,
     /// Audits every STREAM_START emission against the cap's declared
     /// effect contract before its items are yielded.
-    effect_audit: EffectAudit,
+    effect_audit: ResponseAudit,
 }
 
 impl TerminalOutput {
@@ -1358,13 +1597,13 @@ impl TerminalOutput {
     pub fn new(
         rx: mpsc::UnboundedReceiver<Frame>,
         cap_urn: &str,
-        contract: OutputContract,
+        contract: ResponseContract,
         step_token_id: &StepToken,
         progress_fn: Option<CapProgressFn>,
         log_fn: Option<PipelineLogFn>,
         credit: Option<CreditPlumbing>,
     ) -> Result<Self, StreamIoError> {
-        let effect_audit = EffectAudit::new(cap_urn, contract)?;
+        let effect_audit = ResponseAudit::new(cap_urn, contract)?;
         Ok(Self {
             rx,
             cap_urn: cap_urn.to_string(),
@@ -1435,9 +1674,17 @@ impl TerminalOutput {
                     // Effect audit at receipt: the emission must satisfy the
                     // cap's declared effect contract before any of its items
                     // are yielded.
-                    if let Err(e) = self.effect_audit.audit_frame(&frame) {
-                        self.ended = true;
-                        return Some(Err(e));
+                    let is_main = match self.effect_audit.audit_frame(&frame) {
+                        Ok(output) => output.main,
+                        Err(e) => {
+                            self.ended = true;
+                            return Some(Err(e));
+                        }
+                    };
+                    // The terminal output is the cap's main output; the
+                    // stream of another output is consumed and not yielded.
+                    if !is_main {
+                        continue;
                     }
                     if let Some(seq) = frame.is_sequence {
                         self.is_sequence = Some(seq);
@@ -1453,6 +1700,9 @@ impl TerminalOutput {
                         {
                             (plumbing.grant)(frame.stream_id.clone(), grant);
                         }
+                    }
+                    if !self.effect_audit.is_main_stream(frame.stream_id.as_deref()) {
+                        continue;
                     }
                     if let Some(payload) = frame.payload {
                         return Some(Ok(TerminalItem {
@@ -1559,6 +1809,11 @@ impl TerminalOutput {
                             arg_urn: None,
                         }));
                     }
+                    // A request that succeeded owes a stream for every
+                    // required output.
+                    if let Err(e) = self.effect_audit.audit_end() {
+                        return Some(Err(e));
+                    }
                     // Terminal metadata IS the final progress event (L5).
                     let final_progress = frame.final_progress().unwrap_or(1.0) as f32;
                     let final_message = frame.final_message().unwrap_or("");
@@ -1644,7 +1899,7 @@ pub async fn collect_terminal_output(
     mut rx: mpsc::UnboundedReceiver<Frame>,
     progress_fn: Option<&CapProgressFn>,
     cap_urn: &str,
-    contract: OutputContract,
+    contract: &ResponseContract,
     step_token_id: &StepToken,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
@@ -1656,7 +1911,7 @@ pub async fn collect_terminal_output(
 ) -> Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError> {
     // The terminal cap's emission is audited against its declared effect
     // contract at receipt — before the payload is collected or persisted.
-    let effect_audit = EffectAudit::new(cap_urn, contract)?;
+    let mut effect_audit = ResponseAudit::new(cap_urn, contract.clone())?;
     let mut response_chunks: Vec<u8> = Vec::new();
     let mut is_sequence: Option<bool> = None;
     // Consumed-chunk accounting for batched grants (L10): the producer's
@@ -1700,7 +1955,11 @@ pub async fn collect_terminal_output(
                 match frame.frame_type {
                     FrameType::Chunk => {
                         timer.touch();
-                        if let Some(payload) = &frame.payload {
+                        // What is collected is the cap's main output. A chunk
+                        // of another output is consumed — its producer is
+                        // credited for it below — and not collected.
+                        let is_main = effect_audit.is_main_stream(frame.stream_id.as_deref());
+                        if let Some(payload) = frame.payload.as_ref().filter(|_| is_main) {
                             if let Some(ref mut w) = writer {
                                 w.on_chunk_payload(payload, frame.meta.clone()).await?;
                             } else {
@@ -1762,6 +2021,10 @@ pub async fn collect_terminal_output(
                                 arg_urn: None,
                             });
                         }
+
+                        // A request that succeeded owes a stream for every
+                        // required output.
+                        effect_audit.audit_end()?;
 
                         if let Some(payload) = &frame.payload {
                             if let Some(ref mut w) = writer {
@@ -1942,7 +2205,11 @@ pub async fn collect_terminal_output(
                         // emission must satisfy the cap's declared effect and
                         // declared shape before a single byte of it is
                         // collected or persisted.
-                        effect_audit.audit_frame(&frame)?;
+                        if !effect_audit.audit_frame(&frame)?.main {
+                            // Another output's stream: audited, consumed, and
+                            // not part of what is collected.
+                            continue;
+                        }
                         // An UNBOUNDED stream must be consumed incrementally
                         // (L16): a writer streams it to disk; without one this
                         // buffering collector would be unbounded memory. An
@@ -2184,6 +2451,12 @@ mod tests {
         streaming: true,
     };
 
+    /// What the response of `cap_urn` is held to when only its URN is known:
+    /// the one output the URN states, in `shape`.
+    fn contract(cap_urn: &str, shape: OutputContract) -> ResponseContract {
+        ResponseContract::main_only(cap_urn, shape).expect("the test cap URN parses")
+    }
+
     fn stream_start(rid: &MessageId) -> Frame {
         Frame::stream_start(
             rid.clone(),
@@ -2203,6 +2476,380 @@ mod tests {
             0,
             checksum,
         )
+    }
+
+    const SERIES: &str = "media:enc=utf-8;series";
+    const FIT: &str = "media:fmt=json;record;regression";
+    const RESIDUALS: &str = "media:fmt=json;list;record;residual";
+    const NOTE: &str = "media:enc=utf-8;note";
+    const REJECTED: &str = "media:enc=utf-8;rejected";
+
+    fn regress_urn() -> String {
+        format!(r#"cap:in="{SERIES}";regress;out="{FIT}""#)
+    }
+
+    /// A cap with four outputs: the main one (declared second), a required
+    /// sequence, an optional one, and an optional one that carries the input.
+    fn regress_cap() -> crate::Cap {
+        use crate::cap::definition::{ArgSource, CapArg, CapOutput};
+        let urn = crate::CapUrn::from_string(&regress_urn()).unwrap();
+        let mut cap = crate::Cap::new(urn, "Regress".to_string(), vec!["regress".to_string()]);
+        cap.add_arg(CapArg::new(
+            SERIES, "series",
+            true,
+            vec![ArgSource::Stdin { stdin: SERIES.to_string() }],
+        ));
+        let mut residuals = CapOutput::new(RESIDUALS, "residuals", "Residuals");
+        residuals.is_sequence = true;
+        cap.add_output(residuals);
+        cap.add_output(CapOutput::new(FIT, "fit", "The fit"));
+        cap.add_output(CapOutput::new(NOTE, "note", "A note").optional(true));
+        cap.add_output(CapOutput::new(REJECTED, "rejected", "Rejected input").optional(true).carrying_input());
+        crate::cap::validation::validate_cap_definition(&cap).expect("the fixture is a valid definition");
+        cap
+    }
+
+    /// A response STREAM_START: stream `sid` of output `output`, carrying
+    /// `media`. The main output's stream (`FIT`) names no output; every other
+    /// stream names the output it is.
+    fn response_start(rid: &MessageId, sid: &str, output: &str, media: &str, is_sequence: bool) -> Frame {
+        let start = Frame::stream_start(rid.clone(), sid.to_string(), media.to_string(), Some(is_sequence));
+        if output == FIT {
+            start
+        } else {
+            start.for_output(output)
+        }
+    }
+
+    fn chunk_of(rid: &MessageId, sid: &str, payload: &[u8]) -> Frame {
+        Frame::chunk(rid.clone(), sid.to_string(), 0, payload.to_vec(), 0, Frame::compute_checksum(payload))
+    }
+
+    fn breach_detail(result: Result<&DeclaredOutput, StreamIoError>) -> String {
+        match result {
+            Err(StreamIoError::OutputContract { cap_urn, detail }) => {
+                assert_eq!(cap_urn, regress_urn());
+                detail
+            }
+            other => panic!("expected an output-contract breach, got {:?}", other.map(|o| o.name.clone())),
+        }
+    }
+
+    // TEST12723: what a cap's response is held to is every output its
+    // definition declares: each with its identity, shape, whether it may not
+    // fire and what it carries, and one of them the main output — found by its
+    // URN, not by where it is declared. A cap known by its URN alone has the
+    // one output the URN states; a cap whose `out=` is void has none.
+    #[test]
+    fn test12723_a_response_contract_is_every_declared_output() {
+        let contract = ResponseContract::of(&regress_cap()).unwrap();
+        let by_name = |name: &str| contract.outputs().iter().find(|o| o.name == name).unwrap().clone();
+        assert_eq!(contract.outputs().len(), 4);
+        assert_eq!(contract.main().map(|o| o.name.as_str()), Some("fit"));
+        assert!(by_name("fit").main && !by_name("residuals").main);
+        assert_eq!(by_name("residuals").shape, OutputContract { is_sequence: true, streaming: false });
+        assert_eq!(by_name("fit").shape, SCALAR_CONTRACT);
+        assert_eq!(contract.main_shape(), SCALAR_CONTRACT);
+        assert!(!by_name("fit").optional && !by_name("residuals").optional);
+        assert!(by_name("note").optional && by_name("rejected").optional);
+        assert!(by_name("rejected").carries_input && !by_name("note").carries_input);
+        assert!(by_name("residuals").urn.is_equivalent(&crate::MediaUrn::from_string(RESIDUALS).unwrap()).unwrap());
+
+        let one = ResponseContract::main_only(&regress_urn(), STREAMING_SEQUENCE_CONTRACT).unwrap();
+        assert_eq!(one.outputs().len(), 1);
+        assert!(one.outputs()[0].main && !one.outputs()[0].optional);
+        assert_eq!(one.main_shape(), STREAMING_SEQUENCE_CONTRACT);
+        assert!(one.outputs()[0].urn.is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
+
+        let none = ResponseContract::main_only(r#"cap:in="media:enc=utf-8";sink;out=media:void"#, SCALAR_CONTRACT).unwrap();
+        assert!(none.outputs().is_empty() && none.main().is_none());
+        assert_eq!(none.main_shape(), SCALAR_CONTRACT);
+    }
+
+    // TEST12724: every response stream is audited against the output it names.
+    // It must name a declared output, once; what it carries must be what that
+    // output carries; and its shape must be that output's. A request that
+    // succeeds owes a stream for every required output and none for an
+    // optional one.
+    #[test]
+    fn test12724_a_response_stream_is_audited_against_the_output_it_names() {
+        let rid = MessageId::new_uuid();
+        let audit = || ResponseAudit::new(&regress_urn(), ResponseContract::of(&regress_cap()).unwrap()).unwrap();
+
+        // A whole, valid response: every stream is told apart by the output it names.
+        let mut ok = audit();
+        assert!(ok.audit_frame(&response_start(&rid, "a", FIT, FIT, false)).unwrap().main);
+        assert_eq!(ok.audit_frame(&response_start(&rid, "b", "media:residual;record;list;fmt=json", RESIDUALS, true)).unwrap().name, "residuals");
+        // An output that carries the input is labelled with the input's type.
+        assert_eq!(ok.audit_frame(&response_start(&rid, "c", REJECTED, SERIES, false)).unwrap().name, "rejected");
+        // What an output carries may be more specific than the output's URN.
+        assert_eq!(ok.audit_frame(&response_start(&rid, "d", NOTE, "media:enc=utf-8;note;warning", false)).unwrap().name, "note");
+        assert!(ok.is_main_stream(Some("a")) && !ok.is_main_stream(Some("b")));
+        assert_eq!(ok.output_of(Some("c")).map(|o| o.name.as_str()), Some("rejected"));
+        assert!(ok.output_of(Some("never-started")).is_none() && !ok.is_main_stream(Some("never-started")));
+        ok.audit_end().unwrap();
+
+        // The stream that names no output is the main output's — whatever
+        // else it resembles, it is held to the main output's contract.
+        let unnamed_residuals = Frame::stream_start(rid.clone(), "a".to_string(), RESIDUALS.to_string(), Some(true));
+        assert!(matches!(
+            audit().audit_frame(&unnamed_residuals),
+            Err(StreamIoError::EffectContract { .. })
+        ));
+        // The main output's stream is not named: naming it is a breach, in
+        // whatever order its tags are written.
+        for named_main in [FIT, "media:regression;record;fmt=json"] {
+            let named = Frame::stream_start(rid.clone(), "a".to_string(), FIT.to_string(), Some(false))
+                .for_output(named_main);
+            let detail = breach_detail(audit().audit_frame(&named));
+            assert!(detail.contains("names the main output"), "{detail}");
+        }
+        // A cap with no output sends no main stream.
+        let void_urn = r#"cap:in="media:enc=utf-8";sink;out=media:void"#;
+        let mut void = ResponseAudit::new(void_urn, ResponseContract::main_only(void_urn, SCALAR_CONTRACT).unwrap()).unwrap();
+        match void.audit_frame(&Frame::stream_start(rid.clone(), "a".to_string(), "media:void".to_string(), Some(false))) {
+            Err(StreamIoError::OutputContract { detail, .. }) => assert!(detail.contains("declares none"), "{detail}"),
+            other => panic!("expected an output-contract breach, got {:?}", other.map(|o| o.name.clone())),
+        }
+        void.audit_end().expect("a cap with no output owes no stream");
+        // It names something the cap does not declare — close is not declared.
+        for undeclared in ["media:fmt=json;record", "media:enc=utf-8", "not a urn"] {
+            let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", undeclared, FIT, false)));
+            assert!(detail.contains(undeclared), "{detail}");
+            // Refused for what it names — not taken for some declared output
+            // and then refused for what it carries.
+            assert!(detail.contains("does not declare") || detail.contains("not a media URN"), "{detail}");
+        }
+        // A second stream for one output, under another stream id — the main
+        // output included.
+        let mut two_mains = audit();
+        two_mains.audit_frame(&response_start(&rid, "a", FIT, FIT, false)).unwrap();
+        let detail = breach_detail(two_mains.audit_frame(&response_start(&rid, "b", FIT, FIT, false)));
+        assert!(detail.contains("second"), "{detail}");
+        let mut twice = audit();
+        twice.audit_frame(&response_start(&rid, "a", RESIDUALS, RESIDUALS, true)).unwrap();
+        let detail = breach_detail(twice.audit_frame(&response_start(&rid, "b", RESIDUALS, RESIDUALS, true)));
+        assert!(detail.contains("second") && detail.contains(RESIDUALS), "{detail}");
+        // The refused stream is not on record.
+        assert!(twice.output_of(Some("b")).is_none());
+
+        // Another output carrying a type that is not its own.
+        let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", NOTE, "media:enc=utf-8", false)));
+        assert!(detail.contains(NOTE) && detail.contains("media:enc=utf-8"), "{detail}");
+        // An output that carries the input, carrying its own URN instead, or
+        // something more specific than the input: the type is unchanged, exactly.
+        for carried in [REJECTED, "media:enc=utf-8;series;sorted"] {
+            let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", REJECTED, carried, false)));
+            assert!(detail.contains("input"), "{detail}");
+        }
+        // The main output is held to the cap's effect, as before.
+        match audit().audit_frame(&response_start(&rid, "a", FIT, "media:fmt=json;record", false)) {
+            Err(StreamIoError::EffectContract { expected, actual, .. }) => {
+                assert_eq!(actual, "media:fmt=json;record");
+                assert!(crate::MediaUrn::from_string(&expected).unwrap().is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
+            }
+            other => panic!("expected EffectContract, got {:?}", other.map(|o| o.name.clone())),
+        }
+
+        // Each output's shape is its own: the residuals are a sequence, the fit is not.
+        match audit().audit_frame(&response_start(&rid, "a", RESIDUALS, RESIDUALS, false)) {
+            Err(StreamIoError::StreamContract { declared_is_sequence, emitted_is_sequence, .. }) => {
+                assert!(declared_is_sequence && !emitted_is_sequence);
+            }
+            other => panic!("expected StreamContract, got {:?}", other.map(|o| o.name.clone())),
+        }
+        match audit().audit_frame(&response_start(&rid, "a", FIT, FIT, true)) {
+            Err(StreamIoError::StreamContract { declared_is_sequence, emitted_is_sequence, .. }) => {
+                assert!(!declared_is_sequence && emitted_is_sequence);
+            }
+            other => panic!("expected StreamContract, got {:?}", other.map(|o| o.name.clone())),
+        }
+        // A stream refused for its shape did not open its output.
+        let mut reshaped = audit();
+        assert!(reshaped.audit_frame(&response_start(&rid, "a", FIT, FIT, true)).is_err());
+        reshaped.audit_frame(&response_start(&rid, "b", FIT, FIT, false)).unwrap();
+
+        // The end of a successful request: both required outputs, or it is a breach naming the missing one.
+        let mut only_fit = audit();
+        only_fit.audit_frame(&response_start(&rid, "a", FIT, FIT, false)).unwrap();
+        match only_fit.audit_end() {
+            Err(StreamIoError::OutputContract { detail, .. }) => {
+                assert!(detail.contains("required") && detail.contains("residual"), "{detail}");
+                assert!(!detail.contains("regression"), "the output that did arrive is not named: {detail}");
+            }
+            other => panic!("expected an output-contract breach, got {other:?}"),
+        }
+        let mut both = audit();
+        both.audit_frame(&response_start(&rid, "a", FIT, FIT, false)).unwrap();
+        both.audit_frame(&response_start(&rid, "b", RESIDUALS, RESIDUALS, true)).unwrap();
+        both.audit_end().expect("the optional outputs did not fire, and that is no breach");
+    }
+
+    /// Collect the response `frames` of the regress cap, recording every credit grant.
+    async fn collect_regress(
+        frames: Vec<Frame>,
+    ) -> (Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError>, Vec<(Option<String>, u64)>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for frame in frames {
+            tx.send(frame).unwrap();
+        }
+        drop(tx);
+        let grants: Arc<std::sync::Mutex<Vec<(Option<String>, u64)>>> = Arc::default();
+        let recorded = Arc::clone(&grants);
+        let plumbing = CreditPlumbing {
+            router: crate::bifaci::credit::CreditRouter::new(),
+            grant: Arc::new(move |stream_id, n| recorded.lock().unwrap().push((stream_id, n))),
+            window: 2,
+        };
+        let result = collect_terminal_output(
+            rx,
+            None,
+            &regress_urn(),
+            &ResponseContract::of(&regress_cap()).unwrap(),
+            &"step_test".parse().unwrap(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            5,
+            Some(&plumbing),
+        )
+        .await;
+        let grants = grants.lock().unwrap().clone();
+        (result, grants)
+    }
+
+    // TEST12725: what is collected of a response is the cap's main output. The
+    // chunks of another output, interleaved with it, are not part of it — they
+    // used to be appended to the same buffer — and their producer is still
+    // credited for them, so it cannot stall on a stream nobody reads. A
+    // response that breaks its declared outputs fails the collection.
+    #[tokio::test]
+    async fn test12725_the_collector_collects_the_main_output_only() {
+        let rid = MessageId::new_uuid();
+        let (result, grants) = collect_regress(vec![
+            // The other output's stream opens after the main one: its mode
+            // and metadata are its own, and do not become the collection's.
+            response_start(&rid, "fit", FIT, FIT, false),
+            response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
+            chunk_of(&rid, "res", b"R1"),
+            chunk_of(&rid, "fit", b"FIT-"),
+            chunk_of(&rid, "res", b"R2"),
+            chunk_of(&rid, "fit", b"DONE"),
+            chunk_of(&rid, "res", b"R3"),
+            chunk_of(&rid, "res", b"R4"),
+            Frame::stream_end(rid.clone(), "res".to_string(), 4),
+            Frame::stream_end(rid.clone(), "fit".to_string(), 2),
+            Frame::end_ok(rid.clone(), None),
+        ])
+        .await;
+        let (bytes, is_sequence, _meta) = result.expect("a valid response");
+        assert_eq!(bytes, b"FIT-DONE", "only the main output's chunks, in order");
+        assert_eq!(is_sequence, Some(false), "the main output's mode, not the other stream's");
+        let granted = |sid: &str| -> u64 {
+            grants.iter().filter(|(s, _)| s.as_deref() == Some(sid)).map(|(_, n)| n).sum()
+        };
+        assert!(granted("res") >= 2, "the consumed output's producer is credited: {grants:?}");
+        assert!(granted("fit") >= 1, "{grants:?}");
+
+        // The request ends without the required residuals.
+        let (result, _) = collect_regress(vec![
+            response_start(&rid, "fit", FIT, FIT, false),
+            chunk_of(&rid, "fit", b"FIT"),
+            Frame::stream_end(rid.clone(), "fit".to_string(), 1),
+            Frame::end_ok(rid.clone(), None),
+        ])
+        .await;
+        match result {
+            Err(StreamIoError::OutputContract { detail, .. }) => assert!(detail.contains("required"), "{detail}"),
+            other => panic!("expected an output-contract breach, got {:?}", other.map(|r| r.0)),
+        }
+
+        // A stream that names an output the cap does not declare fails at its
+        // STREAM_START, before anything is collected.
+        let (result, _) = collect_regress(vec![
+            response_start(&rid, "fit", FIT, FIT, false),
+            response_start(&rid, "x", "media:enc=utf-8;extra", "media:enc=utf-8;extra", false),
+            chunk_of(&rid, "fit", b"FIT"),
+            Frame::end_ok(rid.clone(), None),
+        ])
+        .await;
+        match result {
+            Err(StreamIoError::OutputContract { detail, .. }) => assert!(detail.contains("does not declare"), "{detail}"),
+            other => panic!("expected an output-contract breach, got {:?}", other.map(|r| r.0)),
+        }
+
+        // A failed request is its failure, not a contract breach for the outputs it never sent.
+        let (result, _) = collect_regress(vec![Frame::err(
+            rid.clone(),
+            "NO_FIT",
+            crate::failure::AttributionClass::Input,
+            "too few points",
+            None,
+        )])
+        .await;
+        match result {
+            Err(StreamIoError::Terminal { code, .. }) => assert_eq!(code.as_deref(), Some("NO_FIT")),
+            other => panic!("expected the cap's own failure, got {:?}", other.map(|r| r.0)),
+        }
+    }
+
+    // TEST12726: the incremental reader yields the items of the main output and
+    // none of another output's, and reports a response that ends without a
+    // required output.
+    #[tokio::test]
+    async fn test12726_the_incremental_reader_yields_the_main_output_only() {
+        let rid = MessageId::new_uuid();
+        let reader = |frames: Vec<Frame>| {
+            let (tx, rx) = mpsc::unbounded_channel();
+            for frame in frames {
+                tx.send(frame).unwrap();
+            }
+            drop(tx);
+            TerminalOutput::new(
+                rx,
+                &regress_urn(),
+                ResponseContract::of(&regress_cap()).unwrap(),
+                &"step_test".parse().unwrap(),
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        let mut whole = reader(vec![
+            response_start(&rid, "fit", FIT, FIT, false),
+            response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
+            chunk_of(&rid, "res", b"R1"),
+            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "res", b"R2"),
+            Frame::stream_end(rid.clone(), "res".to_string(), 2),
+            Frame::stream_end(rid.clone(), "fit".to_string(), 1),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        let mut items = Vec::new();
+        while let Some(item) = whole.next_item().await {
+            items.push(item.expect("a valid response"));
+        }
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].payload, b"FIT");
+        assert_eq!(items[0].stream_id.as_deref(), Some("fit"));
+        assert_eq!(whole.is_sequence(), Some(false), "the main output's mode");
+
+        let mut short = reader(vec![
+            response_start(&rid, "fit", FIT, FIT, false),
+            chunk_of(&rid, "fit", b"FIT"),
+            Frame::stream_end(rid.clone(), "fit".to_string(), 1),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        assert_eq!(short.next_item().await.unwrap().unwrap().payload, b"FIT");
+        match short.next_item().await {
+            Some(Err(StreamIoError::OutputContract { detail, .. })) => assert!(detail.contains("required"), "{detail}"),
+            other => panic!("expected an output-contract breach, got {:?}", other.map(|r| r.map(|i| i.payload))),
+        }
+        assert!(short.next_item().await.is_none(), "the reader has ended");
     }
 
     // TEST8124: the effect audit fires at output STREAM_START receipt — an
@@ -2230,7 +2877,7 @@ mod tests {
             rx,
             None,
             "cap:echo;effect=none",
-            SCALAR_CONTRACT,
+            &contract("cap:echo;effect=none", SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2284,7 +2931,7 @@ mod tests {
             assert_eq!(frame.frame_type, FrameType::StreamStart);
             frame
         };
-        let run = |first: Frame, contract: OutputContract| {
+        let run = |first: Frame, shape: OutputContract| {
             let rid = rid.clone();
             async move {
             let (tx, rx) = mpsc::unbounded_channel();
@@ -2296,7 +2943,7 @@ mod tests {
                 rx,
                 None,
                 "cap:echo;effect=none",
-                contract,
+                &contract("cap:echo;effect=none", shape),
                 &"step_test".parse().unwrap(),
                 None,
                 None,
@@ -2368,7 +3015,7 @@ mod tests {
         drop(tx);
 
         let mut terminal =
-            TerminalOutput::new(rx, "cap:echo;effect=none", SCALAR_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
+            TerminalOutput::new(rx, "cap:echo;effect=none", contract("cap:echo;effect=none", SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
                 .expect("cap:echo;effect=none builds a valid effect audit");
         let first = terminal
             .next_item()
@@ -2404,7 +3051,7 @@ mod tests {
             rx,
             None,
             "cap:test",
-            STREAMING_SEQUENCE_CONTRACT,
+            &contract("cap:test", STREAMING_SEQUENCE_CONTRACT),
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2535,7 +3182,7 @@ mod tests {
             rx,
             None,
             "cap:test",
-            STREAMING_SEQUENCE_CONTRACT,
+            &contract("cap:test", STREAMING_SEQUENCE_CONTRACT),
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -2571,7 +3218,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            SCALAR_CONTRACT,
+            &contract("cap:test", SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2617,7 +3264,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            SCALAR_CONTRACT,
+            &contract("cap:test", SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2662,7 +3309,7 @@ mod tests {
             rx,
             Some(&cap.progress_fn),
             "cap:test",
-            SCALAR_CONTRACT,
+            &contract("cap:test", SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -2709,7 +3356,7 @@ mod tests {
     async fn test7071_terminal_output_yields_before_stream_end() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", STREAMING_SEQUENCE_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", contract("cap:test", STREAMING_SEQUENCE_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         // Announce an unbounded stream and one item — nothing has ended.
@@ -2750,7 +3397,7 @@ mod tests {
     async fn test7077_per_item_meta_incremental() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", SCALAR_CONTRACT, &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, "cap:test", contract("cap:test", SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
             .expect("cap:test builds a valid effect audit");
 
         tx.send(stream_start(&rid)).unwrap();

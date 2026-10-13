@@ -1,4 +1,4 @@
-//! Unified per-request state for routing runtimes (protocol v4, L7/L8).
+//! Unified per-request state for routing runtimes (L7/L8).
 //!
 //! One `RequestState` per in-flight request replaces the parallel routing maps
 //! (routing entry, origin, peer markers, parent→child links, response channel,

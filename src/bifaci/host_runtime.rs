@@ -1864,7 +1864,7 @@ impl CartridgeHostRuntime {
                                 target: "host_runtime",
                                 rid = ?frame.id,
                                 no_route_total = total,
-                                "[CartridgeHostRuntime] dropped CREDIT without direction — v4 requires credit_dir (no_route, L11)"
+                                "[CartridgeHostRuntime] dropped CREDIT without direction — credit_dir is required (no_route, L11)"
                             );
                             return Ok(());
                         }
@@ -1977,7 +1977,7 @@ impl CartridgeHostRuntime {
                 // Terminal bookkeeping.
                 // - Via incoming_rxids: the REQUEST BODY completed. The entry
                 //   STAYS — the handler's response is still flowing and its
-                //   output CREDIT grants route through it (v4). It is removed
+                //   output CREDIT grants route through it. It is removed
                 //   when the handler's response terminal passes outbound
                 //   (handle_cartridge_frame) or on cartridge death.
                 // - Via outgoing_rids: a peer RESPONSE completed — clean up.
@@ -2313,7 +2313,7 @@ impl CartridgeHostRuntime {
                         self.outgoing_max_seq_touched.remove(&flow_key);
 
                         // The handler's RESPONSE terminal is the request's true
-                        // end at this host (v4): once the body has completed
+                        // end at this host: once the body has completed
                         // too, release the incoming routing entry and its
                         // body-done marker. If the response terminates BEFORE
                         // the body END arrives (response-first race), remember
@@ -3547,8 +3547,8 @@ impl CartridgeHostRuntime {
                     protocol_stragglers_total: cartridge.protocol_stragglers_total,
                     protocol_overruns_total: cartridge.protocol_overruns_total,
                 };
-                // A cartridge whose HELLO failed (e.g. a pre-v4 binary hard-
-                // rejected by the version check) stays IN the inventory with
+                // A cartridge whose HELLO failed (e.g. a binary of another protocol
+                // version, hard-rejected by the version check) stays IN the inventory with
                 // an attachment error — never silently absent. It carries no
                 // cap_groups, so it is never routable.
                 if cartridge.hello_failed {
@@ -6842,7 +6842,7 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert!(records[0].attachment_error.is_none());
 
-        // HELLO permanently fails (e.g. a pre-v4 binary rejected by the
+        // HELLO permanently fails (e.g. a binary of another protocol version rejected by the
         // version check): the record STAYS, carrying the failure — the UI
         // must always be able to name why a cartridge is not serving.
         runtime.cartridges[0].hello_failed = true;

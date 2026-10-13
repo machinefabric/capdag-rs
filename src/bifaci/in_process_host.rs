@@ -1520,6 +1520,9 @@ mod tests {
         assert_eq!(resp_ss.frame_type, FrameType::StreamStart);
         assert_eq!(resp_ss.id, rid);
         assert_eq!(resp_ss.stream_id.as_deref(), Some("result"));
+        // What a handler answers with is its cap's main output: the stream
+        // names no output.
+        assert_eq!(resp_ss.output_urn(), None);
 
         let resp_chunk = reader.read().await.unwrap().unwrap();
         assert_eq!(resp_chunk.frame_type, FrameType::Chunk);

@@ -99,3 +99,71 @@ fn capdag_git_source(manifest: &str) -> Option<String> {
     let end = after[start..].find('"')?;
     Some(after[start..start + end].to_string())
 }
+
+/// The testcartridge source directory.
+///
+/// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
+/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
+/// opaque spawn failure later: `Command::current_dir` on an absent directory
+/// reports only `NotFound`, which reads as a missing `cargo`.
+pub fn testcartridge_dir() -> PathBuf {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let dir = PathBuf::from(&manifest_dir)
+        .parent()
+        .expect("capdag-rs has a parent (the capdag superrepo)")
+        .parent()
+        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
+        .join("mfab-tests")
+        .join("testcartridge");
+    assert!(
+        dir.is_dir(),
+        "testcartridge source not found at {}; these tests need the machinefabric workspace \
+         checkout, not a standalone capdag-rs clone",
+        dir.display()
+    );
+    dir
+}
+
+/// The testcartridge binary, built against this capdag.
+///
+/// Built by cargo, once per test binary. Whether an existing binary is stale
+/// is cargo's decision, never this harness's: the cartridge links this
+/// library, and a check of the cartridge's own sources alone ran a cartridge
+/// built against an earlier library — which answers by an earlier protocol.
+pub fn testcartridge_bin(tag: &str) -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let cart_dir = testcartridge_dir();
+            resolve_this_capdag(&cart_dir, tag);
+            let output = std::process::Command::new("cargo")
+                .arg("build")
+                .arg("--release")
+                .args(against_this_capdag(&cart_dir))
+                .current_dir(&cart_dir)
+                .output()
+                .expect("Failed to run cargo build for testcartridge");
+            if !output.status.success() {
+                for line in String::from_utf8_lossy(&output.stderr).lines() {
+                    eprintln!("[{tag}]   {line}");
+                }
+                panic!(
+                    "Failed to build testcartridge (exit code: {:?})",
+                    output.status.code()
+                );
+            }
+            // Where cargo built it, as cargo says: the build ran under the same
+            // cargo and the same environment. With the platform's executable
+            // suffix: on Windows the build writes `testcartridge.exe`.
+            let bin_path = target_dir_of(&cart_dir)
+                .join("release")
+                .join(format!("testcartridge{}", std::env::consts::EXE_SUFFIX));
+            assert!(
+                bin_path.exists(),
+                "testcartridge binary not found at {:?} after a successful build",
+                bin_path
+            );
+            bin_path
+        })
+        .clone()
+}

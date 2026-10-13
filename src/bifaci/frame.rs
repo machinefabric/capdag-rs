@@ -8,7 +8,7 @@
 //! Each frame is a CBOR map with integer keys:
 //! ```text
 //! {
-//!   0: version (u8, always 2)
+//!   0: version (u8, always PROTOCOL_VERSION)
 //!   1: frame_type (u8)
 //!   2: id (bytes[16] or uint)
 //!   3: seq (u64)
@@ -26,6 +26,8 @@
 //!   18: force_kill (bool, Cancel frames - kill the process instead of cooperating)
 //!   19: credit (u64, Credit frames - flow-control grant in CHUNK units)
 //!   20: unbounded (bool, STREAM_START frames - the stream makes no length promise)
+//!   21: output (tstr, STREAM_START of a response stream that is not the cap's main output -
+//!       the media URN of the output it is)
 //! }
 //!
 //! A Cancel frame is attributed like an ERR frame, through `meta`:
@@ -49,10 +51,12 @@ use crate::CapUrn;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Protocol version 4 requires explicit handler capacity and strict diagnostic
-/// attribution in addition to credit-based flow control and terminal metadata.
-/// Every other version is rejected during handshake.
-pub const PROTOCOL_VERSION: u8 = 4;
+/// Protocol version 5: a cap may answer with one stream per declared output.
+/// The stream of its main output names none; the stream of another output
+/// names the output it is (key 21). It keeps explicit
+/// handler capacity, strict diagnostic attribution, credit-based flow control
+/// and terminal metadata. Every other version is rejected during handshake.
+pub const PROTOCOL_VERSION: u8 = 5;
 
 /// Default maximum frame size (3.5 MB) - safe margin below 3.75MB limit
 /// Larger payloads automatically use CHUNK frames
@@ -339,6 +343,14 @@ pub struct Frame {
     /// Whether the stream makes no length promise (no chunk_count on STREAM_END,
     /// receivers must consume incrementally). Present on STREAM_START frames only.
     pub unbounded: Option<bool>,
+    /// Which output of the cap this response stream is, when it is not the
+    /// main one: that output's media URN. The stream of a cap's MAIN output
+    /// (the one the cap URN's `out=` states) carries none — it is the cap's
+    /// answer, and whoever asked knows what they asked for without the cap's
+    /// definition. A request stream is an argument and carries none either.
+    /// `media_urn` says what the data is; two outputs may carry one type, and
+    /// this says which of them the stream is.
+    pub output: Option<String>,
 }
 
 /// WHY a request is being cancelled — the attribution a Cancel frame carries
@@ -492,6 +504,7 @@ impl Frame {
             force_kill: None,
             credit: None,
             unbounded: None,
+            output: None,
         }
     }
 
@@ -882,6 +895,19 @@ impl Frame {
         let mut frame = Self::stream_start(req_id, stream_id, media_urn, is_sequence);
         frame.unbounded = Some(true);
         frame
+    }
+
+    /// Mark this STREAM_START as the stream of an output other than the cap's
+    /// main one: the output `output` identifies (that output's media URN).
+    pub fn for_output(mut self, output: impl Into<String>) -> Self {
+        self.output = Some(output.into());
+        self
+    }
+
+    /// The output this STREAM_START names. `None` on the main output's stream
+    /// and on a request stream.
+    pub fn output_urn(&self) -> Option<&str> {
+        self.output.as_deref()
     }
 
     /// Whether this STREAM_START announces an unbounded stream.
@@ -1703,6 +1729,7 @@ pub mod keys {
     pub const FORCE_KILL: u64 = 18; // Whether Cancel should force-kill the cartridge process
     pub const CREDIT: u64 = 19; // Flow-control credit grant in CHUNK units (Credit frames)
     pub const UNBOUNDED: u64 = 20; // Stream makes no length promise (STREAM_START frames)
+    pub const OUTPUT: u64 = 21; // Which output a response stream is, when not the main one (STREAM_START frames)
 }
 
 /// Which side's stream a CREDIT frame credits (L11 routing discriminator).
@@ -2462,10 +2489,10 @@ mod tests {
         );
     }
 
-    // TEST199: Test PROTOCOL_VERSION is 4
+    // TEST199: Test PROTOCOL_VERSION is 5
     #[test]
     fn test199_protocol_version_constant() {
-        assert_eq!(PROTOCOL_VERSION, 4);
+        assert_eq!(PROTOCOL_VERSION, 5);
     }
 
     // TEST200: Test integer key constants match the protocol specification
@@ -2671,7 +2698,7 @@ mod tests {
         assert_eq!(
             FrameType::from_u8(13),
             Some(FrameType::Credit),
-            "13 is Credit (v4)"
+            "13 is Credit"
         );
         assert_eq!(
             FrameType::from_u8(14),
@@ -3382,7 +3409,7 @@ mod tests {
         );
     }
 
-    // TEST6672: CBOR decode ACCEPTS STREAM_END without chunk_count — unbounded streams make no length promise (v4, L16)
+    // TEST6672: CBOR decode ACCEPTS STREAM_END without chunk_count — unbounded streams make no length promise (L16)
     #[test]
     fn test6672_cbor_accepts_stream_end_without_chunk_count() {
         use crate::bifaci::io::{decode_frame, encode_frame};
@@ -3392,7 +3419,7 @@ mod tests {
         assert_eq!(frame.chunk_count, None);
 
         let encoded = encode_frame(&frame).expect("encoding should succeed");
-        let decoded = decode_frame(&encoded).expect("v4 accepts STREAM_END without chunk_count");
+        let decoded = decode_frame(&encoded).expect("STREAM_END without chunk_count is accepted");
         assert_eq!(decoded.frame_type, FrameType::StreamEnd);
         assert_eq!(decoded.id, req_id);
         assert_eq!(decoded.stream_id.as_deref(), Some("s1"));
@@ -3484,6 +3511,69 @@ mod tests {
             "Credit must bypass the reorder buffer and deliver immediately"
         );
         assert_eq!(delivered[0].frame_type, FrameType::Credit);
+    }
+
+    // TEST12718: the STREAM_START of a response stream that is not the cap's
+    // main output names the output it is, beside the type of what it carries;
+    // the name round-trips through CBOR under key 21, the main output's stream
+    // and a request stream carry none, and no other frame type may carry one.
+    #[test]
+    fn test12718_stream_start_names_its_output() {
+        use crate::bifaci::io::{decode_frame, encode_frame};
+
+        let rid = MessageId::new_uuid();
+        // Two outputs of one cap may carry the same type: the name tells them apart.
+        let kept = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf-8".to_string(), Some(false))
+            .for_output("media:enc=utf-8;kept");
+        let dropped = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf-8".to_string(), Some(false))
+            .for_output("media:dropped;enc=utf-8");
+        let kept_back = decode_frame(&encode_frame(&kept).unwrap()).unwrap();
+        let dropped_back = decode_frame(&encode_frame(&dropped).unwrap()).unwrap();
+        assert_eq!(kept_back.output_urn(), Some("media:enc=utf-8;kept"));
+        assert_eq!(dropped_back.output_urn(), Some("media:dropped;enc=utf-8"));
+        assert_eq!(kept_back.media_urn, dropped_back.media_urn, "the data's type is its own field");
+        assert_eq!(kept_back.media_urn.as_deref(), Some("media:enc=utf-8"));
+
+        // The unbounded form keeps both.
+        let feed = Frame::stream_start_unbounded(rid.clone(), "s3".to_string(), "media:tick".to_string(), Some(true))
+            .for_output("media:tick");
+        let feed_back = decode_frame(&encode_frame(&feed).unwrap()).unwrap();
+        assert!(feed_back.is_unbounded());
+        assert_eq!(feed_back.output_urn(), Some("media:tick"));
+
+        // The main output's stream and a request stream name no output, and
+        // the key is not written.
+        let argument = Frame::stream_start(rid.clone(), "s4".to_string(), "media:enc=utf-8".to_string(), None);
+        let encoded = encode_frame(&argument).unwrap();
+        let map: ciborium::Value = ciborium::from_reader(&encoded[..]).unwrap();
+        let has_key = map.as_map().unwrap().iter().any(|(k, _)| {
+            k.as_integer().map(|i| i128::from(i) == keys::OUTPUT as i128).unwrap_or(false)
+        });
+        assert!(!has_key, "a STREAM_START that names no output does not carry key 21");
+        assert_eq!(decode_frame(&encoded).unwrap().output_urn(), None);
+        assert_eq!(keys::OUTPUT, 21);
+
+        // Only a STREAM_START may name an output.
+        let mut chunk = Frame::chunk(rid, "s1".to_string(), 0, b"x".to_vec(), 0, Frame::compute_checksum(b"x"));
+        chunk.output = Some("media:enc=utf-8;kept".to_string());
+        let err = decode_frame(&encode_frame(&chunk).unwrap()).expect_err("a CHUNK naming an output is refused");
+        assert!(err.to_string().contains("output"), "{err}");
+
+        // Key 21 that is not text is a malformed frame, not a stream that
+        // names no output.
+        let encoded = encode_frame(&kept).unwrap();
+        let ciborium::Value::Map(mut entries) = ciborium::from_reader(&encoded[..]).unwrap() else {
+            panic!("a frame is a map");
+        };
+        for (key, value) in entries.iter_mut() {
+            if key.as_integer().map(|i| i128::from(i) == keys::OUTPUT as i128).unwrap_or(false) {
+                *value = ciborium::Value::Integer(7.into());
+            }
+        }
+        let mut malformed = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Map(entries), &mut malformed).unwrap();
+        let err = decode_frame(&malformed).expect_err("key 21 must be text");
+        assert!(err.to_string().contains("text"), "{err}");
     }
 
     // TEST7012: STREAM_START unbounded flag round-trips through CBOR; absent flag means bounded

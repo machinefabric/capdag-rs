@@ -17,7 +17,6 @@ use capdag::orchestrator::{
 };
 use capdag::{Cap, CapUrn, FabricRegistry, PipelineLogFn, StreamMeta};
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -145,164 +144,77 @@ fn build_combine_cap() -> Cap {
     }
 }
 
+const SPLIT_CAP: &str = r#"cap:in="media:enc=utf-8;node1";test-split;out="media:enc=utf-8;node2""#;
+const SPLIT_PIECES: &str = "media:numeric;split-pieces";
+
+/// Build the `test-split` cap def (matches testcartridge): one input, and four
+/// outputs — the head (main), the rest (required), `flagged` (optional) and
+/// `original` (optional, carries the input unchanged).
+fn build_split_cap() -> Cap {
+    let mut cap = build_testcartridge_cap(SPLIT_CAP);
+    cap.title = "Test Split".to_string();
+    cap.args.push(CapArg::new(
+        SPLIT_PIECES, "rest-pieces",
+        false,
+        vec![ArgSource::CliFlag { cli_flag: "--rest-pieces".to_string() }],
+    ));
+    cap.outputs = vec![
+        CapOutput::new("media:enc=utf-8;node2", "head", "The input before its first ':'"),
+        CapOutput::new("media:enc=utf-8;split-rest", "rest", "The input after its first ':'"),
+        CapOutput::new("media:enc=utf-8;split-flagged", "flagged", "Present when the input holds a '!'")
+            .optional(true),
+        CapOutput::new("media:enc=utf-8;split-original", "original", "The input, unchanged")
+            .optional(true)
+            .carrying_input(),
+    ];
+    capdag::validate_cap_definition(&cap).expect("the split cap def is a valid definition");
+    cap
+}
+
+/// Run `route` over the testcartridge with `input` at node `A`, and return the
+/// bytes at `sink`. `arguments` are per-node argument values.
+async fn run_route(
+    route: &str,
+    input: &str,
+    sink: &str,
+    arguments: HashMap<String, Vec<(String, Vec<u8>)>>,
+) -> Result<Vec<u8>, capdag::orchestrator::ExecutionError> {
+    let registry = create_test_fabric_registry();
+    let (_temp, cartridge_dir, dev_binaries) = setup_test_env();
+    let graph = parse_machine_to_cap_dag(route, &*registry)
+        .await
+        .expect("Parse failed");
+    let mut initial_inputs = HashMap::new();
+    initial_inputs.insert("A".to_string(), NodeData::Text(input.to_string()));
+    let initial_is_sequence = all_scalar(&initial_inputs);
+    let outputs = execute_dag(
+        &graph,
+        cartridge_dir,
+        None,
+        capdag::CartridgeChannel::Release,
+        capdag::FABRIC_MANIFEST_VERSION,
+        initial_inputs,
+        initial_is_sequence,
+        dev_binaries,
+        None,
+        registry,
+        None,
+        &test_pipeline_log_fn(),
+        &arguments,
+        None,
+    )
+    .await?
+    .node_data;
+    Ok(scalar_bytes(outputs.get(sink).expect("the sink has data")))
+}
+
 // =============================================================================
 // Test Helpers
 // =============================================================================
 
-/// Get the testcartridge source directory.
-///
-/// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
-/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
-/// opaque spawn failure later: `Command::current_dir` on an absent directory
-/// reports only `NotFound`, which reads as a missing `cargo`.
-fn testcartridge_dir() -> PathBuf {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let dir = PathBuf::from(&manifest_dir)
-        .parent()
-        .expect("capdag-rs has a parent (the capdag superrepo)")
-        .parent()
-        .expect("the capdag superrepo has a parent (the machinefabric workspace)")
-        .join("mfab-tests")
-        .join("testcartridge");
-    assert!(
-        dir.is_dir(),
-        "testcartridge source not found at {}; these tests need the machinefabric workspace \
-         checkout, not a standalone capdag-rs clone",
-        dir.display()
-    );
-    dir
-}
-
-/// Check if testcartridge needs rebuilding
-fn testcartridge_needs_rebuild(binary_path: &PathBuf) -> bool {
-    let binary_mtime = match binary_path.metadata().and_then(|m| m.modified()) {
-        Ok(t) => t,
-        Err(_) => return true,
-    };
-
-    let cart_dir = testcartridge_dir();
-
-    // Check Cargo.toml
-    let cargo_toml = cart_dir.join("Cargo.toml");
-    if let Ok(meta) = cargo_toml.metadata() {
-        if let Ok(mtime) = meta.modified() {
-            if mtime > binary_mtime {
-                eprintln!("[TestcartridgeTest] Cargo.toml is newer than binary");
-                return true;
-            }
-        }
-    }
-
-    // Check src/ directory
-    let src_dir = cart_dir.join("src");
-    if src_dir.exists() {
-        if check_dir_newer(&src_dir, &binary_mtime) {
-            eprintln!("[TestcartridgeTest] src/ has files newer than binary");
-            return true;
-        }
-    }
-
-    false
-}
-
-/// Check if any file in directory is newer than reference time
-fn check_dir_newer(dir: &PathBuf, reference: &std::time::SystemTime) -> bool {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if check_dir_newer(&path, reference) {
-                    return true;
-                }
-            } else if path.is_file() {
-                if let Ok(meta) = path.metadata() {
-                    if let Ok(mtime) = meta.modified() {
-                        if mtime > *reference {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Build testcartridge in release mode
-fn build_testcartridge() {
-    let cart_dir = testcartridge_dir();
-    eprintln!("[TestcartridgeTest] Building testcartridge in release mode...");
-    eprintln!("[TestcartridgeTest]   Directory: {:?}", cart_dir);
-    eprintln!("[TestcartridgeTest]   Running: cargo build --release");
-
-    support::resolve_this_capdag(&cart_dir, "TestcartridgeTest");
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("--release")
-        .args(support::against_this_capdag(&cart_dir))
-        .current_dir(&cart_dir)
-        .output()
-        .expect("Failed to run cargo build for testcartridge");
-
-    // Print stdout if any
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.trim().is_empty() {
-        for line in stdout.lines() {
-            eprintln!("[TestcartridgeTest]   {}", line);
-        }
-    }
-
-    // Print stderr (cargo output goes here)
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.trim().is_empty() {
-        for line in stderr.lines() {
-            eprintln!("[TestcartridgeTest]   {}", line);
-        }
-    }
-
-    if !output.status.success() {
-        panic!(
-            "Failed to build testcartridge (exit code: {:?})",
-            output.status.code()
-        );
-    }
-
-    eprintln!("[TestcartridgeTest] Successfully built testcartridge");
-}
-
-/// Get path to testcartridge binary, building if necessary.
+/// The testcartridge binary, built against this capdag (see `support`).
 fn testcartridge_bin() -> PathBuf {
-    // Where cargo builds it, as cargo says: the build below runs under the
-    // same cargo and the same environment, so this is where it will be.
-    let target_dir = support::target_dir_of(&testcartridge_dir());
-    // With the platform's executable suffix: on Windows the build writes
-    // `testcartridge.exe`, and a path without it is never there.
-    let bin_path = target_dir
-        .join("release")
-        .join(format!("testcartridge{}", std::env::consts::EXE_SUFFIX));
-
-    let needs_build = if !bin_path.exists() {
-        eprintln!(
-            "[TestcartridgeTest] Binary not found at {:?}, will build",
-            bin_path
-        );
-        true
-    } else {
-        testcartridge_needs_rebuild(&bin_path)
-    };
-
-    if needs_build {
-        build_testcartridge();
-    }
-
-    if !bin_path.exists() {
-        panic!(
-            "testcartridge binary not found at {:?} after build attempt",
-            bin_path
-        );
-    }
-
-    bin_path
+    support::testcartridge_bin("TestcartridgeTest")
 }
 
 fn setup_test_env() -> (TempDir, PathBuf, Vec<PathBuf>) {
@@ -382,6 +294,7 @@ fn create_test_fabric_registry() -> Arc<FabricRegistry> {
             r#"cap:in="media:enc=utf-8;node1";identity;out="media:enc=utf-8;node1""#,
         ),
         build_combine_cap(),
+        build_split_cap(),
     ];
     registry.add_caps_to_cache(caps);
     Arc::new(registry)
@@ -674,6 +587,60 @@ async fn test1316_convergence_two_producers_distinct_arg_urns() {
     let e = scalar_bytes(outputs.get("E").expect("No E output"));
     let e_str = String::from_utf8(e).expect("Invalid UTF-8");
     assert_eq!(e_str, "[PREPEND]hello|[PREPEND]hello[APPEND]");
+}
+
+// TEST12728: a cap that answers on several outputs, as the last step of a run.
+// What the run takes from it is its main output: the head. The other streams
+// it sends — a required rest, and two optional outputs that fire here, one of
+// them carrying the input itself — pass the engine's audit and are not mixed
+// into the result, which is what happened when every chunk of a response was
+// collected into one buffer.
+#[tokio::test]
+async fn test12728_several_outputs_the_main_one_is_the_steps_result() {
+    let route = format!("[test_split {SPLIT_CAP}]\n[A -> test_split -> B]\n");
+
+    // Every output fires: head, rest, flagged, original.
+    let head = run_route(&route, "alpha!?:beta", "B", HashMap::new())
+        .await
+        .expect("Execution failed");
+    assert_eq!(String::from_utf8(head).unwrap(), "alpha!?");
+
+    // No ':' — the handler writes no rest. The runtime sends the required
+    // output empty, and the engine, which holds the response to a stream for
+    // every required output, accepts it.
+    let head = run_route(&route, "alone", "B", HashMap::new())
+        .await
+        .expect("Execution failed");
+    assert_eq!(String::from_utf8(head).unwrap(), "alone");
+}
+
+// TEST12729: the same cap in the middle of a chain. The next step is fed the
+// main output and nothing of the others. The rest is padded past the flow-
+// control window: its producer is credited for a stream no step reads, so the
+// run completes instead of stalling on it.
+#[tokio::test]
+async fn test12729_several_outputs_the_main_one_feeds_the_next_step() {
+    let route = format!(
+        "[test_split {SPLIT_CAP}]\n\
+         [test_edge2 cap:in=\"media:enc=utf-8;node2\";test-edge2;out=\"media:enc=utf-8;node3\"]\n\
+         [A -> test_split -> B]\n\
+         [B -> test_edge2 -> C]\n"
+    );
+    let mut arguments = HashMap::new();
+    arguments.insert("B".to_string(), vec![(SPLIT_PIECES.to_string(), b"80".to_vec())]);
+    // The cartridge is built before the clock starts: the limit below is on
+    // the run, and a build is not a stall.
+    testcartridge_bin();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        run_route(&route, "alpha?:beta", "C", arguments),
+    )
+    .await
+    .expect("the run stalled: a stream nobody reads was not credited")
+    .expect("Execution failed");
+    // edge2 appends to what it was fed: the head, not the rest and not the
+    // 80 pieces of padding.
+    assert_eq!(String::from_utf8(result).unwrap(), "alpha?[APPEND]");
 }
 
 // TEST950: Validate that cycles are rejected

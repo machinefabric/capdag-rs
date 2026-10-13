@@ -253,6 +253,16 @@ pub enum ExecutionError {
         emitted_unbounded: bool,
     },
 
+    /// A cap's response broke what its definition declares of its outputs
+    /// (13.2 §Outputs): a stream for a main output the cap does not have, a
+    /// stream naming an undeclared output or the main one, a second stream
+    /// for one output, an output carrying a type it does not
+    /// declare, or a request that ended without a stream for a required
+    /// output. Fails hard at receipt — attributed Internal: the cartridge
+    /// broke its own declaration, not a user input problem.
+    #[error("Cap '{cap_urn}' violated its output contract: {detail}")]
+    OutputContractViolation { cap_urn: String, detail: String },
+
     #[error("Node {node} has no incoming data")]
     NoIncomingData { node: String },
 
@@ -292,7 +302,8 @@ impl ExecutionError {
             | ExecutionError::IoError(_)
             | ExecutionError::HostError(_)
             | ExecutionError::EffectContractViolation { .. }
-            | ExecutionError::StreamContractViolation { .. } => AttributionClass::Internal,
+            | ExecutionError::StreamContractViolation { .. }
+            | ExecutionError::OutputContractViolation { .. } => AttributionClass::Internal,
         }
     }
 
@@ -339,6 +350,7 @@ impl ExecutionError {
             ExecutionError::CartridgeExecutionFailed { cap_urn, .. } => Some(cap_urn),
             ExecutionError::EffectContractViolation { cap_urn, .. } => Some(cap_urn),
             ExecutionError::StreamContractViolation { cap_urn, .. } => Some(cap_urn),
+            ExecutionError::OutputContractViolation { cap_urn, .. } => Some(cap_urn),
             _ => None,
         }
     }
@@ -1911,11 +1923,15 @@ pub async fn run_dag_on_context(
     // from the fabric definition the plan was built on; a cap the plan names
     // that the registry cannot produce is a plan/registry inconsistency and
     // fails here, before anything is dispatched.
-    let mut cap_shapes: HashMap<String, CapStreamShape> = HashMap::new();
+    let mut cap_shapes: HashMap<String, (CapStreamShape, super::stream_io::ResponseContract)> =
+        HashMap::new();
     let mut group_shapes: Vec<CapStreamShape> = Vec::with_capacity(groups.len());
+    // What each group's response is held to: every output its cap declares.
+    let mut group_contracts: Vec<super::stream_io::ResponseContract> =
+        Vec::with_capacity(groups.len());
     for group in groups.iter() {
-        let shape = if let Some(cached) = cap_shapes.get(&group.cap_urn) {
-            *cached
+        let (shape, contract) = if let Some(cached) = cap_shapes.get(&group.cap_urn) {
+            cached.clone()
         } else {
             let cap = ctx
                 .switch()
@@ -1929,10 +1945,13 @@ pub async fn run_dag_on_context(
                     ))
                 })?;
             let shape = CapStreamShape::of(&cap);
-            cap_shapes.insert(group.cap_urn.clone(), shape);
-            shape
+            let contract = super::stream_io::ResponseContract::of(&cap)
+                .map_err(|e| ExecutionError::HostError(e.to_string()))?;
+            cap_shapes.insert(group.cap_urn.clone(), (shape, contract.clone()));
+            (shape, contract)
         };
         group_shapes.push(shape);
+        group_contracts.push(contract);
     }
     let chains = split_chains_at_shared_bounded_pool(linear_chains, &group_chain);
     let chains = split_chains_at_streaming_boundary(chains, &group_shapes);
@@ -1994,10 +2013,13 @@ pub async fn run_dag_on_context(
 
         let chain_shapes: Vec<CapStreamShape> =
             chain_idxs.iter().map(|&gi| group_shapes[gi]).collect();
+        let chain_contracts: Vec<super::stream_io::ResponseContract> =
+            chain_idxs.iter().map(|&gi| group_contracts[gi].clone()).collect();
         let chain_result = run_group_chain(
             ctx,
             &chain_groups,
             &chain_shapes,
+            &chain_contracts,
             cap_arguments,
             progress_fn,
             progress_base,
@@ -2385,6 +2407,7 @@ async fn run_group_chain(
     ctx: &ExecutionContext,
     chain: &[EdgeGroup],
     shapes: &[CapStreamShape],
+    contracts: &[super::stream_io::ResponseContract],
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     progress_fn: Option<&CapProgressFn>,
     progress_base: f32,
@@ -2566,7 +2589,7 @@ async fn run_group_chain(
         let next_rid = invocations[i + 1].0.clone();
         let next_group = ordered_groups[i + 1];
         let prev_cap_urn = invocations[i].2.clone();
-        let prev_contract = shapes[i].output;
+        let prev_contract = contracts[i].clone();
 
         // The downstream cap demuxes input streams by arg URN equivalence
         // (spec 13.2) — every stream the orchestrator sends is labeled with
@@ -2729,7 +2752,7 @@ async fn run_group_chain(
         taken_last_rx,
         last_pfn.as_ref(),
         last_cap_urn,
-        shapes[last_idx].output,
+        &contracts[last_idx],
         &last_group_token_id,
         log_fn,
         body_index,
@@ -2788,6 +2811,9 @@ async fn run_group_chain(
             emitted_unbounded,
         }
         .at_step(&last_group_token_id),
+        super::stream_io::StreamIoError::OutputContract { cap_urn, detail } => {
+            ExecutionError::OutputContractViolation { cap_urn, detail }.at_step(&last_group_token_id)
+        }
         other => ExecutionError::HostError(other.to_string()),
     };
 
@@ -3218,7 +3244,7 @@ async fn forward_frames(
     max_chunk: usize,
     progress_fn: Option<&CapProgressFn>,
     prev_cap_urn: &str,
-    prev_contract: super::stream_io::OutputContract,
+    prev_contract: super::stream_io::ResponseContract,
     prev_step_token_id: &StepToken,
     next_in_media: &str,
     log_fn: Option<&PipelineLogFn>,
@@ -3242,8 +3268,13 @@ async fn forward_frames(
     // the label to the downstream declared arg URN for demux (spec 13.2),
     // so an unaudited relabel would substitute the plan's belief for the
     // cartridge's claim and mask a lying cap.
-    let effect_audit = super::stream_io::EffectAudit::new(prev_cap_urn, prev_contract)
+    let mut effect_audit = super::stream_io::ResponseAudit::new(prev_cap_urn, prev_contract)
         .map_err(|e| ExecutionError::HostError(format!("pipelined forward: {}", e)))?;
+
+    // The hop carries the producer's MAIN output. A stream of another output
+    // is audited and consumed here — the producer is credited for it so it
+    // never stalls on a window nobody reads — and is not forwarded.
+    let mut consumed_only: HashMap<String, crate::bifaci::credit::CreditWindow> = HashMap::new();
 
     // Per upstream stream: its downstream stream id, the gate on the downstream
     // window, and the upstream window — what has been consumed of the producer
@@ -3266,27 +3297,14 @@ async fn forward_frames(
                     FrameType::StreamStart => {
                         timer.touch();
                         let prev_sid = frame.stream_id.clone().unwrap_or_default();
-                        let new_sid = uuid::Uuid::new_v4().to_string();
-                        let gate = Arc::new(CreditGate::new(initial_credit));
-                        router_down.register(
-                            next_rid.clone(),
-                            Some(new_sid.clone()),
-                            Arc::clone(&gate),
-                        );
-                        stream_id_map.insert(
-                            prev_sid,
-                            (
-                                new_sid.clone(),
-                                gate,
-                                crate::bifaci::credit::CreditWindow::new(initial_credit),
-                            ),
-                        );
 
-                        // Effect audit FIRST, on the producer's own claim: the
-                        // emission must satisfy the producer cap's declared
-                        // effect contract before anything else touches it.
-                        effect_audit
+                        // The audit FIRST, on the producer's own claim: the
+                        // stream must name a declared output and carry what
+                        // that output carries, in its declared shape, before
+                        // anything else touches it.
+                        let is_main = effect_audit
                             .audit_frame(&frame)
+                            .map(|output| output.main)
                             .map_err(|e| match e {
                                 super::stream_io::StreamIoError::EffectContract {
                                     cap_urn,
@@ -3314,11 +3332,38 @@ async fn forward_frames(
                                     emitted_is_sequence,
                                     emitted_unbounded,
                                 },
+                                super::stream_io::StreamIoError::OutputContract {
+                                    cap_urn,
+                                    detail,
+                                } => ExecutionError::OutputContractViolation { cap_urn, detail },
                                 other => ExecutionError::HostError(format!(
                                     "pipelined forward: {}",
                                     other
                                 )),
                             })?;
+                        if !is_main {
+                            consumed_only.insert(
+                                prev_sid,
+                                crate::bifaci::credit::CreditWindow::new(initial_credit),
+                            );
+                            continue;
+                        }
+
+                        let new_sid = uuid::Uuid::new_v4().to_string();
+                        let gate = Arc::new(CreditGate::new(initial_credit));
+                        router_down.register(
+                            next_rid.clone(),
+                            Some(new_sid.clone()),
+                            Arc::clone(&gate),
+                        );
+                        stream_id_map.insert(
+                            prev_sid,
+                            (
+                                new_sid.clone(),
+                                gate,
+                                crate::bifaci::credit::CreditWindow::new(initial_credit),
+                            ),
+                        );
 
                         // Then relabel to the downstream edge's declared arg
                         // URN: the consumer matches input streams by arg-URN
@@ -3372,6 +3417,19 @@ async fn forward_frames(
                     FrameType::Chunk => {
                         timer.touch();
                         let prev_sid = frame.stream_id.clone().unwrap_or_default();
+                        if let Some(upstream) = consumed_only.get(&prev_sid) {
+                            if let Some(n) = upstream.consumed() {
+                                send_upstream_credit(
+                                    &switch,
+                                    prev_rid.clone(),
+                                    prev_sid.clone(),
+                                    n,
+                                    "consumed-output upstream CREDIT",
+                                )
+                                .await?;
+                            }
+                            continue;
+                        }
                         let has_window = {
                             let (_, gate, _) = stream_id_map.get(&prev_sid).ok_or_else(|| {
                                 ExecutionError::HostError(format!(
@@ -3494,6 +3552,9 @@ async fn forward_frames(
                     FrameType::StreamEnd => {
                         timer.touch();
                         let prev_sid = frame.stream_id.as_deref().unwrap_or("");
+                        if consumed_only.contains_key(prev_sid) {
+                            continue;
+                        }
                         let (new_sid, _, _) = stream_id_map
                             .get(prev_sid)
                             .ok_or_else(|| {
@@ -3542,6 +3603,14 @@ async fn forward_frames(
                                 arg_urn: None,
                             });
                         }
+                        // A request that succeeded owes a stream for every
+                        // required output.
+                        effect_audit.audit_end().map_err(|e| match e {
+                            super::stream_io::StreamIoError::OutputContract { cap_urn, detail } => {
+                                ExecutionError::OutputContractViolation { cap_urn, detail }
+                            }
+                            other => ExecutionError::HostError(format!("pipelined forward: {}", other)),
+                        })?;
                         let final_progress = frame.final_progress().unwrap_or(1.0) as f32;
                         if let Some(pfn) = &progress_fn {
                             pfn(

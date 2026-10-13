@@ -1026,7 +1026,7 @@ impl RelaySwitch {
                         // Control/side-channel frames are legal ANYWHERE during the
                         // probe (spec 12.4: LOG interleaves without affecting data
                         // flow; CREDIT/HEARTBEAT are the control plane the writer
-                        // gate itself exempts, L4). A v4 cartridge crediting its
+                        // gate itself exempts, L4). A cartridge crediting its
                         // probe input as it consumes (L10) must not fail identity
                         // verification.
                         FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
@@ -1817,7 +1817,7 @@ impl RelaySwitch {
             }
             let Some(stats) = cartridge.runtime_stats.as_ref() else {
                 return Err(RelaySwitchError::Protocol(format!(
-                    "cartridge '{}' on master {} is missing mandatory v4 runtime_stats",
+                    "cartridge '{}' on master {} is missing mandatory runtime_stats",
                     cartridge.id, master_idx
                 )));
             };
@@ -1921,7 +1921,7 @@ impl RelaySwitch {
         }
         let stats = cartridge.runtime_stats.as_ref().ok_or_else(|| {
             RelaySwitchError::Protocol(format!(
-                "cartridge '{}' on master {} is missing mandatory v4 runtime_stats",
+                "cartridge '{}' on master {} is missing mandatory runtime_stats",
                 cartridge.id, master_idx
             ))
         })?;
@@ -2068,7 +2068,7 @@ impl RelaySwitch {
         };
         let stats = cartridge.runtime_stats.as_ref().ok_or_else(|| {
             RelaySwitchError::Protocol(format!(
-                "cartridge '{}' on master {} is missing mandatory v4 runtime_stats",
+                "cartridge '{}' on master {} is missing mandatory runtime_stats",
                 cartridge.id, master_idx
             ))
         })?;
@@ -2130,7 +2130,7 @@ impl RelaySwitch {
             })?;
         let stats = record.runtime_stats.as_ref().ok_or_else(|| {
             RelaySwitchError::Protocol(format!(
-                "cartridge '{}' on master {master_idx} is missing mandatory v4 runtime_stats",
+                "cartridge '{}' on master {master_idx} is missing mandatory runtime_stats",
                 record.id
             ))
         })?;
@@ -2186,7 +2186,7 @@ impl RelaySwitch {
                 }
                 let stats = record.runtime_stats.as_ref().ok_or_else(|| {
                     RelaySwitchError::Protocol(format!(
-                        "cartridge '{cartridge_id}' on master {idx} is missing mandatory v4 runtime_stats"
+                        "cartridge '{cartridge_id}' on master {idx} is missing mandatory runtime_stats"
                     ))
                 })?;
                 for pool in desired.keys() {
@@ -2578,7 +2578,7 @@ impl RelaySwitch {
                     // Control/side-channel frames are legal ANYWHERE during the
                     // probe (spec 12.4: LOG interleaves without affecting data
                     // flow; CREDIT/HEARTBEAT are the control plane the writer
-                    // gate itself exempts, L4). A v4 cartridge crediting its
+                    // gate itself exempts, L4). A cartridge crediting its
                     // probe input as it consumes (L10) must not fail identity
                     // verification.
                     FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
@@ -3073,7 +3073,7 @@ impl RelaySwitch {
                         // Control/side-channel frames are legal ANYWHERE during the
                         // probe (spec 12.4: LOG interleaves without affecting data
                         // flow; CREDIT/HEARTBEAT are the control plane the writer
-                        // gate itself exempts, L4). A v4 cartridge crediting its
+                        // gate itself exempts, L4). A cartridge crediting its
                         // probe input as it consumes (L10) must not fail identity
                         // verification.
                         FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
@@ -8767,7 +8767,7 @@ mod tests {
     // was never spawned, so it legitimately carries no runtime stats — it is
     // inventory the UI shows, not a handler anything routes to. Before this
     // rule, a single unparseable cartridge.json on disk refused the ENTIRE
-    // daemon relay ("missing mandatory v4 runtime_stats", retried forever),
+    // daemon relay ("missing mandatory runtime_stats", retried forever),
     // taking every healthy cartridge down with it. The mandatory-stats rule
     // still holds where it means something: an OPERATIONAL record without
     // stats refuses the master.
@@ -8824,7 +8824,7 @@ mod tests {
         };
         let err = switch
             .configure_master_admission(0, &[stats_less_operational])
-            .expect_err("an operational record must carry v4 runtime stats");
+            .expect_err("an operational record must carry runtime stats");
         assert!(
             err.to_string().contains("runtime_stats"),
             "unexpected error: {err}"
