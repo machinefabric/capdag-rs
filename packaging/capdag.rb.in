@@ -26,6 +26,9 @@ class Capdag < Formula
     # the whole of it into libexec and expose only a symlink on PATH — @{package} resolves its
     # bundled-cartridges/ tree relative to the symlink's canonicalized real path.
     libexec.install Dir["*"]
+    # Whose bundle this is: `@{package} self update` leaves a package's bundle to the package
+    # manager that installed it, and names it from this file.
+    (libexec/"installed-by").write "Homebrew\n"
     bin.install_symlink libexec/"@{package}"
   end
 

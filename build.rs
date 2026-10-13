@@ -50,6 +50,7 @@ fn main() {
 
     bake_capdag_version();
     enforce_signing_pubkey_pairing();
+    bake_release_line();
 }
 
 /// Bake `capdag/version.txt` as the `CAPDAG_VERSION` compile-time env so
@@ -258,6 +259,71 @@ fn enforce_signing_pubkey_pairing() {
             }
         }
     }
+}
+
+/// Bake the release line of a published `capdag` command as
+/// `CAPDAG_BAKED_RELEASE_LINE`: the release registry it is published in and
+/// the channel it is published on, with a space between them. `capdag self
+/// update` reads it back, and verifies what that registry serves against the
+/// roots and the environment baked above.
+///
+/// `MFR_RELEASE_CHANNEL` is what makes a build a published one, and it then
+/// requires the registry, a real signing environment and the root set: a
+/// command that would look for its next release has to be able to tell a
+/// release from a forgery. A build without it has no release line and does
+/// not update itself.
+fn bake_release_line() {
+    println!("cargo:rerun-if-env-changed=MFR_RELEASE_CHANNEL");
+    println!("cargo:rerun-if-env-changed=MFR_RELEASES_BASE_URL");
+    let given = |name: &str| {
+        env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let Some(channel) = given("MFR_RELEASE_CHANNEL") else {
+        return;
+    };
+    if !matches!(channel.as_str(), "release" | "nightly") {
+        panic!("MFR_RELEASE_CHANNEL must be `release` or `nightly`, got {channel:?}");
+    }
+    let Some(url) = given("MFR_RELEASES_BASE_URL") else {
+        panic!(
+            "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_RELEASES_BASE_URL is not: a \
+             published capdag bakes the release registry it updates from"
+        );
+    };
+    if !url.starts_with("https://") || url.ends_with('/') || url.contains(' ') {
+        panic!(
+            "MFR_RELEASES_BASE_URL must be an https URL with no space and no trailing slash, \
+             got {url:?}"
+        );
+    }
+    match given("MFR_SIGNING_ENVIRONMENT").as_deref() {
+        Some("prod") | Some("staging") => {}
+        other => panic!(
+            "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_SIGNING_ENVIRONMENT is {other:?}: \
+             a published capdag verifies its releases under `prod` or `staging`"
+        ),
+    }
+    let Some(roots) = given("MFR_CARTRIDGE_ROOT_PUBKEYS") else {
+        panic!(
+            "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_CARTRIDGE_ROOT_PUBKEYS is not: a \
+             published capdag bakes the roots its releases chain to"
+        );
+    };
+    let roots: Vec<&str> = roots.split(',').map(str::trim).collect();
+    if roots.len() < 3 {
+        panic!(
+            "MFR_CARTRIDGE_ROOT_PUBKEYS has {} key(s); a published capdag needs at least 3 \
+             (a certificate is signed by two of them)",
+            roots.len()
+        );
+    }
+    for root in &roots {
+        validate_minisign_pubkey(root);
+    }
+    println!("cargo:rustc-env=CAPDAG_BAKED_RELEASE_LINE={url} {channel}");
 }
 
 /// The signing environment a local or CI build uses.

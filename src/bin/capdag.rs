@@ -379,7 +379,8 @@ fn print_usage(program: &str) {
            {p} cache [clear|refresh]                                 Invalidate/renew the local fabric cache\n\
            {p} install <cap-alias-or-urn-or-cartridge-id>            Download + verify without running\n\
            {p} new <name> --<language> [-o <dir>]                    Scaffold a new cartridge project\n\
-           {p} dev-install <project-dir>                             Install/update a dev cartridge under the dev slug\n\n\
+           {p} dev-install <project-dir>                             Install/update a dev cartridge under the dev slug\n\
+           {p} self update                                           Replace this capdag with its channel's latest release\n\n\
          Single-cap mode drives the cap's OWN declared interface — exactly like\n\
          invoking the cartridge directly, except the cap runs inside a full bifaci\n\
          host with the bundled cartridges (data/fetch/model cartridges) registered,\n\
@@ -535,6 +536,7 @@ async fn main() {
         "install" => cmd_install(&args).await,
         "new" => cmd_new(&args).await,
         "dev-install" => cmd_dev_install(&args).await,
+        "self" => cmd_self(&args).await,
         "--help" | "-h" | "help" => {
             print_usage(&args[0]);
             process::exit(0);
@@ -2919,6 +2921,36 @@ async fn cmd_install(args: &[String]) -> ! {
         Ok(path) => {
             eprintln!("Installed and verified: {cartridge_id}");
             println!("{}", path.display());
+            process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            process::exit(1);
+        }
+    }
+}
+
+/// `capdag self update` — replace this `capdag`, and the cartridges bundled
+/// beside it, with the latest release of the channel it was published on.
+///
+/// The release is installed only when its manifest's signature chains to the
+/// roots this build was given, the bundle is the file that manifest describes,
+/// and the executable in it reports the version it was published as
+/// ([`capdag::self_update`]). Exit status 1 for an update that did not
+/// happen, with the reason; 2 for a usage error.
+async fn cmd_self(args: &[String]) -> ! {
+    if args.get(2).map(String::as_str) != Some("update") || args.len() != 3 {
+        eprintln!("Usage: {} self update", args[0]);
+        process::exit(2);
+    }
+    let current = env!("CAPDAG_VERSION");
+    match capdag::self_update::update(current).await {
+        Ok(updated) if updated.from == updated.to => {
+            println!("capdag {} is the latest release", updated.to);
+            process::exit(0);
+        }
+        Ok(updated) => {
+            println!("capdag {} -> {}", updated.from, updated.to);
             process::exit(0);
         }
         Err(e) => {

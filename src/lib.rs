@@ -54,6 +54,7 @@ pub mod net_retry;
 pub mod orchestrator;
 pub mod pages;
 pub mod planner;
+pub mod self_update;
 pub mod standard;
 pub mod urn;
 

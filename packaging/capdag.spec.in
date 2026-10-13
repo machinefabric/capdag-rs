@@ -32,11 +32,15 @@ mkdir -p %{buildroot}
 # %{capdag_payload} is <stage>/opt/capdag/... — copy its whole tree into the
 # buildroot. Undefined macro → rpmbuild errors (fail hard), which is intended.
 cp -a %{capdag_payload}/. %{buildroot}/
+# Whose bundle this is: `capdag self update` leaves a package's bundle to the package manager
+# that installed it, and names it from this file.
+printf 'dnf\n' > %{buildroot}/opt/capdag/installed-by
 
 %files
 %dir /opt/capdag
 /opt/capdag/capdag
 /opt/capdag/bundled-cartridges
+/opt/capdag/installed-by
 
 %post
 # /usr/bin/capdag MUST be a symlink (capdag resolves bundled-cartridges/ relative to its
