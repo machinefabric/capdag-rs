@@ -282,17 +282,14 @@ fn check_dir_newer(dir: &PathBuf, reference: &std::time::SystemTime) -> bool {
 /// Build testcartridge in release mode
 fn build_testcartridge() {
     let cart_dir = testcartridge_dir();
-    let target_dir = testcartridge_target_dir();
     eprintln!("[V4E2ETest] Building testcartridge in release mode...");
     eprintln!("[V4E2ETest]   Directory: {:?}", cart_dir);
-    eprintln!("[V4E2ETest]   Target dir: {:?}", target_dir);
 
-    support::resolve_this_capdag(&cart_dir, &target_dir, "V4E2ETest");
+    support::resolve_this_capdag(&cart_dir, "V4E2ETest");
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
         .args(support::against_this_capdag(&cart_dir))
-        .env("CARGO_TARGET_DIR", &target_dir)
         .current_dir(&cart_dir)
         .output()
         .expect("Failed to run cargo build for testcartridge");
@@ -320,32 +317,11 @@ fn build_testcartridge() {
     eprintln!("[V4E2ETest] Successfully built testcartridge");
 }
 
-/// Resolve the `CARGO_TARGET_DIR` for the testcartridge build, from the build
-/// root the runner names (see orchestrator_integration.rs for why).
-fn testcartridge_target_dir() -> PathBuf {
-    if let Ok(dir) = env::var("CAPDAG_TESTCARTRIDGE_TARGET_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    // Told, never worked out. This derived `<workspace>/build/cargo` when
-    // nothing said otherwise — the layout before build output moved under the
-    // workspace's disposable build root — so it built outside that root on
-    // every machine.
-    // The workspace's test runner names the root for every child it starts,
-    // as CARGO_BUILD_DIR.
-    match env::var("CARGO_BUILD_DIR") {
-        Ok(build_dir) if !build_dir.is_empty() => PathBuf::from(build_dir).join("testcartridge"),
-        _ => panic!(
-            "CARGO_BUILD_DIR is not set, so there is nowhere declared to build the \
-             testcartridge; run this suite through the workspace test runner, which sets it"
-        ),
-    }
-}
-
 /// Get path to testcartridge binary, building if necessary.
 fn testcartridge_bin() -> PathBuf {
-    let target_dir = testcartridge_target_dir();
+    // Where cargo builds it, as cargo says: the build below runs under the
+    // same cargo and the same environment, so this is where it will be.
+    let target_dir = support::target_dir_of(&testcartridge_dir());
     // With the platform's executable suffix: on Windows the build writes
     // `testcartridge.exe`, and a path without it is never there.
     let bin_path = target_dir
@@ -365,9 +341,8 @@ fn testcartridge_bin() -> PathBuf {
 
     if !bin_path.exists() {
         panic!(
-            "testcartridge binary not found at {:?} after build attempt (CARGO_TARGET_DIR={:?})",
-            bin_path,
-            env::var("CARGO_TARGET_DIR").ok()
+            "testcartridge binary not found at {:?} after build attempt",
+            bin_path
         );
     }
 

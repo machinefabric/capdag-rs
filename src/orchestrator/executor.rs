@@ -1495,9 +1495,9 @@ impl ExecutionContext {
         //      it and verify the three-place rule (folder slug ⇔
         //      provenance registry_url).
         //
-        //   2. Dev binaries live wherever cargo dropped them
-        //      (`build/cargo/<name>/release/<name>` or similar) and
-        //      have no cartridge.json. We fall back to the
+        //   2. Dev binaries live wherever cargo dropped them (a
+        //      target directory's `release/<name>`) and have no
+        //      cartridge.json. We fall back to the
         //      orchestrator's `dev_fallback_channel` and treat the
         //      registry_url as `None` (dev install). The cartridge
         //      itself reports the same via HELLO at attach time.

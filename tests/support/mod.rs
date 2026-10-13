@@ -1,6 +1,6 @@
 //! What the end-to-end tests share.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The cargo arguments that build a test cartridge against THIS capdag.
 ///
@@ -37,7 +37,7 @@ pub fn against_this_capdag(cartridge_dir: &Path) -> Vec<String> {
 /// update capdag` under the same patch, which moves that one lock entry and
 /// leaves every other dependency where the lock has it. Nothing is run for a
 /// manifest that names a path. `tag` prefixes what is printed.
-pub fn resolve_this_capdag(cartridge_dir: &Path, target_dir: &Path, tag: &str) {
+pub fn resolve_this_capdag(cartridge_dir: &Path, tag: &str) {
     let patch = against_this_capdag(cartridge_dir);
     if patch.is_empty() {
         return;
@@ -45,7 +45,6 @@ pub fn resolve_this_capdag(cartridge_dir: &Path, target_dir: &Path, tag: &str) {
     let output = std::process::Command::new("cargo")
         .args(["update", "capdag"])
         .args(&patch)
-        .env("CARGO_TARGET_DIR", target_dir)
         .current_dir(cartridge_dir)
         .output()
         .expect("Failed to run cargo update for the test cartridge");
@@ -57,6 +56,36 @@ pub fn resolve_this_capdag(cartridge_dir: &Path, target_dir: &Path, tag: &str) {
         "could not resolve the test cartridge against the capdag under test (exit code: {:?})",
         output.status.code()
     );
+}
+
+/// Where cargo builds the test cartridge in `cartridge_dir`: cargo's own
+/// answer, `target_directory` of `cargo metadata`.
+///
+/// Asked, never worked out. A target directory is not always `target/` beside
+/// the manifest — it follows `CARGO_TARGET_DIR`, Cargo configuration, and a
+/// cargo that keeps build output in a directory of its own — and the build
+/// below runs under whichever of those this test run has. Two earlier
+/// versions of this derived the directory from the checkout's layout, and
+/// each looked for the binary somewhere the build had not put it.
+pub fn target_dir_of(cartridge_dir: &Path) -> PathBuf {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(cartridge_dir)
+        .output()
+        .expect("Failed to run cargo metadata for the test cartridge");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed in {}: {}",
+        cartridge_dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON");
+    PathBuf::from(
+        metadata["target_directory"]
+            .as_str()
+            .expect("cargo metadata names the target directory"),
+    )
 }
 
 /// The git URL a manifest takes `capdag` from, if it takes it from one.
