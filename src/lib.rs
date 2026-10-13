@@ -88,9 +88,7 @@ pub use fabric::alias::{
     classify_alias_target, is_alias_token, normalize_alias_name, token_is_urn, AliasNameError,
     AliasTargetKind, StoredAlias,
 };
-pub use fabric::registry::{
-    write_fabric_snapshot, FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef,
-};
+pub use fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef};
 
 // Build-time-baked fabric manifest version (see capdag/build.rs).
 pub use cartridge_registry_version::CARTRIDGE_REGISTRY_VERSION;

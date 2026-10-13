@@ -17,7 +17,7 @@ use crate::machine::{
     parse_machine_with_sources_async, Machine, MachineSource, NoMachineSource, NodeId,
     StrandNodeNames,
 };
-use crate::planner::{InputCardinality, MachinePlan, MachinePlanBuilder};
+use crate::planner::{ExecutionNodeType, InputCardinality, MachinePlan, MachinePlanBuilder};
 use crate::MediaUrn;
 
 use super::types::ParseOrchestrationError;
@@ -66,6 +66,12 @@ pub struct StrandPlan {
     pub input_slots: HashMap<String, String>,
     /// The written name of each plan `Output` node, by the node's id.
     pub output_names: HashMap<String, String>,
+    /// The written name of every plan node that holds a value of the
+    /// machine, by the node's id: an input slot, a step (its main output),
+    /// and another output of a step. What a report names a value by — a plan
+    /// node's own id means nothing to who wrote the machine. A node inside
+    /// an included machine has the name `alias#use/name`.
+    pub node_names: HashMap<String, String>,
 }
 
 /// Machine notation resolved against a registry: what the machine takes and
@@ -201,7 +207,7 @@ impl ResolvedNotation {
                 )
             })
             .collect();
-        let plan = MachinePlanBuilder::new(self.registry.clone())
+        let mut plan = MachinePlanBuilder::new(self.registry.clone())
             .build_plan_from_machine_strand_with_anchor_cardinalities(
                 &format!("machine_strand_{strand}"),
                 resolved,
@@ -211,7 +217,7 @@ impl ResolvedNotation {
             .map_err(|e| ParseOrchestrationError::InvalidGraph {
                 message: format!("strand {strand}: plan construction failed: {e}"),
             })?;
-        let input_slots = inputs
+        let input_slots: HashMap<String, String> = inputs
             .iter()
             .map(|input| (input.name.clone(), format!("input_slot_{}", input.node)))
             .collect();
@@ -219,10 +225,58 @@ impl ResolvedNotation {
         for output in self.outputs()?.into_iter().filter(|o| o.strand == strand) {
             output_names.insert(format!("output_{}", output.node), output.name);
         }
+        // Where each node of the strand is held in the plan: an input in its
+        // slot, a step's main output at the step, any other at the output's
+        // own node.
+        let mut node_names = HashMap::new();
+        for input in &inputs {
+            node_names.insert(format!("input_slot_{}", input.node), input.name.clone());
+        }
+        for edge in resolved.edges() {
+            let main = edge.main_target();
+            for output in &edge.outputs {
+                let held_at = if main == Some(output.node) {
+                    edge.token_id.to_string()
+                } else {
+                    format!("{}.{}", edge.token_id, output.output_name)
+                };
+                node_names.insert(held_at, self.name_of(strand, output.node)?);
+            }
+        }
+        if let Some(unknown) = node_names.keys().find(|id| !plan.nodes.contains_key(*id)) {
+            return Err(ParseOrchestrationError::InvalidGraph {
+                message: format!("strand {strand}: the plan holds no node '{unknown}' to name"),
+            });
+        }
+        // The plan's own boundary bears the names too: a slot is the input
+        // the notation named, and an output the output it named — what a
+        // drawing of the plan labels them with.
+        let unnamed = |id: &str| ParseOrchestrationError::InvalidGraph {
+            message: format!("strand {strand}: the plan has no boundary node '{id}' to name"),
+        };
+        for (name, slot) in &input_slots {
+            match plan.nodes.get_mut(slot) {
+                Some(node) => match &mut node.node_type {
+                    ExecutionNodeType::InputSlot { slot_name, .. } => {
+                        *slot_name = name.clone();
+                        node.description = Some(format!("Input: {name}"));
+                    }
+                    _ => return Err(unnamed(slot)),
+                },
+                None => return Err(unnamed(slot)),
+            }
+        }
+        for (output, name) in &output_names {
+            match plan.nodes.get_mut(output).map(|node| &mut node.node_type) {
+                Some(ExecutionNodeType::Output { output_name, .. }) => *output_name = name.clone(),
+                _ => return Err(unnamed(output)),
+            }
+        }
         Ok(StrandPlan {
             plan,
             input_slots,
             output_names,
+            node_names,
         })
     }
 }
@@ -1062,8 +1116,23 @@ mod tests {
             ExecutionNodeType::InputSlot { cardinality: InputCardinality::Single, .. }
         ));
         assert_eq!(single.input_slots.len(), 1);
+        assert!(matches!(
+            &single.plan.nodes[slot].node_type,
+            ExecutionNodeType::InputSlot { slot_name, .. } if slot_name == "doc"
+        ));
         let (output_node, name) = single.output_names.iter().next().unwrap();
         assert_eq!(name, "summary");
+        assert!(matches!(
+            &single.plan.nodes[output_node].node_type,
+            ExecutionNodeType::Output { output_name, .. } if output_name == "summary"
+        ));
+        // Every value of the strand is named where the plan holds it: the
+        // input at its slot, and what each step produces at the step.
+        let named_at = |id: &str| single.node_names.get(id).map(String::as_str);
+        assert_eq!(named_at(slot), Some("doc"));
+        assert_eq!(named_at(&step_of(&single.plan, EXTRACT)), Some("text"));
+        assert_eq!(named_at(&step_of(&single.plan, SUMMARIZE)), Some("summary"));
+        assert_eq!(single.node_names.len(), 3);
         assert!(matches!(
             &single.plan.nodes[output_node].node_type,
             ExecutionNodeType::Output { source_node, .. } if source_node == &step_of(&single.plan, SUMMARIZE)
@@ -1090,6 +1159,33 @@ mod tests {
             }
         }
         assert!(resolved.plan(7, &HashSet::new()).await.is_err());
+    }
+
+    // TEST12820: what a step gives on an output other than its main one is
+    // named where the plan holds it — that output's own node — so a report
+    // about that value can say the name the machine wrote for it.
+    #[tokio::test]
+    async fn test12820_another_output_of_a_step_is_named_at_its_own_node() {
+        let reg = registry(vec![
+            with_output(cap(REGRESS, false), "residuals", RESIDUALS, false),
+            cap(PLOT, false),
+            cap(REPORT, false),
+        ]);
+        let notation = format!(
+            "{}{}{}[obs -> regress -> (fit, residuals=res)][res -> plot -> chart][fit -> report -> r]",
+            header("regress", REGRESS),
+            header("plot", PLOT),
+            header("report", REPORT)
+        );
+        let resolved = ResolvedNotation::resolve(&notation, reg).await.expect("resolves");
+        let strand = resolved.plan(0, &HashSet::new()).await.expect("plans");
+        let regress = step_of(&strand.plan, REGRESS);
+        let residuals = wired(&strand.plan, &step_of(&strand.plan, PLOT), None);
+        assert_ne!(residuals, regress, "the other output is a node of its own");
+        let named_at = |id: &str| strand.node_names.get(id).map(String::as_str);
+        assert_eq!(named_at(&residuals), Some("res"));
+        assert_eq!(named_at(&regress), Some("fit"));
+        assert_eq!(named_at(&step_of(&strand.plan, PLOT)), Some("chart"));
     }
 
     // TEST12769: a step's policy goes with it into the plan.

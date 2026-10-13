@@ -1092,8 +1092,23 @@ async fn run_strand(
     (strand, result)
 }
 
-/// Write a finished strand's outputs and report how it ended.
+/// Write a finished strand's outputs and report how it ended. Whatever the
+/// run persisted and did not turn into an output — everything, when it
+/// failed — is removed: nothing of a run is left behind but its outputs.
 fn finish_strand(
+    strand: &capdag::orchestrator::StrandPlan,
+    result: Result<capdag::PipelineResult, capdag::ExecutionError>,
+    output_dir: Option<PathBuf>,
+    force: bool,
+    input_stem: String,
+    runtime: &CliRuntime,
+) -> RunEnd {
+    let end = emit_strand(strand, result, output_dir, force, input_stem);
+    runtime.discard_parts(&strand.plan);
+    end
+}
+
+fn emit_strand(
     strand: &capdag::orchestrator::StrandPlan,
     result: Result<capdag::PipelineResult, capdag::ExecutionError>,
     output_dir: Option<PathBuf>,
@@ -1144,6 +1159,20 @@ fn finish_strand(
             failure.message
         )
     };
+    // A value is named as the machine named it. An item of a map is named
+    // by the sequence it is an item of.
+    let name_of = |node: &String| -> String {
+        if let Some(name) = strand.node_names.get(node) {
+            return format!("'{name}'");
+        }
+        match strand.plan.nodes.get(node).map(|n| &n.node_type) {
+            Some(ExecutionNodeType::Item { source, .. }) => match strand.node_names.get(source) {
+                Some(name) => format!("an item of '{name}'"),
+                None => format!("an item of {source}"),
+            },
+            _ => node.clone(),
+        }
+    };
     for report in &result.steps {
         let run = report
             .body
@@ -1154,7 +1183,7 @@ fn finish_strand(
             capdag::StepOutcome::Skipped { absent } => eprintln!(
                 "Skipped: step {}{run} — it needs {}, which was not produced",
                 report.cap_urn,
-                absent.join(", ")
+                absent.iter().map(name_of).collect::<Vec<_>>().join(", ")
             ),
             capdag::StepOutcome::Completed { failed_attempts } => {
                 for (attempt, failure) in failed_attempts.iter().enumerate() {
@@ -1524,7 +1553,9 @@ async fn execute_notation(
                  `--input <name>=<value>` (`@<path>` reads a file)",
                 missing.join(", ")
             );
-            process::exit(1);
+            // The invocation is incomplete: a usage error, like a name the
+            // machine does not have.
+            process::exit(2);
         }
     }
 
@@ -1722,6 +1753,7 @@ async fn execute_notation(
                     effective_dir.clone(),
                     force_overwrite,
                     run.stem.clone(),
+                    &cli_runtime,
                 )),
                 Err(join) => {
                     eprintln!("a strand of the run panicked: {join}");
@@ -2890,7 +2922,14 @@ async fn cmd_cap(args: &[String]) -> ! {
         } else {
             output_dir.clone()
         };
-        end = end.max(finish_strand(&strand, result, effective_dir, force_overwrite, stem));
+        end = end.max(finish_strand(
+            &strand,
+            result,
+            effective_dir,
+            force_overwrite,
+            stem,
+            &cli_runtime,
+        ));
     }
 
     process::exit(end.exit_code());

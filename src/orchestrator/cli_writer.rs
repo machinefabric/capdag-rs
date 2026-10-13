@@ -46,10 +46,52 @@ enum State {
     },
 }
 
+/// Every part-file the writers of one runtime have created, by the sink each
+/// was created for.
+///
+/// A part-file becomes an output when the run that made it ends and it is
+/// given its name. A run that fails gives none of its parts a name: what it
+/// had already finished is still on disk, and belongs to nothing. The record
+/// is how that is found again — by what created it, never by reading names
+/// off a directory the user's own files are in.
+#[derive(Clone, Default)]
+pub struct PartFiles(std::sync::Arc<std::sync::Mutex<Vec<(String, PathBuf)>>>);
+
+impl PartFiles {
+    fn created(&self, sink: &str, path: &Path) {
+        self.0
+            .lock()
+            .expect("part-file record")
+            .push((sink.to_string(), path.to_path_buf()));
+    }
+
+    /// Remove every part-file created for a sink `of_run` says is the run's
+    /// and that is still where it was created, and forget them: one that was
+    /// given its name has moved, and is an output. Returns how many were
+    /// removed.
+    pub fn discard(&self, of_run: impl Fn(&str) -> bool) -> usize {
+        let mut record = self.0.lock().expect("part-file record");
+        let mut removed = 0;
+        record.retain(|(sink, path)| {
+            if !of_run(sink) {
+                return true;
+            }
+            if std::fs::remove_file(path).is_ok() {
+                removed += 1;
+            }
+            false
+        });
+        removed
+    }
+}
+
 /// Streams one persisted terminal sink to part-files in `dir`. `tag` makes the
 /// part names unique across sinks, runs, and ForEach bodies.
 pub struct CliDiskWriter {
     dir: PathBuf,
+    /// The sink this writer persists, and where what it creates is recorded.
+    sink: String,
+    parts: PartFiles,
     tag: String,
     media_urn: String,
     stream_meta: Option<StreamMeta>,
@@ -57,9 +99,11 @@ pub struct CliDiskWriter {
 }
 
 impl CliDiskWriter {
-    pub fn new(dir: PathBuf, tag: String) -> Self {
+    pub fn new(dir: PathBuf, sink: &str, tag: String, parts: PartFiles) -> Self {
         Self {
             dir,
+            sink: sink.to_string(),
+            parts,
             tag,
             media_urn: String::new(),
             stream_meta: None,
@@ -78,6 +122,8 @@ impl CliDiskWriter {
     /// when leftover bytes remain.
     async fn drain_sequence_items(
         dir: &Path,
+        sink: &str,
+        parts: &PartFiles,
         tag: &str,
         saved_paths: &mut Vec<String>,
         total_bytes: &mut usize,
@@ -98,6 +144,7 @@ impl CliDiskWriter {
             let index = saved_paths.len();
             let raw = unwrap_cbor_value(value, index)?;
             let path = dir.join(format!("{PART_FILE_PREFIX}.{tag}.{index}"));
+            parts.created(sink, &path);
             tokio::fs::write(&path, &raw).await.map_err(|e| {
                 StreamIoError::Protocol(format!(
                     "failed to persist sequence item {index} to '{}': {e}",
@@ -146,6 +193,7 @@ impl IncrementalWriter for CliDiskWriter {
             };
         } else {
             let path = self.part_path("blob");
+            self.parts.created(&self.sink, &path);
             let file = tokio::fs::File::create(&path).await.map_err(|e| {
                 StreamIoError::Protocol(format!(
                     "failed to create part file '{}': {e}",
@@ -200,6 +248,8 @@ impl IncrementalWriter for CliDiskWriter {
                 buf.extend_from_slice(payload);
                 Self::drain_sequence_items(
                     &self.dir,
+                    &self.sink,
+                    &self.parts,
                     &self.tag,
                     saved_paths,
                     total_bytes,
@@ -230,6 +280,8 @@ impl IncrementalWriter for CliDiskWriter {
             } => {
                 Self::drain_sequence_items(
                     &self.dir,
+                    &self.sink,
+                    &self.parts,
                     &self.tag,
                     saved_paths,
                     total_bytes,
@@ -305,6 +357,55 @@ impl IncrementalWriter for CliDiskWriter {
 mod tests {
     use super::*;
 
+    // TEST12819: what a run's writers created is found again by the sink each
+    // was created for. Discarding one run's parts removes those still where
+    // they were created — a blob and every item of a sequence — and leaves a
+    // part that was given its name (it has moved), another run's parts, and
+    // any file that merely looks like a part.
+    #[tokio::test]
+    async fn test12819_a_runs_unclaimed_parts_are_found_by_what_created_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let parts = PartFiles::default();
+        let writer = |sink: &str, tag: &str| {
+            Box::new(CliDiskWriter::new(dir.path().to_path_buf(), sink, tag.to_string(), parts.clone()))
+        };
+        let mut blob = writer("step_a", "0.step_a");
+        blob.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
+        blob.on_chunk_payload(&cbor_bytes(b"one"), None).await.unwrap();
+        let blob = blob.finish();
+        let mut items = writer("step_a.rest", "1.step_a.rest");
+        items.on_stream_start(Some(true), "media:x", None, None).await.unwrap();
+        items.on_chunk_payload(&cbor_bytes(b"i0"), None).await.unwrap();
+        items.on_chunk_payload(&cbor_bytes(b"i1"), None).await.unwrap();
+        let items = items.finish();
+        let mut named = writer("step_a", "2.step_a");
+        named.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
+        named.on_chunk_payload(&cbor_bytes(b"kept"), None).await.unwrap();
+        let named = named.finish();
+        let mut other = writer("step_b", "3.step_b");
+        other.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
+        other.on_chunk_payload(&cbor_bytes(b"other"), None).await.unwrap();
+        let other = other.finish();
+
+        // One part is given its name; and the user has a file of their own
+        // that looks like a part.
+        let output = dir.path().join("doc.out.txt");
+        std::fs::rename(&named.saved_paths[0], &output).unwrap();
+        let lookalike = dir.path().join(format!("{PART_FILE_PREFIX}.9.step_a.blob"));
+        std::fs::write(&lookalike, b"mine").unwrap();
+
+        let removed = parts.discard(|sink| sink.starts_with("step_a"));
+        assert_eq!(removed, 3, "the blob and both items");
+        assert!(!std::path::Path::new(&blob.saved_paths[0]).exists());
+        assert!(items.saved_paths.iter().all(|path| !std::path::Path::new(path).exists()));
+        assert_eq!(std::fs::read(&output).unwrap(), b"kept");
+        assert_eq!(std::fs::read(&lookalike).unwrap(), b"mine");
+        assert_eq!(std::fs::read(&other.saved_paths[0]).unwrap(), b"other");
+        // They are forgotten: a second discard finds nothing of that run.
+        assert_eq!(parts.discard(|sink| sink.starts_with("step_a")), 0);
+        assert_eq!(parts.discard(|_| true), 1, "the other run's part");
+    }
+
     fn cbor_bytes(data: &[u8]) -> Vec<u8> {
         let mut out = Vec::new();
         ciborium::ser::into_writer(&ciborium::Value::Bytes(data.to_vec()), &mut out).unwrap();
@@ -320,7 +421,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut w = Box::new(CliDiskWriter::new(
             dir.path().to_path_buf(),
+            "cap_1",
             "t.cap_1".to_string(),
+            PartFiles::default(),
         ));
         w.on_stream_start(Some(false), "media:audio;ext=wav", None, None)
             .await
@@ -346,7 +449,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut w = Box::new(CliDiskWriter::new(
             dir.path().to_path_buf(),
+            "cap_1",
             "t.cap_2".to_string(),
+            PartFiles::default(),
         ));
         w.on_stream_start(Some(true), "media:image;ext=png", None, None)
             .await
@@ -371,7 +476,9 @@ mod tests {
         // Truncated item at STREAM_END → hard error.
         let mut w2 = Box::new(CliDiskWriter::new(
             dir.path().to_path_buf(),
+            "cap_1",
             "t.cap_3".to_string(),
+            PartFiles::default(),
         ));
         w2.on_stream_start(Some(true), "media:image;ext=png", None, None)
             .await
@@ -389,7 +496,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut w = Box::new(CliDiskWriter::new(
             dir.path().to_path_buf(),
+            "cap_1",
             "t.cap_4".to_string(),
+            PartFiles::default(),
         ));
         let err = w
             .on_chunk_payload(&cbor_bytes(b"x"), None)
@@ -407,7 +516,9 @@ mod tests {
 
         let idle = Box::new(CliDiskWriter::new(
             dir.path().to_path_buf(),
+            "cap_1",
             "t.cap_5".to_string(),
+            PartFiles::default(),
         ));
         let result = (idle as Box<dyn IncrementalWriter>).finish();
         assert!(!result.is_sequence);

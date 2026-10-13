@@ -60,6 +60,9 @@ pub struct CliRuntime {
     persist_dir: PathBuf,
     /// Uniquifies part-file names across sinks, runs, and ForEach bodies.
     writer_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// Every part-file this runtime's writers created (see
+    /// [`CliRuntime::discard_parts`]).
+    parts: crate::orchestrator::cli_writer::PartFiles,
     /// The long-lived in-process cartridge host, built on demand. Behind a mutex for
     /// interior mutability under the `&self` trait hooks; the lock is held only while
     /// registering newly-needed cartridges, never across segment execution.
@@ -131,6 +134,7 @@ impl CliRuntime {
             trace_sink,
             persist_dir,
             writer_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            parts: Default::default(),
             host: Mutex::new(CliHost {
                 ctx: None,
                 manager: None,
@@ -140,6 +144,19 @@ impl CliRuntime {
             }),
             live_inputs: CliLiveInputs::default(),
         }
+    }
+
+    /// Remove every part-file that was created for a sink of `plan` and was
+    /// not given its name: what a run that has ended left behind.
+    ///
+    /// A run's parts become outputs when it ends and they are named
+    /// ([`emit_terminals`](super::cli_output::emit_terminals)). After that —
+    /// or after a run that failed, which names nothing — whatever of its
+    /// parts is still where it was created belongs to no output, and a
+    /// directory of the user's is no place to leave it. Call it once a
+    /// plan's run is over, however it ended. Returns how many were removed.
+    pub fn discard_parts(&self, plan: &crate::planner::MachinePlan) -> usize {
+        self.parts.discard(|sink| plan.nodes.contains_key(sink))
     }
 
     /// STOP INPUT (15.2 §Runs Stop): close every open live tap — host-opened
@@ -343,6 +360,7 @@ impl EngineRuntime for CliRuntime {
     ) -> Option<Box<crate::orchestrator::stream_io::SegmentWriterFactory>> {
         let dir = self.persist_dir.clone();
         let seq = self.writer_seq.clone();
+        let parts = self.parts.clone();
         Some(Box::new(move |sink: &str, coordinate| {
             let n = seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // `n` alone makes the name unique; the run it belongs to makes it
@@ -362,7 +380,9 @@ impl EngineRuntime for CliRuntime {
             };
             Box::new(crate::orchestrator::cli_writer::CliDiskWriter::new(
                 dir.clone(),
+                sink,
                 tag,
+                parts.clone(),
             ))
         }))
     }
