@@ -536,6 +536,22 @@ async fn test12831_values_of_one_item_stay_together_and_sequences_zip() {
         .expect("Execution failed");
     assert_eq!(ran.texts("p"), vec!["one|ONE", "two|TWO", "three|THREE"]);
 
+    // That it is ONE map, and not a second pass zipped against the first,
+    // shows when an item drops out: the word that is not shouted has no
+    // partner, so its pair is not made — and every other word keeps its own.
+    let ran = machines
+        .run(
+            &format!(
+                "{}[doc -> words -> w][(w, fail-on=\"two\") -> shout{{on_error=absent}} -> loud][(w, right=loud) -> pair -> p]",
+                dag_headers()
+            ),
+            &[("doc", Given::One(b"one two three"))],
+        )
+        .await
+        .expect("the failure is tolerated");
+    assert_eq!(ran.texts("p"), vec!["one|ONE", "three|THREE"]);
+    assert_eq!(ran.result.verdict, RunVerdict::CompletedWithToleratedFailures);
+
     let ran = machines
         .run(
             &format!(
