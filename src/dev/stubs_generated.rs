@@ -85,7 +85,7 @@ from capdag.cap.definition import (
     PositionSource,
     StdinSource,
 )
-from capdag.standard.caps import CAP_IDENTITY
+from capdag.standard.caps import identity_cap
 from capdag.urn.cap_urn import CapUrn, CapUrnBuilder
 from ops import DryContext, Op, OpMetadata, WetContext
 
@@ -189,25 +189,31 @@ CAP_URN: str = _cap_urn().to_string()
 def build_manifest() -> CapManifest:
     cap = Cap(_cap_urn(), "__CARTRIDGE_NAME__", ["__CARTRIDGE_NAME__"])
     cap.cap_description = "Classify a piece of text as positive, neutral, or negative."
+    # Every argument and every output has a name: the label a machine wires
+    # it by. The media URN is still what identifies it.
     cap.args = [
         CapArg(
             media_urn=IN_MEDIA,
+            name="text",
             required=True,
             sources=[StdinSource(IN_MEDIA), PositionSource(0)],
             arg_description="UTF-8 text to classify.",
         )
     ]
-    cap.output = CapOutput(
-        media_urn=OUT_MEDIA,
-        output_description="One of the literal strings 'positive', 'neutral', or 'negative'.",
+    cap.add_output(
+        CapOutput(
+            media_urn=OUT_MEDIA,
+            name="tag",
+            output_description="One of the literal strings 'positive', 'neutral', or 'negative'.",
+        )
     )
 
     # Every cartridge advertises CAP_IDENTITY; the runtime auto-registers its handler.
-    identity = Cap(CapUrn.from_string(CAP_IDENTITY), "Identity", ["identity"])
+    identity = identity_cap()
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.205.2130",
+        version="1.206.2143",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -312,7 +318,7 @@ cartridge.json
 //!     # edit the labels or the peer cap, then re-run both to update
 
 use anyhow::Result;
-use capdag::standard::caps::identity_urn;
+use capdag::standard::caps::identity_cap;
 use capdag::{
     async_trait, ArgSource, Cap, CapArg, CapGroup, CapManifest, CapOutput, CapUrn, CapUrnBuilder,
     CartridgeChannel, CartridgeRuntime, DryContext, Op, OpError, OpMetadata, OpResult, Request,
@@ -446,8 +452,11 @@ fn build_manifest() -> CapManifest {
     );
     cap.cap_description =
         Some("Classify a piece of text as positive, neutral, or negative.".to_string());
+    // Every argument and every output has a name: the label a machine wires
+    // it by. The media URN is still what identifies it.
     cap.add_arg(CapArg::with_description(
         IN_MEDIA,
+        "text",
         true,
         vec![
             ArgSource::Stdin {
@@ -457,21 +466,14 @@ fn build_manifest() -> CapManifest {
         ],
         "UTF-8 text to classify.".to_string(),
     ));
-    cap.set_output(CapOutput {
-        media_urn: OUT_MEDIA.to_string(),
-        output_description:
-            "One of the literal strings 'positive', 'neutral', or 'negative'.".to_string(),
-        is_sequence: false,
-        streaming: false,
-        metadata: None,
-    });
+    cap.add_output(CapOutput::new(
+        OUT_MEDIA,
+        "tag",
+        "One of the literal strings 'positive', 'neutral', or 'negative'.",
+    ));
 
     // Every cartridge advertises CAP_IDENTITY; the runtime auto-registers its handler.
-    let identity = Cap::new(
-        identity_urn(),
-        "Identity".to_string(),
-        vec!["identity".to_string()],
-    );
+    let identity = identity_cap();
 
     CapManifest::new(
         "__CARTRIDGE_NAME__".to_string(),
@@ -502,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.205.2130"
+version = "1.206.2143"
 edition = "2021"
 
 [dependencies]
@@ -766,30 +768,30 @@ func buildManifest() *bifaci.CapManifest {
 	c.CapDescription = cap.StringPtr("Classify a piece of text as positive, neutral, or negative.")
 	stdin := inMedia
 	position := 0
-	c.Args = []cap.CapArg{{
-		MediaUrn: inMedia,
-		Required: true,
-		Sources: []cap.ArgSource{
+	// Every argument and every output has a name: the label a machine wires
+	// it by. The media URN is still what identifies it.
+	c.Args = []cap.CapArg{cap.NewCapArgWithDescription(
+		inMedia, "text", true,
+		[]cap.ArgSource{
 			{Stdin: &stdin},
 			{Position: &position},
 		},
-		ArgDescription: cap.StringPtr("UTF-8 text to classify."),
-	}}
-	c.Output = &cap.CapOutput{
-		MediaUrn:          outMedia,
-		OutputDescription: "One of the literal strings 'positive', 'neutral', or 'negative'.",
-	}
+		"UTF-8 text to classify.",
+	)}
+	c.AddOutput(*cap.NewCapOutput(
+		outMedia, "tag",
+		"One of the literal strings 'positive', 'neutral', or 'negative'.",
+	))
 
 	// Every cartridge advertises CAP_IDENTITY; the runtime auto-registers its handler.
-	identityURN, err := urn.NewCapUrnFromString(capdag.CapIdentity)
+	identity, err := cap.IdentityCap()
 	if err != nil {
-		panic(fmt.Sprintf("BUG: CapIdentity is invalid: %v", err))
+		panic(fmt.Sprintf("BUG: the identity cap is invalid: %v", err))
 	}
-	identity := cap.NewCap(identityURN, "Identity", []string{"identity"})
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.205.2130",
+		"1.206.2143",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -1047,7 +1049,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.205.2130",
+        version: "1.206.2143",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",

@@ -24,8 +24,8 @@ import json
 
 from capdag.bifaci.cartridge_runtime import CartridgeRuntime, Request, WET_KEY_REQUEST
 from capdag.bifaci.manifest import CapManifest, default_group
-from capdag.cap.definition import Cap, CapArg, CapOutput, StdinSource
-from capdag.standard.caps import CAP_IDENTITY
+from capdag.cap.definition import Cap, CapArg, CapOutput, CliFlagSource, StdinSource
+from capdag.standard.caps import identity_cap
 from capdag.urn.cap_urn import CapUrn
 from ops import DryContext, Op, OpMetadata, WetContext
 
@@ -121,26 +121,33 @@ class ClassifyOp(Op):
 def build_manifest() -> CapManifest:
     cap = Cap(CapUrn.from_string(CLASSIFY_CAP), "Classify (English)", ["classify-en"])
     cap.cap_description = "Label a piece of text with one of a caller-supplied label set."
+    # The arguments and the output as the published `classify-en` declares
+    # them: the item is the main input, the labels an option.
     cap.args = [
         CapArg(
             media_urn=ITEM_MEDIA,
+            name="input",
             required=True,
             sources=[StdinSource(ITEM_MEDIA)],
             arg_description="The text to classify.",
         ),
         CapArg(
             media_urn=LABELS_MEDIA,
+            name="labels",
             required=True,
-            sources=[StdinSource(LABELS_MEDIA)],
+            sources=[CliFlagSource("--labels")],
             arg_description="Comma-separated labels the answer must come from.",
         ),
     ]
-    cap.output = CapOutput(
-        media_urn=JUDGMENT_MEDIA,
-        output_description="A semantic-judgment record: label, confidence, reason.",
+    cap.add_output(
+        CapOutput(
+            media_urn=JUDGMENT_MEDIA,
+            name="output",
+            output_description="A semantic-judgment record: label, confidence, reason.",
+        )
     )
 
-    identity = Cap(CapUrn.from_string(CAP_IDENTITY), "Identity", ["identity"])
+    identity = identity_cap()
 
     return CapManifest(
         name="e2e-classifier",
