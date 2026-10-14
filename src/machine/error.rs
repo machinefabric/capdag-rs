@@ -96,6 +96,12 @@ pub enum MachineAbstractionError {
     #[error("cap URN '{cap_urn}' has no cached definition — cannot emit a display title for render payload")]
     UncachedCap { cap_urn: String },
 
+    /// The names a machine's text gave its nodes do not describe the
+    /// machine: a strand named that it does not have, a node named twice or
+    /// not at all.
+    #[error("the node names do not describe the machine: {details}")]
+    NodeNamesMismatch { details: String },
+
     /// A cap could not be applied to the runtime input media flowing into it while
     /// realizing a strand — the declared input/output specs are incompatible with the
     /// concrete upstream media. Realization cannot invent a valid data type, so it

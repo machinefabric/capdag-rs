@@ -172,6 +172,16 @@ impl ResolvedNotation {
         &self.machine
     }
 
+    /// How the machine is drawn: its render payload, each node carrying the
+    /// name the notation gave it (see `Machine::to_render_payload_json_with_names`).
+    pub fn render_payload_json(&self) -> Result<String, ParseOrchestrationError> {
+        self.machine
+            .to_render_payload_json_with_names(&self.registry, &self.names)
+            .map_err(|error| ParseOrchestrationError::InvalidGraph {
+                message: format!("the machine's render payload cannot be built: {error}"),
+            })
+    }
+
     /// How many strands the machine has.
     pub fn strand_count(&self) -> usize {
         self.machine.strands().len()

@@ -920,3 +920,110 @@ fn test12838_urns_are_ordered_by_their_parts_not_their_text() {
         assert_eq!(steps, [true, false], "{wirings}");
     }
 }
+
+// TEST12867: the render payload says which binding feeds a step's main input
+// and which output is its main one, by the step's definition, so a view can
+// draw the main wires plain and name the others.
+#[test]
+fn test12867_render_payload_marks_the_main_input_and_output() {
+    let registry = registry();
+    for urn in [SERIES, BENCHMARK, COMPARISON, RESIDUALS] {
+        registry.insert_cached_media_def_for_test(media_def(urn, None, None));
+    }
+    let parsed = parse_machine(
+        &format!("{HEADERS}[(path, benchmark=bench) -> compare -> (result, residuals=res)]"),
+        &registry,
+    )
+    .unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_str(&parsed.to_render_payload_json(&registry).unwrap()).unwrap();
+    let edge = &payload["strands"][0]["edges"][0];
+    let main_of = |list: &str, key: &str, flag: &str| -> Vec<(String, bool)> {
+        let mut entries: Vec<(String, bool)> = edge[list]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| (entry[key].as_str().unwrap().to_string(), entry[flag].as_bool().unwrap()))
+            .collect();
+        entries.sort();
+        entries
+    };
+    assert_eq!(
+        main_of("assignment", "arg_name", "is_main_input"),
+        vec![("benchmark".to_string(), false), ("series".to_string(), true)]
+    );
+    assert_eq!(
+        main_of("outputs", "output_name", "is_main_output"),
+        vec![("comparison".to_string(), true), ("residuals".to_string(), false)]
+    );
+}
+
+// TEST12868: a render payload made with the text's names carries, on each
+// node, the name the text gave it — whatever order the canonical walk numbers
+// the nodes in — so an editor finds the payload's nodes in the text; names that
+// do not describe the machine are refused.
+#[test]
+fn test12868_render_payload_carries_the_texts_node_names() {
+    let registry = registry();
+    for urn in [SERIES, BENCHMARK, COMPARISON, RESIDUALS, "media:numeric;score"] {
+        registry.insert_cached_media_def_for_test(media_def(urn, None, None));
+    }
+    let text = format!(
+        "{HEADERS}[res -> score -> scores][(path, benchmark=bench) -> compare -> (result, residuals=res)]"
+    );
+    let (parsed, names) = parse_machine_with_node_names(&text, &registry).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(
+        &parsed.to_render_payload_json_with_names(&registry, &names).unwrap(),
+    )
+    .unwrap();
+    let strand = &payload["strands"][0];
+    let name_of: HashMap<&str, &str> = strand["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|node| (node["id"].as_str().unwrap(), node["name"].as_str().unwrap()))
+        .collect();
+    let mut written: Vec<&str> = name_of.values().copied().collect();
+    written.sort();
+    assert_eq!(written, ["bench", "path", "res", "result", "scores"]);
+
+    let compare = strand["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["title"] == "compare")
+        .unwrap();
+    let fed: HashMap<&str, &str> = compare["assignment"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["arg_name"].as_str().unwrap(), name_of[b["source_node"].as_str().unwrap()]))
+        .collect();
+    assert_eq!(fed["benchmark"], "bench", "the benchmark is fed by the node the text calls bench");
+    assert_eq!(fed["series"], "path");
+    let took: HashMap<&str, &str> = compare["outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| (o["output_name"].as_str().unwrap(), name_of[o["node"].as_str().unwrap()]))
+        .collect();
+    assert_eq!(took["residuals"], "res");
+    assert_eq!(took["comparison"], "result");
+
+    // Without the text's names, a node is its canonical id alone.
+    let canonical: serde_json::Value =
+        serde_json::from_str(&parsed.to_render_payload_json(&registry).unwrap()).unwrap();
+    assert!(canonical["strands"][0]["nodes"][0].get("name").is_none());
+
+    let mut doubled = names.clone();
+    let (some_name, &node) = doubled[0].iter().next().map(|(n, id)| (n.clone(), id)).unwrap();
+    doubled[0].insert(format!("{some_name}_again"), node);
+    assert!(matches!(
+        parsed.to_render_payload_json_with_names(&registry, &doubled),
+        Err(MachineAbstractionError::NodeNamesMismatch { .. })
+    ));
+    assert!(matches!(
+        parsed.to_render_payload_json_with_names(&registry, &[]),
+        Err(MachineAbstractionError::NodeNamesMismatch { .. })
+    ));
+}

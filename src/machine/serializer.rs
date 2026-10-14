@@ -441,11 +441,13 @@ impl Machine {
     ///             {
     ///               "cap_arg_media_urn": "media:document;ext=pdf",
     ///               "arg_name": "input",
+    ///               "is_main_input": true,
     ///               "source_node": "n0"
     ///             },
     ///             {
     ///               "cap_arg_media_urn": "media:integer;max-pages",
     ///               "arg_name": "max_pages",
+    ///               "is_main_input": false,
     ///               "constant": 20
     ///             }
     ///           ],
@@ -453,6 +455,7 @@ impl Machine {
     ///             {
     ///               "output_media_urn": "media:enc=utf-8;ext=txt",
     ///               "output_name": "output",
+    ///               "is_main_output": true,
     ///               "node": "n1"
     ///             }
     ///           ]
@@ -468,7 +471,9 @@ impl Machine {
     /// ```
     ///
     /// Each node carries the media-def title and each edge the cap
-    /// definition title from the unified `FabricRegistry`. Lookups are
+    /// definition title from the unified `FabricRegistry`. A binding says
+    /// whether it feeds the cap's main input, and an output whether it is the
+    /// cap's main one — read from the cap definition, never from a name. Lookups are
     /// cache-only (no network). A missing cached entry is a hard
     /// failure — we never synthesize a title from a URN string.
     ///
@@ -478,6 +483,37 @@ impl Machine {
     pub fn to_render_payload_json(
         &self,
         fabric_registry: &FabricRegistry,
+    ) -> Result<String, MachineAbstractionError> {
+        self.render_payload_json(fabric_registry, None)
+    }
+
+    /// [`Machine::to_render_payload_json`], with each node also carrying the
+    /// name the machine's text gave it (`"name"`), strand by strand as the
+    /// parser returned them: what lets a view of the text — an editor — find
+    /// the payload's nodes in the text without assuming the order the text
+    /// wrote them in. Every node of a strand has a name: the text's own, or
+    /// the one inlining gave a node inside an included machine.
+    pub fn to_render_payload_json_with_names(
+        &self,
+        fabric_registry: &FabricRegistry,
+        names: &[super::parser::StrandNodeNames],
+    ) -> Result<String, MachineAbstractionError> {
+        if names.len() != self.strands().len() {
+            return Err(MachineAbstractionError::NodeNamesMismatch {
+                details: format!(
+                    "{} strands are named for a machine of {}",
+                    names.len(),
+                    self.strands().len()
+                ),
+            });
+        }
+        self.render_payload_json(fabric_registry, Some(names))
+    }
+
+    fn render_payload_json(
+        &self,
+        fabric_registry: &FabricRegistry,
+        names: Option<&[super::parser::StrandNodeNames]>,
     ) -> Result<String, MachineAbstractionError> {
         if self.is_empty() {
             return Ok("{\"strands\":[]}".to_string());
@@ -495,7 +531,36 @@ impl Machine {
             if s_idx > 0 {
                 json.push(',');
             }
-            emit_strand_json(&mut json, strand, strand_plan, fabric_registry)?;
+            // The text's name of each node, by node id.
+            let text_names = match names {
+                Some(names) => {
+                    let mut by_node: Vec<Option<&str>> = vec![None; strand.nodes().len()];
+                    for (name, &node) in &names[s_idx] {
+                        let slot = by_node.get_mut(node as usize).ok_or_else(|| {
+                            MachineAbstractionError::NodeNamesMismatch {
+                                details: format!(
+                                    "strand {s_idx} names node {node}, which it does not have"
+                                ),
+                            }
+                        })?;
+                        if let Some(other) = slot.replace(name.as_str()) {
+                            return Err(MachineAbstractionError::NodeNamesMismatch {
+                                details: format!(
+                                    "strand {s_idx} names node {node} both '{other}' and '{name}'"
+                                ),
+                            });
+                        }
+                    }
+                    if let Some(unnamed) = by_node.iter().position(Option::is_none) {
+                        return Err(MachineAbstractionError::NodeNamesMismatch {
+                            details: format!("strand {s_idx} gives node {unnamed} no name"),
+                        });
+                    }
+                    Some(by_node)
+                }
+                None => None,
+            };
+            emit_strand_json(&mut json, strand, strand_plan, text_names.as_deref(), fabric_registry)?;
         }
         write!(json, "]}}").unwrap();
         Ok(json)
@@ -506,6 +571,7 @@ fn emit_strand_json(
     json: &mut String,
     strand: &MachineStrand,
     plan: &StrandPlan,
+    text_names: Option<&[Option<&str>]>,
     fabric_registry: &FabricRegistry,
 ) -> Result<(), MachineAbstractionError> {
     write!(json, "{{").unwrap();
@@ -525,12 +591,17 @@ fn emit_strand_json(
             })?;
         write!(
             json,
-            "{{\"id\":\"{}\",\"urn\":\"{}\",\"title\":\"{}\"}}",
+            "{{\"id\":\"{}\",\"urn\":\"{}\",\"title\":\"{}\"",
             plan.node_names[id],
             json_escape(&urn_str),
             json_escape(&title)
         )
         .unwrap();
+        if let Some(text_names) = text_names {
+            let name = text_names[id].expect("every node was found named above");
+            write!(json, ",\"name\":\"{}\"", json_escape(name)).unwrap();
+        }
+        json.push('}');
     }
     write!(json, "],").unwrap();
 
@@ -541,12 +612,20 @@ fn emit_strand_json(
             json.push(',');
         }
         let cap_urn_str = edge.cap_urn.to_string();
-        let cap_title = fabric_registry
-            .get_cached_cap(&cap_urn_str)
-            .map(|cap| cap.title)
-            .ok_or_else(|| MachineAbstractionError::UncachedCap {
+        let definition = fabric_registry.get_cached_cap(&cap_urn_str).ok_or_else(|| {
+            MachineAbstractionError::UncachedCap {
                 cap_urn: cap_urn_str.clone(),
-            })?;
+            }
+        })?;
+        let cap_title = definition.title.clone();
+        // Which binding feeds the cap's main input and which output is its
+        // main one: a view draws the main wires plain and names the others.
+        // A binding and an output carry the name the resolver read from this
+        // same definition, where a name is unique, so the definition's main
+        // arg and main output are found by it.
+        let main_input = definition.main_input_arg().map(|arg| arg.name.clone());
+        let main_output = definition.main_output().map(|output| output.name.clone());
+        let is_main = |main: &Option<String>, name: &str| main.as_deref() == Some(name);
         write!(
             json,
             "{{\"alias\":\"{}\",\"cap_urn\":\"{}\",\"title\":\"{}\",\"is_loop\":{},\"retry\":{},\"on_error\":\"{}\",\"included_as\":[{}],\"assignment\":[",
@@ -576,9 +655,10 @@ fn emit_strand_json(
             }
             write!(
                 json,
-                "{{\"cap_arg_media_urn\":\"{}\",\"arg_name\":\"{}\",",
+                "{{\"cap_arg_media_urn\":\"{}\",\"arg_name\":\"{}\",\"is_main_input\":{},",
                 json_escape(&b.cap_arg_media_urn.to_string()),
-                json_escape(&b.arg_name)
+                json_escape(&b.arg_name),
+                is_main(&main_input, &b.arg_name)
             )
             .unwrap();
             match &b.source {
@@ -596,9 +676,10 @@ fn emit_strand_json(
             }
             write!(
                 json,
-                "{{\"output_media_urn\":\"{}\",\"output_name\":\"{}\",\"node\":\"{}\"}}",
+                "{{\"output_media_urn\":\"{}\",\"output_name\":\"{}\",\"is_main_output\":{},\"node\":\"{}\"}}",
                 json_escape(&o.output_media_urn.to_string()),
                 json_escape(&o.output_name),
+                is_main(&main_output, &o.output_name),
                 plan.node_names[o.node as usize]
             )
             .unwrap();
