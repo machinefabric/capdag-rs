@@ -4,6 +4,30 @@ use thiserror::Error;
 
 use crate::planner::StepToken;
 
+/// A member of a wiring whose arg the types alone do not decide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndecidedMember {
+    /// The node, as the notation named it. `None` where no notation is at
+    /// hand (a strand resolved from a planner path): the member is then
+    /// known by its type alone.
+    pub node: Option<String>,
+    /// The media URN the member holds.
+    pub source_urn: String,
+    /// The args — or, for a machine in step position, the inputs — it could
+    /// go to, by name, in the order the definition declares them.
+    pub could_be: Vec<String>,
+}
+
+impl std::fmt::Display for UndecidedMember {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.node {
+            Some(node) => write!(f, "'{node}' ({})", self.source_urn)?,
+            None => write!(f, "a member of type '{}'", self.source_urn)?,
+        }
+        write!(f, " could be {}", self.could_be.join(" or "))
+    }
+}
+
 /// Errors raised when building or resolving a `Machine`.
 ///
 /// These cover anchor-realization (computing each `MachineStrand`'s
@@ -37,18 +61,19 @@ pub enum MachineAbstractionError {
         source_urn: String,
     },
 
-    /// The bipartite minimum-cost source-to-arg assignment is not
-    /// unique. Either two distinct assignments tie at the same
-    /// total specificity-distance cost, or the equality subgraph
-    /// admits more than one perfect matching at the minimum cost.
-    /// The notation cannot be resolved deterministically; no
-    /// fall-back to source-vec position is permitted.
+    /// The minimum-cost assignment of the unnamed members to the cap's args
+    /// is not unique: the types do not say which arg some member is for.
+    /// The notation cannot be resolved deterministically, and where a member
+    /// stands is never a tiebreak. `members` are the ones to name, each with
+    /// the args it could go to.
     #[error(
-        "in strand {strand_index}, cap '{cap_urn}': source-to-cap-arg assignment is ambiguous (multiple minimum-cost matchings exist)"
+        "in strand {strand_index}, cap '{cap_urn}': the types do not say which arg these members are for — name them: {}",
+        members.iter().map(|member| member.to_string()).collect::<Vec<_>>().join("; ")
     )]
     AmbiguousMachineNotation {
         strand_index: usize,
         cap_urn: String,
+        members: Vec<UndecidedMember>,
     },
 
     /// The resolved data-flow graph of a strand contains a cycle.
@@ -261,9 +286,17 @@ pub enum MachineAbstractionError {
     },
 
     /// The unnamed members of a machine in step position fit its inputs in
-    /// more than one way.
-    #[error("statement {position}: the unnamed members of machine '{alias}' fit its inputs in more than one way — name them")]
-    AmbiguousMachineMembers { position: usize, alias: String },
+    /// more than one way. `members` are the ones to name, each with the
+    /// inputs it could go to.
+    #[error(
+        "statement {position}: the types do not say which input of machine '{alias}' these members are for — name them: {}",
+        members.iter().map(|member| member.to_string()).collect::<Vec<_>>().join("; ")
+    )]
+    AmbiguousMachineMembers {
+        position: usize,
+        alias: String,
+        members: Vec<UndecidedMember>,
+    },
 
     /// A named member's URN does not conform to the type of the machine
     /// input it names.
@@ -294,18 +327,6 @@ pub enum MachineAbstractionError {
     CapDoesNotDeclareInput {
         strand_index: usize,
         cap_urn: String,
-    },
-
-    /// A non-primary (convergence) wiring source is NOT another cap's output. Only a
-    /// cap output may be wired into a non-main argument; a raw input feeding a
-    /// non-main argument is an argument VALUE (default / setting / config / user
-    /// input), delivered through the argument value channel, never wired. Exposed
-    /// hard rather than silently mis-routed.
-    #[error("strand {strand_index}: cap '{cap_urn}' arg '{arg_urn}' is wired from a source that is not a cap output; wire only cap outputs into non-main args, deliver everything else as an argument value")]
-    NonProducerSecondaryArg {
-        strand_index: usize,
-        cap_urn: String,
-        arg_urn: String,
     },
 
     /// A strand's edges do not form a data-flow graph whose every source is reachable
@@ -405,10 +426,6 @@ pub enum MachineSyntaxError {
     #[error("machine notation is empty")]
     Empty,
 
-    /// A statement bracket `[` was opened but never closed with `]`.
-    #[error("unterminated statement starting at byte {position}")]
-    UnterminatedStatement { position: usize },
-
     /// A cap URN in a header statement failed to parse.
     #[error("invalid cap URN in header '{alias}': {details}")]
     InvalidCapUrn { alias: String, details: String },
@@ -431,18 +448,9 @@ pub enum MachineSyntaxError {
         first_position: usize,
     },
 
-    /// A wiring statement has invalid structure (wrong number of
-    /// arrows, missing parts).
-    #[error("invalid wiring at statement {position}: {details}")]
-    InvalidWiring { position: usize, details: String },
-
     /// A media URN referenced in a header failed to parse.
     #[error("invalid media URN in cap '{alias}': {details}")]
     InvalidMediaUrn { alias: String, details: String },
-
-    /// A header statement has invalid structure.
-    #[error("invalid header at statement {position}: {details}")]
-    InvalidHeader { position: usize, details: String },
 
     /// The parsed machine has headers but no wirings.
     #[error("machine has headers but no wirings — define at least one edge")]
@@ -528,6 +536,7 @@ mod tests {
             MachineAbstractionError::AmbiguousMachineNotation {
                 strand_index: 1,
                 cap_urn: "cap:y".to_string(),
+                members: Vec::new(),
             },
             MachineAbstractionError::CyclicMachineStrand { strand_index: 2 },
         ];
@@ -544,14 +553,15 @@ mod tests {
     // TEST1147: MachineSyntaxError Display includes position and detail for each variant
     #[test]
     fn test1147_machine_syntax_error_display_is_specific() {
-        let err = MachineSyntaxError::InvalidWiring {
+        let err = MachineSyntaxError::InvalidPolicy {
+            step: "fetch".to_string(),
             position: 7,
-            details: "expected source -> cap -> target".to_string(),
+            details: "unknown key 'tries'".to_string(),
         };
 
         assert_eq!(
             err.to_string(),
-            "invalid wiring at statement 7: expected source -> cap -> target"
+            "invalid policy on step 'fetch' in statement 7: unknown key 'tries'"
         );
     }
 
@@ -574,19 +584,36 @@ mod tests {
     // TEST1149: MachineParseError::from(MachineAbstractionError) preserves the resolution error variant
     #[test]
     fn test1149_machine_parse_error_from_resolution_preserves_variant() {
+        let undecided = |node: Option<&str>| UndecidedMember {
+            node: node.map(str::to_string),
+            source_urn: "media:enc=utf-8".to_string(),
+            could_be: vec!["left".to_string(), "right".to_string()],
+        };
         let parse_error: MachineParseError = MachineAbstractionError::AmbiguousMachineNotation {
             strand_index: 2,
             cap_urn: "cap:in=\"media:document;ext=pdf\";out=media:text".to_string(),
+            members: vec![undecided(Some("a")), undecided(None)],
         }
         .into();
+        // What it says is which members to name, and what each could be.
+        let said = parse_error.to_string();
+        assert!(
+            said.ends_with(
+                "name them: 'a' (media:enc=utf-8) could be left or right; \
+                 a member of type 'media:enc=utf-8' could be left or right"
+            ),
+            "{said}"
+        );
 
         match parse_error {
             MachineParseError::Resolution(MachineAbstractionError::AmbiguousMachineNotation {
                 strand_index,
                 cap_urn,
+                members,
             }) => {
                 assert_eq!(strand_index, 2);
                 assert_eq!(cap_urn, "cap:in=\"media:document;ext=pdf\";out=media:text");
+                assert_eq!(members.len(), 2);
             }
             other => panic!("expected ambiguous resolution error, got {other:?}"),
         }

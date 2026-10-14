@@ -707,4 +707,54 @@ mod tests {
             assert!(matches!(refused(input), MachineSyntaxError::ParseError { .. }), "{input}");
         }
     }
+
+    // TEST12832: a constant has one text, the same in every implementation:
+    // an object's keys in order, a whole number without a point, a float with
+    // one (or an exponent beyond sixteen digits and below five zeros), and
+    // only the escapes JSON requires. A number is read as the nearest float,
+    // however many digits it was written with. Two constants are equal as
+    // JSON values: `1` and `1.0` are not.
+    #[test]
+    fn test12832_a_constant_has_one_text() {
+        let constant = |written: &str| -> serde_json::Value {
+            let wiring = one(&format!("(a={written}) -> f -> y"));
+            match &wiring.sources[0].value {
+                SyntaxValue::Constant(c) => c.value.clone(),
+                other => panic!("{written}: {other:?}"),
+            }
+        };
+        for (written, text) in [
+            ("20", "20"),
+            ("-7", "-7"),
+            ("18446744073709551615", "18446744073709551615"),
+            ("18446744073709551616", "1.8446744073709552e+19"),
+            ("-9223372036854775809", "-9.223372036854776e+18"),
+            ("1.0", "1.0"),
+            ("1.50", "1.5"),
+            ("-1.5e3", "-1500.0"),
+            ("1e3", "1000.0"),
+            ("0.0001", "0.0001"),
+            ("0.00001", "0.00001"),
+            ("0.000001", "1e-6"),
+            ("1.25e-7", "1.25e-7"),
+            ("1e15", "1000000000000000.0"),
+            ("1e16", "1e+16"),
+            ("1234567890123456.0", "1234567890123456.0"),
+            // Seventeen digits: the nearest float, not the one below it.
+            ("12345678901234567.0", "1.2345678901234568e+16"),
+            ("1e21", "1e+21"),
+            ("5e-324", "5e-324"),
+            ("0.0", "0.0"),
+            ("-0.0", "-0.0"),
+            (r#"{"b": 1, "a": [true, null]}"#, r#"{"a":[true,null],"b":1}"#),
+            (r#""a<b>&c é""#, r#""a<b>&c é""#),
+            (r#""tab\there \u0001 \" \\ \/""#, r#""tab\there \u0001 \" \\ /""#),
+        ] {
+            assert_eq!(constant(written).to_string(), text, "{written}");
+            // The text reads back as the value it was written from.
+            assert_eq!(constant(text), constant(written), "{written}");
+        }
+        assert_ne!(constant("1"), constant("1.0"));
+        assert_eq!(constant(r#"{"a":1,"b":[2,"x"]}"#), constant(r#"{"b":[2,"x"],"a":1}"#));
+    }
 }

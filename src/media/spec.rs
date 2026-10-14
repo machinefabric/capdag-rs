@@ -1259,4 +1259,76 @@ mod tests {
         // clearer must not touch description
         assert_eq!(spec.description.as_deref(), Some("short"));
     }
+
+    // TEST12835: the one decision of whether a value breaks a media
+    // definition's validation. A rule applies to the values it is about and
+    // passes the rest: min and max to numbers, the length rules to strings and
+    // arrays, pattern and allowed values to strings. The first rule broken is
+    // named; a pattern that is no regular expression is a defect of the
+    // definition, not of the value.
+    #[test]
+    fn test12835_a_value_is_held_to_the_rules_that_are_about_it() {
+        use serde_json::json;
+        let broken = |validation: &MediaValidation, value: serde_json::Value| -> Option<String> {
+            validation.violation(&value).expect("the rules can be applied")
+        };
+        let rule = |text: &str| Some(text.to_string());
+
+        let range = MediaValidation { min: Some(1.0), max: Some(365.0), ..Default::default() };
+        assert_eq!(broken(&range, json!(1)), None);
+        assert_eq!(broken(&range, json!(365.0)), None);
+        assert_eq!(broken(&range, json!(0)), rule("minimum value 1"));
+        assert_eq!(broken(&range, json!(365.5)), rule("maximum value 365"));
+        assert_eq!(broken(&range, json!(0.5)), rule("minimum value 1"));
+        assert_eq!(broken(&range, json!(366u64)), rule("maximum value 365"));
+        // A range says nothing of what is not a number.
+        assert_eq!(broken(&range, json!("0")), None);
+        assert_eq!(broken(&range, json!([0])), None);
+        assert_eq!(broken(&range, json!(null)), None);
+
+        let length = MediaValidation { min_length: Some(2), max_length: Some(3), ..Default::default() };
+        assert_eq!(broken(&length, json!("ab")), None);
+        assert_eq!(broken(&length, json!("abc")), None);
+        assert_eq!(broken(&length, json!("a")), rule("minimum length 2"));
+        assert_eq!(broken(&length, json!("abcd")), rule("maximum length 3"));
+        // An array has a length too, and the rule says which it measured.
+        assert_eq!(broken(&length, json!(["a", "b"])), None);
+        assert_eq!(broken(&length, json!(["a"])), rule("minimum array length 2"));
+        assert_eq!(broken(&length, json!([1, 2, 3, 4])), rule("maximum array length 3"));
+        // A number has none.
+        assert_eq!(broken(&length, json!(12345)), None);
+
+        let pattern = MediaValidation { pattern: Some("^[a-z]+$".to_string()), ..Default::default() };
+        assert_eq!(broken(&pattern, json!("abc")), None);
+        assert_eq!(broken(&pattern, json!("abc1")), rule("pattern '^[a-z]+$'"));
+        assert_eq!(broken(&pattern, json!(1)), None, "a pattern is about strings");
+        let unreadable = MediaValidation { pattern: Some("(".to_string()), ..Default::default() };
+        let defect = unreadable.violation(&json!("x")).expect_err("a pattern that is no regular expression");
+        assert!(defect.contains("Invalid regex pattern '('"), "{defect}");
+        // The defect is the definition's only when the rule is applied.
+        assert_eq!(unreadable.violation(&json!(1)), Ok(None));
+
+        let allowed = MediaValidation {
+            allowed_values: Some(vec!["mean".to_string(), "median".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(broken(&allowed, json!("median")), None);
+        assert_eq!(broken(&allowed, json!("mode")), rule(r#"allowed values: ["mean", "median"]"#));
+        assert_eq!(broken(&allowed, json!(3)), None, "allowed values are about strings");
+
+        // The first rule broken is the one named: the length before the
+        // pattern, the pattern before the allowed values.
+        let every = MediaValidation {
+            min_length: Some(3),
+            pattern: Some("^x".to_string()),
+            allowed_values: Some(vec!["xyz".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(broken(&every, json!("ab")), rule("minimum length 3"));
+        assert_eq!(broken(&every, json!("abc")), rule("pattern '^x'"));
+        assert_eq!(broken(&every, json!("xab")), rule(r#"allowed values: ["xyz"]"#));
+        assert_eq!(broken(&every, json!("xyz")), None);
+        // No rule, nothing broken.
+        assert_eq!(broken(&MediaValidation::default(), json!("anything")), None);
+    }
 }

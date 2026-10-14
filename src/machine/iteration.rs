@@ -572,6 +572,28 @@ mod tests {
         assert_eq!(s.item_map(0, map), Some(map));
         assert_eq!(s.item_map(1, map), None);
         assert_eq!(s.item_map(0, ROOT), None);
+
+        // A map is what it iterates IN THE SCOPE IT IS OPENED IN: the same
+        // sequence mapped from two scopes is two maps.
+        // 0 docs, 5 others: sequences. 0 -> split -> 1 (a declared sequence per doc)
+        // 1 -> ocr -> 2: over each doc's pages, inside the map over docs.
+        // 5 -> b -> 6 (a declared sequence per item of 5)
+        // (1, all=6) -> t -> 7: neither map holds the other, so the step is
+        // placed in the machine, mapping over every page there is, given 6 whole.
+        let steps = [
+            step(vec![member(0, false)], vec![(1, true)]),
+            step(vec![member(1, false)], vec![(2, false)]),
+            step(vec![member(5, false)], vec![(6, true)]),
+            step(vec![member(1, false), member(6, true)], vec![(7, false)]),
+        ];
+        let s = placed(&steps, &[0, 5]);
+        let per_doc = s.steps()[1].map.expect("mapped over each doc's pages");
+        let flat = s.steps()[3].map.expect("mapped over every page");
+        assert_eq!(s.sources(per_doc), &[1]);
+        assert_eq!(s.sources(flat), &[1]);
+        assert_eq!(Some(s.parent(per_doc)), s.steps()[0].map);
+        assert_eq!(s.parent(flat), ROOT);
+        assert_ne!(per_doc, flat);
     }
 
     // TEST12751: there is no cross product. A step given a value of a map and

@@ -45,7 +45,7 @@ mod notation_tests;
 #[cfg(test)]
 mod include_tests;
 
-pub use error::{MachineAbstractionError, MachineParseError, MachineSyntaxError};
+pub use error::{MachineAbstractionError, MachineParseError, MachineSyntaxError, UndecidedMember};
 pub use graph::{
     BindingSource, EdgeAssignmentBinding, EdgeOutput, Machine, MachineEdge, MachineRun,
     MachineRunStatus, MachineStrand, NodeId,

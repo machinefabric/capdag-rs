@@ -434,22 +434,12 @@ impl MachineStrand {
     /// Strict equivalence with another `MachineStrand`.
     ///
     /// Walks both strands in canonical edge order, building a
-    /// bijection between `NodeId`s on the fly. Any anchor or
-    /// edge mismatch (cap URN, assignment, target node, or
-    /// `is_loop`) fails the comparison. Inconsistent node
-    /// bijection (the same `NodeId` in self mapped to two
-    /// different `NodeId`s in other) also fails.
+    /// bijection between `NodeId`s on the fly. Any edge mismatch (cap URN,
+    /// policy, assignment, outputs, or `is_loop`) fails the comparison, and
+    /// so does an inconsistent bijection (a node of either strand paired
+    /// with two of the other) or two paired nodes that hold different types.
     pub fn is_equivalent(&self, other: &Self) -> bool {
-        if self.nodes.len() != other.nodes.len() {
-            return false;
-        }
         if self.edges.len() != other.edges.len() {
-            return false;
-        }
-        if self.input_anchor_ids.len() != other.input_anchor_ids.len() {
-            return false;
-        }
-        if self.output_anchor_ids.len() != other.output_anchor_ids.len() {
             return false;
         }
 
@@ -466,13 +456,11 @@ impl MachineStrand {
             }
         }
 
-        // Under that correspondence the anchors are the same nodes.
-        let same_nodes = |mine: &[NodeId], theirs: &[NodeId]| {
-            mine.iter()
-                .all(|id| node_map.other_of(*id).is_some_and(|other_id| theirs.contains(&other_id)))
-        };
-        same_nodes(&self.input_anchor_ids, &other.input_anchor_ids)
-            && same_nodes(&self.output_anchor_ids, &other.output_anchor_ids)
+        // Every node of a strand is a source or an output of one of its
+        // edges, so the walk has paired every node of each strand with one of
+        // the other: the strands have the same nodes, and the same of them
+        // are anchors.
+        true
     }
 }
 
@@ -503,11 +491,6 @@ impl NodeBijection {
         }
     }
 
-    /// The node of `other` that `self_id` corresponds to, once bound.
-    fn other_of(&self, self_id: NodeId) -> Option<NodeId> {
-        self.self_to_other[self_id as usize]
-    }
-
     fn bind(
         &mut self,
         self_id: NodeId,
@@ -529,16 +512,15 @@ impl NodeBijection {
             return false;
         }
 
-        match self.self_to_other[self_idx] {
-            Some(existing) if existing == other_id => {}
-            Some(_) => return false,
-            None => self.self_to_other[self_idx] = Some(other_id),
+        // A node of either strand already paired with another node of the
+        // other refuses the pair, and a refused pair leaves nothing behind.
+        if self.self_to_other[self_idx].is_some_and(|existing| existing != other_id)
+            || self.other_to_self[other_idx].is_some_and(|existing| existing != self_id)
+        {
+            return false;
         }
-        match self.other_to_self[other_idx] {
-            Some(existing) if existing == self_id => {}
-            Some(_) => return false,
-            None => self.other_to_self[other_idx] = Some(self_id),
-        }
+        self.self_to_other[self_idx] = Some(other_id);
+        self.other_to_self[other_idx] = Some(self_id);
         true
     }
 }
@@ -744,8 +726,8 @@ impl MachineRun {
 
 #[cfg(test)]
 mod tests {
-    use super::{Machine, MachineAbstractionError, MachineRun, MachineRunStatus};
-    use crate::machine::test_fixtures::{build_cap, cap_step, registry_with, strand_from_steps};
+    use super::{Machine, MachineAbstractionError, MachineRun, MachineRunStatus, MachineStrand, NodeBijection};
+    use crate::machine::test_fixtures::{build_cap, cap_step, media, registry_with, strand_from_steps};
 
     fn extract_cap_def() -> crate::cap::definition::Cap {
         build_cap(
@@ -897,5 +879,42 @@ mod tests {
         assert_eq!(run.id, "run-id-1");
         assert_eq!(run.machine_notation, canonical);
         assert_eq!(run.status, MachineRunStatus::Pending);
+    }
+
+    // TEST12834: the correspondence between the nodes of two strands is one
+    // to one in both directions: a pair made once is confirmed, and a node of
+    // either strand paired with a second node of the other is refused.
+    #[test]
+    fn test12834_a_node_stands_for_one_node() {
+        // Three nodes of one type on each side: what is refused is refused
+        // by the correspondence, not by a difference of type.
+        let strand = MachineStrand::from_resolved(
+            vec![media("media:enc=utf-8"); 3],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![false; 3],
+        );
+        let mut nodes = NodeBijection::new(3, 3);
+        assert!(nodes.bind(0, 2, &strand, &strand));
+        assert!(nodes.bind(0, 2, &strand, &strand), "the same pair again");
+        assert!(!nodes.bind(0, 1, &strand, &strand), "one node of this strand, two of the other");
+        assert!(!nodes.bind(1, 2, &strand, &strand), "two nodes of this strand, one of the other");
+        // A refused pair leaves nothing behind: both nodes it named are still free.
+        assert!(nodes.bind(1, 1, &strand, &strand));
+        assert!(nodes.bind(2, 0, &strand, &strand));
+        assert!(nodes.bind(1, 1, &strand, &strand), "and a pair made stays made");
+
+        // Nodes that stand for each other hold one type.
+        let other = MachineStrand::from_resolved(
+            vec![media("media:enc=utf-8"), media("media:integer")],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![false; 2],
+        );
+        let mut typed = NodeBijection::new(3, 2);
+        assert!(typed.bind(0, 0, &strand, &other));
+        assert!(!typed.bind(1, 1, &strand, &other), "a text is not an integer");
     }
 }

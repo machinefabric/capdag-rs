@@ -68,7 +68,7 @@ use super::graph::{BindingSource, Machine, MachineStrand, NodeId};
 use super::include::{
     IncludedMachine, IncludedValue, MachineSource, MachineSourceError, NoMachineSource,
 };
-use super::resolve::{resolve_pre_interned, ForEachIdentity, PreInternedWiring};
+use super::resolve::{resolve_named_wirings, ForEachIdentity, MatchFailure, PreInternedWiring};
 use super::syntax::{parse_syntax, StepPolicy, SyntaxStatementKind, SyntaxValue};
 
 #[derive(Parser)]
@@ -474,7 +474,13 @@ fn parse_program(
             });
         }
 
-        let strand = resolve_pre_interned(nodes, &pre_interned, registry, strand_index)?;
+        // The name the text gave each node, by `NodeId`: what a refusal about
+        // a member names it by.
+        let mut names_by_id = vec![String::new(); nodes.len()];
+        for (name, id) in &name_to_id {
+            names_by_id[*id as usize] = name.clone();
+        }
+        let strand = resolve_named_wirings(nodes, &names_by_id, &pre_interned, registry, strand_index)?;
         strands.push(strand);
         strand_node_names.push(name_to_id);
     }
@@ -687,24 +693,25 @@ fn include_machines(
                 &accepts,
                 &vec![false; accepts.len()],
                 None,
-                alias,
-                0,
             )
-            .map_err(|e| match e {
-                MachineAbstractionError::UnmatchedSourceInCapArgs { source_urn, .. } => {
-                    MachineAbstractionError::UnmatchedMachineMember {
-                        position,
-                        alias: alias.clone(),
-                        source_urn,
-                    }
-                }
-                MachineAbstractionError::AmbiguousMachineNotation { .. } => {
-                    MachineAbstractionError::AmbiguousMachineMembers {
-                        position,
-                        alias: alias.clone(),
-                    }
-                }
-                other => other,
+            .map_err(|failure| match failure {
+                MatchFailure::Unmatched { source } => MachineAbstractionError::UnmatchedMachineMember {
+                    position,
+                    alias: alias.clone(),
+                    source_urn: sources[source].to_string(),
+                },
+                MatchFailure::Ambiguous { undecided } => MachineAbstractionError::AmbiguousMachineMembers {
+                    position,
+                    alias: alias.clone(),
+                    members: undecided
+                        .into_iter()
+                        .map(|(source, inputs)| super::error::UndecidedMember {
+                            node: Some(unnamed[source].clone()),
+                            source_urn: sources[source].to_string(),
+                            could_be: inputs.iter().map(|input| free[*input].0.clone()).collect(),
+                        })
+                        .collect(),
+                },
             })?;
             // The matching answers in types. Where it is unique no two
             // members and no two inputs it paired hold one type — two that
@@ -756,8 +763,9 @@ fn include_machines(
         for (index, step) in machine.steps.iter().enumerate() {
             let step_alias = format!("{instance}/{index}");
             alias_map.insert(step_alias.clone(), (step.cap_urn.clone(), position));
-            let mut included_as = w.included_as.clone();
-            included_as.push(instance.clone());
+            // The step came through this use, and then through whatever uses
+            // it had already come through inside the included machine.
+            let mut included_as = vec![instance.clone()];
             included_as.extend(step.included_as.iter().cloned());
             written.push(RawWiring {
                 sources: step

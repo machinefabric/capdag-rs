@@ -264,20 +264,82 @@ fn test12737_a_named_member_binds_the_arg_it_names() {
     }
     // The same two, produced by steps: each has a type, and it fits two args.
     let produced = "[(reference=\"a\") -> fetch -> a][(reference=\"b\") -> fetch -> b]";
-    assert!(matches!(
-        resolution_error(&format!("{produced}[(a, b) -> compare -> result]")),
-        MachineAbstractionError::AmbiguousMachineNotation { .. }
-    ));
+    // The refusal says which members to name, by the names the text gave
+    // them, and the args each could be for.
+    match resolution_error(&format!("{produced}[(a, b) -> compare -> result]")) {
+        MachineAbstractionError::AmbiguousMachineNotation { members, .. } => {
+            let named: Vec<(Option<&str>, Vec<&str>)> = members
+                .iter()
+                .map(|m| (m.node.as_deref(), m.could_be.iter().map(String::as_str).collect()))
+                .collect();
+            assert_eq!(
+                named,
+                vec![(Some("a"), vec!["series", "benchmark"]), (Some("b"), vec!["series", "benchmark"])]
+            );
+            assert!(members.iter().all(|m| m.source_urn == MediaUrn::from_string(SERIES).unwrap().to_string()));
+        }
+        other => panic!("{other}"),
+    }
+    let said = resolution_error(&format!("{produced}[(a, b) -> compare -> result]")).to_string();
+    assert!(said.contains("name them: 'a' (") && said.contains("could be series or benchmark; 'b' ("), "{said}");
+    // A member is named by the name the text gave it, wherever it stands in
+    // its group and whichever node was written first.
+    match resolution_error(&format!("{produced}[(b, a) -> compare -> result]")) {
+        MachineAbstractionError::AmbiguousMachineNotation { members, .. } => {
+            let named: Vec<Option<&str>> = members.iter().map(|m| m.node.as_deref()).collect();
+            assert_eq!(named, vec![Some("b"), Some("a")]);
+        }
+        other => panic!("{other}"),
+    }
+    // The args a member could be for are the ones no name took: with the
+    // first of three bound by name, the other two are what is left to say.
+    let mix_urn = format!(r#"cap:in="{SERIES}";mix;out="{COMPARISON}""#);
+    let with_mix = registry();
+    with_mix.add_caps_to_cache(vec![definition(
+        &mix_urn,
+        "mix",
+        vec![
+            CapArg::new(SERIES, "first", true, vec![ArgSource::Stdin { stdin: SERIES.to_string() }]),
+            flag("media:second;fmt=json;list;record;time-series", "second").accepting(SERIES),
+            flag("media:third;fmt=json;list;record;time-series", "third").accepting(SERIES),
+        ],
+        vec![CapOutput::new(COMPARISON, "mixed", "The mix")],
+    )]);
+    let third = "[(reference=\"c\") -> fetch -> c]";
+    match parse_machine(
+        &format!("{HEADERS}[mix {mix_urn}]{produced}{third}[(first=c, a, b) -> mix -> result]"),
+        &with_mix,
+    ) {
+        Err(MachineParseError::Resolution(MachineAbstractionError::AmbiguousMachineNotation { members, .. })) => {
+            let named: Vec<(Option<&str>, Vec<&str>)> = members
+                .iter()
+                .map(|m| (m.node.as_deref(), m.could_be.iter().map(String::as_str).collect()))
+                .collect();
+            assert_eq!(
+                named,
+                vec![(Some("a"), vec!["second", "third"]), (Some("b"), vec!["second", "third"])]
+            );
+        }
+        other => panic!("{:?}", other.map(|_| ())),
+    }
     let said = machine(&format!("{produced}[(a, benchmark=b) -> compare -> result]"));
     assert_eq!(said.strands()[0].edges().len(), 3);
     // An arg a member named is said: an unnamed member is not matched into it
     // as well. Two unnamed series beside a named benchmark have one arg left
     // between them, and that is what the refusal says — not that they tie.
-    let third = "[(reference=\"c\") -> fetch -> c]";
     assert!(matches!(
         resolution_error(&format!("{produced}{third}[(a, c, benchmark=b) -> compare -> result]")),
         MachineAbstractionError::UnmatchedSourceInCapArgs { .. }
     ));
+
+    // A member that fits no arg at all is the one the refusal names, wherever
+    // it stands: here the second, a comparison where a series is taken.
+    match resolution_error(&format!("{produced}[a -> compare -> made][(b, made) -> compare -> result]")) {
+        MachineAbstractionError::UnmatchedSourceInCapArgs { source_urn, .. } => {
+            assert_eq!(source_urn, MediaUrn::from_string(COMPARISON).unwrap().to_string());
+        }
+        other => panic!("{other}"),
+    }
 
     // A name the cap does not declare, with the names it does.
     match resolution_error("[(path, baseline=bench) -> compare -> result]") {
@@ -556,7 +618,22 @@ fn test12741_canonical_notation_round_trips() {
     assert_eq!(policy("[p -> compare{retry=2, on_error=absent} -> r]"), StepPolicy { retry: 2, on_error: OnError::Absent });
     assert!(!equivalent("[p -> compare{retry=2} -> r]", "[p -> compare -> r]"));
     assert!(!equivalent("[p -> compare{retry=2} -> r]", "[p -> compare{retry=3} -> r]"));
+    assert!(!equivalent("[p -> compare{on_error=absent} -> r]", "[p -> compare -> r]"));
     assert!(equivalent("[p -> compare{retry=2} -> r]", "[q -> compare { retry = 2 } -> s]"));
+
+    // Two machines of the same nodes, steps and anchors, whose steps take
+    // their outputs differently: which step makes the residuals is part of
+    // what each is.
+    let first = "[p -> compare -> r1][(p, window=20) -> compare -> (r2, residuals=x)]";
+    let second = "[p -> compare -> (r1, residuals=x)][(p, window=20) -> compare -> r2]";
+    assert!(!equivalent(first, second));
+    assert!(!equivalent(second, first));
+
+    // A machine is not the machine it is the first steps of.
+    let one = "[p -> compare -> (residuals=res)]";
+    let two = "[p -> compare -> (residuals=res)][res -> score -> s]";
+    assert!(!equivalent(one, two));
+    assert!(!equivalent(two, one));
 }
 
 // TEST12742: a machine header names another machine. Read with nothing to
@@ -606,4 +683,74 @@ fn test12743_render_payload_carries_names_constants_and_outputs() {
     assert!(outputs.iter().all(|o| o["node"].is_string()));
     assert!(edge.get("target_node").is_none(), "one target is not the shape any more");
     assert_eq!(edge["included_as"], json!([]), "a step the machine wrote itself");
+}
+
+// TEST12833: an output that carries the input holds the input's type, not the
+// URN that names it: a router's branches are typed by what was routed, so a
+// step that takes that type can be wired to one. Which branch a wiring takes
+// is part of what the machine is, although both hold one type.
+#[test]
+fn test12833_a_carried_output_holds_the_inputs_type() {
+    const VERDICT: &str = "media:enc=utf-8;verdict";
+    const KEPT: &str = "media:kept;marker";
+    const DROPPED: &str = "media:dropped;marker";
+    let route_urn = format!(r#"cap:in="{SERIES}";route;out="{VERDICT}""#);
+    let registry = registry();
+    registry.add_caps_to_cache(vec![definition(
+        &route_urn,
+        "route",
+        vec![CapArg::new(SERIES, "series", true, vec![ArgSource::Stdin { stdin: SERIES.to_string() }])],
+        vec![
+            CapOutput::new(VERDICT, "verdict", "The verdict"),
+            CapOutput::new(KEPT, "kept", "What was kept").optional(true).carrying_input(),
+            CapOutput::new(DROPPED, "dropped", "What was dropped").optional(true).carrying_input(),
+        ],
+    )]);
+    let headers = format!("{HEADERS}[route {route_urn}]");
+    let parse = |wirings: &str| {
+        parse_machine_with_node_names(&format!("{headers}{wirings}"), &registry)
+            .unwrap_or_else(|e| panic!("{wirings}: {e}"))
+    };
+    let urn = |text: &str| MediaUrn::from_string(text).unwrap().to_string();
+
+    let (m, names) = parse("[s -> route -> (v, kept=k, dropped=d)][k -> compare -> r]");
+    let held = |name: &str| m.strands()[0].node_urn(names[0][name]).to_string();
+    assert_eq!(held("k"), urn(SERIES), "the branch holds what was routed");
+    assert_eq!(held("d"), urn(SERIES));
+    assert_eq!(held("v"), urn(VERDICT), "the main output holds its own type");
+    // The edge still records which output each is, by the output's own URN.
+    let route = m.strands()[0]
+        .edges()
+        .iter()
+        .find(|edge| {
+            let cap = edge.cap_urn.to_string();
+            cap.trim_start_matches("cap:").split(';').any(|tag| tag == "route")
+        })
+        .expect("the route step");
+    let mut taken: Vec<(String, String)> = route
+        .outputs
+        .iter()
+        .map(|o| (o.output_name.clone(), o.output_media_urn.to_string()))
+        .collect();
+    taken.sort();
+    assert_eq!(
+        taken,
+        vec![
+            ("dropped".to_string(), urn(DROPPED)),
+            ("kept".to_string(), urn(KEPT)),
+            ("verdict".to_string(), urn(VERDICT)),
+        ]
+    );
+
+    // An output that carries nothing holds the URN it declares.
+    let (plain, plain_names) = parse("[p -> compare -> (note=n)]");
+    assert_eq!(plain.strands()[0].node_urn(plain_names[0]["n"]).to_string(), urn(NOTE));
+
+    // The two branches hold one type and are two outputs.
+    let kept_only = parse("[s -> route -> (kept=x)]").0;
+    let kept_again = parse("[t -> route -> (kept=y)]").0;
+    let dropped_only = parse("[s -> route -> (dropped=x)]").0;
+    assert!(kept_only.is_equivalent(&kept_again));
+    assert!(!kept_only.is_equivalent(&dropped_only));
+    assert!(!dropped_only.is_equivalent(&kept_only));
 }

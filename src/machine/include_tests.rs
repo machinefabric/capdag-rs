@@ -245,7 +245,15 @@ fn test12805_unnamed_members_of_a_machine_step_are_matched_by_type() {
     match refusal(&format!(
         "[analyse machine \"analyse\"]{FETCH_TWO}[(a, b) -> analyse -> (cmp=c, scores=s)]"
     )) {
-        MachineAbstractionError::AmbiguousMachineMembers { alias, .. } => assert_eq!(alias, "analyse"),
+        MachineAbstractionError::AmbiguousMachineMembers { alias, members, .. } => {
+            assert_eq!(alias, "analyse");
+            // Which members to name, and the inputs each could be.
+            let named: Vec<(Option<&str>, Vec<&str>)> = members
+                .iter()
+                .map(|m| (m.node.as_deref(), m.could_be.iter().map(String::as_str).collect()))
+                .collect();
+            assert_eq!(named, vec![(Some("a"), vec!["bench", "series"]), (Some("b"), vec!["bench", "series"])]);
+        }
         other => panic!("{other}"),
     }
     // An input of the including machine, unnamed: nothing says what it is.
@@ -263,6 +271,15 @@ fn test12805_unnamed_members_of_a_machine_step_are_matched_by_type() {
     )) {
         MachineAbstractionError::UnmatchedMachineMember { alias, source_urn, .. } => {
             assert_eq!(alias, "analyse");
+            assert_eq!(source_urn, crate::MediaUrn::from_string(COMPARISON).unwrap().to_string());
+        }
+        other => panic!("{other}"),
+    }
+    // The member that fits no input is the one named, wherever it stands.
+    match refusal(&format!(
+        "[analyse machine \"analyse\"]{produce}[(a, c) -> analyse -> (cmp=c2, scores=s)]"
+    )) {
+        MachineAbstractionError::UnmatchedMachineMember { source_urn, .. } => {
             assert_eq!(source_urn, crate::MediaUrn::from_string(COMPARISON).unwrap().to_string());
         }
         other => panic!("{other}"),
@@ -335,6 +352,21 @@ fn test12806_a_machine_step_is_held_to_the_machines_inputs_and_outputs() {
     match step("[(series=a, bench=b) -> analyse{retry=2} -> (cmp=c, scores=s)]") {
         MachineAbstractionError::PolicyOnMachine { alias, .. } => assert_eq!(alias, "analyse"),
         other => panic!("{other}"),
+    }
+
+    // A cap header and a machine header name steps in one space: one alias
+    // is declared once, whichever kind declares it first.
+    for headers in ["[fetch machine \"analyse\"]", "[twice machine \"analyse\"][twice machine \"pub\"]"] {
+        match parse(&format!("{headers}{FETCH_TWO}")) {
+            Err(MachineParseError::Syntax(MachineSyntaxError::DuplicateAlias { .. })) => {}
+            other => panic!("{headers}: {:?}", other.map(|_| ())),
+        }
+    }
+    // A machine header is a declaration like any other: with no wiring after
+    // it, the machine has headers and no steps.
+    match parse_machine_with_sources("[analyse machine \"analyse\"]", &registry(), &library(), None) {
+        Err(MachineParseError::Syntax(MachineSyntaxError::NoEdges)) => {}
+        other => panic!("{:?}", other.map(|_| ())),
     }
 }
 
