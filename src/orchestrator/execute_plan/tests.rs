@@ -2040,3 +2040,30 @@ async fn test12788_terminals_are_persisted_and_nothing_else_is() {
     per_run.sort();
     assert_eq!(per_run, vec![(0, texts(&["saved:A"])), (1, texts(&["saved:B"]))]);
 }
+
+// TEST12874: a map's persisted files are the terminal's in ITEM order when its
+// runs finish in the reverse order. A host lists, titles and numbers a run's
+// outputs in the order the terminal gives them ("long · 1", "long · 2", …), so
+// a completion-ordered terminal listed page 2 before page 1.
+#[tokio::test(start_paused = true)]
+async fn test12874_persisted_map_files_are_in_item_order_whatever_finishes_first() {
+    let built = build("[doc -> split -> ws][ws -> upper -> out]", &[]).await;
+    let runtime = Scripted::with(MapFailurePolicy::Fail, true, None);
+    runtime.on("upper", |call| {
+        let text = call.main();
+        let delay = match text.as_str() {
+            "one" => 30,
+            "two" => 20,
+            _ => 10,
+        };
+        after(Duration::from_secs(delay), value(text.to_uppercase()))
+    });
+    let result = run(&built, &runtime, &[("doc", Given::One("one two three"))]).await.unwrap();
+    let produced = result.terminal(&built.output("out")).unwrap().produced().unwrap();
+    let saved: Vec<String> = produced
+        .writer_results
+        .iter()
+        .flat_map(|writer| writer.saved_paths.clone())
+        .collect();
+    assert_eq!(saved, texts(&["saved:ONE", "saved:TWO", "saved:THREE"]));
+}
