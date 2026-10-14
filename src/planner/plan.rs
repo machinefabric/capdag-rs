@@ -1744,6 +1744,8 @@ mod tests {
         ));
         // An edge type nothing produces is not read.
         assert!(serde_json::from_str::<EdgeType>(r#"{"json_field":{"field":"data"}}"#).is_err());
+        // An arg edge that names no argument is not one.
+        assert!(serde_json::from_str::<EdgeType>(r#"{"arg":{}}"#).is_err());
     }
 
     // TEST743: Tests ExecutionNodeType enum serialization and deserialization to/from JSON
@@ -1800,11 +1802,68 @@ mod tests {
                 "carries_input": false,
             })
         );
-        // A node type nothing produces is not read.
-        assert!(serde_json::from_value::<ExecutionNodeType>(serde_json::json!({
-            "node_type": "merge", "input_nodes": ["a"], "merge_strategy": "concat"
-        }))
-        .is_err());
+        let item_node = MachineNode::item("item", "each", "input", "media:page").node_type;
+        assert_eq!(
+            serde_json::to_value(&item_node).unwrap(),
+            serde_json::json!({
+                "node_type": "item", "foreach": "each", "source": "input", "media_urn": "media:page",
+            })
+        );
+        let gather = MachineNode::collect("g", vec!["a".to_string(), "b".to_string()], "media:summary").node_type;
+        assert_eq!(
+            serde_json::to_value(&gather).unwrap(),
+            serde_json::json!({
+                "node_type": "collect", "input_nodes": ["a", "b"], "output_media_urn": "media:summary",
+            })
+        );
+
+        // The default policy is not written; one a step wrote is, whole.
+        let written = serde_json::to_value(&cap_node).unwrap();
+        assert!(written.get("policy").is_none());
+        let mut retrying = cap_node.clone();
+        if let ExecutionNodeType::Cap { policy, .. } = &mut retrying {
+            *policy = StepPolicy {
+                retry: 2,
+                on_error: crate::machine::OnError::Absent,
+            };
+        }
+        let written = serde_json::to_value(&retrying).unwrap();
+        assert_eq!(written["policy"], serde_json::json!({"retry": 2, "on_error": "absent"}));
+        match serde_json::from_value::<ExecutionNodeType>(written).unwrap() {
+            ExecutionNodeType::Cap { policy, .. } => {
+                assert_eq!((policy.retry, policy.on_error), (2, crate::machine::OnError::Absent))
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            serde_json::to_value(StepPolicy { retry: 1, ..StepPolicy::default() }).unwrap(),
+            serde_json::json!({"retry": 1, "on_error": "fail"})
+        );
+        assert_eq!(
+            serde_json::from_value::<StepPolicy>(serde_json::json!({"retry": 3})).unwrap(),
+            StepPolicy { retry: 3, ..StepPolicy::default() },
+            "a field left out is its default"
+        );
+
+        // A node type nothing produces is not read, nor is a node missing a
+        // field its kind has, nor a map in the shape it once had.
+        for refused in [
+            serde_json::json!({"node_type": "merge", "input_nodes": ["a"], "merge_strategy": "concat"}),
+            serde_json::json!({"node_type": "split", "input_node": "a", "output_count": 2}),
+            serde_json::json!({"node_type": "for_each", "input_node": "a", "body_entry": "b", "body_exit": "b"}),
+            serde_json::json!({"node_type": "for_each", "token_id": "t", "sources": [{"node": "a", "item": "i"}]}),
+            serde_json::json!({"node_type": "collect", "input_nodes": ["a"]}),
+            serde_json::json!({"node_type": "cap", "cap_urn": "cap:test"}),
+            serde_json::json!({"node_type": "cap", "token_id": "", "cap_urn": "cap:test"}),
+            serde_json::json!({"node_type": "cap", "token_id": "t", "cap_urn": "cap:test", "policy": {"on_error": "shrug"}}),
+            serde_json::json!({"node_type": "item", "foreach": "each", "source": "input"}),
+            serde_json::json!({"cap_urn": "cap:test"}),
+        ] {
+            assert!(
+                serde_json::from_value::<ExecutionNodeType>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
     }
 
     // TEST744: Tests MachinePlan serialization and deserialization to/from JSON
@@ -2000,6 +2059,7 @@ mod tests {
         }
         assert!(!inside.contains("cap_post") && !inside.contains("foreach_0"));
         assert_eq!(plan.map_members("foreach_1").len(), 2);
+        assert!(plan.map_members("cap_0").is_empty(), "a step is no map");
     }
 
     // TEST12754: a plan whose nodes name what is not there, or name it as what
@@ -2040,6 +2100,38 @@ mod tests {
             },
             "which is not that",
         );
+        fn source(plan: &mut MachinePlan) -> &mut ForEachSource {
+            match &mut plan.nodes.get_mut("foreach_0").unwrap().node_type {
+                ExecutionNodeType::ForEach { sources, .. } => &mut sources[0],
+                _ => unreachable!(),
+            }
+        }
+        refused(
+            &|plan| source(plan).node = "nowhere".to_string(),
+            "node 'foreach_0' names source 'nowhere', which is not in the plan",
+        );
+        refused(
+            &|plan| source(plan).item = "nowhere".to_string(),
+            "node 'foreach_0' names item 'nowhere', which is not in the plan",
+        );
+        // The item it lists is an item — of another source, or of another map.
+        refused(
+            &|plan| source(plan).node = "input_slot".to_string(),
+            "map 'foreach_0' lists 'foreach_0_item_0' as its item of 'input_slot', which is not that",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::for_each(
+                    "second",
+                    vec![ForEachSource {
+                        node: "cap_0".to_string(),
+                        item: "foreach_0_item_0".to_string(),
+                    }],
+                    vec!["foreach_0_item_0".to_string()],
+                ));
+            },
+            "map 'second' lists 'foreach_0_item_0' as its item of 'cap_0', which is not that",
+        );
         refused(
             &|plan| {
                 if let ExecutionNodeType::ForEach { body, .. } =
@@ -2049,6 +2141,18 @@ mod tests {
                 }
             },
             "does not list its item 'foreach_0_item_0' in its body",
+        );
+        fn body(plan: &mut MachinePlan, member: &str) {
+            if let ExecutionNodeType::ForEach { body, .. } =
+                &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
+            {
+                body.push(member.to_string());
+            }
+        }
+        refused(&|plan| body(plan, "foreach_0"), "map 'foreach_0' lists itself in its body");
+        refused(
+            &|plan| body(plan, "nowhere"),
+            "node 'foreach_0' names body node 'nowhere', which is not in the plan",
         );
         refused(
             &|plan| {
@@ -2072,6 +2176,12 @@ mod tests {
         );
         refused(
             &|plan| {
+                plan.add_node(MachineNode::cap_output("o", "nowhere", "media:x", "x", false));
+            },
+            "node 'o' names step 'nowhere', which is not in the plan",
+        );
+        refused(
+            &|plan| {
                 plan.add_node(MachineNode::collect("g", vec!["nowhere".to_string()], "media:"));
             },
             "node 'g' names gathered node 'nowhere', which is not in the plan",
@@ -2088,6 +2198,17 @@ mod tests {
             },
             "item node 'stray' names map 'foreach_0'",
         );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::item("stray", "cap_0", "input_slot", "media:pdf-page"));
+            },
+            "item node 'stray' names map 'cap_0'",
+        );
+
+        // A step's other output, of a step: accepted.
+        let mut plan = build_foreach_plan();
+        plan.add_node(MachineNode::cap_output("o", "cap_0", "media:x", "x", false));
+        plan.validate().expect("valid");
     }
 
     fn one_cap_strand(prefix: Option<&str>) -> Strand {
@@ -2270,5 +2391,34 @@ mod tests {
             .expect("a scoped ForEach body coordinate is valid");
         assert_eq!(decoded.foreach_token_id.as_deref(), Some("tok-foreach"));
         assert_eq!(decoded.body_index, 3);
+        assert!(decoded.enclosing.is_empty());
+
+        // The runs a body is inside are written as a list, empty for a body
+        // of the machine's own map; a linear outcome is inside no map.
+        assert_eq!(encoded.get("enclosing"), Some(&serde_json::json!([])));
+        let outer = serde_json::json!({"foreach_token_id": "tok-outer", "body_index": 2});
+        let mut inside_linear = encoded.as_object().unwrap().clone();
+        inside_linear.insert("enclosing".to_string(), serde_json::json!([outer]));
+        let error = serde_json::from_value::<BodyOutcome>(serde_json::Value::Object(inside_linear))
+            .expect_err("a linear outcome names no enclosing run");
+        assert!(error.to_string().contains("a linear BodyOutcome is inside no map"));
+
+        // A body of a map opened inside another names the run it is inside.
+        let mut nested = encoded.as_object().unwrap().clone();
+        nested.insert("foreach_token_id".to_string(), serde_json::json!("tok-foreach"));
+        nested.insert("body_index".to_string(), serde_json::json!(3));
+        nested.insert("enclosing".to_string(), serde_json::json!([outer]));
+        let decoded = serde_json::from_value::<BodyOutcome>(serde_json::Value::Object(nested)).unwrap();
+        assert_eq!(
+            decoded.enclosing,
+            vec![MapRun {
+                foreach_token_id: "tok-outer".parse().unwrap(),
+                body_index: 2,
+            }]
+        );
+        assert_eq!(serde_json::to_value(&decoded).unwrap()["enclosing"], serde_json::json!([outer]));
+        // A run that names no map is not a run.
+        assert!(serde_json::from_value::<MapRun>(serde_json::json!({"body_index": 2})).is_err());
+        assert!(serde_json::from_value::<MapRun>(serde_json::json!({"foreach_token_id": "", "body_index": 2})).is_err());
     }
 }

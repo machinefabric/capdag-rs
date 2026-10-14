@@ -382,6 +382,32 @@ mod tests {
         assert_eq!(graph.nodes["concat"], "media:enc=utf-8;joined");
         assert!(!graph.nodes.contains_key("both"), "a gather is an input, not a node of the graph");
         assert!(!graph.nodes.contains_key("out"));
+
+        let media = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs.iter().map(|(node, urn)| (node.to_string(), urn.to_string())).collect()
+        };
+        // A step alone: what it produces has its media whether or not a step
+        // of the graph reads it, and what it reads is what the graph is given.
+        let alone = steps_to_resolved_graph(&plan(), &["split"], &registry()).expect("converts");
+        assert_eq!(
+            alone.nodes,
+            media(&[
+                ("split", "media:enc=utf-8;head"),
+                ("split.rest", REST),
+                ("extract", "media:enc=utf-8;ext=txt"),
+            ])
+        );
+        // And a step that reads a step's other output from outside the graph
+        // is given it under that output's own type.
+        let gathering = steps_to_resolved_graph(&plan(), &["concat"], &registry()).expect("converts");
+        assert_eq!(
+            gathering.nodes,
+            media(&[
+                ("concat", "media:enc=utf-8;joined"),
+                ("summarize", "media:enc=utf-8;summary"),
+                ("split.rest", REST),
+            ])
+        );
     }
 
     // TEST770: a plan with a map is not one graph, and the refusal names the
@@ -464,8 +490,16 @@ mod tests {
             "step 'summarize' has an incoming Iteration edge from 'now'",
         );
         refused(
+            &|plan| plan.add_edge(MachinePlanEdge::collection("now", "summarize")),
+            "step 'summarize' has an incoming Collection edge from 'now'",
+        );
+        refused(
             &|plan| plan.add_edge(MachinePlanEdge::arg("out", "extract", CONTEXT)),
             "step 'extract' is wired from 'out', which holds no value",
+        );
+        refused(
+            &|plan| plan.add_edge(MachinePlanEdge::arg("doc", "extract", "not a urn")),
+            "step 'extract': input stream URN 'not a urn' is not a media URN",
         );
 
         let mut unknown = plan();
@@ -497,5 +531,6 @@ mod tests {
         assert_eq!(step(&graph, "extract").policy, policy);
         assert_eq!(step(&graph, "extract").token_id, token);
         assert!(step(&graph, "summarize").policy.is_default());
+        assert_ne!(step(&graph, "summarize").token_id, token, "each step has its own");
     }
 }
