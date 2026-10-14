@@ -384,7 +384,9 @@ fn emit_multiline(
 //
 // The render payload is a list of strands, each with its
 // nodes, edges, and anchor sets. The JS renderer iterates the
-// strands and draws each as a sub-graph.
+// strands and draws each as a sub-graph: every step a node of
+// its own, an edge into it per binding (a node or a constant)
+// and out of it per output taken.
 
 impl Machine {
     /// Build the JSON payload the JS strand-graph renderer
@@ -404,13 +406,28 @@ impl Machine {
     ///           "cap_urn": "cap:in=...;...;out=...",
     ///           "title": "Extract Text from PDF",
     ///           "is_loop": false,
+    ///           "retry": 0,
+    ///           "on_error": "fail",
+    ///           "included_as": [],
     ///           "assignment": [
     ///             {
     ///               "cap_arg_media_urn": "media:document;ext=pdf",
+    ///               "arg_name": "input",
     ///               "source_node": "n0"
+    ///             },
+    ///             {
+    ///               "cap_arg_media_urn": "media:integer;max-pages",
+    ///               "arg_name": "max_pages",
+    ///               "constant": 20
     ///             }
     ///           ],
-    ///           "target_node": "n1"
+    ///           "outputs": [
+    ///             {
+    ///               "output_media_urn": "media:enc=utf-8;ext=txt",
+    ///               "output_name": "output",
+    ///               "node": "n1"
+    ///             }
+    ///           ]
     ///         },
     ///         ...
     ///       ],

@@ -647,6 +647,11 @@ mod tests {
         assert_eq!(StepPolicy { retry: 3, on_error: OnError::Fail }.to_notation(), "{retry=3}");
         assert_eq!(StepPolicy { retry: 0, on_error: OnError::Absent }.to_notation(), "{on_error=absent}");
         assert_eq!(both.to_notation(), "{retry=2, on_error=absent}");
+        // The policy of a step that wrote none is the default; either key
+        // said is not.
+        assert!(StepPolicy::default().is_default());
+        assert!(!StepPolicy { retry: 0, on_error: OnError::Absent }.is_default());
+        assert!(!StepPolicy { retry: 1, on_error: OnError::Fail }.is_default());
         // What is written back reads as what it was.
         for p in [StepPolicy::default(), both, StepPolicy { retry: 7, on_error: OnError::Fail }] {
             assert_eq!(policy(&format!("a -> f{} -> b", p.to_notation())), p);

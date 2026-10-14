@@ -146,7 +146,8 @@ fn media_def(urn: &str, validation: Option<MediaValidation>, schema: Option<serd
 
 /// A registry with the caps above and the media definitions their constants
 /// are held to: a window of 1 to 365, a label that is a string of three
-/// allowed words, tags and references that are strings.
+/// allowed words, tags that are strings, and references of at most twelve
+/// bytes.
 pub(super) fn registry() -> FabricRegistry {
     let registry = FabricRegistry::new_for_test();
     registry.add_caps_to_cache(vec![compare_cap(), fetch_cap(), publish_cap(), mean_cap(), score_cap()]);
@@ -164,7 +165,11 @@ pub(super) fn registry() -> FabricRegistry {
         Some(json!({"type": "string"})),
     ));
     registry.insert_cached_media_def_for_test(media_def(TAG, None, Some(json!({"type": "string"}))));
-    registry.insert_cached_media_def_for_test(media_def(REFERENCE, None, None));
+    registry.insert_cached_media_def_for_test(media_def(
+        REFERENCE,
+        Some(MediaValidation { max_length: Some(12), ..Default::default() }),
+        None,
+    ));
     registry
 }
 
@@ -412,6 +417,29 @@ fn test12738_a_constant_is_bound_and_validated() {
     // The bounds themselves are allowed.
     machine("[(path, window=1) -> compare -> result]");
     machine("[(path, window=365) -> compare -> result]");
+
+    // A string's length is its UTF-8 bytes: six two-byte characters fill a
+    // reference of twelve, and a seventh breaks it.
+    machine(r#"[(reference="éééééé") -> fetch -> s]"#);
+    let (_, _, reason) = refused(r#"[(reference="ééééééé") -> fetch -> s]"#);
+    assert!(reason.contains("maximum length 12"), "{reason}");
+
+    // A schema's required properties are held: a benchmark written as an
+    // object says its points.
+    let with_benchmark_schema = registry();
+    with_benchmark_schema.insert_cached_media_def_for_test(media_def(
+        BENCHMARK,
+        None,
+        Some(json!({"type": "object", "required": ["points"], "properties": {"points": {"type": "array"}}})),
+    ));
+    parse_machine(&format!(r#"{HEADERS}[(path, benchmark={{"points": [1, 2]}}) -> compare -> r]"#), &with_benchmark_schema)
+        .unwrap_or_else(|e| panic!("a benchmark that says its points: {e}"));
+    match parse_machine(&format!(r#"{HEADERS}[(path, benchmark={{"scale": 2}}) -> compare -> r]"#), &with_benchmark_schema) {
+        Err(MachineParseError::Resolution(MachineAbstractionError::ConstantFailsValidation { reason, .. })) => {
+            assert!(reason.contains("schema"), "{reason}")
+        }
+        other => panic!("a benchmark that does not say its points must be refused, got {other:?}"),
+    }
 
     // A constant is not a node. One input feeding two args, and the same input
     // feeding one of them beside a constant for the other, have the same nodes
