@@ -137,6 +137,7 @@ pub(crate) fn cap_step(cap_urn_str: &str, title: &str, from: &str, to: &str) -> 
             specificity: 0,
             input_is_sequence: false,
             output_is_sequence: false,
+            output_urn: None,
             // Single main input fed by the strand input. Chained fixtures wire the
             // predecessor via `chain_cap_steps` (below).
             inputs: vec![CapInput {

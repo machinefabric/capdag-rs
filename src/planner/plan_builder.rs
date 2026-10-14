@@ -1647,6 +1647,7 @@ mod tests {
                     specificity: 2,
                     input_is_sequence: false,
                     output_is_sequence: false,
+                    output_urn: None,
                     inputs: vec![CapInput {
                         arg_urn: MediaUrn::from_string("media:enc=utf-8;file-path").unwrap(),
                         source: ArgSourceRef::StrandInput,
@@ -1710,6 +1711,7 @@ mod tests {
                     specificity: 1,
                     input_is_sequence: false,
                     output_is_sequence: false,
+                    output_urn: None,
                     inputs: vec![CapInput {
                         arg_urn: MediaUrn::from_string("media:enc=utf-8;file-path").unwrap(),
                         source: source_ref,

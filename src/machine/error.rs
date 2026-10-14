@@ -127,6 +127,16 @@ pub enum MachineAbstractionError {
         declared: Vec<String>,
     },
 
+    /// A strand step takes an output, by its media URN, that the step's cap
+    /// does not declare as one of its other outputs.
+    #[error("strand {strand_index}: cap '{cap_urn}' declares no other output '{output_urn}' (it declares: {})", declared.join(", "))]
+    UnknownStrandOutput {
+        strand_index: usize,
+        cap_urn: String,
+        output_urn: String,
+        declared: Vec<String>,
+    },
+
     /// A named member's URN does not conform to the type that arg accepts.
     #[error("strand {strand_index}: cap '{cap_urn}' arg '{name}' accepts '{accepts}', and its source is '{source_urn}'")]
     SourceDoesNotConformToArg {

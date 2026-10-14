@@ -53,8 +53,12 @@ pub enum LiveMachinePlanEdgeType {
         specificity: usize,
         /// Whether the cap's main input expects a sequence of items
         input_is_sequence: bool,
-        /// Whether the cap's output produces a sequence of items
+        /// Whether the output this edge reaches produces a sequence of items
         output_is_sequence: bool,
+        /// The output this edge reaches, when it is not the cap's main one:
+        /// that output's media URN, its identity in the definition. `None`:
+        /// the main output, whose runtime type follows the cap URN's effect.
+        output_urn: Option<MediaUrn>,
     },
     /// Fan-out: iterate over list items (list → item, remove `list` tag)
     /// Synthesized for any list-typed source.
@@ -358,8 +362,12 @@ pub enum StrandStepType {
         specificity: usize,
         /// Whether the cap's main input expects a sequence
         input_is_sequence: bool,
-        /// Whether the cap's output produces a sequence
+        /// Whether the output this step takes produces a sequence
         output_is_sequence: bool,
+        /// The output this step takes, when it is not the cap's main one: that
+        /// output's media URN, its identity in the definition (never its name,
+        /// which is a label). `None`: the main output.
+        output_urn: Option<MediaUrn>,
         /// ALL of this cap's data-flow inputs — the primary (stdin) input plus any
         /// convergence inputs — each naming its producer explicitly. The primary is
         /// the input whose `arg_urn` is the cap's stdin argument URN.
@@ -776,12 +784,48 @@ impl LiveCapFab {
             }
         };
 
-        // Create edge
-        let edge_idx = self.edges.len();
         // Cardinality shape from the single canonical definition (`Cap::sequence_shape`)
         // so path search, editor realization, and notation resolution never diverge.
         let (input_is_sequence, output_is_sequence) = cap.sequence_shape();
+        self.push_cap_edge(cap, &from_spec, to_spec, input_is_sequence, output_is_sequence, None);
 
+        // Every other output the cap declares is reachable too: an edge from
+        // the cap's input to that output's own type. An output that carries
+        // the input unchanged (a router's) has no type of its own to reach.
+        for output in cap.get_outputs() {
+            if output.carries.is_some() {
+                continue;
+            }
+            let output_urn = MediaUrn::from_string(&output.media_urn)
+                .expect("cap registry invariant: every output media_urn is a valid MediaUrn");
+            if cap
+                .main_output()
+                .map_or(false, |main| main.media_urn == output.media_urn)
+            {
+                continue;
+            }
+            self.push_cap_edge(
+                cap,
+                &from_spec,
+                output_urn.clone(),
+                input_is_sequence,
+                output.is_sequence,
+                Some(output_urn),
+            );
+        }
+    }
+
+    /// Store one edge of `cap`, from its input to one of its outputs.
+    fn push_cap_edge(
+        &mut self,
+        cap: &Cap,
+        from_spec: &MediaUrn,
+        to_spec: MediaUrn,
+        input_is_sequence: bool,
+        output_is_sequence: bool,
+        output_urn: Option<MediaUrn>,
+    ) {
+        let edge_idx = self.edges.len();
         // Update indices with URN clones — MediaUrn and CapUrn
         // are the HashMap keys directly via their derived
         // `Hash`/`Eq` impls; no string intermediaries.
@@ -800,8 +844,8 @@ impl LiveCapFab {
             .or_default()
             .push(edge_idx);
 
-        let edge = LiveMachinePlanEdge {
-            from_spec,
+        self.edges.push(LiveMachinePlanEdge {
+            from_spec: from_spec.clone(),
             to_spec,
             edge_type: LiveMachinePlanEdgeType::Cap {
                 cap_urn: cap.urn.clone(),
@@ -809,9 +853,9 @@ impl LiveCapFab {
                 specificity: cap.urn.specificity(),
                 input_is_sequence,
                 output_is_sequence,
+                output_urn,
             },
-        };
-        self.edges.push(edge);
+        });
     }
 
     /// Get all edges reachable from a source media URN.
@@ -872,8 +916,14 @@ impl LiveCapFab {
                         specificity,
                         input_is_sequence,
                         output_is_sequence,
+                        output_urn,
                     } => {
-                        let runtime_out = cap_urn.infer_runtime_output_media(source).ok()?;
+                        // The main output's runtime type follows the cap URN's
+                        // effect; any other output gives its own type.
+                        let runtime_out = match output_urn {
+                            Some(output_urn) => output_urn.clone(),
+                            None => cap_urn.infer_runtime_output_media(source).ok()?,
+                        };
                         Some((
                             LiveMachinePlanEdge {
                                 from_spec: source.clone(),
@@ -884,6 +934,7 @@ impl LiveCapFab {
                                     specificity: *specificity,
                                     input_is_sequence: *input_is_sequence,
                                     output_is_sequence: *output_is_sequence,
+                                    output_urn: output_urn.clone(),
                                 },
                             },
                             *output_is_sequence,
@@ -1446,12 +1497,14 @@ impl LiveCapFab {
                         specificity,
                         input_is_sequence,
                         output_is_sequence,
+                        output_urn,
                     } => StrandStepType::Cap {
                         cap_urn: cap_urn.clone(),
                         title: cap_title.clone(),
                         specificity: *specificity,
                         input_is_sequence: *input_is_sequence,
                         output_is_sequence: *output_is_sequence,
+                        output_urn: output_urn.clone(),
                         inputs: vec![CapInput {
                             arg_urn: MediaUrn::from_string(cap_urn.in_spec())
                                 .expect("cap URN in= is a valid media URN"),
@@ -1588,8 +1641,11 @@ impl LiveCapFab {
 
         // Same rank — compare structural details.
         match (&a.step_type, &b.step_type) {
-            (StrandStepType::Cap { cap_urn: ca, .. }, StrandStepType::Cap { cap_urn: cb, .. }) => {
-                match ca.cmp(cb) {
+            (
+                StrandStepType::Cap { cap_urn: ca, output_urn: oa, .. },
+                StrandStepType::Cap { cap_urn: cb, output_urn: ob, .. },
+            ) => {
+                match ca.cmp(cb).then_with(|| oa.cmp(ob)) {
                     Ordering::Equal => {}
                     ord => return ord,
                 }
@@ -2406,6 +2462,7 @@ mod tests {
                         specificity: 4,
                         input_is_sequence: false,
                         output_is_sequence: true,
+                        output_urn: None,
                         inputs: vec![CapInput {
                             arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                             source: ArgSourceRef::StrandInput,
@@ -2838,6 +2895,7 @@ mod tests {
                     specificity: 0,
                     input_is_sequence: false,
                     output_is_sequence: false,
+                    output_urn: None,
                     inputs: vec![CapInput {
                         arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                         source: ArgSourceRef::StrandInput,
@@ -2889,6 +2947,7 @@ mod tests {
                     specificity: 0,
                     input_is_sequence: false,
                     output_is_sequence: false,
+                    output_urn: None,
                     inputs: vec![CapInput {
                         arg_urn: MediaUrn::from_string("media:document;ext=pdf").unwrap(),
                         source: ArgSourceRef::StrandInput,
@@ -2906,6 +2965,158 @@ mod tests {
 
         let err = strand.knit(&registry).unwrap_err();
         assert!(matches!(err, MachineAbstractionError::UnknownCap { .. }));
+    }
+
+    /// `split`: text in; its main output `head`, another output `rest`, a
+    /// sequence output `parts`, and a router-like output `same` that carries
+    /// the input unchanged. And `count`, which takes `rest`.
+    fn split_caps() -> (Cap, Cap) {
+        use crate::cap::definition::CapOutput;
+        let mut split = make_test_cap("media:enc=utf-8;ext=txt", "media:enc=utf-8;head", "split", "Split");
+        let mut parts = CapOutput::new("media:enc=utf-8;part".to_string(), "parts", "the parts".to_string());
+        parts.is_sequence = true;
+        split.outputs = vec![
+            CapOutput::new("media:enc=utf-8;head".to_string(), "head", "the head".to_string()),
+            CapOutput::new("media:enc=utf-8;rest".to_string(), "rest", "the rest".to_string()),
+            parts,
+            CapOutput::new("media:enc=utf-8;same".to_string(), "same", "the input".to_string()).carrying_input(),
+        ];
+        let count = make_test_cap_with_arg("media:enc=utf-8;rest", "media:integer;numeric", "count", "Count");
+        (split, count)
+    }
+
+    fn text_strand_step(cap: &Cap, output_urn: Option<&str>, to: &str) -> StrandStep {
+        StrandStep::new(
+            StrandStepType::Cap {
+                cap_urn: cap.urn.clone(),
+                title: cap.title.clone(),
+                specificity: 0,
+                input_is_sequence: false,
+                output_is_sequence: false,
+                output_urn: output_urn.map(|urn| MediaUrn::from_string(urn).unwrap()),
+                inputs: vec![CapInput {
+                    arg_urn: MediaUrn::from_string(cap.urn.in_spec()).unwrap(),
+                    source: ArgSourceRef::StrandInput,
+                }],
+            },
+            MediaUrn::from_string(cap.urn.in_spec()).unwrap(),
+            MediaUrn::from_string(to).unwrap(),
+        )
+    }
+
+    // TEST12847: every output of a cap other than its main one is reachable by
+    // planning: the search has an edge from the cap's input to that output's
+    // own type, and a strand that reaches it records which output it took (by
+    // URN), with that output's cardinality. An output that carries the input
+    // has no type of its own and no edge; the main output's edge is the cap's.
+    #[test]
+    fn test12847_a_caps_other_outputs_are_reachable_by_planning() {
+        let (split, count) = split_caps();
+        let mut graph = LiveCapFab::new();
+        graph.add_cap(&split);
+        graph.add_cap(&count);
+        graph.set_bookends(&all_bookends(&[split.clone(), count.clone()]));
+        assert_eq!(graph.edges.len(), 4, "split: head, rest, parts; count: one");
+
+        let text = MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap();
+        let only_step = |target: &str| -> StrandStep {
+            let target = MediaUrn::from_string(target).unwrap();
+            let paths = graph.find_paths_to_exact_target(&text, &target, false, 3, 10);
+            assert_eq!(paths.len(), 1, "one path to {target}");
+            assert_eq!(paths[0].steps.len(), 1);
+            paths[0].steps[0].clone()
+        };
+
+        let head = only_step("media:enc=utf-8;head");
+        assert!(matches!(&head.step_type, StrandStepType::Cap { output_urn: None, .. }), "{head:?}");
+
+        let rest = only_step("media:enc=utf-8;rest");
+        match &rest.step_type {
+            StrandStepType::Cap { cap_urn, output_urn, output_is_sequence, .. } => {
+                assert_eq!(cap_urn, &split.urn);
+                assert_eq!(output_urn.as_ref().map(|u| u.to_string()).as_deref(), Some("media:enc=utf-8;rest"));
+                assert!(!output_is_sequence);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(rest.to_spec.to_string(), "media:enc=utf-8;rest", "the output's own type, not the effect's");
+
+        let parts = only_step("media:enc=utf-8;part");
+        assert!(
+            matches!(&parts.step_type, StrandStepType::Cap { output_is_sequence: true, .. }),
+            "the output's own cardinality: {parts:?}"
+        );
+
+        let same = MediaUrn::from_string("media:enc=utf-8;same").unwrap();
+        assert!(graph.find_paths_to_exact_target(&text, &same, false, 3, 10).is_empty(), "a carried output is reached by no edge");
+
+        // Through another output and on: count is fed by split, by token.
+        let integer = MediaUrn::from_string("media:integer;numeric").unwrap();
+        let paths = graph.find_paths_to_exact_target(&text, &integer, false, 3, 10);
+        assert_eq!(paths.len(), 1);
+        let steps = &paths[0].steps;
+        assert_eq!(steps.len(), 2);
+        assert!(matches!(&steps[0].step_type, StrandStepType::Cap { output_urn: Some(_), .. }));
+        match &steps[1].step_type {
+            StrandStepType::Cap { inputs, output_urn: None, .. } => {
+                assert_eq!(inputs[0].source, ArgSourceRef::Step { token_id: steps[0].token_id().clone() });
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // TEST12848: a strand that takes another output of a cap knits into a
+    // machine whose step takes that output by its name; the notation says so
+    // and reads back as the same machine. A strand that takes an output its cap
+    // does not declare as another output — an unknown URN, or the main one —
+    // is refused, naming the outputs it could take.
+    #[test]
+    fn test12848_a_strand_through_another_output_knits_into_a_machine() {
+        use crate::cap::registry::FabricRegistry;
+        use crate::machine::MachineAbstractionError;
+
+        let (split, count) = split_caps();
+        let registry = FabricRegistry::new_for_test();
+        registry.add_caps_to_cache(vec![split.clone(), count.clone()]);
+
+        let first = text_strand_step(&split, Some("media:enc=utf-8;rest"), "media:enc=utf-8;rest");
+        let mut second = text_strand_step(&count, None, "media:integer;numeric");
+        if let StrandStepType::Cap { inputs, .. } = &mut second.step_type {
+            inputs[0].source = ArgSourceRef::Step { token_id: first.token_id().clone() };
+        }
+        let strand = |steps: Vec<StrandStep>| Strand {
+            source_media_urn: MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
+            target_media_urn: steps.last().unwrap().to_spec.clone(),
+            total_steps: steps.len() as i32,
+            cap_step_count: steps.len() as i32,
+            steps,
+            description: "split then count".to_string(),
+        };
+
+        let through = strand(vec![first.clone(), second]);
+        let machine = through.knit(&registry).expect("a strand through another output knits");
+        let edges = machine.strands()[0].edges();
+        let split_edge = edges.iter().find(|edge| edge.cap_urn == split.urn).expect("split's step");
+        assert_eq!(split_edge.outputs.len(), 1);
+        assert_eq!(split_edge.outputs[0].output_name, "rest");
+        let notation = machine.to_machine_notation().unwrap();
+        assert!(notation.contains("rest="), "{notation}");
+        let reread = crate::machine::parse_machine(&notation, &registry).expect("the notation reads back");
+        assert!(reread.is_equivalent(&machine), "{notation}");
+
+        for wrong in ["media:enc=utf-8;nowhere", "media:enc=utf-8;head"] {
+            let step = text_strand_step(&split, Some(wrong), wrong);
+            match strand(vec![step]).knit(&registry).unwrap_err() {
+                MachineAbstractionError::UnknownStrandOutput { output_urn, declared, .. } => {
+                    assert_eq!(output_urn, wrong);
+                    assert_eq!(
+                        declared,
+                        vec!["media:enc=utf-8;rest", "media:enc=utf-8;part", "media:enc=utf-8;same"]
+                    );
+                }
+                other => panic!("{wrong}: {other:?}"),
+            }
+        }
     }
 
     // =========================================================================

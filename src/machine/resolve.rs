@@ -191,7 +191,10 @@ pub fn resolve_strand(
     for step in &strand.steps {
         match &step.step_type {
             StrandStepType::Cap {
-                cap_urn, inputs, ..
+                cap_urn,
+                inputs,
+                output_urn,
+                ..
             } => {
                 // Resolve every declared input to its producer's `NodeId`. The primary
                 // (stdin) input's runtime media is `from_spec`; it is the only input
@@ -231,8 +234,9 @@ pub fn resolve_strand(
                     cap_urn: cap_urn.clone(),
                     named_sources: Vec::new(),
                     source_node_ids,
-                    // A strand step produces its cap's main output.
-                    targets: vec![(None, target_id)],
+                    // A strand step produces the output it takes: its cap's
+                    // main output, or the other output its URN identifies.
+                    targets: vec![(strand_output_name(registry, cap_urn, output_urn.as_ref(), strand_index)?, target_id)],
                     policy: StepPolicy::default(),
                     included_as: Vec::new(),
                 });
@@ -269,6 +273,40 @@ pub fn resolve_strand(
     }
 
     resolve_pre_interned(nodes, &pre_interned, registry, strand_index)
+}
+
+/// The name a strand step's taken output has in its cap's definition: `None`
+/// for the main output. A strand records an output by its media URN, its
+/// identity; a wiring takes it by its name, a label that is unique per cap.
+fn strand_output_name(
+    registry: &FabricRegistry,
+    cap_urn: &CapUrn,
+    output_urn: Option<&MediaUrn>,
+    strand_index: usize,
+) -> Result<Option<String>, MachineAbstractionError> {
+    let Some(output_urn) = output_urn else {
+        return Ok(None);
+    };
+    let cap = registry
+        .get_cached_cap(&cap_urn.to_string())
+        .ok_or_else(|| MachineAbstractionError::UnknownCap {
+            cap_urn: cap_urn.to_string(),
+        })?;
+    let main = cap.main_output().map(|main| main.media_urn.clone());
+    match cap.output_by_urn(&output_urn.to_string()) {
+        Some(output) if Some(&output.media_urn) != main.as_ref() => Ok(Some(output.name.clone())),
+        _ => Err(MachineAbstractionError::UnknownStrandOutput {
+            strand_index,
+            cap_urn: cap_urn.to_string(),
+            output_urn: output_urn.to_string(),
+            declared: cap
+                .get_outputs()
+                .iter()
+                .filter(|output| Some(&output.media_urn) != main.as_ref())
+                .map(|output| output.media_urn.clone())
+                .collect(),
+        }),
+    }
 }
 
 /// Resolve a planner-path wiring set into a `MachineStrand`.

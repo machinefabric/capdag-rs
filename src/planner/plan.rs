@@ -2273,6 +2273,7 @@ mod tests {
                 specificity: 1,
                 input_is_sequence: false,
                 output_is_sequence: false,
+                output_urn: None,
                 inputs: Vec::new(),
             },
             from_spec: input.clone(),
