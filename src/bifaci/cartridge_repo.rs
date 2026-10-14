@@ -6,7 +6,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::manifest::CapGroup;
 use super::registry_verdict::{ChainFailureReason, RegistryVerdict, RegistryVerdictState};
+use crate::Cap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -208,83 +210,10 @@ const fn const_eq(a: &str, b: &str) -> bool {
     true
 }
 
-/// One cap as it appears inside a `cap_group` in the registry response.
-///
-/// `urn`, `title`, and `aliases` are always present. `abstract` defaults to
-/// false. `cap_description`, `args`, and `output` are only emitted by
-/// cartridges that document them; the identity cap, for example, omits all three.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryCap {
-    pub urn: String,
-    pub title: String,
-    pub aliases: Vec<String>,
-    #[serde(
-        rename = "abstract",
-        default,
-        skip_serializing_if = "std::ops::Not::not"
-    )]
-    pub is_abstract: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cap_description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub args: Option<Vec<RegistryCapArg>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<RegistryCapOutput>,
-}
-
-/// One argument descriptor for a registry cap.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryCapArg {
-    pub media_urn: String,
-    pub required: bool,
-    #[serde(default)]
-    pub is_sequence: bool,
-    /// Consumed without a length promise (see `CapArg::streaming`).
-    #[serde(default)]
-    pub streaming: bool,
-    #[serde(default)]
-    pub sources: Vec<RegistryArgSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub arg_description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<serde_json::Value>,
-}
-
-/// One source entry on a `RegistryCapArg`. The wire form is one of three
-/// shapes — stdin/position/cli_flag — at most one populated per entry.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryArgSource {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stdin: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub position: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cli_flag: Option<String>,
-}
-
-/// Output descriptor for a registry cap.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryCapOutput {
-    pub media_urn: String,
-    #[serde(default)]
-    pub is_sequence: bool,
-    /// May be emitted without a length promise (see `CapOutput::streaming`).
-    #[serde(default)]
-    pub streaming: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_description: Option<String>,
-}
-
-/// A `cap_groups[i]` entry in the registry response: a named bundle of
-/// caps plus the media URNs the bundle's adapter inspects.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct RegistryCapGroup {
-    pub name: String,
-    #[serde(default)]
-    pub caps: Vec<RegistryCap>,
-    #[serde(default)]
-    pub adapter_urns: Vec<String>,
-}
+/// The schema revision of the cartridge registry this build reads and writes
+/// (`schemas/cartridge-registry/v6.json`): its cap groups carry each
+/// cartridge's cap definitions exactly as its manifest declares them.
+pub const CARTRIDGE_REGISTRY_SCHEMA_VERSION: &str = "6.0";
 
 /// A cartridge entry as returned by /api/cartridges.
 ///
@@ -318,10 +247,11 @@ pub struct CartridgeInfo {
     pub categories: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Cap groups exactly as carried on the wire. Snake-cased on the wire
-    /// (`cap_groups`) so we name it explicitly to override `rename_all`.
+    /// The cartridge's cap groups, its definitions exactly as its manifest
+    /// declares them. Snake-cased on the wire (`cap_groups`) so we name it
+    /// explicitly to override `rename_all`.
     #[serde(rename = "cap_groups")]
-    pub cap_groups: Vec<RegistryCapGroup>,
+    pub cap_groups: Vec<CapGroup>,
     /// All versions with their builds (platform-specific packages).
     pub versions: HashMap<String, CartridgeVersionData>,
     /// All available versions (newest first)
@@ -598,9 +528,11 @@ pub struct CartridgeRegistryEntry {
     pub team_id: String,
     #[serde(default)]
     pub min_app_version: String,
-    /// Snake-cased on the wire; named explicitly to override `rename_all`.
+    /// The cartridge's cap groups, its definitions exactly as its manifest
+    /// declares them. Snake-cased on the wire; named explicitly to override
+    /// `rename_all`.
     #[serde(rename = "cap_groups", default)]
-    pub cap_groups: Vec<RegistryCapGroup>,
+    pub cap_groups: Vec<CapGroup>,
     #[serde(default)]
     pub categories: Vec<String>,
     #[serde(default)]
@@ -769,11 +701,11 @@ impl CartridgeInfo {
         platforms
     }
 
-    /// Iterate every `RegistryCap` across every group, in declaration order.
+    /// Iterate every cap definition across every group, in declaration order.
     /// Use this whenever you need a flat view of the cartridge's caps —
     /// it is the only sanctioned way to walk caps now that the on-wire
     /// shape groups them.
-    pub fn iter_caps(&self) -> impl Iterator<Item = &RegistryCap> {
+    pub fn iter_caps(&self) -> impl Iterator<Item = &Cap> {
         self.cap_groups.iter().flat_map(|g| g.caps.iter())
     }
 }
@@ -1068,13 +1000,7 @@ impl CartridgeRepo {
                 id: cartridge_info.id.clone(),
             };
             for cap in cartridge_info.iter_caps() {
-                let parsed = CapUrn::from_string(&cap.urn).map_err(|e| {
-                    CartridgeRepoError::ParseError(format!(
-                        "cartridge {} ({} @ {}): invalid cap URN '{}': {}",
-                        key.id, key.channel, key.registry_url, cap.urn, e
-                    ))
-                })?;
-                let normalized = parsed.to_string();
+                let normalized = cap.urn.to_string();
                 cap_to_cartridges
                     .entry(normalized)
                     .or_default()
@@ -1193,11 +1119,10 @@ impl CartridgeRepo {
         // non-in/out/effect tag are arbitrary and carry no functional weight.
         for cache in caches.values() {
             for (key, cartridge) in &cache.cartridges {
-                let Some(cap_info) = cartridge.iter_caps().find(|c| {
-                    CapUrn::from_string(&c.urn)
-                        .map(|declared| declared.is_equivalent(&requested))
-                        .unwrap_or(false)
-                }) else {
+                let Some(cap_info) = cartridge
+                    .iter_caps()
+                    .find(|c| c.urn.is_equivalent(&requested))
+                else {
                     continue;
                 };
                 let page_url = if cartridge.page_url.is_empty() {
@@ -1354,10 +1279,10 @@ impl CartridgeRepoServer {
         registry_url: impl Into<String>,
         expected_fabric_url: impl AsRef<str>,
     ) -> Result<Self> {
-        if registry.schema_version != "5.0" {
+        if registry.schema_version != CARTRIDGE_REGISTRY_SCHEMA_VERSION {
             return Err(CartridgeRepoError::ParseError(format!(
-                "Unsupported registry schema version: {}. Required: 5.0",
-                registry.schema_version
+                "Unsupported registry schema version: {}. Required: {}",
+                registry.schema_version, CARTRIDGE_REGISTRY_SCHEMA_VERSION
             )));
         }
         // The registry regime version must match the version this build speaks.
@@ -1379,6 +1304,24 @@ impl CartridgeRepoServer {
                  reference the same fabric so their caps are comparable.",
                 registry.fabric_registry_url, expected_fabric_url
             )));
+        }
+        // A registry is bytes another program wrote: every definition in it is
+        // held to the definition rules before anything routes by it, as a
+        // cartridge's own manifest is (`CapManifest::from_advertised`).
+        for (channel, entries) in [
+            ("release", &registry.channels.release.cartridges),
+            ("nightly", &registry.channels.nightly.cartridges),
+        ] {
+            for (id, entry) in entries {
+                for cap in entry.cap_groups.iter().flat_map(|g| g.caps.iter()) {
+                    crate::cap::validation::validate_cap_definition(cap).map_err(|e| {
+                        CartridgeRepoError::ParseError(format!(
+                            "cartridge {} ({}): {}",
+                            id, channel, e
+                        ))
+                    })?;
+                }
+            }
         }
         Ok(Self {
             registry,
@@ -1636,13 +1579,7 @@ impl CartridgeRepoServer {
         let mut matched = Vec::new();
         for cart in all {
             for cap in cart.iter_caps() {
-                let declared = CapUrn::from_string(&cap.urn).map_err(|e| {
-                    CartridgeRepoError::ParseError(format!(
-                        "cartridge {} ({}): invalid declared cap URN '{}': {}",
-                        cart.id, cart.channel, cap.urn, e
-                    ))
-                })?;
-                if declared.is_dispatchable(&requested) {
+                if cap.urn.is_dispatchable(&requested) {
                     matched.push(cart.clone());
                     break;
                 }
@@ -1686,24 +1623,28 @@ mod tests {
         }
     }
 
-    fn build_cap(urn: &str, title: &str, command: &str) -> RegistryCap {
-        RegistryCap {
-            urn: urn.to_string(),
-            title: title.to_string(),
-            aliases: vec![command.to_string()],
-            is_abstract: false,
-            cap_description: None,
-            args: None,
-            output: None,
+    /// A whole definition of `urn`: its input on stdin unless it is void, and
+    /// the output its URN states unless that is void.
+    fn build_cap(urn: &str, title: &str, command: &str) -> Cap {
+        use crate::cap::definition::{ArgSource, CapArg, CapOutput};
+        let urn = crate::urn::cap_urn::CapUrn::from_string(urn).expect("a test cap URN");
+        let (input, output) = (urn.in_spec().to_string(), urn.out_spec().to_string());
+        let mut cap = Cap::new(urn, title.to_string(), vec![command.to_string()]);
+        if input != crate::urn::media_urn::MEDIA_VOID {
+            cap.add_arg(CapArg::new(&input, "input", true, vec![ArgSource::Stdin { stdin: input.clone() }]));
         }
+        if output != crate::urn::media_urn::MEDIA_VOID {
+            cap.add_output(CapOutput::new(&output, "output", "What it gives"));
+        }
+        cap
     }
 
     fn build_cap_group(
         name: &str,
-        caps: Vec<RegistryCap>,
+        caps: Vec<Cap>,
         adapter_urns: Vec<String>,
-    ) -> RegistryCapGroup {
-        RegistryCapGroup {
+    ) -> CapGroup {
+        CapGroup {
             name: name.to_string(),
             caps,
             adapter_urns,
@@ -1713,7 +1654,7 @@ mod tests {
     fn build_cartridge_info(
         id: &str,
         name: &str,
-        cap_groups: Vec<RegistryCapGroup>,
+        cap_groups: Vec<CapGroup>,
     ) -> CartridgeInfo {
         build_cartridge_info_in(CartridgeChannel::Release, id, name, cap_groups)
     }
@@ -1722,7 +1663,7 @@ mod tests {
         channel: CartridgeChannel,
         id: &str,
         name: &str,
-        cap_groups: Vec<RegistryCapGroup>,
+        cap_groups: Vec<CapGroup>,
     ) -> CartridgeInfo {
         let pkg = format!("{}-1.0.0.pkg", id);
         let mut versions = HashMap::new();
@@ -1752,7 +1693,7 @@ mod tests {
 
     fn build_registry_entry(
         name: &str,
-        cap_groups: Vec<RegistryCapGroup>,
+        cap_groups: Vec<CapGroup>,
     ) -> CartridgeRegistryEntry {
         let mut versions = HashMap::new();
         versions.insert("1.0.0".to_string(), build_version_data("entry-1.0.0.pkg"));
@@ -1796,20 +1737,30 @@ mod tests {
     // change shows up here as a parse failure.
     // ----------------------------------------------------------------------
 
-    // TEST632: A registry cap with only the three required fields parses.
+    // TEST632: A registry cap is the cartridge's cap definition as its
+    // manifest declares it: the identity cap reads with its argument and its
+    // output, and a cap whose argument or output has no name is not one.
     #[test]
     fn test632_deserialize_minimal_registry_cap() {
-        let json = r#"{"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]}"#;
-        let cap: RegistryCap = serde_json::from_str(json).unwrap();
-        assert_eq!(cap.urn, "cap:effect=none");
+        let identity = serde_json::to_string(&crate::standard::caps::identity_cap()).unwrap();
+        let cap: Cap = serde_json::from_str(&identity).unwrap();
+        assert_eq!(cap.urn, crate::standard::caps::identity_urn());
         assert_eq!(cap.title, "Identity");
         assert_eq!(cap.aliases, vec!["identity".to_string()]);
-        assert!(cap.cap_description.is_none());
-        assert!(cap.args.is_none());
-        assert!(cap.output.is_none());
+        assert_eq!(cap.args[0].name, "input");
+        assert_eq!(cap.main_output().map(|o| o.name.as_str()), Some("output"));
+
+        let unnamed_arg = r#"{"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"],
+            "args": [{"media_urn": "media:", "required": true, "sources": [{"stdin": "media:"}]}]}"#;
+        assert!(serde_json::from_str::<Cap>(unnamed_arg).is_err(), "an argument has a name");
+        let single_output = r#"{"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"],
+            "output": {"media_urn": "media:", "output_description": "x"}}"#;
+        let read: Cap = serde_json::from_str(single_output).unwrap();
+        assert!(read.get_outputs().is_empty(), "outputs are a list; a single `output` is not read");
     }
 
-    // TEST633: A registry cap with cap_description, args, output all parses.
+    // TEST633: A registry cap with a description, named arguments and several
+    // outputs parses, each part where the definition holds it.
     #[test]
     fn test633_deserialize_rich_registry_cap() {
         let json = r#"{
@@ -1820,45 +1771,54 @@ mod tests {
             "args": [
                 {
                     "media_urn": "media:enc=utf-8;file-path",
+                    "name": "document",
                     "required": true,
                     "is_sequence": false,
                     "sources": [{"stdin": "media:document;ext=pdf"}, {"position": 0}],
                     "arg_description": "Path to the PDF file to process"
                 }
             ],
-            "output": {
-                "media_urn": "media:enc=utf-8;page",
-                "is_sequence": true,
-                "output_description": "One page text per PDF page"
-            }
+            "outputs": [
+                {
+                    "media_urn": "media:enc=utf-8;page",
+                    "name": "pages",
+                    "is_sequence": true,
+                    "output_description": "One page text per PDF page"
+                },
+                {
+                    "media_urn": "media:enc=utf-8;outline",
+                    "name": "outline",
+                    "optional": true,
+                    "output_description": "The document's outline, when it has one"
+                }
+            ]
         }"#;
-        let cap: RegistryCap = serde_json::from_str(json).unwrap();
+        let cap: Cap = serde_json::from_str(json).unwrap();
         assert_eq!(cap.aliases, vec!["disbind".to_string()]);
         assert_eq!(
             cap.cap_description.as_deref(),
             Some("Extract each PDF page as plain page text.")
         );
-        let args = cap.args.unwrap();
-        assert_eq!(args.len(), 1);
-        assert_eq!(args[0].media_urn, "media:enc=utf-8;file-path");
-        assert_eq!(args[0].sources[0].stdin.as_deref(), Some("media:document;ext=pdf"));
-        assert_eq!(args[0].sources[1].position, Some(0));
-        let output = cap.output.unwrap();
-        assert_eq!(output.media_urn, "media:enc=utf-8;page");
-        assert!(output.is_sequence);
+        assert_eq!(cap.args.len(), 1);
+        assert_eq!(cap.args[0].media_urn, "media:enc=utf-8;file-path");
+        assert_eq!(cap.args[0].name, "document");
+        assert_eq!(cap.args[0].sources[1], crate::cap::definition::ArgSource::Position { position: 0 });
+        let main = cap.main_output().expect("the main output is the one `out=` names");
+        assert_eq!(main.name, "pages");
+        assert!(main.is_sequence);
+        let outline = cap.output_named("outline").expect("another output");
+        assert!(outline.optional);
+        crate::cap::validation::validate_cap_definition(&cap).expect("a whole definition");
     }
 
     // TEST634: A registry cap_group parses with caps + adapter_urns.
     #[test]
     fn test634_deserialize_cap_group() {
-        let json = r#"{
-            "name": "pdf-formats",
-            "caps": [
-                {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]}
-            ],
-            "adapter_urns": ["media:document;ext=pdf"]
-        }"#;
-        let group: RegistryCapGroup = serde_json::from_str(json).unwrap();
+        let identity = serde_json::to_string(&crate::standard::caps::identity_cap()).unwrap();
+        let json = format!(
+            r#"{{"name": "pdf-formats", "caps": [{identity}], "adapter_urns": ["media:document;ext=pdf"]}}"#
+        );
+        let group: CapGroup = serde_json::from_str(&json).unwrap();
         assert_eq!(group.name, "pdf-formats");
         assert_eq!(group.caps.len(), 1);
         assert_eq!(group.adapter_urns, vec!["media:document;ext=pdf".to_string()]);
@@ -1883,8 +1843,8 @@ mod tests {
                 {
                     "name": "pdf-formats",
                     "caps": [
-                        {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]},
-                        {"urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"]}
+                        {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"], "args": [{"media_urn": "media:", "name": "input", "required": true, "sources": [{"stdin": "media:"}]}], "outputs": [{"media_urn": "media:", "name": "output", "output_description": "The input data, unchanged"}]},
+                        {"urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"], "args": [{"media_urn": "media:document;ext=pdf", "name": "document", "required": true, "sources": [{"stdin": "media:document;ext=pdf"}]}], "outputs": [{"media_urn": "media:enc=utf-8;page", "name": "pages", "is_sequence": true, "output_description": "The pages"}]}
                     ],
                     "adapter_urns": ["media:document;ext=pdf"]
                 }
@@ -1949,7 +1909,7 @@ mod tests {
                         {
                             "name": "pdf-formats",
                             "caps": [
-                                {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"]}
+                                {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"], "args": [{"media_urn": "media:", "name": "input", "required": true, "sources": [{"stdin": "media:"}]}], "outputs": [{"media_urn": "media:", "name": "output", "output_description": "The input data, unchanged"}]}
                             ],
                             "adapter_urns": ["media:document;ext=pdf"]
                         }
@@ -2375,7 +2335,7 @@ mod tests {
             nightly_map.insert(id.to_string(), entry);
         }
         CartridgeRegistry {
-            schema_version: "5.0".to_string(),
+            schema_version: CARTRIDGE_REGISTRY_SCHEMA_VERSION.to_string(),
             registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
             fabric_registry_url: TEST_FABRIC_URL.to_string(),
             last_updated: "2026-02-07".to_string(),
@@ -2394,7 +2354,56 @@ mod tests {
         }
     }
 
-    // TEST323: CartridgeRepoServer requires schema 5.0 and rejects older.
+    // TEST12849: a registry is bytes another program wrote, so reading one
+    // holds every cap definition in it to the definition rules: a cartridge
+    // whose definition breaks one is refused, naming the cartridge, its
+    // channel, the cap and the rule; whole definitions are read.
+    #[test]
+    fn test12849_reading_a_registry_holds_its_definitions_to_the_rules() {
+        let compare = r#"cap:in="media:enc=utf-8";compare;out="media:record""#;
+        let whole = build_cap(compare, "Compare", "compare");
+        let registry = build_registry(vec![(
+            "comparer",
+            build_registry_entry("Comparer", vec![build_cap_group("default", vec![whole.clone()], vec![])]),
+        )]);
+        CartridgeRepoServer::new(registry, "https://test.example/manifest", TEST_FABRIC_URL)
+            .expect("whole definitions are read");
+
+        // The output the cap URN states is not declared (RULE21).
+        let mut broken = whole.clone();
+        broken.set_outputs(vec![]);
+        let registry = build_registry(vec![(
+            "comparer",
+            build_registry_entry("Comparer", vec![build_cap_group("default", vec![broken], vec![])]),
+        )]);
+        let message = CartridgeRepoServer::new(registry, "https://test.example/manifest", TEST_FABRIC_URL)
+            .err()
+            .expect("a definition that breaks a rule is refused")
+            .to_string();
+        assert!(
+            message.contains("comparer") && message.contains("release") && message.contains("compare") && message.contains("RULE21"),
+            "{message}"
+        );
+
+        // A nightly entry is held to the same rules, and named in its channel.
+        let mut nightly_broken = whole.clone();
+        nightly_broken.set_outputs(vec![]);
+        let registry = build_registry_in_channels(
+            vec![],
+            vec![(
+                "comparer",
+                build_registry_entry("Comparer", vec![build_cap_group("default", vec![nightly_broken], vec![])]),
+            )],
+        );
+        let message = CartridgeRepoServer::new(registry, "https://test.example/manifest", TEST_FABRIC_URL)
+            .err()
+            .expect("a nightly definition that breaks a rule is refused")
+            .to_string();
+        assert!(message.contains("nightly") && message.contains("RULE21"), "{message}");
+    }
+
+    // TEST323: CartridgeRepoServer requires the schema this build reads
+    // (6.0) and rejects older.
     #[test]
     fn test323_cartridge_repo_server_validate_registry() {
         let server = CartridgeRepoServer::new(
@@ -2405,11 +2414,11 @@ mod tests {
         assert!(server.is_ok());
 
         let mut bad = build_registry(vec![]);
-        bad.schema_version = "4.0".to_string();
+        bad.schema_version = "5.0".to_string();
         let result =
             CartridgeRepoServer::new(bad, "https://test.example/manifest", TEST_FABRIC_URL);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("5.0"));
+        assert!(result.unwrap_err().to_string().contains("6.0"));
 
         // A registry from a different regime version (e.g. a v0 legacy manifest
         // that somehow reached this v>=1 build) must be rejected, not silently
@@ -2954,25 +2963,26 @@ mod tests {
     }
 
     // TEST319: A registry response with a malformed cap URN inside
-    // cap_groups must propagate as ParseError when indexed into the
-    // cache, not silently disappear.
-    #[tokio::test]
-    async fn test319_update_cache_rejects_malformed_cap_urn() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
-        let registry = CartridgeRegistryResponse {
-            cartridges: vec![build_cartridge_info(
-                "broken",
-                "Broken",
-                vec![build_cap_group(
-                    "g",
-                    vec![build_cap("not a valid urn at all", "Bad", "x")],
-                    vec![],
-                )],
-            )],
-        };
-        let mut caches = repo.caches.write().await;
-        let result = CartridgeRepo::update_cache(&mut caches, "https://x", registry);
-        assert!(matches!(result, Err(CartridgeRepoError::ParseError(_))));
+    // cap_groups is refused where it is read, not silently dropped: a cap
+    // definition holds a parsed cap URN, so a cartridge entry carrying one
+    // that does not parse is not a cartridge entry.
+    #[test]
+    fn test319_update_cache_rejects_malformed_cap_urn() {
+        let good = serde_json::to_value(build_cartridge_info(
+            "broken",
+            "Broken",
+            vec![build_cap_group("g", vec![build_cap("cap:in=media:;x;out=media:", "Bad", "x")], vec![])],
+        ))
+        .unwrap();
+        let read: CartridgeInfo = serde_json::from_value(good.clone()).expect("the entry as written reads");
+        assert_eq!(read.iter_caps().count(), 1);
+
+        let mut broken = good;
+        broken["cap_groups"][0]["caps"][0]["urn"] = serde_json::Value::String("not a valid urn at all".into());
+        assert!(
+            serde_json::from_value::<CartridgeInfo>(broken).is_err(),
+            "an entry whose cap URN does not parse is refused"
+        );
     }
 
     /// TEST8156: every way a sync can fail lands on the verdict that names it.

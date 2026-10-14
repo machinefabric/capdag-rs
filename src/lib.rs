@@ -188,8 +188,8 @@ pub use bifaci::cartridge_repo::{
     host_platform, CartridgeBinaryInfo, CartridgeBuild, CartridgeChannel, CartridgeChannelEntries,
     CartridgeCompatibilityResolution, CartridgeDistributionInfo, CartridgeInfo, CartridgeRegistry,
     CartridgeRegistryChannels, CartridgeRegistryEntry, CartridgeRegistryResponse, CartridgeRepo,
-    CartridgeRepoError, CartridgeSuggestion, CartridgeVersionData, CompatStatus, RegistryArgSource,
-    RegistryCap, RegistryCapArg, RegistryCapGroup, RegistryCapOutput,
+    CartridgeRepoError, CartridgeSuggestion, CartridgeVersionData, CompatStatus,
+    CARTRIDGE_REGISTRY_SCHEMA_VERSION,
 };
 pub use ops_rs::{DryContext, Op, OpError, OpMetadata, OpResult, WetContext};
 
