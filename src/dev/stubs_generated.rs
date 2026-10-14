@@ -213,7 +213,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.206.2143",
+        version="1.207.2159",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.206.2143"
+version = "1.207.2159"
 edition = "2021"
 
 [dependencies]
@@ -791,7 +791,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.206.2143",
+		"1.207.2159",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -1030,26 +1030,32 @@ func buildManifest() -> Manifest {
         title: "__CARTRIDGE_NAME__",
         aliases: ["__CARTRIDGE_NAME__"],
         capDescription: "Classify a piece of text as positive, neutral, or negative.",
+        // Every argument and every output has a name: the label a machine wires
+        // it by. The media URN is still what identifies it.
         args: [
             CapArg(
                 mediaUrn: inMedia,
+                name: "text",
                 required: true,
                 sources: [.stdin(inMedia), .positional(0)],
                 argDescription: "UTF-8 text to classify."
             )
         ],
-        output: CapOutput(
-            mediaUrn: outMedia,
-            outputDescription: "One of the literal strings 'positive', 'neutral', or 'negative'."
-        )
+        outputs: [
+            CapOutput(
+                mediaUrn: outMedia,
+                name: "tag",
+                outputDescription: "One of the literal strings 'positive', 'neutral', or 'negative'."
+            )
+        ]
     )
 
     // Every cartridge advertises CAP_IDENTITY; the runtime auto-registers its handler.
-    let identity = CapDefinition(urn: CSCapIdentity, title: "Identity", aliases: ["identity"])
+    let identity = identityCapDefinition()
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.206.2143",
+        version: "1.207.2159",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
