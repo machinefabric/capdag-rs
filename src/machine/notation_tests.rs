@@ -254,6 +254,8 @@ fn test12737_a_named_member_binds_the_arg_it_names() {
     };
     assert_eq!(node_of("benchmark"), names[0].get("bench").copied());
     assert_eq!(node_of("series"), names[0].get("path").copied());
+    // Two inputs that hold one type come in the order their nodes were made.
+    assert_eq!(named.strands()[0].input_anchor_ids(), &[names[0]["path"], names[0]["bench"]]);
 
     // Unnamed, nothing says which of the two series is the benchmark.
     match resolution_error("[(path, bench) -> compare -> result]") {
@@ -518,6 +520,20 @@ fn test12739_outputs_sources_and_sinks() {
     assert!(!step(&folded, "mean"));
     assert!(step(&mapped, "score"));
     assert!(!step(&mapped, "compare"));
+    // Whether a step maps is part of what the machine is: the same text, read
+    // where the residuals are one value, is another machine.
+    let one_value = registry();
+    let mut single = compare_cap();
+    single.outputs.iter_mut().find(|output| output.name == "residuals").unwrap().is_sequence = false;
+    one_value.add_caps_to_cache(vec![single]);
+    let unmapped = parse_machine(
+        &format!("{HEADERS}[path -> compare -> (residuals=res)][res -> score -> s]"),
+        &one_value,
+    )
+    .unwrap();
+    assert!(!step(&unmapped, "score"));
+    assert!(!unmapped.is_equivalent(&mapped));
+    assert!(!mapped.is_equivalent(&unmapped));
 }
 
 // TEST12740: the media URN of a node comes from the wirings that touch it and
@@ -634,6 +650,23 @@ fn test12741_canonical_notation_round_trips() {
     let two = "[p -> compare -> (residuals=res)][res -> score -> s]";
     assert!(!equivalent(one, two));
     assert!(!equivalent(two, one));
+
+    // Two steps of one cap that differ only in what feeds an arg have one
+    // order in the canonical text, whichever was written first: the one fed
+    // by a node, then the one fed by a constant.
+    let with_benchmark_def = registry();
+    with_benchmark_def.insert_cached_media_def_for_test(media_def(BENCHMARK, None, None));
+    let by_node = "[(series=p, benchmark=q) -> compare -> (note=a)]";
+    let by_constant = "[(series=p, benchmark=[1, 2]) -> compare -> (note=b)]";
+    let text_of = |wirings: String| {
+        parse_machine(&format!("{HEADERS}{wirings}"), &with_benchmark_def)
+            .unwrap_or_else(|e| panic!("{wirings}: {e}"))
+            .to_machine_notation()
+            .unwrap()
+    };
+    let text = text_of(format!("{by_node}{by_constant}"));
+    assert_eq!(text, text_of(format!("{by_constant}{by_node}")));
+    assert!(text.find("benchmark=n").unwrap() < text.find("benchmark=[1,2]").unwrap(), "{text}");
 }
 
 // TEST12742: a machine header names another machine. Read with nothing to
@@ -753,4 +786,109 @@ fn test12833_a_carried_output_holds_the_inputs_type() {
     assert!(kept_only.is_equivalent(&kept_again));
     assert!(!kept_only.is_equivalent(&dropped_only));
     assert!(!dropped_only.is_equivalent(&kept_only));
+}
+
+// TEST12838: what a machine sorts by URN, it sorts by the URN's parts — the
+// prefix, then the tags by key and value; for a cap its input, its output, its
+// effect and then its tags — and never by the URN's text. The two orders
+// differ wherever one tag key is the beginning of another (`file`,
+// `file-path`), and the canonical form is the same in every implementation
+// only because all of them use the first.
+#[test]
+fn test12838_urns_are_ordered_by_their_parts_not_their_text() {
+    let media = |text: &str| MediaUrn::from_string(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    let stands_before = |first: &str, second: &str| media(first) < media(second);
+    let (sample, path) = ("media:file;sample", "media:file-path");
+    assert!(stands_before(sample, path));
+    assert!(!stands_before(path, sample));
+    assert!(media(path).to_string() < media(sample).to_string(), "the text orders them the other way");
+    // A URN that is the beginning of another stands first; a tag with any
+    // value before the same tag with one; values in their own order.
+    assert!(stands_before("media:file", "media:file;sample"));
+    assert!(stands_before("media:enc", "media:enc=ascii"));
+    assert!(stands_before("media:enc=ascii", "media:enc=utf-8"));
+    assert!(media("media:sample;file") == media(sample));
+
+    let cap = |text: &str| CapUrn::from_string(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+    let cap_before = |first: &str, second: &str| cap(first) < cap(second);
+    // A cap's input decides before anything else it says.
+    assert!(cap_before(
+        &format!(r#"cap:in="{sample}";zz;out="media:x""#),
+        &format!(r#"cap:in="{path}";aa;out="media:x""#)
+    ));
+    // Then its output — and only then: an input that stands first wins over
+    // an output that stands last.
+    assert!(cap_before(
+        &format!(r#"cap:in="media:x";zz;out="{sample}""#),
+        &format!(r#"cap:in="media:x";aa;out="{path}""#)
+    ));
+    assert!(cap_before(
+        &format!(r#"cap:in="{sample}";op;out="{path}""#),
+        &format!(r#"cap:in="{path}";op;out="{sample}""#)
+    ));
+    // Then its effect, in the order: declared, none, patch, unspecified.
+    let effects = [
+        r#"cap:in="media:x";op;out="media:x""#,
+        r#"cap:effect=none;in="media:x";op;out="media:x""#,
+        r#"cap:effect=patch;in="media:x";op;out="media:x""#,
+        r#"cap:effect=?;in="media:x";op;out="media:x""#,
+    ];
+    for pair in effects.windows(2) {
+        assert!(cap_before(pair[0], pair[1]), "{} before {}", pair[0], pair[1]);
+        assert!(!cap_before(pair[1], pair[0]));
+    }
+    // Then its other tags — after the effect, whatever they say.
+    assert!(cap_before(r#"cap:in="media:x";aa;out="media:x""#, r#"cap:in="media:x";zz;out="media:x""#));
+    assert!(cap_before(
+        r#"cap:in="media:x";zz;out="media:x""#,
+        r#"cap:effect=patch;in="media:x";aa;out="media:x""#
+    ));
+
+    // In a machine: the bindings of a step, the outputs it takes, the inputs
+    // of the strand and the steps themselves all stand in that order.
+    let (result, whereabouts) = ("media:file;result", "media:file-path;written");
+    let pair_urn = format!(r#"cap:in="{sample}";pair;out="{result}""#);
+    let first_urn = format!(r#"cap:in="{sample}";zz-first;out="media:file;a""#);
+    let second_urn = format!(r#"cap:in="{sample}";aa-second;out="{path}""#);
+    let stdin = |media_urn: &str, name: &str| {
+        CapArg::new(media_urn, name, true, vec![ArgSource::Stdin { stdin: media_urn.to_string() }])
+    };
+    let output = |media_urn: &str, name: &str| CapOutput::new(media_urn, name, String::new());
+    let registry = FabricRegistry::new_for_test();
+    registry.add_caps_to_cache(vec![
+        definition(
+            &pair_urn,
+            "pair",
+            vec![stdin(sample, "sample"), flag(path, "path")],
+            vec![output(result, "result"), output(whereabouts, "where")],
+        ),
+        definition(&first_urn, "first", vec![stdin(sample, "sample")], vec![output("media:file;a", "made")]),
+        definition(&second_urn, "second", vec![stdin(sample, "sample")], vec![output(path, "made")]),
+    ]);
+
+    let (machine, names) = parse_machine_with_node_names(
+        &format!("[pair {pair_urn}][(path=p, s) -> pair -> (where=w, r)]"),
+        &registry,
+    )
+    .unwrap();
+    let edge = only_edge(&machine);
+    assert_eq!(edge.assignment.iter().map(|b| b.arg_name.as_str()).collect::<Vec<_>>(), ["sample", "path"]);
+    assert_eq!(edge.outputs.iter().map(|o| o.output_name.as_str()).collect::<Vec<_>>(), ["result", "where"]);
+    assert_eq!(machine.strands()[0].input_anchor_ids(), &[names[0]["s"], names[0]["p"]]);
+    assert_eq!(machine.strands()[0].output_anchor_ids(), &[names[0]["r"], names[0]["w"]]);
+    assert!(machine
+        .to_machine_notation()
+        .unwrap()
+        .contains("[(sample=n0, path=n1) -> edge_0 -> (result=n2, where=n3)]"));
+
+    let headers = format!("[first {first_urn}][second {second_urn}]");
+    for wirings in ["[x -> first -> a][x -> second -> b]", "[x -> second -> b][x -> first -> a]"] {
+        let parsed = parse_machine(&format!("{headers}{wirings}"), &registry).unwrap();
+        let steps: Vec<bool> = parsed.strands()[0]
+            .edges()
+            .iter()
+            .map(|step| step.cap_urn.to_string().contains("zz-first"))
+            .collect();
+        assert_eq!(steps, [true, false], "{wirings}");
+    }
 }

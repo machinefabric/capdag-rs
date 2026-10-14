@@ -1742,10 +1742,34 @@ mod tests {
             serde_json::from_str::<EdgeType>(&json).unwrap(),
             EdgeType::Arg { arg_urn } if arg_urn == "media:data"
         ));
-        // An edge type nothing produces is not read.
-        assert!(serde_json::from_str::<EdgeType>(r#"{"json_field":{"field":"data"}}"#).is_err());
+        // Every kind is written as the reference of every implementation
+        // writes it, and read back as itself.
+        for (written, edge_type) in [
+            (r#""direct""#, EdgeType::Direct),
+            (r#""iteration""#, EdgeType::Iteration),
+            (r#""collection""#, EdgeType::Collection),
+            (r#"{"arg":{"arg_urn":"media:data"}}"#, arg.clone()),
+        ] {
+            assert_eq!(serde_json::to_string(&edge_type).unwrap(), written);
+            let read: EdgeType = serde_json::from_str(written).unwrap();
+            assert_eq!(std::mem::discriminant(&read), std::mem::discriminant(&edge_type), "{written}");
+            assert_eq!(serde_json::to_string(&read).unwrap(), written);
+        }
         // An arg edge that names no argument is not one.
         assert!(serde_json::from_str::<EdgeType>(r#"{"arg":{}}"#).is_err());
+        // An edge carries the whole value: a part of it is not something an
+        // edge can be asked for, in either of the forms that once said so —
+        // and a kind nothing has is no kind, whatever it carries.
+        for retired in [
+            r#"{"json_field":{"field":"data"}}"#,
+            r#"{"json_path":{"path":"a.b"}}"#,
+            r#""json_field""#,
+            r#""sideways""#,
+            r#""arg""#,
+            r#"{"sideways":{"arg_urn":"media:data"}}"#,
+        ] {
+            assert!(serde_json::from_str::<EdgeType>(retired).is_err(), "{retired}");
+        }
     }
 
     // TEST743: Tests ExecutionNodeType enum serialization and deserialization to/from JSON
@@ -2203,6 +2227,29 @@ mod tests {
                 plan.add_node(MachineNode::item("stray", "cap_0", "input_slot", "media:pdf-page"));
             },
             "item node 'stray' names map 'cap_0'",
+        );
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::item("stray", "nowhere", "cap_0", "media:pdf-page"));
+            },
+            "node 'stray' names map 'nowhere', which is not in the plan",
+        );
+        // An item its map lists for another source: nodes are checked in the
+        // order of their ids, so it is the item — which comes first — that
+        // is named.
+        refused(
+            &|plan| {
+                plan.add_node(MachineNode::for_each(
+                    "second",
+                    vec![ForEachSource {
+                        node: "cap_0".to_string(),
+                        item: "an_item".to_string(),
+                    }],
+                    vec!["an_item".to_string()],
+                ));
+                plan.add_node(MachineNode::item("an_item", "second", "input_slot", "media:pdf-page"));
+            },
+            "item node 'an_item' names map 'second' and source 'input_slot', and that map does not list it so",
         );
 
         // A step's other output, of a step: accepted.

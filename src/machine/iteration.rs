@@ -573,6 +573,34 @@ mod tests {
         assert_eq!(s.item_map(1, map), None);
         assert_eq!(s.item_map(0, ROOT), None);
 
+        // A step joins the map whichever of its members is listed first: a
+        // value of the machine beside a value of the map, in either order.
+        // 8 a single value of the machine. (8, text=1) -> annotate -> 9, and swapped.
+        for members in [
+            vec![member(8, false), member(1, false)],
+            vec![member(1, false), member(8, false)],
+        ] {
+            let mut with = steps.to_vec();
+            with.push(step(members.clone(), vec![(9, false)]));
+            let joined = placed(&with, &[0]);
+            assert_eq!(joined.steps()[4], once(joined.steps()[0].map.unwrap()), "{members:?}");
+        }
+
+        // A map is opened by the first of the steps that map in it, whichever
+        // of them was placed first. Step 0 maps over the docs and waits for a
+        // value step 2 makes, so step 1 — which maps over the docs too — is
+        // placed before it.
+        // (0, with=5) -> a -> 1 ; 0 -> b -> 2 ; 7 -> c -> 5
+        let waiting = [
+            step(vec![member(0, false), member(5, false)], vec![(1, false)]),
+            step(vec![member(0, false)], vec![(2, false)]),
+            step(vec![member(7, false)], vec![(5, false)]),
+        ];
+        let w = placed(&waiting, &[0]);
+        let shared = w.steps()[0].map.expect("maps over the docs");
+        assert_eq!(w.steps()[1].map, Some(shared));
+        assert_eq!(w.opened_by(shared), Some(0));
+
         // A map is what it iterates IN THE SCOPE IT IS OPENED IN: the same
         // sequence mapped from two scopes is two maps.
         // 0 docs, 5 others: sequences. 0 -> split -> 1 (a declared sequence per doc)

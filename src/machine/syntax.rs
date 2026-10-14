@@ -176,11 +176,15 @@ fn node(pair: &Pair<'_, Rule>, position: usize) -> Result<Spanned<String>, Machi
     Ok(name)
 }
 
-fn constant(pair: &Pair<'_, Rule>) -> Spanned<serde_json::Value> {
-    // The grammar's `constant` is JSON's value grammar, so what matched parses.
-    let value = serde_json::from_str(pair.as_str())
-        .expect("the grammar's constant rule matches exactly JSON values");
-    Spanned::of(pair, value)
+fn constant(pair: &Pair<'_, Rule>) -> Result<Spanned<serde_json::Value>, MachineSyntaxError> {
+    // The grammar's `constant` is JSON's value grammar, so what matched is
+    // JSON text. What the grammar cannot say is still refused here: a number
+    // no float holds (`1e999`), and a string escape that names half a
+    // character (`"\ud800"`).
+    let value = serde_json::from_str(pair.as_str()).map_err(|error| MachineSyntaxError::ParseError {
+        details: format!("{} is not a JSON value: {error}", pair.as_str().trim()),
+    })?;
+    Ok(Spanned::of(pair, value))
 }
 
 fn member(pair: Pair<'_, Rule>, position: usize) -> Result<SyntaxMember, MachineSyntaxError> {
@@ -191,7 +195,7 @@ fn member(pair: Pair<'_, Rule>, position: usize) -> Result<SyntaxMember, Machine
             let name = text(&parts.next().expect("named member has a name"));
             let value = parts.next().expect("named member has a value");
             let value = match value.as_rule() {
-                Rule::constant => SyntaxValue::Constant(constant(&value)),
+                Rule::constant => SyntaxValue::Constant(constant(&value)?),
                 Rule::alias => SyntaxValue::Node(node(&value, position)?),
                 other => unreachable!("a named member's value is a constant or an alias, not {other:?}"),
             };
@@ -397,9 +401,12 @@ pub fn parse_syntax(input: &str) -> Result<Vec<SyntaxStatement>, MachineSyntaxEr
                 let alias = text(&parts.next().expect("machine header has an alias"));
                 parts.next(); // the `machine` keyword
                 let string = parts.next().expect("machine header has a reference");
-                // The grammar's `string` is JSON's string grammar.
-                let reference: String = serde_json::from_str(string.as_str())
-                    .expect("the grammar's string rule matches exactly JSON strings");
+                // The grammar's `string` is JSON's string grammar, but for
+                // what it cannot say: an escape that names half a character.
+                let reference: String =
+                    serde_json::from_str(string.as_str()).map_err(|error| MachineSyntaxError::ParseError {
+                        details: format!("{} is not a JSON string: {error}", string.as_str().trim()),
+                    })?;
                 SyntaxStatementKind::MachineHeader {
                     alias,
                     reference: Spanned::of(&string, reference),
@@ -689,6 +696,7 @@ mod tests {
             ("a -> f{retry=-1} -> b", "-1"),
             ("a -> f{retry=1.5} -> b", "1.5"),
             ("a -> f{retry=many} -> b", "many"),
+            ("a -> f{retry=4294967296} -> b", "4294967296"),
             ("a -> f{on_error=ignore} -> b", "ignore"),
             ("a -> f{on_error=3} -> b", "3"),
             ("a -> f{retry=1, retry=2} -> b", "twice"),
@@ -702,8 +710,33 @@ mod tests {
             }
         }
 
+        // Both halves of a character, written as their two escapes, are it;
+        // and an escaped backslash before a `u` is no escape of a character.
+        assert_eq!(
+            members(&one(r#"(a="\ud83d\ude00") -> f -> b"#)),
+            vec![(Some("a".to_string()), "=\"\u{1f600}\"".to_string())]
+        );
+        assert_eq!(
+            members(&one(r#"(a="\\ud800") -> f -> b"#)),
+            vec![(Some("a".to_string()), r#"="\\ud800""#.to_string())]
+        );
+
+        // The largest count a policy holds is read.
+        assert_eq!(one("a -> f{retry=4294967295} -> b").policy.retry, 4294967295);
+
         // What the grammar does not accept at all.
-        for input in ["a -> f", "a -> -> b", "(a,) -> f -> b", "a -> f -> (b", "(a b) -> f -> c", "x machine clean", "(a=) -> f -> b"] {
+        for input in [
+            "a -> f", "a -> -> b", "(a,) -> f -> b", "a -> f -> (b", "(a b) -> f -> c", "x machine clean", "(a=) -> f -> b",
+            // A string that is not a JSON string: an escape JSON does not
+            // have, and a raw line break.
+            r#"(a="\q") -> f -> b"#, "(a=\"x\ny\") -> f -> b", r#"x machine "bad \q ref""#,
+            // A number no constant can hold.
+            "(a=1e999) -> f -> b",
+            // An escape that names half a character: text has no such thing.
+            r#"(a="\ud800") -> f -> b"#, r#"(a="\udc00x") -> f -> b"#, r#"(a="\ud83d\ud83d") -> f -> b"#,
+            r#"(a={"k\ud800": 1}) -> f -> b"#, r#"(a=["\udc00"]) -> f -> b"#, r#"(a={"k": "\ud800"}) -> f -> b"#,
+            r#"x machine "\ud800""#,
+        ] {
             assert!(matches!(refused(input), MachineSyntaxError::ParseError { .. }), "{input}");
         }
     }
@@ -746,6 +779,12 @@ mod tests {
             ("5e-324", "5e-324"),
             ("0.0", "0.0"),
             ("-0.0", "-0.0"),
+            // A whole number has no sign to keep at zero: `-0` is the float.
+            ("0", "0"),
+            ("-0", "-0.0"),
+            ("-9223372036854775808", "-9223372036854775808"),
+            ("1E3", "1000.0"),
+            ("2.50e0", "2.5"),
             (r#"{"b": 1, "a": [true, null]}"#, r#"{"a":[true,null],"b":1}"#),
             (r#""a<b>&c é""#, r#""a<b>&c é""#),
             (r#""tab\there \u0001 \" \\ \/""#, r#""tab\there \u0001 \" \\ /""#),
@@ -755,6 +794,9 @@ mod tests {
             assert_eq!(constant(text), constant(written), "{written}");
         }
         assert_ne!(constant("1"), constant("1.0"));
+        for (left, right) in [("true", "1"), ("false", "0"), ("true", "1.0"), ("null", "0"), ("null", "false")] {
+            assert_ne!(constant(left), constant(right), "{left} and {right}");
+        }
         assert_eq!(constant(r#"{"a":1,"b":[2,"x"]}"#), constant(r#"{"b":[2,"x"],"a":1}"#));
     }
 }

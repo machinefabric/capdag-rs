@@ -1285,12 +1285,15 @@ mod tests {
         assert_eq!(broken(&range, json!("0")), None);
         assert_eq!(broken(&range, json!([0])), None);
         assert_eq!(broken(&range, json!(null)), None);
+        assert_eq!(broken(&range, json!(false)), None, "a truth value is no number");
 
         let length = MediaValidation { min_length: Some(2), max_length: Some(3), ..Default::default() };
         assert_eq!(broken(&length, json!("ab")), None);
         assert_eq!(broken(&length, json!("abc")), None);
         assert_eq!(broken(&length, json!("a")), rule("minimum length 2"));
         assert_eq!(broken(&length, json!("abcd")), rule("maximum length 3"));
+        // A string's length is its bytes.
+        assert_eq!(broken(&length, json!("éé")), rule("maximum length 3"));
         // An array has a length too, and the rule says which it measured.
         assert_eq!(broken(&length, json!(["a", "b"])), None);
         assert_eq!(broken(&length, json!(["a"])), rule("minimum array length 2"));
@@ -1302,6 +1305,9 @@ mod tests {
         assert_eq!(broken(&pattern, json!("abc")), None);
         assert_eq!(broken(&pattern, json!("abc1")), rule("pattern '^[a-z]+$'"));
         assert_eq!(broken(&pattern, json!(1)), None, "a pattern is about strings");
+        // A pattern is searched for, not anchored unless it says so.
+        let anywhere = MediaValidation { pattern: Some("b".to_string()), ..Default::default() };
+        assert_eq!(broken(&anywhere, json!("abc")), None);
         let unreadable = MediaValidation { pattern: Some("(".to_string()), ..Default::default() };
         let defect = unreadable.violation(&json!("x")).expect_err("a pattern that is no regular expression");
         assert!(defect.contains("Invalid regex pattern '('"), "{defect}");
@@ -1315,6 +1321,12 @@ mod tests {
         assert_eq!(broken(&allowed, json!("median")), None);
         assert_eq!(broken(&allowed, json!("mode")), rule(r#"allowed values: ["mean", "median"]"#));
         assert_eq!(broken(&allowed, json!(3)), None, "allowed values are about strings");
+        // A list that allows nothing is a rule that refuses every string.
+        let nothing = MediaValidation {
+            allowed_values: Some(Vec::new()),
+            ..allowed.clone()
+        };
+        assert_eq!(broken(&nothing, json!("mean")), rule("allowed values: []"));
 
         // The first rule broken is the one named: the length before the
         // pattern, the pattern before the allowed values.

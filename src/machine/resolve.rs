@@ -1323,7 +1323,9 @@ mod tests {
         PreInternedWiring,
     };
     use crate::machine::error::MachineAbstractionError;
+    use crate::machine::graph::{BindingSource, NodeId};
     use crate::machine::StepPolicy;
+    use crate::planner::{ArgSourceRef, StepToken, Strand, StrandStep, StrandStepType};
     use crate::machine::test_fixtures::{
         build_cap, build_cap_with_slot_stdin_pairs, cap_step, collect_step, for_each_step, media,
         registry_with, strand_from_steps,
@@ -1431,16 +1433,35 @@ mod tests {
         }
         assert!(found_image && found_text, "both arg slots must be assigned");
 
-        // One source that fits two args takes the one it is closest to.
-        let page = vec![media("media:enc=utf-8;page")];
-        let either = vec![media("media:enc=utf-8"), media("media:enc=utf-8;page")];
-        let pairs = match_sources_to_args(&page, &either, &[false, false], None).unwrap();
-        assert_eq!(pairs.len(), 1);
-        assert!(
-            pairs[0].0.is_equivalent(&media("media:enc=utf-8;page")).unwrap(),
-            "the exact arg, not the general one: {}",
-            pairs[0].0
+        // The pairs come by arg URN — its parts, not its text — whatever
+        // order the sources stand in.
+        for ordered in [sources.clone(), vec![sources[1].clone(), sources[0].clone()]] {
+            let pairs =
+                match_sources_to_args(&ordered, &args, &vec![false; args.len()], None).unwrap();
+            assert_eq!(pairs.len(), 2);
+            assert!(pairs[0].0 < pairs[1].0);
+        }
+        let file_things = vec![media("media:file-path"), media("media:file;sample")];
+        let by_parts =
+            match_sources_to_args(&file_things, &file_things, &[false, false], None).unwrap();
+        assert_eq!(
+            by_parts.iter().map(|(arg, _)| arg.to_string()).collect::<Vec<_>>(),
+            vec![media("media:file;sample").to_string(), media("media:file-path").to_string()]
         );
+
+        // One source that fits two args takes the one it is closest to,
+        // whichever of the two is tried first.
+        let page = vec![media("media:enc=utf-8;page")];
+        let (general, exact) = (media("media:enc=utf-8"), media("media:enc=utf-8;page"));
+        for either in [vec![general.clone(), exact.clone()], vec![exact.clone(), general.clone()]] {
+            let pairs = match_sources_to_args(&page, &either, &[false, false], None).unwrap();
+            assert_eq!(pairs.len(), 1);
+            assert!(
+                pairs[0].0.is_equivalent(&exact).unwrap(),
+                "the exact arg, not the general one: {}",
+                pairs[0].0
+            );
+        }
     }
 
     // TEST1182: Matching fails as ambiguous when two sources can be swapped at equal minimum cost.
@@ -2187,6 +2208,9 @@ mod tests {
         // Anchors: two inputs (pdf, md), one output (txt).
         assert_eq!(strand.input_anchors().len(), 2);
         assert_eq!(strand.output_anchors().len(), 1);
+        // Anchors come by the URN they hold, not by when their node was made.
+        assert_eq!(strand.input_anchor_ids(), &[0, 1]);
+        assert!(strand.node_urn(0) < strand.node_urn(1));
     }
 
     // TEST1404: a sequence PRODUCER inside a gather resolves — the gather
@@ -2323,5 +2347,125 @@ mod tests {
             Some("tok-cap"),
             "the boundary and its body-entry cap are separate identities"
         );
+    }
+
+    // TEST12836: a strand's steps name where each input comes from. A
+    // strand's own input, taken by two steps, is one node holding the most
+    // specific type either declares for it; a step that names a producer no
+    // step of the strand is makes the strand disconnected, and is refused.
+    #[test]
+    fn test12836_a_strand_input_is_one_node_and_a_missing_producer_is_refused() {
+        const LOOSE: &str = r#"cap:in="media:enc=utf-8";count;out="media:count;numeric""#;
+        const TIGHT: &str = r#"cap:in="media:enc=utf-8;page";title;out="media:enc=utf-8;title""#;
+        let registry = registry_with(vec![
+            build_cap(LOOSE, "count", &["media:enc=utf-8"], "media:count;numeric"),
+            build_cap(TIGHT, "title", &["media:enc=utf-8;page"], "media:enc=utf-8;title"),
+        ]);
+        let loose = || cap_step(LOOSE, "count", "media:enc=utf-8", "media:count;numeric");
+        let tight = || cap_step(TIGHT, "title", "media:enc=utf-8;page", "media:enc=utf-8;title");
+        // The steps as given: each names its own source, and none is chained
+        // to the one before it.
+        let strand_of = |steps: Vec<StrandStep>| Strand {
+            source_media_urn: steps[0].from_spec.clone(),
+            target_media_urn: steps[steps.len() - 1].to_spec.clone(),
+            total_steps: steps.len() as i32,
+            cap_step_count: steps.len() as i32,
+            description: "fan-out".to_string(),
+            steps,
+        };
+
+        // Both steps take the strand's input; one declares it more tightly.
+        for steps in [vec![loose(), tight()], vec![tight(), loose()]] {
+            let resolved = resolve_strand(&strand_of(steps), &registry, 0).unwrap();
+            assert_eq!(resolved.nodes().len(), 3, "the input once, and what each step makes");
+            assert_eq!(resolved.input_anchor_ids().len(), 1);
+            let anchor = resolved.input_anchor_ids()[0];
+            assert!(
+                resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf-8;page")).unwrap(),
+                "the most specific type a step declares for it, whichever step comes first"
+            );
+            for edge in resolved.edges() {
+                assert_eq!(edge.source_nodes().collect::<Vec<_>>(), vec![anchor]);
+            }
+        }
+
+        // A producer that is no step of the strand.
+        let mut orphan = tight();
+        if let StrandStepType::Cap { inputs, .. } = &mut orphan.step_type {
+            inputs[0].source = ArgSourceRef::Step {
+                token_id: "no-such-step".parse().unwrap(),
+            };
+        }
+        match resolve_strand(&strand_of(vec![loose(), orphan]), &registry, 4) {
+            Err(MachineAbstractionError::DisconnectedStrand { strand_index }) => {
+                assert_eq!(strand_index, 4)
+            }
+            other => panic!("expected a disconnected strand, got {:?}", other.map(|_| ())),
+        }
+    }
+
+    // TEST12837: the resolver holds a wiring it is handed to the names its
+    // cap's definition declares, whoever built the wiring: a member or a
+    // target naming what the cap does not declare is refused by name, with
+    // what it does declare.
+    #[test]
+    fn test12837_the_resolver_refuses_names_a_definition_does_not_declare() {
+        const CAP: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#;
+        let registry = registry_with(vec![build_cap(
+            CAP,
+            "extract",
+            &["media:document;ext=pdf"],
+            "media:enc=utf-8;ext=txt",
+        )]);
+        let nodes = || vec![media("media:document;ext=pdf"), media("media:enc=utf-8;ext=txt")];
+        let wiring = |arg: &str, target: (Option<String>, NodeId)| {
+            vec![PreInternedWiring {
+                token_id: StepToken::mint(),
+                foreach_identity: ForEachIdentity::MintIfRequired,
+                cap_urn: CapUrn::from_string(CAP).unwrap(),
+                source_node_ids: Vec::new(),
+                named_sources: vec![(arg.to_string(), BindingSource::Node(0))],
+                targets: vec![target],
+                policy: StepPolicy::default(),
+                included_as: Vec::new(),
+            }]
+        };
+
+        // By the names the definition declares, it resolves.
+        let input = registry
+            .get_cached_cap(CAP)
+            .map(|cap| (cap.args[0].name.clone(), cap.outputs[0].name.clone()))
+            .expect("the fixture is in the registry");
+        let resolved =
+            resolve_pre_interned(nodes(), &wiring(&input.0, (Some(input.1.clone()), 1)), &registry, 0)
+                .unwrap();
+        assert_eq!(resolved.edges()[0].main_target(), Some(1));
+
+        match resolve_pre_interned(nodes(), &wiring("document", (None, 1)), &registry, 2) {
+            Err(error @ MachineAbstractionError::UnknownArgName { .. }) => {
+                let said = error.to_string();
+                assert!(said.starts_with("strand 2: "), "{said}");
+                assert!(
+                    said.contains(&format!("declares no arg named 'document' (it declares: {})", input.0)),
+                    "{said}"
+                );
+            }
+            other => panic!("expected an unknown arg name, got {:?}", other.map(|_| ())),
+        }
+        match resolve_pre_interned(
+            nodes(),
+            &wiring(&input.0, (Some("text".to_string()), 1)),
+            &registry,
+            2,
+        ) {
+            Err(error @ MachineAbstractionError::UnknownOutputName { .. }) => {
+                let said = error.to_string();
+                assert!(
+                    said.contains(&format!("declares no output named 'text' (it declares: {})", input.1)),
+                    "{said}"
+                );
+            }
+            other => panic!("expected an unknown output name, got {:?}", other.map(|_| ())),
+        }
     }
 }

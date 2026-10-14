@@ -204,6 +204,17 @@ fn test12804_each_use_of_a_machine_has_nodes_of_its_own() {
         names_of(&inlined, &names, |s| s.output_anchor_ids()),
         set(&["c1", "s1", "c2", "s2"])
     );
+
+    // Two headers may name one machine: reading it for the first does not
+    // make the second a circle, and each alias counts its own uses.
+    let (aliased, names) = parse(&format!(
+        "[one machine \"analyse\"][two machine \"analyse\"]{FETCH_TWO}\
+         [(series=a, bench=b) -> one -> (cmp=c1, scores=s1)]\
+         [(series=b, bench=a) -> two -> (cmp=c2, scores=s2)]"
+    ))
+    .unwrap();
+    assert!(aliased.is_equivalent(&inlined));
+    assert!(names[0].contains_key("one#1/res") && names[0].contains_key("two#1/res"));
 }
 
 // TEST12805: an unnamed member of a machine step is matched to an input by
@@ -240,6 +251,16 @@ fn test12805_unnamed_members_of_a_machine_step_are_matched_by_type() {
         "[analyse machine \"analyse\"]{FETCH_TWO}[(series=a, bench=b) -> analyse -> (cmp=c, scores=s)]"
     ));
     assert!(one_named.is_equivalent(&both_named));
+    // An input a member named is said: the unnamed member beside it has the
+    // other input, though both hold one type.
+    let one_unnamed = machine(&format!(
+        "[analyse machine \"analyse\"]{FETCH_TWO}[(series=a, b) -> analyse -> (cmp=c, scores=s)]"
+    ));
+    assert!(one_unnamed.is_equivalent(&both_named));
+    let other_unnamed = machine(&format!(
+        "[analyse machine \"analyse\"]{FETCH_TWO}[(a, series=b) -> analyse -> (cmp=c, scores=s)]"
+    ));
+    assert!(!other_unnamed.is_equivalent(&both_named));
 
     // Two sources of the one type its two inputs hold.
     match refusal(&format!(
@@ -425,6 +446,12 @@ fn test12807_a_reference_must_resolve_to_a_valid_machine_and_never_to_itself() {
     // step later, and is the same circle.
     match parse_from(&a, None) {
         MachineAbstractionError::CyclicMachineReference { chain } => assert_eq!(chain, ["b", "a", "b"]),
+        other => panic!("{other}"),
+    }
+    // A machine that only leads to the circle is not on it.
+    let leading = with_headers("[first machine \"a\"][(reference=\"z\") -> fetch -> u]");
+    match parse_from(&leading, Some("top")) {
+        MachineAbstractionError::CyclicMachineReference { chain } => assert_eq!(chain, ["a", "b", "a"]),
         other => panic!("{other}"),
     }
 }
