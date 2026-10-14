@@ -13000,6 +13000,28 @@ mod tests {
                 other => panic!("{unknown}: expected UnknownOutput, got {:?}", other.map(|_| ())),
             }
         }
+
+        // A request made from a bare stream has the one output that stream
+        // is, and nothing is known of the cap it is for.
+        let (sender, _frames) = MockFrameSender::new();
+        let bare = OutputStream::new(
+            Arc::new(sender),
+            "bare".to_string(),
+            "media:".to_string(),
+            MessageId::new_uuid(),
+            None,
+            Limits::default().max_chunk,
+        );
+        let (input_tx, input_rx) = crossbeam_channel::unbounded();
+        drop(input_tx);
+        let lone = Request::new(demux_multi_stream(input_rx, None, None, None), bare, Arc::new(NoPeerInvoker));
+        assert!(std::ptr::eq(lone.output(), lone.output_for("media:").unwrap()));
+        match lone.output_for("media:integer") {
+            Err(RuntimeError::UnknownOutput { cap_urn, output }) => {
+                assert_eq!((cap_urn.as_str(), output.as_str()), ("", "media:integer"));
+            }
+            other => panic!("expected UnknownOutput, got {:?}", other.map(|_| ())),
+        }
     }
 
     /// An op that writes two residual rows and nothing else, or fails.
@@ -13124,11 +13146,58 @@ mod tests {
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
         assert_eq!((sent[0].0.as_deref(), sent[0].1.as_str()), (None, "media:integer"));
+
+        // A cap of one text input and the one output `declare` makes.
+        let one_output = |urn: &str, name: &str, declare: &dyn Fn(crate::cap::definition::CapOutput) -> crate::cap::definition::CapOutput| {
+            let urn = CapUrn::from_string(urn).unwrap();
+            let out = urn.out_spec().to_string();
+            let mut cap = Cap::new(urn, name.to_string(), vec![name.to_string()]);
+            cap.add_arg(CapArg::new(
+                "media:enc=utf-8", "input",
+                true,
+                vec![ArgSource::Stdin { stdin: "media:enc=utf-8".to_string() }],
+            ));
+            cap.add_output(declare(crate::cap::definition::CapOutput::new(&out, "made", "What it makes")));
+            crate::cap::validation::validate_cap_definition(&cap).expect("the fixture is a valid definition");
+            let manifest = create_test_manifest(name, "1.0.0", "Test", vec![cap.clone()]);
+            (cap, manifest)
+        };
+        // A main output declared a sequence, that nobody wrote to, is an
+        // empty sequence.
+        let (listing, manifest) = one_output(r#"cap:in="media:enc=utf-8";list;out="media:enc=utf-8;line""#, "list", &|mut output| {
+            output.is_sequence = true;
+            output
+        });
+        let (outputs, frames) = recorded_outputs(&listing.urn_string(), Some(&manifest));
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!((sent[0].0.as_deref(), sent[0].2), (None, Some(true)));
+        // A main output its definition declares optional is not sent when
+        // nobody wrote to it.
+        let (maybe, manifest) = one_output(r#"cap:in="media:enc=utf-8";maybe;out="media:integer""#, "maybe", &|output| output.optional(true));
+        let (outputs, frames) = recorded_outputs(&maybe.urn_string(), Some(&manifest));
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        assert!(frames.lock().unwrap().is_empty());
+
+        // A request made from a bare stream has an output nothing is known
+        // of: nothing is sent for it unless the handler writes.
+        let (sender, frames) = MockFrameSender::new();
+        let bare = OutputStream::new(
+            Arc::new(sender),
+            "bare".to_string(),
+            "media:".to_string(),
+            MessageId::new_uuid(),
+            None,
+            Limits::default().max_chunk,
+        );
+        dispatch_op(Box::new(Silent), empty_input(), ResponseOutputs::undeclared(bare), peer()).await.unwrap();
+        assert!(frames.lock().unwrap().is_empty());
     }
 
     // TEST12721: a request stream names no output: the argument of a peer call
-    // is identified by its media URN alone. And a request stream that does name
-    // one is refused where it is read — it is not an argument.
+    // is identified by its media URN alone. (That one which does name an output
+    // is refused where it is read is TEST12731.)
     #[test]
     fn test12721_a_request_stream_names_no_output() {
         let (sender, frames) = MockFrameSender::new();
@@ -13149,6 +13218,10 @@ mod tests {
         assert_eq!(sent[0].1, "media:enc=utf-8;prompt");
     }
 
+    // TEST12731: a request stream names no output: an argument is identified
+    // by its media URN alone. A request stream that does name one is refused
+    // where it is read — the request ends with a protocol error, and nothing
+    // of the stream is read as an argument.
     #[tokio::test]
     async fn test12731_a_request_stream_that_names_an_output_is_refused() {
         let rid = MessageId::new_uuid();
@@ -13313,16 +13386,109 @@ mod tests {
         assert!(grants.iter().all(|(s, _)| s.is_some()), "every grant names its stream: {grants:?}");
         assert!(granted("rest") >= 1 && granted("head") >= 1, "{grants:?}");
 
-        // A chunk for a stream that was never started is not data of any output.
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tx.send(value_chunk(&rid, "ghost", 0, text("?"))).unwrap();
-        tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
-        drop(tx);
-        let mut stray = demux_peer_response(rx, None);
-        assert!(matches!(
-            stray.recv().await,
-            Some(PeerResponseItem::Data(Err(StreamError::Protocol(_)), _))
-        ));
+        let feed_frames = |frames: Vec<Frame>| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            for frame in frames {
+                tx.send(frame).unwrap();
+            }
+            drop(tx);
+            demux_peer_response(rx, None)
+        };
+        let start = |stream: &str, sequence: bool| {
+            Frame::stream_start(rid.clone(), stream.into(), "media:enc=utf-8".into(), Some(sequence))
+        };
+
+        // A chunk for a stream that was never started is not data of any
+        // output, and the response ends there: what follows it is not read.
+        let mut stray = feed_frames(vec![
+            value_chunk(&rid, "ghost", 0, text("?")),
+            start("head", false),
+            value_chunk(&rid, "head", 0, text("H1")),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        match stray.recv().await {
+            Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
+                assert!(message.contains("ghost"), "{message}")
+            }
+            _ => panic!("expected a protocol error"),
+        }
+        assert!(stray.recv().await.is_none());
+        // So does a second STREAM_START for a stream: which of the two the
+        // chunks after it belong to is not something to guess.
+        let mut twice = feed_frames(vec![
+            start("head", false),
+            value_chunk(&rid, "head", 0, text("H1")),
+            start("head", false).for_output(rest.as_str()),
+            value_chunk(&rid, "head", 1, text("H2")),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        assert!(matches!(twice.recv().await, Some(PeerResponseItem::Data(Ok(_), _))));
+        match twice.recv().await {
+            Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
+                assert!(message.contains("a second STREAM_START for stream 'head'"), "{message}")
+            }
+            _ => panic!("expected a protocol error"),
+        }
+        assert!(twice.recv().await.is_none());
+
+        // What goes wrong on another output's stream is an error of the
+        // response: it is tagged with its output, and a collector does not
+        // pass over it.
+        let broken = || {
+            let mut damaged = value_chunk(&rid, "rest", 0, text("R1"));
+            damaged.checksum = damaged.checksum.map(|checksum| checksum.wrapping_add(1));
+            vec![
+                start("rest", false).for_output(rest.as_str()),
+                start("head", false),
+                value_chunk(&rid, "head", 0, text("H1")),
+                damaged,
+                Frame::stream_end(rid.clone(), "rest".into(), 1),
+                Frame::stream_end(rid.clone(), "head".into(), 1),
+                Frame::end_ok(rid.clone(), None),
+            ]
+        };
+        let mut failing = feed_frames(broken());
+        let mut tagged = Vec::new();
+        while let Some(item) = failing.recv().await {
+            match item {
+                PeerResponseItem::Output { output, item: Err(_), .. } => tagged.push(output),
+                PeerResponseItem::Data(Err(error), _) => panic!("an error of the main output: {error}"),
+                _ => {}
+            }
+        }
+        assert_eq!(tagged, vec![rest.clone()]);
+        let mismatch = |result: Result<(), StreamError>| match result {
+            Err(StreamError::Protocol(message)) => assert!(message.contains("Checksum mismatch"), "{message}"),
+            other => panic!("expected the checksum mismatch, got {other:?}"),
+        };
+        mismatch(feed_frames(broken()).collect_bytes().await.map(|_| ()));
+        mismatch(feed_frames(broken()).collect_value().await.map(|_| ()));
+        let (forward_to, _) = recorded_outputs(r#"cap:in="media:enc=utf-8";count;out="media:integer""#, None);
+        mismatch(
+            feed_frames(broken())
+                .collect_bytes_forwarding(forward_to.main(), 0.0, 1.0)
+                .await
+                .map(|_| ()),
+        );
+
+        // A sequence stream of another output that the request's END cuts
+        // inside an item ends with that error, under its output.
+        let mut whole = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Text("a long enough item".into()), &mut whole).unwrap();
+        let half = whole[..whole.len() / 2].to_vec();
+        let mut cut = feed_frames(vec![
+            start("rows", true).for_output(rest.as_str()),
+            Frame::chunk(rid.clone(), "rows".into(), 0, half.clone(), 0, Frame::compute_checksum(&half)),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        match cut.recv().await {
+            Some(PeerResponseItem::Output { output, item: Err(StreamError::Decode(message)), .. }) => {
+                assert_eq!(output, rest);
+                assert!(message.contains("ended mid-item"), "{message}");
+            }
+            _ => panic!("expected the unfinished item's error, under its output"),
+        }
+        assert!(cut.recv().await.is_none());
     }
 
     // TEST8126: derive_response_media — the response label is the effect
