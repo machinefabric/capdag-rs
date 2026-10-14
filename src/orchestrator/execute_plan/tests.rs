@@ -170,7 +170,6 @@ fn headers() -> String {
 /// One run of one step, as the script sees it.
 #[derive(Debug, Clone)]
 struct Call {
-    node: String,
     op: String,
     /// Per input stream, in the order sent: its URN, its items, whether it
     /// was sent as a sequence.
@@ -518,7 +517,6 @@ impl EngineRuntime for Scripted {
                 *count - 1
             };
             let call = Call {
-                node: step.node.clone(),
                 op: op_of(step),
                 inputs,
                 args: cap_arguments.get(&step.node).cloned().unwrap_or_default(),
@@ -686,7 +684,7 @@ async fn build(wirings: &str, sequences: &[&str]) -> Built {
     assert_eq!(machine.strands().len(), 1, "{wirings}: one strand");
     let strand = &machine.strands()[0];
     let names: HashMap<String, NodeId> = names[0].clone();
-    let cardinalities: HashMap<NodeId, InputCardinality> = strand
+    let inputs: HashMap<NodeId, crate::planner::AnchorInput> = strand
         .input_anchor_ids()
         .iter()
         .map(|anchor| {
@@ -697,16 +695,19 @@ async fn build(wirings: &str, sequences: &[&str]) -> Built {
                 .expect("every input has the name the notation wrote");
             (
                 *anchor,
-                if sequences.contains(&name) {
-                    InputCardinality::Sequence
-                } else {
-                    InputCardinality::Single
+                crate::planner::AnchorInput {
+                    cardinality: if sequences.contains(&name) {
+                        InputCardinality::Sequence
+                    } else {
+                        InputCardinality::Single
+                    },
+                    media: strand.node_urn(*anchor).clone(),
                 },
             )
         })
         .collect();
     let plan = MachinePlanBuilder::new(registry)
-        .build_plan_from_machine_strand_with_anchor_cardinalities("test", strand, &cardinalities)
+        .build_plan_from_machine_strand_for_run("test", strand, &inputs)
         .await
         .unwrap_or_else(|e| panic!("{wirings}: {e}"));
     plan.validate().expect("the builder makes a valid plan");

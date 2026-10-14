@@ -62,14 +62,13 @@ pub use live_cap_fab::{
 };
 pub use plan::{
     BodyOutcome, EdgeType, ExecutionNodeType, ForEachSource, MachineNode, MachinePlan,
-    MachinePlanEdge, MachineResult, MapRun, NodeExecutionResult, NodeId,
+    MachinePlanEdge, MapRun, NodeId,
 };
 pub use plan_analysis::{
-    derive_foreach_media_urns, derive_output_media_urn, derive_output_producing_cap_urn,
-    resolve_plan_output,
+    derive_output_media_urn, derive_output_producing_cap_urn,
 };
 pub use plan_builder::{
-    ArgumentInfo, ArgumentResolution, MachinePlanBuilder, PathArgumentRequirements,
+    AnchorInput, ArgumentInfo, ArgumentResolution, MachinePlanBuilder, PlanArgumentRequirements,
     StepArgumentRequirements,
 };
 pub use plan_space::{

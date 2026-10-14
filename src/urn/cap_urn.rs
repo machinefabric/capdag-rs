@@ -15,7 +15,7 @@ use std::fmt;
 use std::str::FromStr;
 use tagged_urn::{TaggedUrn, TaggedUrnBuilder, TaggedUrnError};
 
-use crate::urn::media_urn::{MediaUrn, MediaUrnError, MEDIA_IDENTITY, MEDIA_OBJECT, MEDIA_VOID};
+use crate::urn::media_urn::{MediaUrn, MediaUrnError, MEDIA_IDENTITY, MEDIA_VOID};
 
 /// Functional category of a cap, derived from all four structural axes (`in`,
 /// `out`, `effect`, and the remaining tags). The classification is **logical**
@@ -1429,6 +1429,7 @@ impl Default for CapUrnBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::urn::media_urn::MEDIA_OBJECT;
 
     // All cap URNs now require in and out specs. Use these helpers:
     fn test_urn(tags: &str) -> String {

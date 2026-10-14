@@ -191,6 +191,51 @@ struct StrandPlan {
     node_names: Vec<String>,
 }
 
+/// The names canonical notation gives the nodes of `strand`, indexed by
+/// `NodeId`, numbering on from `next_node`.
+///
+/// Nodes are named in the order the canonical edge walk first meets them:
+/// each edge's sources in assignment order, then its outputs. The name of a
+/// node is then a property of the machine, not of the order its nodes
+/// happened to be allocated in — two inputs of one type get the same names
+/// whichever was written first.
+fn canonical_strand_node_names(
+    strand: &crate::machine::graph::MachineStrand,
+    next_node: &mut usize,
+) -> Vec<String> {
+    let mut node_names: Vec<Option<String>> = vec![None; strand.nodes().len()];
+    for edge in strand.edges() {
+        for node in edge.source_nodes().chain(edge.output_nodes()) {
+            if node_names[node as usize].is_none() {
+                node_names[node as usize] = Some(format!("n{}", next_node));
+                *next_node += 1;
+            }
+        }
+    }
+    node_names
+        .into_iter()
+        .map(|name| name.expect("every node of a strand is a source or an output of an edge"))
+        .collect()
+}
+
+impl Machine {
+    /// The names canonical notation gives this machine's nodes, strand by
+    /// strand: what [`Machine::to_machine_notation`] writes for each node.
+    pub fn canonical_node_names(&self) -> Vec<crate::machine::StrandNodeNames> {
+        let mut next_node = 0usize;
+        self.strands()
+            .iter()
+            .map(|strand| {
+                canonical_strand_node_names(strand, &mut next_node)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(id, name)| (name, id as crate::machine::NodeId))
+                    .collect()
+            })
+            .collect()
+    }
+}
+
 fn build_serialization_plan(machine: &Machine, rendering: CapRendering<'_>) -> SerializationPlan {
     let mut strand_plans: Vec<StrandPlan> = Vec::with_capacity(machine.strand_count());
     let mut next_alias: usize = 0;
@@ -216,24 +261,7 @@ fn build_serialization_plan(machine: &Machine, rendering: CapRendering<'_>) -> S
             }
             next_alias += 1;
         }
-        // Nodes are named in the order the canonical edge walk first meets
-        // them: each edge's sources in assignment order, then its outputs.
-        // The name of a node is then a property of the machine, not of the
-        // order its nodes happened to be allocated in — two inputs of one type
-        // get the same names whichever was written first.
-        let mut node_names: Vec<Option<String>> = vec![None; strand.nodes().len()];
-        for edge in strand.edges() {
-            for node in edge.source_nodes().chain(edge.output_nodes()) {
-                if node_names[node as usize].is_none() {
-                    node_names[node as usize] = Some(format!("n{}", next_node));
-                    next_node += 1;
-                }
-            }
-        }
-        let node_names: Vec<String> = node_names
-            .into_iter()
-            .map(|name| name.expect("every node of a strand is a source or an output of an edge"))
-            .collect();
+        let node_names = canonical_strand_node_names(strand, &mut next_node);
         strand_plans.push(StrandPlan {
             edge_tokens,
             needs_header,
@@ -694,6 +722,57 @@ mod tests {
             notation.contains("[(input=n1) -> edge_1 -> (output=n2)]"),
             "second wiring should be `(input=n1) -> edge_1 -> (output=n2)`, got: {notation}"
         );
+    }
+
+    // TEST12856: a machine made from a planner path resolves under the names
+    // its canonical notation gives its nodes, and its plan's steps keep the
+    // path's own tokens — what was addressed to a step of the path is
+    // addressed to the same step of the run.
+    #[tokio::test]
+    async fn test12856_a_path_resolves_under_its_canonical_names_and_keeps_its_tokens() {
+        let registry = std::sync::Arc::new(registry_with(vec![extract_cap_def(), embed_cap_def()]));
+        let strand = pdf_to_vec_strand();
+        let path_tokens: Vec<String> = strand
+            .steps
+            .iter()
+            .filter(|step| step.is_cap())
+            .map(|step| step.token_id.to_string())
+            .collect();
+        let machine = Machine::from_strand(&strand, &registry).unwrap();
+
+        let names = machine.canonical_node_names();
+        let (_, parsed_names) = crate::machine::parse_machine_with_node_names(
+            &machine.to_machine_notation().unwrap(),
+            &registry,
+        )
+        .unwrap();
+        let mut written: Vec<&String> = parsed_names[0].keys().collect();
+        let mut canonical: Vec<&String> = names[0].keys().collect();
+        written.sort();
+        canonical.sort();
+        assert_eq!(canonical, written, "the names are the ones the notation writes");
+
+        let resolved =
+            crate::orchestrator::ResolvedNotation::from_machine(machine, registry.clone()).unwrap();
+        let inputs = resolved.inputs().unwrap();
+        assert_eq!(inputs.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(), vec!["n0"]);
+        let plan = resolved
+            .plan(0, &crate::orchestrator::RunInputs::declared())
+            .await
+            .unwrap()
+            .plan;
+        let mut plan_tokens: Vec<String> = plan
+            .nodes
+            .values()
+            .filter_map(|node| match &node.node_type {
+                crate::planner::ExecutionNodeType::Cap { token_id, .. } => Some(token_id.to_string()),
+                _ => None,
+            })
+            .collect();
+        let mut path_tokens = path_tokens;
+        plan_tokens.sort();
+        path_tokens.sort();
+        assert_eq!(plan_tokens, path_tokens, "the run's steps are the path's steps");
     }
 
     // TEST1173: Serializing and reparsing a machine preserves strict machine equivalence.

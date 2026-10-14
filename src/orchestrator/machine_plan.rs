@@ -17,7 +17,9 @@ use crate::machine::{
     parse_machine_with_sources_async, Machine, MachineSource, NoMachineSource, NodeId,
     StrandNodeNames,
 };
-use crate::planner::{ExecutionNodeType, InputCardinality, MachinePlan, MachinePlanBuilder};
+use crate::planner::{
+    AnchorInput, ExecutionNodeType, InputCardinality, MachinePlan, MachinePlanBuilder,
+};
 use crate::MediaUrn;
 
 use super::types::ParseOrchestrationError;
@@ -74,6 +76,27 @@ pub struct StrandPlan {
     pub node_names: HashMap<String, String>,
 }
 
+/// What a run binds to the inputs of a machine, by the names the notation
+/// gives them.
+#[derive(Debug, Clone, Default)]
+pub struct RunInputs {
+    /// The inputs bound to a sequence. Every other input is bound to one
+    /// value.
+    pub sequences: HashSet<String>,
+    /// The type of what the run binds, for an input it knows more of than the
+    /// machine declares (a file whose type is more specific than the input's).
+    /// Every other input holds its declared type. A type that does not
+    /// conform to the input's is refused.
+    pub media: HashMap<String, MediaUrn>,
+}
+
+impl RunInputs {
+    /// Every input one value of its declared type.
+    pub fn declared() -> Self {
+        Self::default()
+    }
+}
+
 /// Machine notation resolved against a registry: what the machine takes and
 /// gives, and — once a run has said which inputs it binds to a sequence —
 /// the plan of each of its strands.
@@ -120,6 +143,33 @@ impl ResolvedNotation {
             names,
             registry,
         })
+    }
+
+    /// A machine already resolved — a path the planner found, made a machine
+    /// — under the names its canonical notation gives its nodes. Its steps
+    /// keep the tokens they have, so what was addressed to them before it was
+    /// a machine (an argument value for a step of the path) is addressed to
+    /// them still.
+    pub fn from_machine(
+        machine: Machine,
+        registry: Arc<FabricRegistry>,
+    ) -> Result<Self, ParseOrchestrationError> {
+        if machine.strands().is_empty() {
+            return Err(ParseOrchestrationError::InvalidGraph {
+                message: "the machine has zero strands (no capability steps)".to_string(),
+            });
+        }
+        let names = machine.canonical_node_names();
+        Ok(Self {
+            machine,
+            names,
+            registry,
+        })
+    }
+
+    /// The resolved machine: every included machine inlined.
+    pub fn machine(&self) -> &Machine {
+        &self.machine
     }
 
     /// How many strands the machine has.
@@ -169,49 +219,57 @@ impl ResolvedNotation {
         self.anchors(|strand| strand.output_anchor_ids())
     }
 
-    /// The plan of strand `strand` for a run that binds the inputs named in
-    /// `sequences` to a sequence and every other input to one value. A name
-    /// in `sequences` that is not an input of the strand is refused.
+    /// The plan of strand `strand` for a run that binds its inputs as
+    /// `inputs` says. A name in `inputs` that is not an input of the strand is
+    /// refused.
     pub async fn plan(
         &self,
         strand: usize,
-        sequences: &HashSet<String>,
+        inputs: &RunInputs,
     ) -> Result<StrandPlan, ParseOrchestrationError> {
         let resolved = self.machine.strands().get(strand).ok_or_else(|| {
             ParseOrchestrationError::InvalidGraph {
                 message: format!("the machine has no strand {strand}"),
             }
         })?;
+        let run_inputs = inputs;
         let inputs: Vec<MachineAnchor> = self
             .inputs()?
             .into_iter()
             .filter(|input| input.strand == strand)
             .collect();
-        for name in sequences {
+        for name in run_inputs.sequences.iter().chain(run_inputs.media.keys()) {
             if !inputs.iter().any(|input| &input.name == name) {
                 return Err(ParseOrchestrationError::InvalidGraph {
                     message: format!("strand {strand} has no input named '{name}'"),
                 });
             }
         }
-        let cardinalities: HashMap<NodeId, InputCardinality> = inputs
+        let anchor_inputs: HashMap<NodeId, AnchorInput> = inputs
             .iter()
             .map(|input| {
                 (
                     input.node,
-                    if sequences.contains(&input.name) {
-                        InputCardinality::Sequence
-                    } else {
-                        InputCardinality::Single
+                    AnchorInput {
+                        cardinality: if run_inputs.sequences.contains(&input.name) {
+                            InputCardinality::Sequence
+                        } else {
+                            InputCardinality::Single
+                        },
+                        media: run_inputs
+                            .media
+                            .get(&input.name)
+                            .cloned()
+                            .unwrap_or_else(|| input.media_urn.clone()),
                     },
                 )
             })
             .collect();
         let mut plan = MachinePlanBuilder::new(self.registry.clone())
-            .build_plan_from_machine_strand_with_anchor_cardinalities(
+            .build_plan_from_machine_strand_for_run(
                 &format!("machine_strand_{strand}"),
                 resolved,
-                &cardinalities,
+                &anchor_inputs,
             )
             .await
             .map_err(|e| ParseOrchestrationError::InvalidGraph {
@@ -302,7 +360,7 @@ pub async fn build_plans_from_notation_from(
     let resolved = ResolvedNotation::resolve_from(notation, registry, source, id).await?;
     let mut plans = Vec::with_capacity(resolved.strand_count());
     for strand in 0..resolved.strand_count() {
-        plans.push(resolved.plan(strand, &HashSet::new()).await?.plan);
+        plans.push(resolved.plan(strand, &RunInputs::declared()).await?.plan);
     }
     Ok(plans)
 }
@@ -1108,7 +1166,7 @@ mod tests {
         assert!(!inputs.iter().chain(&outputs).any(|(_, name, _)| name == "text"));
 
         // One value: no map. The slot and the output are found by name.
-        let single = resolved.plan(doc_strand, &HashSet::new()).await.unwrap();
+        let single = resolved.plan(doc_strand, &RunInputs::declared()).await.unwrap();
         assert!(maps(&single.plan).is_empty());
         let slot = &single.input_slots["doc"];
         assert!(matches!(
@@ -1140,7 +1198,10 @@ mod tests {
 
         // A sequence of documents: the same strand, mapped.
         let many = resolved
-            .plan(doc_strand, &HashSet::from(["doc".to_string()]))
+            .plan(
+                doc_strand,
+                &RunInputs { sequences: HashSet::from(["doc".to_string()]), ..RunInputs::default() },
+            )
             .await
             .unwrap();
         assert_eq!(maps(&many.plan).len(), 1);
@@ -1151,14 +1212,14 @@ mod tests {
 
         // Not an input of that strand; not a strand.
         for (strand, name) in [(doc_strand, "scan"), (doc_strand, "text"), (scan_strand, "nowhere")] {
-            match resolved.plan(strand, &HashSet::from([name.to_string()])).await {
+            match resolved.plan(strand, &RunInputs { sequences: HashSet::from([name.to_string()]), ..RunInputs::default() }).await {
                 Err(ParseOrchestrationError::InvalidGraph { message }) => {
                     assert!(message.contains(&format!("no input named '{name}'")), "{message}");
                 }
                 other => panic!("expected a refusal for '{name}', got {:?}", other.map(|p| p.plan.name)),
             }
         }
-        assert!(resolved.plan(7, &HashSet::new()).await.is_err());
+        assert!(resolved.plan(7, &RunInputs::declared()).await.is_err());
     }
 
     // TEST12820: what a step gives on an output other than its main one is
@@ -1178,7 +1239,7 @@ mod tests {
             header("report", REPORT)
         );
         let resolved = ResolvedNotation::resolve(&notation, reg).await.expect("resolves");
-        let strand = resolved.plan(0, &HashSet::new()).await.expect("plans");
+        let strand = resolved.plan(0, &RunInputs::declared()).await.expect("plans");
         let regress = step_of(&strand.plan, REGRESS);
         let residuals = wired(&strand.plan, &step_of(&strand.plan, PLOT), None);
         assert_ne!(residuals, regress, "the other output is a node of its own");
@@ -1214,13 +1275,348 @@ mod tests {
         );
         assert!(policy_of(SUMMARIZE).is_default());
     }
+
+    // ---- What a run of a plan is asked for (MachinePlanBuilder::analyze_plan_arguments)
+
+    /// The requirements of the one plan of `notation`, by step URN.
+    async fn requirements(
+        notation: &str,
+        reg: Arc<FabricRegistry>,
+    ) -> (MachinePlan, crate::planner::PlanArgumentRequirements) {
+        let plan = one_plan(notation, reg.clone()).await;
+        let requirements = MachinePlanBuilder::new(reg)
+            .analyze_plan_arguments(&plan)
+            .await
+            .unwrap_or_else(|e| panic!("{notation}: {e}"));
+        (plan, requirements)
+    }
+
+    /// The arg named `name` of the one step running `cap`.
+    fn arg_of<'a>(
+        requirements: &'a crate::planner::PlanArgumentRequirements,
+        cap: &str,
+        name: &str,
+    ) -> &'a crate::planner::ArgumentInfo {
+        let wanted = CapUrn::from_string(cap).unwrap();
+        let step = requirements
+            .steps
+            .iter()
+            .find(|s| CapUrn::from_string(&s.cap_urn).unwrap().is_equivalent(&wanted))
+            .unwrap_or_else(|| panic!("no step runs '{cap}'"));
+        step.arguments
+            .iter()
+            .find(|a| a.name == name)
+            .unwrap_or_else(|| panic!("step '{cap}' has no arg named '{name}'"))
+    }
+
+    fn slot_names(requirements: &crate::planner::PlanArgumentRequirements) -> Vec<String> {
+        let mut names: Vec<String> = requirements
+            .steps
+            .iter()
+            .flat_map(|s| s.slots.iter().map(|a| a.name.clone()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    const COMPARE: &str = r#"cap:in="media:enc=utf-8;ext=txt";compare;out="media:comparison;enc=utf-8""#;
+
+    // TEST994: an arg is wired from an input of the machine or from what a
+    // step produced, and the analysis says which; neither is asked of the run.
+    #[tokio::test]
+    async fn test994_wired_args_come_from_an_input_or_a_step_and_are_not_slots() {
+        let reg = registry(vec![cap(EXTRACT, false), cap(SUMMARIZE, false)]);
+        let notation = format!(
+            "{}{}[doc -> extract -> text][text -> summarize -> summary]",
+            header("extract", EXTRACT),
+            header("summarize", SUMMARIZE)
+        );
+        let (_, req) = requirements(&notation, reg).await;
+        let extract_in = arg_of(&req, EXTRACT, "input");
+        assert_eq!(extract_in.resolution, crate::planner::ArgumentResolution::FromInput);
+        assert!(extract_in.is_main_input);
+        let summarize_in = arg_of(&req, SUMMARIZE, "input");
+        assert_eq!(summarize_in.resolution, crate::planner::ArgumentResolution::FromStep);
+        assert!(slot_names(&req).is_empty(), "a wired arg is not the run's to give");
+        assert!(req.can_execute_without_input);
+    }
+
+    // TEST1009: an arg the machine leaves unbound is the run's: a slot,
+    // carrying its definition's default, which the run may go without.
+    #[tokio::test]
+    async fn test1009_an_unbound_arg_with_a_default_is_a_slot_the_run_may_skip() {
+        let mut summarize = with_arg(cap(SUMMARIZE, false), "budget", "media:budget;numeric", None);
+        let budget = summarize.args.last_mut().unwrap();
+        budget.required = false;
+        budget.default_value = Some(serde_json::json!(400));
+        let reg = registry(vec![summarize]);
+        let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
+        let (_, req) = requirements(&notation, reg).await;
+        let budget = arg_of(&req, SUMMARIZE, "budget");
+        assert_eq!(budget.resolution, crate::planner::ArgumentResolution::HasDefault);
+        assert_eq!(budget.default_value, Some(serde_json::json!(400)));
+        assert_eq!(slot_names(&req), vec!["budget"]);
+        assert!(req.can_execute_without_input);
+    }
+
+    // TEST1012: an unbound required arg with no default must be given by
+    // the run: the plan cannot run without the user.
+    #[tokio::test]
+    async fn test1012_an_unbound_required_arg_without_default_needs_the_user() {
+        let reg = registry(vec![with_arg(
+            cap(SUMMARIZE, false),
+            "instruction",
+            "media:enc=utf-8;instruction",
+            None,
+        )]);
+        let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
+        let (_, req) = requirements(&notation, reg).await;
+        assert_eq!(
+            arg_of(&req, SUMMARIZE, "instruction").resolution,
+            crate::planner::ArgumentResolution::RequiresUserInput
+        );
+        assert_eq!(slot_names(&req), vec!["instruction"]);
+        assert!(!req.can_execute_without_input);
+    }
+
+    // TEST1015: an unbound optional arg without a default is a slot the run
+    // may leave empty: it does not stop the run going without the user.
+    #[tokio::test]
+    async fn test1015_an_unbound_optional_arg_without_default_does_not_block_the_run() {
+        let mut summarize =
+            with_arg(cap(SUMMARIZE, false), "style", "media:enc=utf-8;style", None);
+        summarize.args.last_mut().unwrap().required = false;
+        let reg = registry(vec![summarize]);
+        let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
+        let (_, req) = requirements(&notation, reg).await;
+        assert_eq!(
+            arg_of(&req, SUMMARIZE, "style").resolution,
+            crate::planner::ArgumentResolution::RequiresUserInput
+        );
+        assert_eq!(slot_names(&req), vec!["style"]);
+        assert!(req.can_execute_without_input);
+    }
+
+    // TEST12851: a constant written in the machine binds its arg: the arg is
+    // not a slot, and the run needs no value for it though it has no default.
+    #[tokio::test]
+    async fn test12851_a_constant_binds_its_arg_and_is_not_asked_of_the_run() {
+        let reg = registry(vec![with_arg(
+            cap(SUMMARIZE, false),
+            "instruction",
+            "media:enc=utf-8;instruction",
+            None,
+        )]);
+        // A constant is held to its arg's media definition, which says it is
+        // a string.
+        reg.insert_cached_media_def_for_test(crate::fabric::registry::StoredMediaDef {
+            version: 0,
+            urn: "media:enc=utf-8;instruction".to_string(),
+            media_type: "text/plain".to_string(),
+            title: "Instruction".to_string(),
+            profile_uri: None,
+            schema: Some(serde_json::json!({"type": "string"})),
+            description: None,
+            documentation: None,
+            validation: None,
+            metadata: None,
+            extensions: Vec::new(),
+        });
+        let notation = format!(
+            "{}[(text, instruction=\"be brief\") -> summarize -> summary]",
+            header("summarize", SUMMARIZE)
+        );
+        let (_, req) = requirements(&notation, reg).await;
+        assert_eq!(
+            arg_of(&req, SUMMARIZE, "instruction").resolution,
+            crate::planner::ArgumentResolution::Constant
+        );
+        assert!(slot_names(&req).is_empty());
+        assert!(req.can_execute_without_input);
+    }
+
+    // TEST12852: a source wired to a non-main arg by name binds it: the arg
+    // is fed — from an input, or from a step — and is not a slot.
+    #[tokio::test]
+    async fn test12852_a_named_source_binds_a_non_main_arg() {
+        let mut compare = with_arg(
+            with_arg(
+                cap(COMPARE, false),
+                "benchmark",
+                "media:benchmark;enc=utf-8",
+                Some("media:enc=utf-8;ext=txt"),
+            ),
+            "threshold",
+            "media:numeric;threshold",
+            None,
+        );
+        compare.args.last_mut().unwrap().default_value = Some(serde_json::json!(0.5));
+        let reg = registry(vec![cap(EXTRACT, false), compare]);
+        let notation = format!(
+            "{}{}[doc -> extract -> text][(text, benchmark=reference) -> compare -> result]",
+            header("extract", EXTRACT),
+            header("compare", COMPARE)
+        );
+        let (_, req) = requirements(&notation, reg).await;
+        assert_eq!(
+            arg_of(&req, COMPARE, "input").resolution,
+            crate::planner::ArgumentResolution::FromStep
+        );
+        assert_eq!(
+            arg_of(&req, COMPARE, "benchmark").resolution,
+            crate::planner::ArgumentResolution::FromInput,
+            "`reference` is an input of the machine"
+        );
+        assert_eq!(
+            arg_of(&req, COMPARE, "threshold").resolution,
+            crate::planner::ArgumentResolution::HasDefault,
+            "the wire into `benchmark` binds that arg, not every other"
+        );
+        assert_eq!(slot_names(&req), vec!["threshold"]);
+    }
+
+    // TEST12854: a run says what type it binds to an input, and the plan
+    // follows it: a step whose output is its input unchanged produces the
+    // run's type, not the declared one. A type that does not conform to the
+    // input's, and a name that is no input, are refused.
+    #[tokio::test]
+    async fn test12854_a_run_binds_a_more_specific_type_and_the_plan_follows_it() {
+        const STRIP: &str = r#"cap:effect=none;in="media:image";strip-metadata;out="media:image""#;
+        let reg = registry(vec![cap(STRIP, false)]);
+        let notation = format!("{}[img -> strip -> clean]", header("strip", STRIP));
+        let resolved = ResolvedNotation::resolve(&notation, reg).await.expect("resolves");
+        let output_media = |plan: &MachinePlan| {
+            let output = plan.output_nodes.first().expect("one output").clone();
+            MediaUrn::from_string(
+                &crate::planner::derive_output_media_urn(plan, &output).expect("derives"),
+            )
+            .unwrap()
+        };
+
+        let declared = resolved.plan(0, &RunInputs::declared()).await.expect("plans").plan;
+        assert!(output_media(&declared)
+            .is_equivalent(&MediaUrn::from_string("media:image").unwrap())
+            .unwrap());
+
+        let png = MediaUrn::from_string("media:ext=png;image").unwrap();
+        let run = RunInputs {
+            media: HashMap::from([("img".to_string(), png.clone())]),
+            ..RunInputs::default()
+        };
+        let bound = resolved.plan(0, &run).await.expect("a png is an image").plan;
+        assert!(
+            output_media(&bound).is_equivalent(&png).unwrap(),
+            "the step passes its input through: a png in is a png out"
+        );
+
+        let text = RunInputs {
+            media: HashMap::from([(
+                "img".to_string(),
+                MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
+            )]),
+            ..RunInputs::default()
+        };
+        let refused = resolved.plan(0, &text).await.err().expect("text is not an image");
+        assert!(refused.to_string().contains("which takes"), "{refused}");
+
+        let stray = RunInputs {
+            media: HashMap::from([("nothing".to_string(), png)]),
+            ..RunInputs::default()
+        };
+        let refused = resolved.plan(0, &stray).await.err().expect("no input is called that");
+        assert!(refused.to_string().contains("no input named 'nothing'"), "{refused}");
+    }
+
+    // TEST12853: an arg reached through a map's item is fed from where the
+    // map's sequence comes from: an input of the machine bound to a sequence
+    // feeds each run of the body, and is not asked of the run.
+    #[tokio::test]
+    async fn test12853_an_item_of_an_input_feeds_from_the_input() {
+        let reg = registry(vec![cap(TO_JPEG, false)]);
+        let notation = format!("{}[pages -> convert -> jpeg]", header("convert", TO_JPEG));
+        let resolved = ResolvedNotation::resolve(&notation, reg.clone()).await.expect("resolves");
+        let plan = resolved
+            .plan(
+                0,
+                &RunInputs { sequences: HashSet::from(["pages".to_string()]), ..RunInputs::default() },
+            )
+            .await
+            .expect("plans")
+            .plan;
+        assert_eq!(maps(&plan).len(), 1, "a sequence into a scalar arg opens a map");
+        let req = MachinePlanBuilder::new(reg).analyze_plan_arguments(&plan).await.unwrap();
+        assert_eq!(
+            arg_of(&req, TO_JPEG, "input").resolution,
+            crate::planner::ArgumentResolution::FromInput
+        );
+        assert!(slot_names(&req).is_empty());
+    }
+
+    // TEST7104: the main input is found by tagged-URN equivalence with the
+    // cap's `in=`, never by spelling: a stdin source whose URN writes the
+    // tags in another order is still the main input, and exactly one arg is.
+    #[tokio::test]
+    async fn test7104_the_main_input_is_found_by_equivalence_not_spelling() {
+        let mut summarize = cap(SUMMARIZE, false);
+        summarize.args[0].sources = vec![ArgSource::Stdin {
+            stdin: "media:ext=txt;enc=utf-8".to_string(),
+        }];
+        let mut summarize =
+            with_arg(summarize, "instruction", "media:enc=utf-8;instruction", None);
+        // Where an arg is written says nothing of what it is: the main input
+        // is not the first.
+        summarize.args.rotate_right(1);
+        assert_eq!(summarize.args[0].name, "instruction");
+        let reg = registry(vec![summarize]);
+        let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
+        let (_, req) = requirements(&notation, reg).await;
+        let main: Vec<&str> = req.steps[0]
+            .arguments
+            .iter()
+            .filter(|a| a.is_main_input)
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(main, vec!["input"]);
+        assert_eq!(
+            arg_of(&req, SUMMARIZE, "input").resolution,
+            crate::planner::ArgumentResolution::FromInput
+        );
+    }
+
+    // TEST1461: requirements are addressed by the plan's own tokens: two
+    // steps of one cap carry the two distinct tokens of their cap nodes.
+    #[tokio::test]
+    async fn test1461_step_requirements_carry_the_plans_own_tokens() {
+        let rewrite = r#"cap:in="media:enc=utf-8;ext=txt";rewrite;out="media:enc=utf-8;ext=txt""#;
+        let reg = registry(vec![cap(rewrite, false)]);
+        let notation = format!(
+            "{}[a -> rewrite -> b][b -> rewrite -> c]",
+            header("rewrite", rewrite)
+        );
+        let (plan, req) = requirements(&notation, reg).await;
+        let mut plan_tokens: Vec<String> = plan
+            .nodes
+            .values()
+            .filter_map(|n| match &n.node_type {
+                ExecutionNodeType::Cap { token_id, .. } => Some(token_id.to_string()),
+                _ => None,
+            })
+            .collect();
+        plan_tokens.sort();
+        let mut requirement_tokens: Vec<String> =
+            req.steps.iter().map(|s| s.token_id.to_string()).collect();
+        requirement_tokens.sort();
+        assert_eq!(plan_tokens.len(), 2);
+        assert_ne!(plan_tokens[0], plan_tokens[1], "two steps, two tokens");
+        assert_eq!(requirement_tokens, plan_tokens);
+    }
 }
 
 #[cfg(test)]
 mod anchor_cardinality_tests {
     use super::tests::{cap, registry};
     use crate::machine::parse_machine_with_node_names_async;
-    use crate::planner::{ExecutionNodeType, InputCardinality, MachinePlanBuilder};
+    use crate::planner::{AnchorInput, ExecutionNodeType, InputCardinality, MachinePlanBuilder};
     use std::collections::HashMap;
 
     // TEST1446: per-anchor cardinality — a Sequence anchor feeding a scalar
@@ -1257,24 +1653,20 @@ mod anchor_cardinality_tests {
         let strand = &machine.strands()[0];
 
         // pdf anchor: Sequence (a 3-file batch); md anchor: Single.
-        let mut cardinalities: HashMap<crate::machine::NodeId, InputCardinality> = HashMap::new();
+        let mut inputs: HashMap<crate::machine::NodeId, AnchorInput> = HashMap::new();
         for &anchor in strand.input_anchor_ids() {
-            let urn = strand.node_urn(anchor).to_string();
-            let cardinality = if urn.contains("pdf") {
+            let urn = strand.node_urn(anchor);
+            let cardinality = if urn.to_string().contains("pdf") {
                 InputCardinality::Sequence
             } else {
                 InputCardinality::Single
             };
-            cardinalities.insert(anchor, cardinality);
+            inputs.insert(anchor, AnchorInput { cardinality, media: urn.clone() });
         }
 
         let builder = MachinePlanBuilder::new(reg.clone());
         let plan = builder
-            .build_plan_from_machine_strand_with_anchor_cardinalities(
-                "mixed anchors",
-                strand,
-                &cardinalities,
-            )
+            .build_plan_from_machine_strand_for_run("mixed anchors", strand, &inputs)
             .await
             .expect("mixed-cardinality plan builds");
         plan.validate().expect("valid");

@@ -989,7 +989,6 @@ impl CartridgeRepo {
         repo_url: &str,
         registry: CartridgeRegistryResponse,
     ) -> Result<()> {
-        use crate::urn::cap_urn::CapUrn;
         let mut cartridges: HashMap<CartridgeKey, CartridgeInfo> = HashMap::new();
         let mut cap_to_cartridges: HashMap<String, Vec<CartridgeKey>> = HashMap::new();
 

@@ -46,7 +46,7 @@ use crate::cap::caller::CapArgumentValue;
 use crate::cap::definition::{ArgSource, Cap, CapArg};
 use crate::standard::caps::{CAP_ADAPTER_SELECTION, CAP_DISCARD, CAP_IDENTITY};
 use crate::urn::cap_urn::CapUrn;
-use crate::urn::media_urn::{MediaUrn, MEDIA_FILE_PATH};
+use crate::urn::media_urn::MediaUrn;
 use async_trait::async_trait;
 // crossbeam is used for demux_multi_stream (bridging sync stdin reads to async handlers)
 use ops_rs::{DryContext, Op, OpError, OpMetadata, OpResult, WetContext};
@@ -55,7 +55,7 @@ use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
 /// Errors that can occur in the cartridge runtime
@@ -2077,9 +2077,7 @@ impl OutputStream {
                         break;
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        let n = tick_counter_for_ticker
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                            + 1;
+                        tick_counter_for_ticker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let mut frame = Frame::progress(ticker_rid.clone(), progress, &ticker_msg);
                         frame.routing_id = ticker_xid.clone();
                         if ticker_sender.send(&frame).is_err() {
@@ -7261,6 +7259,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::urn::media_urn::MEDIA_FILE_PATH;
     use crate::bifaci::frame::DEFAULT_MAX_CHUNK;
 
     /// A responder over real pools (none declared), as a started cartridge has.

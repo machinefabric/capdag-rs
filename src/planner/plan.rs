@@ -16,7 +16,7 @@ use super::live_cap_fab::{StepToken, Strand, StrandStep, StrandStepType};
 use super::PlannerError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use uuid::Uuid;
+
 
 /// Unique identifier for a node in the execution plan
 pub type NodeId = String;
@@ -1065,52 +1065,6 @@ impl MachinePlan {
     }
 }
 
-/// Result of executing a single node
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeExecutionResult {
-    /// The node that was executed
-    pub node_id: NodeId,
-
-    /// Whether execution succeeded
-    pub success: bool,
-
-    /// Binary output data (if any).
-    /// Used by the standalone executor (capdag). The pipeline executor in floom-engine
-    /// writes output incrementally to disk and populates saved_paths instead.
-    pub binary_output: Option<Vec<u8>>,
-
-    /// Individual output items when the terminal cap used emit_list_item (is_sequence=true).
-    /// Used by the standalone executor. Pipeline executor uses saved_paths.
-    #[serde(default)]
-    pub binary_items: Option<Vec<Vec<u8>>>,
-
-    /// File paths of output already saved to disk by IncrementalWriter.
-    /// Populated by the pipeline executor (floom-engine). Empty for standalone executor.
-    /// For blob: single path. For sequence: one path per item.
-    #[serde(default)]
-    pub saved_paths: Vec<String>,
-
-    /// Whether the output is a sequence (from is_sequence on STREAM_START).
-    /// Determines how saved_paths should be interpreted: true = folder of items,
-    /// false = single file.
-    #[serde(default)]
-    pub is_sequence_output: bool,
-
-    /// Total bytes written to disk. 0 when binary_output is used instead.
-    #[serde(default)]
-    pub total_bytes: usize,
-
-    /// Output media URN (from the terminal cap's STREAM_START or plan derivation).
-    #[serde(default)]
-    pub media_urn_output: String,
-
-    /// Error message if execution failed
-    pub error: Option<String>,
-
-    /// Execution duration in milliseconds
-    pub duration_ms: u64,
-}
-
 /// One run of a map's body: which map, and which of its runs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MapRun {
@@ -1252,37 +1206,6 @@ where
     D: serde::Deserializer<'de>,
 {
     Option::<StepToken>::deserialize(deserializer)
-}
-
-/// Overall result of executing a machine
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MachineResult {
-    /// Whether the entire chain executed successfully
-    pub success: bool,
-
-    /// Results from each node
-    pub node_results: HashMap<NodeId, NodeExecutionResult>,
-
-    /// Outputs from output nodes (structured JSON)
-    pub outputs: HashMap<String, serde_json::Value>,
-
-    /// Error message if the chain failed
-    pub error: Option<String>,
-
-    /// Total execution duration in milliseconds
-    pub total_duration_ms: u64,
-
-    /// Per-body outcomes for ForEach pipelines, or single entry for linear.
-    /// Populated by the pipeline executor, empty for standalone executor.
-    #[serde(default)]
-    pub body_outcomes: Vec<BodyOutcome>,
-}
-
-impl MachineResult {
-    /// Get the primary output (first output node's result)
-    pub fn primary_output(&self) -> Option<&serde_json::Value> {
-        self.outputs.values().next()
-    }
 }
 
 #[cfg(test)]
@@ -1466,26 +1389,6 @@ mod tests {
         assert!(matches!(arg.edge_type, EdgeType::Arg { arg_urn } if arg_urn == "media:data"));
     }
 
-    // TEST927: Tests MachineResult structure for successful execution outcomes
-    // Verifies that success status, outputs, and primary_output() accessor work correctly
-    #[test]
-    fn test927_execution_result() {
-        let mut outputs = HashMap::new();
-        outputs.insert("output".to_string(), json!({"result": "success"}));
-
-        let result = MachineResult {
-            success: true,
-            node_results: HashMap::new(),
-            outputs,
-            error: None,
-            total_duration_ms: 100,
-            body_outcomes: vec![],
-        };
-
-        assert!(result.success);
-        assert!(result.primary_output().is_some());
-    }
-
     // TEST928: Tests plan validation detects edges originating from non-existent nodes
     // Verifies that validate() returns an error when an edge references a missing from_node
     #[test]
@@ -1658,68 +1561,6 @@ mod tests {
         );
         assert_eq!(plan.nodes.len(), 0);
         assert_eq!(plan.edges.len(), 0);
-    }
-
-    // TEST739: Tests NodeExecutionResult structure for successful node execution
-    // Verifies that success status, outputs (binary and text), and error fields work correctly
-    #[test]
-    fn test739_node_execution_result_success() {
-        let result = NodeExecutionResult {
-            node_id: "node_0".to_string(),
-            success: true,
-            binary_output: Some(vec![1, 2, 3]),
-            binary_items: None,
-            saved_paths: vec![],
-            is_sequence_output: false,
-            total_bytes: 0,
-            media_urn_output: String::new(),
-            error: None,
-            duration_ms: 50,
-        };
-
-        assert!(result.success);
-        assert!(result.binary_output.is_some());
-        assert_eq!(result.error, None);
-    }
-
-    // TEST931: Tests NodeExecutionResult structure for failed node execution
-    // Verifies that failure status, error message, and absence of outputs are correctly represented
-    #[test]
-    fn test931_node_execution_result_failure() {
-        let result = NodeExecutionResult {
-            node_id: "node_0".to_string(),
-            success: false,
-            binary_output: None,
-            binary_items: None,
-            saved_paths: vec![],
-            is_sequence_output: false,
-            total_bytes: 0,
-            media_urn_output: String::new(),
-            error: Some("Cap execution failed".to_string()),
-            duration_ms: 10,
-        };
-
-        assert!(!result.success);
-        assert!(result.binary_output.is_none());
-        assert_eq!(result.error, Some("Cap execution failed".to_string()));
-    }
-
-    // TEST932: Tests MachineResult structure for failed chain execution
-    // Verifies that failure status, error message, and absence of outputs are correctly represented
-    #[test]
-    fn test932_execution_result_failure() {
-        let result = MachineResult {
-            success: false,
-            node_results: HashMap::new(),
-            outputs: HashMap::new(),
-            error: Some("Chain failed".to_string()),
-            total_duration_ms: 100,
-            body_outcomes: vec![],
-        };
-
-        assert!(!result.success);
-        assert_eq!(result.error, Some("Chain failed".to_string()));
-        assert!(result.primary_output().is_none());
     }
 
     // TEST742: Tests EdgeType enum serialization and deserialization to/from JSON

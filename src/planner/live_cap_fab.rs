@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::cap::registry::FabricRegistry;
-use crate::planner::cardinality::InputCardinality;
+
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 use crate::Cap;
@@ -1026,12 +1026,6 @@ impl LiveCapFab {
         (self.nodes.len(), self.edges.len())
     }
 
-    /// The bookend-eligible node set (see `is_bookend`). Used by the unified
-    /// plan engine (`plan_engine.rs`) to restrict discovered targets.
-    pub(crate) fn bookends(&self) -> &HashSet<MediaUrn> {
-        &self.bookend_nodes
-    }
-
     /// The distinct cap URNs in the graph, for registry-backed lookups by the
     /// unified plan engine (e.g. multi-input Merge-cap discovery).
     pub(crate) fn cap_urns(&self) -> Vec<CapUrn> {
@@ -1233,7 +1227,6 @@ impl LiveCapFab {
 
             let mut current_path: Vec<StrandStep> = Vec::new();
             let mut visited: HashSet<(MediaUrn, bool)> = HashSet::new();
-            let paths_before = all_paths.len();
             let mut nodes_this_depth: u64 = 0;
 
             self.iddfs_find_paths(
@@ -1284,7 +1277,7 @@ impl LiveCapFab {
         max_depth: usize,
         max_paths: usize,
         cancelled: &std::sync::atomic::AtomicBool,
-        mut on_event: F,
+        on_event: F,
     ) -> Vec<Strand>
     where
         F: FnMut(PathFindingEvent),

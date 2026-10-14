@@ -996,63 +996,33 @@ impl RunEnd {
     }
 }
 
-/// A required arg of a step that nothing gives a value to, as the user must
-/// be told of it before anything runs.
-fn unbound_required_args(
+/// Every required arg of a step of `plan` that the machine does not bind and
+/// that has no default, as the user must be told of it before anything runs.
+/// A `.machine` run gives no argument values of its own, so each is missing.
+async fn unbound_required_args(
     plan: &capdag::planner::MachinePlan,
-    registry: &FabricRegistry,
-    cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
-) -> Vec<String> {
-    let same = |a: &str, b: &str| match (capdag::MediaUrn::from_string(a), capdag::MediaUrn::from_string(b)) {
-        (Ok(a), Ok(b)) => a.is_equivalent(&b).unwrap_or(false),
-        _ => false,
-    };
+    registry: Arc<FabricRegistry>,
+) -> Result<Vec<String>, String> {
+    let requirements = capdag::planner::MachinePlanBuilder::new(registry)
+        .analyze_plan_arguments(plan)
+        .await
+        .map_err(|e| format!("the steps of '{}' cannot be analyzed: {e}", plan.name))?;
     let mut missing = Vec::new();
-    let mut ids: Vec<&String> = plan.nodes.keys().collect();
-    ids.sort();
-    for id in ids {
-        let ExecutionNodeType::Cap {
-            cap_urn,
-            arg_bindings,
-            ..
-        } = &plan.nodes[id].node_type
-        else {
-            continue;
-        };
-        let Some(cap) = registry.get_cached_cap(cap_urn) else {
-            missing.push(format!("step '{cap_urn}': its cap is not in the registry"));
-            continue;
-        };
-        for arg in cap.get_args() {
-            if !arg.required || arg.default_value.is_some() {
-                continue;
-            }
-            let stream = arg.stream_urn();
-            let wired = plan.edges.iter().any(|edge| {
-                &edge.to_node == id
-                    && match &edge.edge_type {
-                        capdag::planner::EdgeType::Direct => same(cap.urn.in_spec(), stream),
-                        capdag::planner::EdgeType::Arg { arg_urn } => same(arg_urn, stream),
-                        _ => false,
-                    }
-            });
-            let constant = arg_bindings.bindings.iter().any(|(urn, binding)| {
-                matches!(binding, capdag::planner::ArgumentBinding::Literal { .. }) && same(urn, stream)
-            });
-            let given = cap_arguments
-                .get(id)
-                .is_some_and(|values| values.iter().any(|(urn, _)| same(urn, stream)));
-            if !(wired || constant || given) {
+    for step in &requirements.steps {
+        for slot in &step.slots {
+            if slot.is_required
+                && slot.resolution == capdag::planner::ArgumentResolution::RequiresUserInput
+            {
                 missing.push(format!(
                     "step '{}' has no value for its required arg '{}' ({}) — bind it in the \
                      machine: a constant in the wiring (`{}=<value>`), or a node supplied with \
                      `--input`",
-                    cap.title, arg.name, arg.media_urn, arg.name
+                    step.title, slot.name, slot.media_urn, slot.name
                 ));
             }
         }
     }
-    missing
+    Ok(missing)
 }
 
 /// Run one strand's plan to its end, write what it produced, and say on
@@ -1611,7 +1581,11 @@ async fn execute_notation(
                 .filter(|name| inputs.iter().any(|input| input.strand == strand && &input.name == *name))
                 .cloned()
                 .collect();
-            match resolved.plan(strand, &of_strand).await {
+            let run_inputs = capdag::orchestrator::RunInputs {
+                sequences: of_strand,
+                ..capdag::orchestrator::RunInputs::default()
+            };
+            match resolved.plan(strand, &run_inputs).await {
                 Ok(plan) => strands.push(plan),
                 Err(e) => {
                     eprintln!("Validation failed: {}", e);
@@ -1620,10 +1594,16 @@ async fn execute_notation(
             }
         }
         if index == 0 {
-            let missing: Vec<String> = strands
-                .iter()
-                .flat_map(|strand| unbound_required_args(&strand.plan, &registry, &cap_arguments))
-                .collect();
+            let mut missing: Vec<String> = Vec::new();
+            for strand in &strands {
+                match unbound_required_args(&strand.plan, registry.clone()).await {
+                    Ok(of_strand) => missing.extend(of_strand),
+                    Err(e) => {
+                        eprintln!("Validation failed: {e}");
+                        process::exit(1);
+                    }
+                }
+            }
             if !missing.is_empty() {
                 eprintln!("The machine cannot run as written:");
                 for line in missing {
@@ -2778,7 +2758,7 @@ async fn cmd_cap(args: &[String]) -> ! {
         );
         process::exit(1);
     }
-    let strand = match resolved.plan(0, &std::collections::HashSet::new()).await {
+    let strand = match resolved.plan(0, &capdag::orchestrator::RunInputs::declared()).await {
         Ok(strand) => strand,
         Err(e) => {
             eprintln!("Failed to plan cap execution: {e}");

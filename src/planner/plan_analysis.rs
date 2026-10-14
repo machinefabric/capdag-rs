@@ -5,42 +5,13 @@
 //! dependency. They live in capdag's planner so the reference executor and the engine
 //! share one implementation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
 use super::plan::{EdgeType, ExecutionNodeType, MachinePlan, MachinePlanEdge};
 use super::{PlannerError, PlannerResult};
-
-/// Resolve a plan's terminal output node and its data from executed node data.
-///
-/// Tries each declared output node directly, then through an `Output` meta-node to its
-/// source. Fails hard if no output data is present — the executor must not silently
-/// return empty.
-pub fn resolve_plan_output(
-    plan: &MachinePlan,
-    node_data: &HashMap<String, Vec<Vec<u8>>>,
-) -> PlannerResult<(String, Vec<Vec<u8>>)> {
-    for output_id in &plan.output_nodes {
-        if let Some(items) = node_data.get(output_id) {
-            return Ok((output_id.clone(), items.clone()));
-        }
-        if let Some(node) = plan.get_node(output_id) {
-            if let ExecutionNodeType::Output { source_node, .. } = &node.node_type {
-                if let Some(items) = node_data.get(source_node) {
-                    return Ok((output_id.clone(), items.clone()));
-                }
-            }
-        }
-    }
-
-    Err(PlannerError::Internal(format!(
-        "No output data found. output_nodes={:?}, available={:?}",
-        plan.output_nodes,
-        node_data.keys().collect::<Vec<_>>()
-    )))
-}
 
 /// Derive the runtime output media URN for a plan's output node by walking back to the
 /// cap that produces it and applying each cap to its runtime input.
@@ -198,18 +169,6 @@ pub fn derive_output_producing_cap_urn(
     walk(plan, output_node_id, 0)
 }
 
-/// The media URN of the items of a map's source: the type the source node holds.
-/// A map changes shape (a sequence becomes one value per run), not type, so the
-/// item URN is the source's URN. Returned parsed and as a string.
-pub fn derive_foreach_media_urns(
-    plan: &MachinePlan,
-    source_node_id: &str,
-) -> PlannerResult<(MediaUrn, String)> {
-    let media_urn = resolve_node_output_media(plan, source_node_id, &mut BTreeMap::new())?;
-    let item_urn_str = media_urn.to_string();
-    Ok((media_urn, item_urn_str))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,9 +240,6 @@ mod tests {
         assert!(same(&media(&plan, "now"), "media:stamp"));
         assert!(same(&media(&plan, "both"), "media:textable"));
         assert!(same(&media(&plan, "out"), &media(&plan, "rejected")));
-        let (item, text) = derive_foreach_media_urns(&plan, "split").unwrap();
-        assert!(same(&text, "media:page;textable"));
-        assert_eq!(item.to_string(), text);
         // A map holds no value.
         assert!(derive_output_media_urn(&plan, "each").unwrap_err().to_string().contains("is a map"));
     }

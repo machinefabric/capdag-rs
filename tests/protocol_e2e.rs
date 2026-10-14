@@ -144,7 +144,10 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
     } else {
         HashSet::new()
     };
-    let strand = resolved.plan(0, &sequences).await.expect("the machine plans");
+    let strand = resolved
+        .plan(0, &capdag::orchestrator::RunInputs { sequences, ..Default::default() })
+        .await
+        .expect("the machine plans");
     let graph = plan_to_resolved_graph(&strand.plan, &machines.registry).expect("the plan converts");
     let input = strand.input_slots[&inputs[0].name].clone();
     // These machines are one step: its node is where its main output is.

@@ -19,7 +19,6 @@
 //! in the cap cache has every one of its referenced media defs already in
 //! the media cache (and the extension index).
 
-use crate::cap::definition::ArgSource;
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
 use crate::media::spec::MediaDef;
 use crate::Cap;
@@ -3173,6 +3172,7 @@ pub enum FabricRegistryError {
 #[cfg(test)]
 mod alias_tests {
     use super::*;
+    use crate::cap::definition::ArgSource;
     use crate::cap::definition::{Cap, CapArg, CapOutput};
     use crate::CapUrn;
 

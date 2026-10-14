@@ -17,12 +17,22 @@ use std::sync::Arc;
 
 use super::argument_binding::{ArgumentBinding, ArgumentBindings};
 use super::cardinality::InputCardinality;
-use super::live_cap_fab::{StepToken, Strand};
-use super::plan::{ExecutionNodeType, ForEachSource, MachineNode, MachinePlan, MachinePlanEdge};
+use super::live_cap_fab::StepToken;
+use super::plan::{
+    EdgeType, ExecutionNodeType, ForEachSource, MachineNode, MachinePlan, MachinePlanEdge,
+};
 use super::PlannerError;
 use crate::{Cap, FabricRegistry, MediaUrn, MediaValidation};
 
 type PlannerResult<T> = Result<T, PlannerError>;
+
+/// What a run binds to one input of a strand: how many values, and their
+/// type — the input's declared type, or one that conforms to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnchorInput {
+    pub cardinality: InputCardinality,
+    pub media: MediaUrn,
+}
 
 /// Builder for creating cap execution plans.
 ///
@@ -54,11 +64,13 @@ impl MachinePlanBuilder {
     }
 
     /// Check if a file-path arg is also the primary stdin input slot.
-    /// Returns true if the arg has a stdin source whose media URN matches the cap's in_spec.
-    /// This means the arg can receive piped data from the previous cap in a chain,
-    /// not just a literal file path.
+    /// Returns true if the arg has a stdin source whose media URN is
+    /// equivalent to the cap's in_spec. This means the arg can receive piped
+    /// data from the previous cap in a chain, not just a literal file path.
     fn is_file_path_stdin_chainable(cap: &Cap) -> bool {
-        let in_spec = cap.urn.in_spec();
+        let Ok(in_spec) = MediaUrn::from_string(cap.urn.in_spec()) else {
+            return false;
+        };
         for arg in cap.get_args() {
             let is_file_path = MediaUrn::from_string(&arg.media_urn)
                 .map(|urn| urn.is_file_path())
@@ -68,7 +80,10 @@ impl MachinePlanBuilder {
             }
             for source in &arg.sources {
                 if let crate::ArgSource::Stdin { stdin } = source {
-                    if stdin == in_spec {
+                    let equivalent = MediaUrn::from_string(stdin)
+                        .ok()
+                        .is_some_and(|stdin| stdin.is_equivalent(&in_spec).unwrap_or(false));
+                    if equivalent {
                         return true;
                     }
                 }
@@ -107,32 +122,36 @@ impl MachinePlanBuilder {
         strand: &crate::machine::graph::MachineStrand,
         input_cardinality: InputCardinality,
     ) -> PlannerResult<MachinePlan> {
-        // Uniform cardinality across every anchor — the historical single-anchor
-        // shape (and the multi-anchor shape where every anchor binds alike).
-        let anchor_cardinality: HashMap<crate::machine::graph::NodeId, InputCardinality> = strand
+        // Every input bound alike, each to its declared type.
+        let inputs: HashMap<crate::machine::graph::NodeId, AnchorInput> = strand
             .input_anchor_ids()
             .iter()
-            .map(|&a| (a, input_cardinality))
+            .map(|&anchor| {
+                (
+                    anchor,
+                    AnchorInput {
+                        cardinality: input_cardinality,
+                        media: strand.node_urn(anchor).clone(),
+                    },
+                )
+            })
             .collect();
-        self.build_plan_from_machine_strand_with_anchor_cardinalities(
-            name,
-            strand,
-            &anchor_cardinality,
-        )
-        .await
+        self.build_plan_from_machine_strand_for_run(name, strand, &inputs).await
     }
 
-    /// [`build_plan_from_machine_strand`] with PER-ANCHOR cardinality — the
-    /// multi-anchor (convergence-machine) run shape: each input anchor binds its
-    /// own file set, so a 3-file anchor feeding a scalar entry cap needs its
-    /// per-file ForEach while a 1-file anchor beside it does not. The map must
-    /// cover every input anchor; a missing anchor is a hard error (a run never
-    /// guesses cardinality).
-    pub async fn build_plan_from_machine_strand_with_anchor_cardinalities(
+    /// [`build_plan_from_machine_strand`] for a run that says, per input, how
+    /// many values it binds and what type they are: a 3-file input feeding a
+    /// scalar arg opens a map while a 1-file input beside it does not, and a
+    /// step whose output follows its input (an `effect` that passes it
+    /// through or patches it) produces the type the run actually gives it.
+    /// The map must cover every input; a missing one is a hard error (a run
+    /// never guesses), and a type that does not conform to the input's
+    /// declared one is refused.
+    pub async fn build_plan_from_machine_strand_for_run(
         &self,
         name: &str,
         strand: &crate::machine::graph::MachineStrand,
-        anchor_cardinality: &HashMap<crate::machine::graph::NodeId, InputCardinality>,
+        inputs: &HashMap<crate::machine::graph::NodeId, AnchorInput>,
     ) -> PlannerResult<MachinePlan> {
         use crate::machine::graph::{BindingSource, EdgeAssignmentBinding, NodeId};
         use crate::machine::iteration::{IterationStructure, MemberShape, ScopeId, StepShape, ROOT};
@@ -151,14 +170,32 @@ impl MachinePlanBuilder {
         let mut producer: HashMap<NodeId, String> = HashMap::new();
 
         let input_anchors: Vec<NodeId> = strand.input_anchor_ids().to_vec();
+        if let Some(stray) = inputs.keys().find(|node| !input_anchors.contains(node)) {
+            return Err(PlannerError::InvalidInput(format!(
+                "node {stray} is not an input of the strand; a run binds inputs only"
+            )));
+        }
         for &anchor in &input_anchors {
-            let media = strand.node_urn(anchor).clone();
-            let cardinality = *anchor_cardinality.get(&anchor).ok_or_else(|| {
+            let declared = strand.node_urn(anchor);
+            let given = inputs.get(&anchor).ok_or_else(|| {
                 PlannerError::InvalidInput(format!(
-                    "input anchor {anchor} ('{media}') has no declared cardinality — a run \
+                    "input anchor {anchor} ('{declared}') is not bound by the run — a run \
                      never guesses; supply one entry per input anchor"
                 ))
             })?;
+            if !given.media.conforms_to(declared).map_err(|e| {
+                PlannerError::InvalidInput(format!(
+                    "comparing '{}' with input anchor {anchor}'s type '{declared}': {e}",
+                    given.media
+                ))
+            })? {
+                return Err(PlannerError::InvalidInput(format!(
+                    "the run binds '{}' to input anchor {anchor}, which takes '{declared}'",
+                    given.media
+                )));
+            }
+            let media = given.media.clone();
+            let cardinality = given.cardinality;
             let slot_id = format!("input_slot_{anchor}");
             plan.add_node(MachineNode::input_slot(
                 &slot_id,
@@ -222,7 +259,10 @@ impl MachinePlanBuilder {
             });
         }
         let iteration = IterationStructure::of(&shapes, |node| {
-            matches!(anchor_cardinality.get(&node), Some(InputCardinality::Sequence))
+            matches!(
+                inputs.get(&node).map(|input| input.cardinality),
+                Some(InputCardinality::Sequence)
+            )
         })
         .map_err(|cyclic| {
             PlannerError::InvalidPath(format!(
@@ -451,8 +491,6 @@ impl MachinePlanBuilder {
 
             // Bindings: what the step's args are given other than by a wire.
             let mut bindings = ArgumentBindings::new();
-            let in_spec = cap.urn.in_spec();
-            let out_spec = cap.urn.out_spec();
             if let (Some(arg_name), Some(main_from)) = (Self::find_file_path_arg(cap), &main_from) {
                 let chainable = Self::is_file_path_stdin_chainable(cap);
                 if main_from_anchor || !chainable {
@@ -481,7 +519,8 @@ impl MachinePlanBuilder {
                 }
             }
             for (index, arg) in cap.get_args().iter().enumerate() {
-                if arg.media_urn == in_spec || arg.media_urn == out_spec {
+                // The main input is fed by a wire or, for a source, by nothing.
+                if Some(index) == main_arg_index {
                     continue;
                 }
                 let arg_urn = MediaUrn::from_string(&arg.media_urn).map_err(|e| {
@@ -674,24 +713,35 @@ impl MachinePlanBuilder {
 // ARGUMENT ANALYSIS FOR SLOT PRESENTATION
 // =============================================================================
 
-/// How an argument will be resolved
+/// Where a step's argument gets its value in a run of a plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArgumentResolution {
-    /// Auto-resolved from input file (for first cap's file_path)
-    FromInputFile,
-    /// Auto-resolved from previous cap's output
-    FromPreviousOutput,
-    /// Has a default value in cap definition
+    /// Wired from an input of the machine (through a map's item or a gather
+    /// of inputs, when it is reached through one).
+    FromInput,
+    /// Wired from what another step produces.
+    FromStep,
+    /// Bound to a constant the machine writes.
+    Constant,
+    /// Not bound by the machine; its definition gives a default.
     HasDefault,
-    /// Must be provided by user (slot)
+    /// Not bound by the machine and no default: the run supplies it.
     RequiresUserInput,
+}
+
+impl ArgumentResolution {
+    /// Whether the machine itself binds the arg. A bound arg takes no value
+    /// from the run (09 §Who owns an arg's value).
+    pub fn is_bound(&self) -> bool {
+        matches!(self, Self::FromInput | Self::FromStep | Self::Constant)
+    }
 }
 
 /// Information about a single argument for UI presentation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArgumentInfo {
-    /// Argument name (e.g., "file_path", "width")
+    /// The arg's name in its cap definition: a label, unique within the cap.
     pub name: String,
     /// Media URN describing the type (e.g., "media:integer")
     pub media_urn: String,
@@ -714,18 +764,18 @@ pub struct ArgumentInfo {
     pub validation: Option<serde_json::Value>,
 }
 
-/// Argument requirements for a single step in the path
+/// Argument requirements for a single step of a plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepArgumentRequirements {
     /// Cap URN for this step
     pub cap_urn: String,
-    /// The planner-minted `StrandStep::token_id` of the step these requirements
-    /// describe — the ONLY address an argument value is ever bound to.
+    /// The token of the plan's cap node these requirements describe — the
+    /// ONLY address an argument value is ever bound to.
     ///
     /// A token exists because a plan exists. It is never derived from a
-    /// position, a notation string, or anything else: the plan mints it and
+    /// position, a notation string, or anything else: the plan carries it and
     /// everything downstream carries it unchanged. Positions cannot address a
-    /// step because a strand is a DAG — parallel branches merging downstream
+    /// step because a plan is a DAG — parallel branches merging downstream
     /// have no ordinal, and two identical caps on separate branches are
     /// distinguishable only by token.
     pub token_id: StepToken,
@@ -733,7 +783,8 @@ pub struct StepArgumentRequirements {
     pub title: String,
     /// All arguments for this cap with their resolution status
     pub arguments: Vec<ArgumentInfo>,
-    /// Arguments that require user input (slots)
+    /// The arguments the machine does not bind: the ones a run may give a
+    /// value (and must, when they have no default).
     pub slots: Vec<ArgumentInfo>,
     /// Architecture identifiers (config.json `model_type`) the cap can
     /// run. Forwarded by the gRPC layer to UI components so model
@@ -747,60 +798,59 @@ pub struct StepArgumentRequirements {
     pub default_model_spec: Option<String>,
 }
 
-/// Argument requirements for an entire path
+/// Argument requirements for a whole plan: one entry per cap node, in the
+/// plan's topological order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PathArgumentRequirements {
-    /// Source media URN
-    pub source_media_urn: String,
-    /// Target media URN
-    pub target_media_urn: String,
+pub struct PlanArgumentRequirements {
     /// Requirements for each step
     pub steps: Vec<StepArgumentRequirements>,
-    /// Whether this path can execute without any user input
+    /// Whether a run of the plan needs no value from the user: every arg the
+    /// machine leaves unbound has a default.
     pub can_execute_without_input: bool,
 }
 
 impl MachinePlanBuilder {
-    /// Analyze argument requirements for a path.
+    /// What a run of `plan` binds and what it leaves to the run, step by step.
     ///
-    /// Takes the new typed `Strand` from `live_cap_fab` which uses
-    /// typed `MediaUrn` and `CapUrn` values.
-    ///
-    /// Only Cap steps have arguments to analyze. ForEach/Collect steps
-    /// are cardinality transitions with no user-configurable arguments.
-    pub async fn analyze_path_arguments(
+    /// An arg is bound when a wire feeds it (a `Direct` edge into the step's
+    /// main input, an `Arg` edge naming the arg's stream) or a binding gives
+    /// it a value the machine wrote (a constant) or the plan derived (a file
+    /// path of the input). Every other arg is the run's: it is a slot, with
+    /// its default when the definition declares one.
+    pub async fn analyze_plan_arguments(
         &self,
-        path: &Strand,
-    ) -> PlannerResult<PathArgumentRequirements> {
+        plan: &MachinePlan,
+    ) -> PlannerResult<PlanArgumentRequirements> {
         let caps =
             self.fabric_registry.get_cached_caps().await.map_err(|e| {
                 PlannerError::FabricRegistryError(format!("Failed to get caps: {}", e))
             })?;
+        let order = plan.topological_order().map_err(|e| {
+            PlannerError::InvalidPath(format!("plan '{}' is not a DAG: {e}", plan.name))
+        })?;
 
         let mut step_requirements = Vec::new();
-        // Track cap step index for determining first cap (affects file_path resolution)
-        let mut cap_step_index = 0;
-
-        for step in path.steps.iter() {
-            // Only analyze Cap steps - cardinality transitions have no arguments
-            let cap_urn = match step.cap_urn() {
-                Some(urn) => urn,
-                None => continue, // Skip ForEach/Collect steps
+        for node in order {
+            let ExecutionNodeType::Cap {
+                token_id,
+                cap_urn: cap_urn_str,
+                arg_bindings,
+                ..
+            } = &node.node_type
+            else {
+                continue;
             };
-
-
-            let cap_urn_str = cap_urn.to_string();
+            // The plan names the registry cap it was built from, in the
+            // registry's own spelling: the definition is that cap.
             let cap = caps
                 .iter()
-                .find(|c| c.urn.to_string() == cap_urn_str)
+                .find(|c| c.urn.to_string() == *cap_urn_str)
                 .ok_or_else(|| {
                     PlannerError::NotFound(format!("Cap '{}' not found in registry", cap_urn_str))
                 })?;
-
             let in_spec = cap.urn.in_spec();
-            let out_spec = cap.urn.out_spec();
-            // The cap's `in=` spec as a typed URN — main-input identification is
-            // a tagged-URN-equivalence question, never a string comparison.
+            // Main-input identification is a tagged-URN-equivalence question,
+            // never a string comparison.
             let in_spec_urn = MediaUrn::from_string(in_spec).map_err(|e| {
                 PlannerError::InvalidPath(format!(
                     "cap '{cap_urn_str}' in= URN '{in_spec}' invalid: {e}"
@@ -809,20 +859,59 @@ impl MachinePlanBuilder {
 
             let mut arguments = Vec::new();
             let mut slots = Vec::new();
-
             for arg in cap.get_args() {
-                let resolution = self.determine_resolution_with_io_check(
-                    &arg.media_urn,
-                    &in_spec,
-                    &out_spec,
-                    cap_step_index,
-                    arg.required,
-                    &arg.default_value,
-                );
+                let is_main_input = arg.is_main_input(&in_spec_urn);
+                let wire = plan.edges.iter().find(|edge| {
+                    edge.to_node == node.id
+                        && match &edge.edge_type {
+                            EdgeType::Direct => is_main_input,
+                            EdgeType::Arg { arg_urn } => arg_urn == arg.stream_urn(),
+                            EdgeType::Iteration | EdgeType::Collection => false,
+                        }
+                });
+                let binding = arg_bindings
+                    .bindings
+                    .get(arg.stream_urn())
+                    .or_else(|| arg_bindings.bindings.get(&arg.media_urn));
+                let resolution = match (wire, binding) {
+                    (Some(edge), _) => {
+                        if Self::fed_by_inputs_only(plan, &edge.from_node)? {
+                            ArgumentResolution::FromInput
+                        } else {
+                            ArgumentResolution::FromStep
+                        }
+                    }
+                    (None, Some(ArgumentBinding::Literal { .. })) => ArgumentResolution::Constant,
+                    (
+                        None,
+                        Some(
+                            ArgumentBinding::InputFile { .. }
+                            | ArgumentBinding::InputFilePath
+                            | ArgumentBinding::InputMediaUrn,
+                        ),
+                    ) => ArgumentResolution::FromInput,
+                    (None, Some(ArgumentBinding::PreviousOutput { .. })) => {
+                        ArgumentResolution::FromStep
+                    }
+                    (
+                        None,
+                        None
+                        | Some(
+                            ArgumentBinding::Slot { .. }
+                            | ArgumentBinding::CapDefault
+                            | ArgumentBinding::CapSetting { .. }
+                            | ArgumentBinding::PlanMetadata { .. },
+                        ),
+                    ) => {
+                        if arg.default_value.is_some() {
+                            ArgumentResolution::HasDefault
+                        } else {
+                            ArgumentResolution::RequiresUserInput
+                        }
+                    }
+                };
 
-                // Resolve validation from the media definition via the registry. There
-                // is no inline `cap.media_defs` override anymore — every
-                // media URN is resolved through the same path.
+                // Validation comes from the media definition via the registry.
                 let resolved_spec =
                     crate::media::spec::resolve_media_urn(&arg.media_urn, &self.fabric_registry)
                         .await
@@ -830,47 +919,68 @@ impl MachinePlanBuilder {
                 let validation = resolved_spec.and_then(|spec| spec.validation);
 
                 let arg_info = ArgumentInfo {
-                    name: arg.media_urn.clone(),
+                    name: arg.name.clone(),
                     media_urn: arg.media_urn.clone(),
                     description: arg.arg_description.clone().unwrap_or_default(),
                     resolution: resolution.clone(),
                     default_value: arg.default_value.clone(),
                     is_required: arg.required,
                     is_sequence: arg.is_sequence,
-                    is_main_input: arg.is_main_input(&in_spec_urn),
+                    is_main_input,
                     validation: Self::validation_to_json(validation.as_ref()),
                 };
-
-                let is_io_arg = resolution == ArgumentResolution::FromInputFile
-                    || resolution == ArgumentResolution::FromPreviousOutput;
-
-                if !is_io_arg {
+                if !resolution.is_bound() {
                     slots.push(arg_info.clone());
                 }
                 arguments.push(arg_info);
             }
 
             step_requirements.push(StepArgumentRequirements {
-                cap_urn: cap_urn_str,
-                token_id: step.token_id.clone(),
-                title: step.title(),
+                cap_urn: cap_urn_str.clone(),
+                token_id: token_id.clone(),
+                title: cap.title.clone(),
                 arguments,
                 slots,
                 supported_model_types: cap.supported_model_types.clone(),
                 default_model_spec: cap.default_model_spec.clone(),
             });
-
-            cap_step_index += 1;
         }
 
-        let can_execute_without_input = step_requirements.iter().all(|s| s.slots.is_empty());
-
-        Ok(PathArgumentRequirements {
-            source_media_urn: path.source_media_urn.to_string(),
-            target_media_urn: path.target_media_urn.to_string(),
+        // A run can go without the user when nothing it must have is
+        // missing: an optional arg left without a value is not given one.
+        let can_execute_without_input = step_requirements.iter().all(|step| {
+            step.slots.iter().all(|slot| {
+                !(slot.is_required && slot.resolution == ArgumentResolution::RequiresUserInput)
+            })
+        });
+        Ok(PlanArgumentRequirements {
             steps: step_requirements,
             can_execute_without_input,
         })
+    }
+
+    /// Whether the value at `node` comes from the machine's inputs alone:
+    /// an input slot, an item of a map over one, or a gather of such values.
+    fn fed_by_inputs_only(plan: &MachinePlan, node: &str) -> PlannerResult<bool> {
+        let held = plan.get_node(node).ok_or_else(|| {
+            PlannerError::InvalidPath(format!("plan '{}' wires from no node '{node}'", plan.name))
+        })?;
+        match &held.node_type {
+            ExecutionNodeType::InputSlot { .. } => Ok(true),
+            ExecutionNodeType::Item { source, .. } => Self::fed_by_inputs_only(plan, source),
+            ExecutionNodeType::Collect { input_nodes, .. } => {
+                for member in input_nodes {
+                    if !Self::fed_by_inputs_only(plan, member)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            ExecutionNodeType::Cap { .. }
+            | ExecutionNodeType::CapOutput { .. }
+            | ExecutionNodeType::ForEach { .. }
+            | ExecutionNodeType::Output { .. } => Ok(false),
+        }
     }
 
     /// Convert MediaValidation to JSON if it has any constraints
@@ -889,53 +999,6 @@ impl MachinePlanBuilder {
         } else {
             None
         }
-    }
-
-    /// Determine how an argument will be resolved based on I/O matching and media URN type.
-    fn determine_resolution_with_io_check(
-        &self,
-        media_urn: &str,
-        in_spec: &str,
-        out_spec: &str,
-        step_index: usize,
-        _is_required: bool,
-        default_value: &Option<serde_json::Value>,
-    ) -> ArgumentResolution {
-        // Check if this arg is the input arg (matches cap's in= spec)
-        if media_urn == in_spec {
-            if step_index == 0 {
-                return ArgumentResolution::FromInputFile;
-            } else {
-                return ArgumentResolution::FromPreviousOutput;
-            }
-        }
-
-        // Check if this arg is the output arg (matches cap's out= spec)
-        if media_urn == out_spec {
-            return ArgumentResolution::FromPreviousOutput;
-        }
-
-        // Check for file-path types
-        let is_file_path_type = if let Ok(urn) = MediaUrn::from_string(media_urn) {
-            urn.is_file_path()
-        } else {
-            false
-        };
-
-        if is_file_path_type {
-            if step_index == 0 {
-                return ArgumentResolution::FromInputFile;
-            } else {
-                return ArgumentResolution::FromPreviousOutput;
-            }
-        }
-
-        // All other args need user input
-        if default_value.is_some() {
-            return ArgumentResolution::HasDefault;
-        }
-
-        ArgumentResolution::RequiresUserInput
     }
 }
 
@@ -1127,167 +1190,10 @@ mod tests {
     }
 
     // ==========================================================================
-    // ARGUMENT RESOLUTION TESTS
+    // ARGUMENT PRESENTATION TESTS
+    // (the plan analysis itself is tested over real plans in
+    // orchestrator/machine_plan.rs)
     // ==========================================================================
-
-    fn create_test_plan_builder() -> MachinePlanBuilder {
-        MachinePlanBuilder::new(Arc::new(FabricRegistry::new_for_test()))
-    }
-
-    fn create_test_plan_builder_with_registry(registry: FabricRegistry) -> MachinePlanBuilder {
-        MachinePlanBuilder::new(Arc::new(registry))
-    }
-
-    // TEST994: Tests first cap's input argument is automatically resolved from input file
-    // Verifies that determine_resolution_with_io_check() returns FromInputFile for the first cap in a chain
-    #[test]
-    fn test994_input_arg_first_cap_auto_resolved_from_input() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution =
-            builder.determine_resolution_with_io_check(in_spec, in_spec, out_spec, 0, true, &None);
-        assert_eq!(resolution, ArgumentResolution::FromInputFile);
-    }
-
-    // TEST995: Tests subsequent caps' input arguments are automatically resolved from previous output
-    // Verifies that determine_resolution_with_io_check() returns FromPreviousOutput for caps after the first
-    #[test]
-    fn test995_input_arg_subsequent_cap_auto_resolved_from_previous() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-
-        let resolution =
-            builder.determine_resolution_with_io_check(in_spec, in_spec, out_spec, 1, true, &None);
-        assert_eq!(resolution, ArgumentResolution::FromPreviousOutput);
-
-        let resolution =
-            builder.determine_resolution_with_io_check(in_spec, in_spec, out_spec, 2, true, &None);
-        assert_eq!(resolution, ArgumentResolution::FromPreviousOutput);
-    }
-
-    // TEST996: Tests output arguments are automatically resolved from previous cap's output
-    // Verifies that arguments matching the output spec are always resolved as FromPreviousOutput
-    #[test]
-    fn test996_output_arg_auto_resolved() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution =
-            builder.determine_resolution_with_io_check(out_spec, in_spec, out_spec, 0, true, &None);
-        assert_eq!(resolution, ArgumentResolution::FromPreviousOutput);
-    }
-
-    // TEST997: Tests MEDIA_FILE_PATH argument type resolves to input file for first cap
-    // Verifies that generic file-path arguments are bound to input file in the first cap
-    #[test]
-    fn test997_file_path_type_fallback_first_cap() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_FILE_PATH,
-            in_spec,
-            out_spec,
-            0,
-            true,
-            &None,
-        );
-        assert_eq!(resolution, ArgumentResolution::FromInputFile);
-    }
-
-    // TEST998: Tests MEDIA_FILE_PATH argument type resolves to previous output for subsequent caps
-    // Verifies that generic file-path arguments are bound to previous cap's output after the first cap
-    #[test]
-    fn test998_file_path_type_fallback_subsequent_cap() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_FILE_PATH,
-            in_spec,
-            out_spec,
-            1,
-            true,
-            &None,
-        );
-        assert_eq!(resolution, ArgumentResolution::FromPreviousOutput);
-    }
-
-    // TEST1009: Tests required non-IO arguments with default values are marked as HasDefault
-    // Verifies that arguments like integers with defaults don't require user input
-    #[test]
-    fn test1009_non_io_arg_with_default_has_default() {
-        let builder = create_test_plan_builder();
-        let default = Some(serde_json::json!(200));
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_INTEGER,
-            in_spec,
-            out_spec,
-            0,
-            true,
-            &default,
-        );
-        assert_eq!(resolution, ArgumentResolution::HasDefault);
-    }
-
-    // TEST1012: Tests required non-IO arguments without defaults require user input
-    // Verifies that arguments like strings without defaults are marked as RequiresUserInput
-    #[test]
-    fn test1012_non_io_arg_without_default_requires_user_input() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_STRING,
-            in_spec,
-            out_spec,
-            0,
-            true,
-            &None,
-        );
-        assert_eq!(resolution, ArgumentResolution::RequiresUserInput);
-    }
-
-    // TEST886: Tests optional non-IO arguments with default values are marked as HasDefault
-    // Verifies that optional arguments with defaults behave the same as required ones with defaults
-    #[test]
-    fn test886_optional_non_io_arg_with_default_has_default() {
-        let builder = create_test_plan_builder();
-        let default = Some(serde_json::json!(300));
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_INTEGER,
-            in_spec,
-            out_spec,
-            0,
-            false,
-            &default,
-        );
-        assert_eq!(resolution, ArgumentResolution::HasDefault);
-    }
-
-    // TEST1015: Tests optional non-IO arguments without defaults still require user input
-    // Verifies that optional arguments without defaults must be explicitly provided or skipped
-    #[test]
-    fn test1015_optional_non_io_arg_without_default_requires_user_input() {
-        let builder = create_test_plan_builder();
-        let in_spec = "media:document;ext=pdf";
-        let out_spec = "media:ext=png;image";
-        let resolution = builder.determine_resolution_with_io_check(
-            crate::MEDIA_BOOLEAN,
-            in_spec,
-            out_spec,
-            0,
-            false,
-            &None,
-        );
-        assert_eq!(resolution, ArgumentResolution::RequiresUserInput);
-    }
 
     // TEST1019: Tests validation_to_json() returns None for None input
     // Verifies that missing validation metadata is converted to JSON None
@@ -1348,101 +1254,6 @@ mod tests {
         assert!(json.contains("\"name\":\"width\""));
         assert!(json.contains("\"resolution\":\"has_default\""));
         assert!(json.contains("\"default_value\":200"));
-    }
-
-    // TEST768: Tests PathArgumentRequirements structure for single-step execution paths
-    // Verifies that argument requirements are correctly organized by step with resolution information
-    #[test]
-    fn test768_path_argument_requirements_structure() {
-        let requirements = PathArgumentRequirements {
-            source_media_urn: "media:document;ext=pdf".to_string(),
-            target_media_urn: "media:ext=png;image".to_string(),
-            steps: vec![StepArgumentRequirements {
-                cap_urn: "cap:generate-thumbnail;in=pdf;out=png".to_string(),
-                token_id: "tok-thumbnail".parse().unwrap(),
-                title: "Generate Thumbnail".to_string(),
-                arguments: vec![ArgumentInfo {
-                    name: "file_path".to_string(),
-                    media_urn: "media:string".to_string(),
-                    description: "Path to file".to_string(),
-                    resolution: ArgumentResolution::FromInputFile,
-                    default_value: None,
-                    is_required: true,
-                    is_sequence: false,
-                    is_main_input: true,
-                    validation: None,
-                }],
-                slots: vec![],
-                supported_model_types: Vec::new(),
-                default_model_spec: None,
-            }],
-            can_execute_without_input: true,
-        };
-
-        assert!(requirements.can_execute_without_input);
-        assert_eq!(requirements.steps.len(), 1);
-        assert_eq!(requirements.steps[0].slots.len(), 0);
-        assert_eq!(
-            requirements.steps[0].arguments[0].resolution,
-            ArgumentResolution::FromInputFile
-        );
-    }
-
-    // TEST769: Tests PathArgumentRequirements tracking of required user-input slots
-    // Verifies that arguments requiring user input are collected in slots and can_execute_without_input is false
-    #[test]
-    fn test769_path_with_required_slot() {
-        let requirements = PathArgumentRequirements {
-            source_media_urn: "media:text".to_string(),
-            target_media_urn: "media:translated".to_string(),
-            steps: vec![StepArgumentRequirements {
-                cap_urn: "cap:translate;in=text;out=translated".to_string(),
-                token_id: "tok-translate".parse().unwrap(),
-                title: "Translate".to_string(),
-                arguments: vec![
-                    ArgumentInfo {
-                        name: "file_path".to_string(),
-                        media_urn: "media:string".to_string(),
-                        description: "Path to file".to_string(),
-                        resolution: ArgumentResolution::FromInputFile,
-                        default_value: None,
-                        is_required: true,
-                        is_sequence: false,
-                        is_main_input: true,
-                        validation: None,
-                    },
-                    ArgumentInfo {
-                        name: "target_language".to_string(),
-                        media_urn: "media:string".to_string(),
-                        description: "Target language code".to_string(),
-                        resolution: ArgumentResolution::RequiresUserInput,
-                        default_value: None,
-                        is_required: true,
-                        is_sequence: false,
-                        is_main_input: false,
-                        validation: None,
-                    },
-                ],
-                slots: vec![ArgumentInfo {
-                    name: "target_language".to_string(),
-                    media_urn: "media:string".to_string(),
-                    description: "Target language code".to_string(),
-                    resolution: ArgumentResolution::RequiresUserInput,
-                    default_value: None,
-                    is_required: true,
-                    is_sequence: false,
-                    is_main_input: false,
-                    validation: None,
-                }],
-                supported_model_types: Vec::new(),
-                default_model_spec: None,
-            }],
-            can_execute_without_input: false,
-        };
-
-        assert!(!requirements.can_execute_without_input);
-        assert_eq!(requirements.steps[0].slots.len(), 1);
-        assert_eq!(requirements.steps[0].slots[0].name, "target_language");
     }
 
     // ==========================================================================
@@ -1530,282 +1341,6 @@ mod tests {
         assert!(
             !candidate.is_dispatchable(&request),
             "Candidate missing required tag should not be dispatchable for request"
-        );
-    }
-
-    /// TEST7104: over a realistic multi-arg cap (one stdin MAIN input whose
-    /// slot URN differs from its stdin URN, one required defaultless cli_flag
-    /// arg, several defaulted cli_flag args), exactly one arg is the main
-    /// input, and partitioning the rest by `required && default_value.is_none()`
-    /// yields the expected required-options vs defaulted-options sets. The
-    /// planner's real step-requirements assembly (`analyze_path_arguments`)
-    /// must set `ArgumentInfo.is_main_input` accordingly for every arg.
-    #[tokio::test]
-    async fn test7104_main_input_and_option_partition_through_step_requirements() {
-        use crate::cap::definition::{ArgSource, CapArg};
-        use crate::planner::live_cap_fab::{ArgSourceRef, CapInput, StrandStep, StrandStepType};
-
-        // The main input's stdin URN spells `in=` with the tags in a DIFFERENT
-        // string order, and its slot URN differs from the stdin URN — only
-        // tagged-URN equivalence against the stdin source identifies it.
-        let urn = CapUrn::from_string(
-            r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8;summary""#,
-        )
-        .unwrap();
-        let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
-        cap.args = vec![
-            CapArg::with_full_definition(
-            "media:enc=utf-8;file-path", "input", None,
-            true,
-            false,
-            false,
-                vec![ArgSource::Stdin {
-                    stdin: "media:ext=pdf;document".to_string(),
-                }],
-                Some("Document to summarize".to_string()),
-                None,
-                None,
-            ),
-            CapArg::with_full_definition(
-            "media:enc=utf-8;model-spec", "model-spec", None,
-            true,
-            false,
-            false,
-                vec![ArgSource::CliFlag {
-                    cli_flag: "--model-spec".to_string(),
-                }],
-                Some("Model to run".to_string()),
-                None,
-                None,
-            ),
-            CapArg::with_full_definition(
-            "media:budget;numeric", "budget", None,
-            false,
-            false,
-            false,
-                vec![ArgSource::CliFlag {
-                    cli_flag: "--budget".to_string(),
-                }],
-                Some("Token budget".to_string()),
-                Some(serde_json::json!(400)),
-                None,
-            ),
-            CapArg::with_full_definition(
-            "media:numeric;temperature", "temperature", None,
-            false,
-            false,
-            false,
-                vec![ArgSource::CliFlag {
-                    cli_flag: "--temperature".to_string(),
-                }],
-                Some("Sampling temperature".to_string()),
-                Some(serde_json::json!(0.7)),
-                None,
-            ),
-        ];
-
-        // The definition-level partition: exactly ONE main input; the rest
-        // split into required options vs defaulted options.
-        let in_spec = MediaUrn::from_string(cap.urn.in_spec()).unwrap();
-        let (main_inputs, others): (Vec<&CapArg>, Vec<&CapArg>) =
-            cap.args.iter().partition(|a| a.is_main_input(&in_spec));
-        assert_eq!(main_inputs.len(), 1, "exactly one arg is the main input");
-        assert_eq!(main_inputs[0].media_urn, "media:enc=utf-8;file-path");
-        let (required, defaulted): (Vec<&CapArg>, Vec<&CapArg>) = others
-            .into_iter()
-            .partition(|a| a.required && a.default_value.is_none());
-        assert_eq!(
-            required
-                .iter()
-                .map(|a| a.media_urn.as_str())
-                .collect::<Vec<_>>(),
-            vec!["media:enc=utf-8;model-spec"],
-            "required options = required && no default, excluding the main input"
-        );
-        let mut defaulted_urns: Vec<&str> =
-            defaulted.iter().map(|a| a.media_urn.as_str()).collect();
-        defaulted_urns.sort();
-        assert_eq!(
-            defaulted_urns,
-            vec!["media:budget;numeric", "media:numeric;temperature"],
-            "defaulted options carry their default values"
-        );
-
-        // The REAL step-requirements assembly must stamp is_main_input on
-        // every ArgumentInfo — via the registry-cached cap and a one-step
-        // strand, not a reimplementation of the partition.
-        let registry = FabricRegistry::new_for_test();
-        registry.add_caps_to_cache(vec![cap.clone()]);
-        let builder = MachinePlanBuilder::new(Arc::new(registry));
-        let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
-        let target = MediaUrn::from_string("media:enc=utf-8;summary").unwrap();
-        let strand = Strand {
-            steps: vec![StrandStep::new(
-                StrandStepType::Cap {
-                    cap_urn: cap.urn.clone(),
-                    title: "Summarize".to_string(),
-                    specificity: 2,
-                    input_is_sequence: false,
-                    output_is_sequence: false,
-                    output_urn: None,
-                    inputs: vec![CapInput {
-                        arg_urn: MediaUrn::from_string("media:enc=utf-8;file-path").unwrap(),
-                        source: ArgSourceRef::StrandInput,
-                    }],
-                },
-                source.clone(),
-                target.clone(),
-            )],
-            source_media_urn: source,
-            target_media_urn: target,
-            total_steps: 1,
-            cap_step_count: 1,
-            description: "Summarize a PDF".to_string(),
-        };
-
-        let requirements = builder
-            .analyze_path_arguments(&strand)
-            .await
-            .expect("step-requirements assembly must succeed");
-        assert_eq!(requirements.steps.len(), 1);
-        let arguments = &requirements.steps[0].arguments;
-        assert_eq!(arguments.len(), 4, "every declared arg is presented");
-
-        let main: Vec<&ArgumentInfo> = arguments.iter().filter(|a| a.is_main_input).collect();
-        assert_eq!(
-            main.len(),
-            1,
-            "the assembly marks exactly one arg as the main input"
-        );
-        assert_eq!(main[0].media_urn, "media:enc=utf-8;file-path");
-        for info in arguments.iter().filter(|a| !a.is_main_input) {
-            match info.media_urn.as_str() {
-                "media:enc=utf-8;model-spec" => {
-                    assert!(info.is_required && info.default_value.is_none());
-                }
-                "media:budget;numeric" => {
-                    assert_eq!(info.default_value, Some(serde_json::json!(400)));
-                }
-                "media:numeric;temperature" => {
-                    assert_eq!(info.default_value, Some(serde_json::json!(0.7)));
-                }
-                other => panic!("unexpected non-main arg '{other}' in step requirements"),
-            }
-        }
-    }
-
-    /// Build a one-cap-URN-repeated strand: two steps running the SAME cap,
-    /// which is the shape that makes positional identity indistinguishable
-    /// from token identity unless the tokens are actually carried.
-    #[cfg(test)]
-    fn repeated_cap_strand(cap: &Cap) -> Strand {
-        use crate::planner::live_cap_fab::{ArgSourceRef, CapInput, StrandStep, StrandStepType};
-
-        let source = MediaUrn::from_string("media:ext=txt;text").unwrap();
-        let target = MediaUrn::from_string("media:ext=txt;text").unwrap();
-        let step = |source_ref: ArgSourceRef| {
-            StrandStep::new(
-                StrandStepType::Cap {
-                    cap_urn: cap.urn.clone(),
-                    title: "Rewrite".to_string(),
-                    specificity: 1,
-                    input_is_sequence: false,
-                    output_is_sequence: false,
-                    output_urn: None,
-                    inputs: vec![CapInput {
-                        arg_urn: MediaUrn::from_string("media:enc=utf-8;file-path").unwrap(),
-                        source: source_ref,
-                    }],
-                },
-                source.clone(),
-                target.clone(),
-            )
-        };
-
-        Strand {
-            steps: vec![step(ArgSourceRef::StrandInput), step(ArgSourceRef::StrandInput)],
-            source_media_urn: source,
-            target_media_urn: target,
-            total_steps: 2,
-            cap_step_count: 2,
-            description: "Rewrite twice".to_string(),
-        }
-    }
-
-    #[cfg(test)]
-    fn rewrite_cap() -> Cap {
-        use crate::cap::definition::{ArgSource, CapArg};
-
-        let urn =
-            CapUrn::from_string(r#"cap:in="media:ext=txt;text";out="media:ext=txt;text";rewrite"#)
-                .unwrap();
-        let mut cap = Cap::new(urn, "Rewrite".to_string(), vec!["rewrite".to_string()]);
-        cap.args = vec![
-            CapArg::with_full_definition(
-            "media:enc=utf-8;file-path", "input", None,
-            true,
-            false,
-            false,
-                vec![ArgSource::Stdin {
-                    stdin: "media:ext=txt;text".to_string(),
-                }],
-                Some("Text to rewrite".to_string()),
-                None,
-                None,
-            ),
-            CapArg::with_full_definition(
-            "media:numeric;temperature", "temperature", None,
-            false,
-            false,
-            false,
-                vec![ArgSource::CliFlag {
-                    cli_flag: "--temperature".to_string(),
-                }],
-                Some("Sampling temperature".to_string()),
-                Some(serde_json::json!(0.7)),
-                None,
-            ),
-        ];
-        cap
-    }
-
-    /// TEST1461: step requirements are addressed by the plan's own token.
-    ///
-    /// Two steps of the SAME cap in one strand: the requirements must carry the
-    /// two DISTINCT `StrandStep::token_id` values the planner minted, in
-    /// correspondence with the steps they describe. Nothing about a requirement
-    /// entry may be recoverable only by counting — a caller holding a
-    /// requirement must be able to bind a value without consulting the strand.
-    #[tokio::test]
-    async fn test1461_step_requirements_carry_the_plans_own_tokens() {
-        let cap = rewrite_cap();
-        let registry = FabricRegistry::new_for_test();
-        registry.add_caps_to_cache(vec![cap.clone()]);
-        let builder = MachinePlanBuilder::new(Arc::new(registry));
-        let strand = repeated_cap_strand(&cap);
-
-        let strand_tokens: Vec<StepToken> =
-            strand.steps.iter().map(|s| s.token_id.clone()).collect();
-        assert_ne!(
-            strand_tokens[0], strand_tokens[1],
-            "the planner mints a distinct token per step even for a repeated cap"
-        );
-
-        let requirements = builder
-            .analyze_path_arguments(&strand)
-            .await
-            .expect("step-requirements assembly must succeed");
-
-        assert_eq!(requirements.steps.len(), 2);
-        let requirement_tokens: Vec<StepToken> = requirements
-            .steps
-            .iter()
-            .map(|s| s.token_id.clone())
-            .collect();
-        assert_eq!(
-            requirement_tokens, strand_tokens,
-            "each requirement carries the token of the step it describes — the \
-             address a value is bound to, not a position to be counted"
         );
     }
 

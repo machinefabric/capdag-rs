@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::input_resolver::value_adapter::{ValueAdapter, ValueAdapterResult};
+use crate::input_resolver::value_adapter::ValueAdapter;
 
 /// Registry of value-based content inspection adapters
 ///

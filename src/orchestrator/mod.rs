@@ -39,7 +39,7 @@ pub use types::{
 
 pub use machine_plan::{
     build_plans_from_notation, build_plans_from_notation_from, MachineAnchor, ResolvedNotation,
-    StrandPlan,
+    RunInputs, StrandPlan,
 };
 
 pub use execute_plan::{

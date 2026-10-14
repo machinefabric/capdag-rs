@@ -119,16 +119,6 @@ pub struct PreInternedWiring {
     pub included_as: Vec<String>,
 }
 
-impl PreInternedWiring {
-    /// Every node this wiring consumes.
-    fn source_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.named_sources
-            .iter()
-            .filter_map(|(_, source)| source.node())
-            .chain(self.source_node_ids.iter().copied())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum ForEachIdentity {
     Exact(Option<StepToken>),

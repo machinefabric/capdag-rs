@@ -21,7 +21,7 @@
 use super::stream_io::{PipelineLogFn, PipelineLogRecord, PipelineProgressTracker, TerminalMeta};
 use super::types::{ResolvedGraph, ResolvedStep, StepSource};
 use crate::{
-    handshake, Cap, CapManifest, CapUrn, CartridgeHostRuntime, CartridgeRepo, FabricRegistry,
+    handshake, CapManifest, CapUrn, CartridgeHostRuntime, CartridgeRepo, FabricRegistry,
     Frame, FrameReader, FrameType, FrameWriter, Limits, MessageId, RelayNotifyCapabilitiesPayload,
     RelaySlave, RelaySwitch, DEFAULT_MAX_CHUNK,
 };
@@ -179,8 +179,6 @@ impl ProgressMapper {
     }
 }
 
-/// Cap URN for the identity capability (always available from any cartridge runtime).
-const CAP_IDENTITY: &str = "cap:effect=none";
 
 // =============================================================================
 // Error Types
@@ -3347,7 +3345,6 @@ async fn forward_frames(
     activity_timeout_secs: u64,
 ) -> Result<(), ExecutionError> {
     use crate::bifaci::credit::CreditGate;
-    use crate::bifaci::frame::CreditDirection;
     use std::time::Duration;
 
     let target_arg_urn = crate::MediaUrn::from_string(next_in_media).map_err(|e| {
@@ -3649,15 +3646,12 @@ async fn forward_frames(
                         if consumed_only.contains_key(prev_sid) {
                             continue;
                         }
-                        let (new_sid, _, _) = stream_id_map
-                            .get(prev_sid)
-                            .ok_or_else(|| {
-                                ExecutionError::HostError(format!(
-                                    "forward STREAM_END: unknown stream_id '{}'",
-                                    prev_sid
-                                ))
-                            })?
-                            .clone();
+                        let (new_sid, _, _) = stream_id_map.get(prev_sid).ok_or_else(|| {
+                            ExecutionError::HostError(format!(
+                                "forward STREAM_END: unknown stream_id '{}'",
+                                prev_sid
+                            ))
+                        })?;
 
                         let mut new_frame = frame.clone();
                         new_frame.id = next_rid.clone();

@@ -362,7 +362,7 @@ impl Machines {
             .map(|(name, _)| name.to_string())
             .collect();
         let strand = resolved
-            .plan(0, &sequences)
+            .plan(0, &capdag::orchestrator::RunInputs { sequences, ..Default::default() })
             .await
             .unwrap_or_else(|e| panic!("the machine does not plan: {e}"));
 

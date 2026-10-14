@@ -1,6 +1,5 @@
 //! Response wrapper for unified cartridge output handling with validation
 
-use crate::{Cap, ValidationError};
 use anyhow::{anyhow, Result};
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
