@@ -74,8 +74,9 @@ pub use cbor_util::{
 };
 
 pub use executor::{
-    map_progress, run_dag_on_context, CapProgressFn, CapStepProgressFn, CartridgeManager,
-    CollateralCause, DagOutput, ExecutionContext, ExecutionError, ProgressMapper, RunCancel,
+    bundled_providers_of, map_progress, run_dag_on_context, BundledProvider, CapProgressFn,
+    CapStepProgressFn, CartridgeManager, CollateralCause, DagOutput, ExecutionContext,
+    ExecutionError, ProgressMapper, RunCancel,
 };
 
 pub use stream_io::{

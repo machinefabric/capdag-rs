@@ -3028,8 +3028,33 @@ async fn cmd_cache(args: &[String]) -> ! {
     process::exit(0);
 }
 
-/// `capdag find <cap-alias-or-urn>` — resolve a cap and show which registry
-/// cartridge(s) provide it, without downloading anything.
+/// The bundled cartridges beside this executable that declare `cap`. A cap
+/// they provide is theirs: a run hosts it from the bundle and never asks a
+/// registry for it.
+async fn bundled_providers(cap: &capdag::CapUrn) -> Vec<capdag::orchestrator::BundledProvider> {
+    let Some(dir) = bundled_cartridges_dir() else {
+        return Vec::new();
+    };
+    match capdag::orchestrator::bundled_providers_of(
+        &dir,
+        BUILD_CHANNEL,
+        BAKED_REGISTRY_URL,
+        capdag::FABRIC_MANIFEST_VERSION,
+        cap,
+    )
+    .await
+    {
+        Ok(providers) => providers,
+        Err(e) => {
+            eprintln!("The cartridges bundled with capdag could not be read: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+/// `capdag find <cap-alias-or-urn>` — resolve a cap and show which cartridge
+/// provides it, without downloading anything: the cartridge bundled with
+/// capdag that declares it, or else the registry cartridge(s) that do.
 async fn cmd_find(args: &[String]) -> ! {
     let Some(token) = args.get(2) else {
         eprintln!("Usage: {} find <cap-alias-or-urn>", args[0]);
@@ -3038,6 +3063,14 @@ async fn cmd_find(args: &[String]) -> ! {
     let registry = fabric_registry_or_exit().await;
     let cap = resolve_cap_or_exit(&registry, token).await;
     println!("{}", cap.urn);
+
+    let bundled = bundled_providers(&cap.urn).await;
+    if !bundled.is_empty() {
+        for provider in &bundled {
+            println!("  {} v{} — bundled with capdag", provider.id, provider.version);
+        }
+        process::exit(0);
+    }
 
     let manager = registry_manager_or_exit(Vec::new()).await;
     let suggestions = manager.suggestions_for_cap(&cap.urn.to_string()).await;
@@ -3098,6 +3131,16 @@ async fn cmd_install(args: &[String]) -> ! {
         if token.contains(':') || manager.registry_cartridge(token).await.is_none() {
             let registry = fabric_registry_or_exit().await;
             let cap = resolve_cap_or_exit(&registry, token).await;
+            // A cap the bundle provides needs nothing installed: it is answered
+            // by the bundled cartridge, which is already here and verified.
+            if let Some(provider) = bundled_providers(&cap.urn).await.first() {
+                eprintln!(
+                    "Bundled with capdag, nothing to install: {} v{}",
+                    provider.id, provider.version
+                );
+                println!("{}", provider.entry_point.display());
+                process::exit(0);
+            }
             let suggestions = manager.suggestions_for_cap(&cap.urn.to_string()).await;
             let Some(first) = suggestions.first() else {
                 eprintln!("No registry cartridge provides cap {}", cap.urn);

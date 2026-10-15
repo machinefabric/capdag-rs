@@ -79,6 +79,24 @@ fn default_device() -> &'static str {
     }
 }
 
+/// The frame rate asked for when the selector names none.
+///
+/// avfoundation's own default is NTSC's 29.97, a broadcast rate that Mac
+/// cameras do not offer: a FaceTime HD camera offers 15 to 30 at every size,
+/// so a capture that named no rate was refused, and the refusal reached the
+/// caller as nothing more than "Input/output error". 30 is the rate cameras
+/// on macOS offer. v4l2 opens a device at a rate the device itself chooses.
+fn default_framerate() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(30)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 /// Open the camera the selector names and start capturing into `sink`.
 /// Returns the stream-level format actuals for STREAM_START meta. A device
 /// that cannot be opened is a hard error — never a silent empty feed.
@@ -123,6 +141,7 @@ pub fn open(
         .device
         .clone()
         .unwrap_or_else(|| default_device().to_string());
+    let framerate = framerate.or_else(default_framerate);
 
     // Open on THIS thread so a bad device fails the resolution, not the
     // capture thread; then hand the opened input to the capture thread.
@@ -398,7 +417,20 @@ fn open_capture(
         );
         av_dict_free(&mut opts);
         if rc < 0 {
-            return Err(err("open", rc));
+            // A device that refuses the mode it was asked for says only that
+            // the open failed; what was asked for is said here, so the error
+            // names what to change.
+            let size = match (width, height) {
+                (Some(w), Some(h)) => format!("{w}x{h}"),
+                _ => "the device's own size".to_string(),
+            };
+            let rate = framerate.map_or("the device's own rate".to_string(), |r| format!("{r} fps"));
+            return Err(RuntimeError::Handler(format!(
+                "webcam '{device}': open failed: {} (asked for {size} at {rate}; a device \
+                 that does not offer that mode is refused — set the width, height and \
+                 framerate params to one it does)",
+                ff::av_strerror_owned(rc)
+            )));
         }
         let rc = ff::avformat_find_stream_info(fmt, ptr::null_mut());
         if rc < 0 {

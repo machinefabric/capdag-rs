@@ -961,12 +961,22 @@ impl CartridgeManager {
             cartridge_paths.insert(dev_path.clone());
         }
 
-        // For each cartridge, forward the full manifest cap_groups —
-        // adapter_urns and all. Non-dev cartridges (registry installs)
-        // get a synthetic identity-only group so on-demand spawn can
-        // route the identity probe; their real cap_groups arrive via
-        // the post-spawn HELLO and overwrite this fallback.
-        let result: Vec<(
+        // Every cartridge is hosted with the full cap_groups it declares —
+        // adapter_urns and all — so the host advertises its caps before it
+        // runs and a request for any of them starts it.
+        //
+        // A registry install's groups are the ones its own binary reports,
+        // read the way a dev cartridge's are: the installed version is what
+        // runs, and it may be older than the registry's latest. These were a
+        // placeholder group holding only the identity cap, on the expectation
+        // that the switch's identity probe would start the cartridge and its
+        // HELLO would bring the real caps. The probe goes to the host, which
+        // hands it to the first cartridge serving identity — and every
+        // cartridge serves identity. So only the first cartridge hosted was
+        // ever started that way: with a bundled cartridge ahead of it, or a
+        // second registry cartridge after it, a registry cap waited 15 s for
+        // an advertisement that never came.
+        let mut result: Vec<(
             PathBuf,
             Option<(
                 String,
@@ -974,26 +984,20 @@ impl CartridgeManager {
                 crate::bifaci::cartridge_repo::CartridgeChannel,
             )>,
             Vec<crate::bifaci::manifest::CapGroup>,
-        )> = cartridge_paths
-            .into_iter()
-            .map(|path| {
-                if let Some(manifest) = self.dev_cartridges.get(&path) {
-                    let identity = Some((
-                        manifest.name.clone(),
-                        manifest.version.clone(),
-                        manifest.channel,
-                    ));
-                    (path, identity, manifest.cap_groups.clone())
-                } else {
-                    let groups = vec![crate::bifaci::manifest::CapGroup {
-                        name: "identity".to_string(),
-                        caps: vec![crate::standard::caps::identity_cap()],
-                        adapter_urns: Vec::new(),
-                    }];
-                    (path, None, groups)
-                }
-            })
-            .collect();
+        )> = Vec::with_capacity(cartridge_paths.len());
+        for path in cartridge_paths {
+            if let Some(manifest) = self.dev_cartridges.get(&path) {
+                let identity = Some((
+                    manifest.name.clone(),
+                    manifest.version.clone(),
+                    manifest.channel,
+                ));
+                result.push((path, identity, manifest.cap_groups.clone()));
+            } else {
+                let manifest = self.discover_manifest(&path).await?;
+                result.push((path, None, manifest.cap_groups));
+            }
+        }
 
         Ok(result)
     }
@@ -4006,6 +4010,49 @@ pub(crate) async fn discover_bundled_cartridges(
         }
     }
     Ok(out)
+}
+
+/// A bundled cartridge that declares a cap: what `capdag install` and
+/// `capdag find` report for it in place of a registry download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundledProvider {
+    pub id: String,
+    pub version: String,
+    pub entry_point: PathBuf,
+}
+
+/// The bundled cartridges that declare `cap_urn` itself (`is_equivalent`, the
+/// relation a run resolves a cap to a cartridge by). A cap the bundle provides
+/// is the bundle's: a run hosts it from the bundle and never looks it up in a
+/// registry. Discovery holds each one to the build's signed bundle manifest,
+/// as for a run.
+pub async fn bundled_providers_of(
+    bundled_cartridges_dir: &std::path::Path,
+    channel: crate::bifaci::cartridge_repo::CartridgeChannel,
+    registry_url: Option<&str>,
+    fabric_manifest_version: u32,
+    cap_urn: &CapUrn,
+) -> Result<Vec<BundledProvider>, ExecutionError> {
+    let found = discover_bundled_cartridges(
+        bundled_cartridges_dir,
+        channel,
+        registry_url,
+        fabric_manifest_version,
+    )
+    .await?;
+    Ok(found
+        .into_iter()
+        .filter(|(_, _, groups)| {
+            groups
+                .iter()
+                .any(|group| group.caps.iter().any(|cap| cap.urn.is_equivalent(cap_urn)))
+        })
+        .map(|(entry_point, identity, _)| {
+            let (id, version, _) = identity
+                .expect("discovery gives every hostable bundled cartridge its identity");
+            BundledProvider { id, version, entry_point }
+        })
+        .collect())
 }
 
 #[cfg(test)]

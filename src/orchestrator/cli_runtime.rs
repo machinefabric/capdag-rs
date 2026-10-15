@@ -108,6 +108,8 @@ struct CliHost {
     registered_paths: HashSet<PathBuf>,
     /// Bundled cartridges are discovered and registered exactly once.
     bundled_registered: bool,
+    /// Every cap the bundled cartridges declare, once they are discovered.
+    bundled_caps: Vec<crate::urn::cap_urn::CapUrn>,
 }
 
 impl CliRuntime {
@@ -141,6 +143,7 @@ impl CliRuntime {
                 registered_caps: HashSet::new(),
                 registered_paths: HashSet::new(),
                 bundled_registered: false,
+                bundled_caps: Vec::new(),
             }),
             live_inputs: CliLiveInputs::default(),
         }
@@ -222,6 +225,14 @@ impl CliRuntime {
 }
 
 impl CliHost {
+    /// Whether a bundled cartridge declares `cap_urn` itself. A cap URN that does
+    /// not parse is not the bundle's; the registry resolution names it.
+    fn bundle_provides(&self, cap_urn: &str) -> bool {
+        crate::urn::cap_urn::CapUrn::from_string(cap_urn)
+            .map(|cap| self.bundled_caps.iter().any(|bundled| bundled.is_equivalent(&cap)))
+            .unwrap_or(false)
+    }
+
     /// Ensure every cartridge this segment's caps need is hosted on the shared switch,
     /// building the switch on first use. Idempotent per binary: a cartridge already
     /// hosted (by an earlier segment or another cap of the same binary) is not hosted
@@ -255,30 +266,44 @@ impl CliHost {
             self.manager = Some(manager);
         }
 
-        // Resolve this segment's caps to cartridges (immutable borrow scoped to here).
-        let mut resolved = {
+        // Bundled cartridges are discovered once, on the first segment, and hosted
+        // beside the dev/registry cartridges this segment resolves.
+        let mut resolved = Vec::new();
+        if !self.bundled_registered {
+            if let Some(dir) = &rt.bundled_cartridges_dir {
+                let bundled = discover_bundled_cartridges(
+                    dir,
+                    rt.channel,
+                    rt.registry_url.as_deref(),
+                    rt.fabric_manifest_version,
+                )
+                .await?;
+                for (_, _, groups) in &bundled {
+                    self.bundled_caps
+                        .extend(groups.iter().flat_map(|g| g.caps.iter().map(|c| c.urn.clone())));
+                }
+                resolved.extend(bundled);
+            }
+            self.bundled_registered = true;
+        }
+
+        // A cap the bundle provides is the bundle's: it is never looked up in a
+        // registry. A bundled cartridge is never published to one, and the same
+        // identity fetched from a registry would be a second artifact of it, which
+        // the host rightly refuses as ambiguous. Resolution's relation, as for dev
+        // and registry cartridges: the cap itself (`is_equivalent`), not anything
+        // that could serve it.
+        let unbundled: Vec<&str> = cap_urns
+            .iter()
+            .copied()
+            .filter(|cap| !self.bundle_provides(cap))
+            .collect();
+        {
             let manager = self
                 .manager
                 .as_ref()
                 .expect("initialised immediately above");
-            manager.resolve_cartridges(&cap_urns).await?
-        };
-
-        // Bundled cartridges are hosted once, on the first segment, beside the resolved
-        // dev/registry cartridges.
-        if !self.bundled_registered {
-            if let Some(dir) = &rt.bundled_cartridges_dir {
-                resolved.extend(
-                    discover_bundled_cartridges(
-                        dir,
-                        rt.channel,
-                        rt.registry_url.as_deref(),
-                        rt.fabric_manifest_version,
-                    )
-                    .await?,
-                );
-            }
-            self.bundled_registered = true;
+            resolved.extend(manager.resolve_cartridges(&unbundled).await?);
         }
 
         // Host only cartridges not already hosted (dedup by binary path).
