@@ -529,7 +529,8 @@ pub fn parse_notation_ast(input: &str) -> NotationAST {
     // This is the editor's lexical view; full anchor resolution against the cap
     // registry is done elsewhere (the gRPC layer calls `Machine::from_string` for the
     // resolved view). Node sequence-shape (cardinality) is NOT lexical — it needs cap
-    // definitions — so it is derived in `build_editor_model` from `cap_shapes`.
+    // definitions — so it is derived in `build_editor_model` from the cap
+    // definitions, which also type the nodes a named member or target names.
     build_node_media(&ast.statements, &ast.alias_map, &mut ast.node_media);
 
     ast
@@ -778,7 +779,7 @@ pub fn build_editor_model(
     ast: &NotationAST,
     cap_details: &HashMap<String, (String, String, Option<String>)>,
     media_details: &HashMap<String, (String, String, Option<String>)>,
-    cap_shapes: &HashMap<String, (bool, bool)>,
+    cap_definitions: &HashMap<String, crate::Cap>,
 ) -> (Vec<NotationEntityInfo>, Vec<NotationGraphElementInfo>) {
     let mut entities = Vec::new();
     let mut graph_elements = Vec::new();
@@ -787,27 +788,63 @@ pub fn build_editor_model(
     let mut node_identity_by_name: HashMap<String, (String, String)> = HashMap::new();
     let mut wiring_index = 0usize;
 
-    // Cardinality of every node, derived from cap shapes (`cap_shapes`: cap URN →
-    // `(input_is_sequence, output_is_sequence)`). A node holds a sequence iff the cap
-    // that PRODUCES it (the wiring whose target is that node) has a sequence output;
-    // nodes that are never a target are scalar roots. This is exactly the rule
-    // `resolve::resolve_pre_interned` and `live_cap_fab::get_outgoing_edges` use — the
-    // single source of truth — so the editor's ForEach badge matches execution. It
-    // replaces the retired `LOOP` keyword: ForEach is shown wherever a sequence feeds
-    // a scalar-input cap, never authored.
+    let wirings = || {
+        ast.statements.iter().filter_map(|stmt| match stmt {
+            ParsedStatement::Wiring(wiring) => Some(wiring),
+            _ => None,
+        })
+    };
+    // The definition of the cap a wiring's step names, by its canonical URN.
+    let cap_of = |wiring: &ParsedWiring| {
+        ast.alias_map
+            .get(&wiring.cap_alias)
+            .and_then(|header| cap_definitions.get(&header.cap_urn_str))
+    };
+
+    // What every node holds, and whether it is a sequence.
+    //
+    // The lexical reading (`ast.node_media`) types only what the text alone
+    // decides: a main output's node and an unnamed member's. What a NAMED
+    // member or target holds is in the cap's definition, and canonical
+    // notation names every one — `(input=n0) -> render -> (output=n1)` — so a
+    // machine written by the app had no node typed at all, and its editor
+    // said "Input" and "Output" where it used to say "Plain Text" and "PNG".
+    // A target holds the output it takes (unless that output carries the
+    // input, which only the resolved machine can type); a named member
+    // conforms to the type its arg accepts.
+    //
+    // A node holds a sequence iff the output that PRODUCES it is a sequence;
+    // nodes that are never a target are scalar roots. This is the rule
+    // `resolve::resolve_pre_interned` and `live_cap_fab::get_outgoing_edges`
+    // use, so the editor's ForEach badge matches execution. ForEach is shown
+    // wherever a sequence feeds an arg that takes one value, never authored.
+    let mut node_media: HashMap<String, MediaUrn> = ast.node_media.clone();
     let mut node_is_sequence: HashMap<String, bool> = HashMap::new();
-    for stmt in &ast.statements {
-        if let ParsedStatement::Wiring(wiring) = stmt {
-            let output_is_sequence = ast
-                .alias_map
-                .get(&wiring.cap_alias)
-                .and_then(|header| cap_shapes.get(&header.cap_urn_str))
-                .map(|(_, out)| *out)
-                .unwrap_or(false);
-            // `cap_shapes` knows the cap's MAIN output; the node that takes it
-            // is the unnamed target.
-            if let Some(target) = wiring.main_target() {
-                node_is_sequence.insert(target.node.clone(), output_is_sequence);
+    for wiring in wirings() {
+        let cap = cap_of(wiring);
+        for target in &wiring.targets {
+            let output = cap.and_then(|cap| match &target.name {
+                None => cap.main_output(),
+                Some((name, _)) => cap.output_named(name),
+            });
+            node_is_sequence.insert(target.node.clone(), output.is_some_and(|output| output.is_sequence));
+            if let Some(output) = output.filter(|output| output.carries.is_none()) {
+                if let Ok(urn) = MediaUrn::from_string(&output.media_urn) {
+                    node_media.entry(target.node.clone()).or_insert(urn);
+                }
+            }
+        }
+    }
+    for wiring in wirings() {
+        let Some(cap) = cap_of(wiring) else { continue };
+        for member in &wiring.sources {
+            if let (Some((name, _)), ParsedValue::Node(node, _)) = (&member.name, &member.value) {
+                if let Some(urn) = cap
+                    .arg_named(name)
+                    .and_then(|arg| MediaUrn::from_string(arg.accepted_urn()).ok())
+                {
+                    node_media.entry(node.clone()).or_insert(urn);
+                }
             }
         }
     }
@@ -890,24 +927,27 @@ pub fn build_editor_model(
                     color_index: Some(color_index),
                 });
 
-                // Whether this cap maps per-item (ForEach), derived from cardinality:
-                // its primary source node carries a sequence but the cap consumes a
-                // scalar. `Cap::needs_foreach` is the canonical rule; here we apply it
-                // to the editor's cap shapes so the badge matches what execution does.
-                let (input_is_sequence, _output_is_sequence) = linked_cap_urn
-                    .as_deref()
-                    .and_then(|urn| cap_shapes.get(urn))
-                    .copied()
-                    .unwrap_or((false, false));
-                // Lexically, the members a step is given without a name are the
-                // candidates for its main input; which arg a NAMED member is
-                // for, and whether that arg takes a sequence, is in the cap's
-                // definition. So the badge is shown where an unnamed member
-                // holds a sequence and the cap's main input takes one value.
-                let unnamed_source_is_sequence = wiring
-                    .unnamed_source_nodes()
-                    .any(|name| node_is_sequence.get(name).copied().unwrap_or(false));
-                let is_loop = unnamed_source_is_sequence && !input_is_sequence;
+                // Whether this step maps per item (ForEach): a member holds a
+                // sequence and the arg it feeds takes one value. A named
+                // member feeds the arg it names; an unnamed one is a candidate
+                // for the main input. Without the cap's definition nothing is
+                // known of a named member's arg, and no badge is drawn for it.
+                let cap = linked_cap_urn.as_deref().and_then(|urn| cap_definitions.get(urn));
+                let is_loop = wiring.sources.iter().any(|member| {
+                    let ParsedValue::Node(node, _) = &member.value else {
+                        return false;
+                    };
+                    if !node_is_sequence.get(node).copied().unwrap_or(false) {
+                        return false;
+                    }
+                    let arg_takes_a_sequence = match (&member.name, cap) {
+                        (Some((name, _)), Some(cap)) => cap.arg_named(name).map(|arg| arg.is_sequence),
+                        (Some(_), None) => None,
+                        (None, Some(cap)) => Some(cap.sequence_shape().0),
+                        (None, None) => Some(false),
+                    };
+                    arg_takes_a_sequence == Some(false)
+                });
 
                 // What each member names, and each constant: text entities of
                 // the step, sharing its token so hovering one lights the step.
@@ -955,7 +995,7 @@ pub fn build_editor_model(
                         &mut graph_elements,
                         &mut node_identity_by_name,
                         source_name,
-                        ast,
+                        &node_media,
                         media_details,
                         &node_is_sequence,
                     );
@@ -966,10 +1006,10 @@ pub fn build_editor_model(
                         kind: NotationEntityKind::Node,
                         range: source_span.clone(),
                         label: source_name.to_string(),
-                        detail: ast.node_media.get(source_name).map(|urn| urn.to_string()),
+                        detail: node_media.get(source_name).map(|urn| urn.to_string()),
                         hover_markdown: Some(format_node_hover(
                             source_name,
-                            &ast.node_media,
+                            &node_media,
                             media_details,
                         )),
                         linked_cap_urn: None,
@@ -984,7 +1024,7 @@ pub fn build_editor_model(
                         &mut graph_elements,
                         &mut node_identity_by_name,
                         &target.node,
-                        ast,
+                        &node_media,
                         media_details,
                         &node_is_sequence,
                     );
@@ -1005,10 +1045,10 @@ pub fn build_editor_model(
                         kind: NotationEntityKind::Node,
                         range: target.node_span.clone(),
                         label: target.node.clone(),
-                        detail: ast.node_media.get(&target.node).map(|urn| urn.to_string()),
+                        detail: node_media.get(&target.node).map(|urn| urn.to_string()),
                         hover_markdown: Some(format_node_hover(
                             &target.node,
-                            &ast.node_media,
+                            &node_media,
                             media_details,
                         )),
                         linked_cap_urn: None,
@@ -1304,7 +1344,7 @@ fn ensure_graph_node(
     graph_elements: &mut Vec<NotationGraphElementInfo>,
     node_identity_by_name: &mut HashMap<String, (String, String)>,
     node_name: &str,
-    ast: &NotationAST,
+    node_media: &HashMap<String, MediaUrn>,
     media_details: &HashMap<String, (String, String, Option<String>)>,
     node_is_sequence: &HashMap<String, bool>,
 ) -> (String, String) {
@@ -1314,7 +1354,7 @@ fn ensure_graph_node(
 
     let token_id = new_token_id();
     let graph_id = format!("node-{node_name}");
-    let linked_media_urn = ast.node_media.get(node_name).map(|urn| urn.to_string());
+    let linked_media_urn = node_media.get(node_name).map(|urn| urn.to_string());
     let detail = linked_media_urn
         .as_ref()
         .and_then(|urn| {
@@ -1963,19 +2003,14 @@ mod tests {
         let ast = parse_notation_ast(input);
         assert!(ast.error.is_none(), "got: {:?}", ast.error);
 
-        // Key cap_shapes on the exact canonical URN strings the parser produced, the
-        // same keys `build_editor_model` looks up. (input_is_sequence, output_is_sequence)
-        let mut cap_shapes: HashMap<String, (bool, bool)> = HashMap::new();
-        cap_shapes.insert(
-            ast.alias_map.get("disbind").unwrap().cap_urn_str.clone(),
-            (false, true),
-        );
-        cap_shapes.insert(
-            ast.alias_map.get("p2t").unwrap().cap_urn_str.clone(),
-            (false, false),
-        );
+        // Keyed on the exact canonical URN strings the parser produced, the same
+        // keys `build_editor_model` looks up.
+        let definitions = definitions_of(&ast, &[
+            ("disbind", "media:document;ext=pdf", false, "media:page", true),
+            ("p2t", "media:page", false, "media:ext=txt", false),
+        ]);
 
-        let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &cap_shapes);
+        let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &definitions);
 
         let cap_for = |alias: &str| {
             graph
@@ -1991,6 +2026,82 @@ mod tests {
             cap_for("p2t").is_loop,
             "a sequence source feeding a scalar-input cap must map (ForEach)"
         );
+    }
+
+    /// Definitions for the caps a notation's headers name, by alias: each with
+    /// a main input named `input` (read from stdin) and a main output named
+    /// `output`, and the cardinality of each.
+    fn definitions_of(
+        ast: &NotationAST,
+        caps: &[(&str, &str, bool, &str, bool)],
+    ) -> HashMap<String, crate::Cap> {
+        use crate::cap::definition::{ArgSource, CapArg, CapOutput};
+        caps.iter()
+            .map(|(alias, input, input_is_sequence, output, output_is_sequence)| {
+                let urn_str = ast.alias_map.get(*alias).unwrap().cap_urn_str.clone();
+                let urn = crate::CapUrn::from_string(&urn_str).unwrap();
+                let mut cap = crate::Cap::with_description(urn, alias.to_string(), vec![], String::new());
+                let mut arg = CapArg::new(
+                    input.to_string(),
+                    "input",
+                    true,
+                    vec![ArgSource::Stdin { stdin: input.to_string() }],
+                );
+                arg.is_sequence = *input_is_sequence;
+                cap.args.push(arg);
+                let mut out = CapOutput::new(output.to_string(), "output", "the output");
+                out.is_sequence = *output_is_sequence;
+                cap.add_output(out);
+                (urn_str, cap)
+            })
+            .collect()
+    }
+
+    // TEST12880: canonical notation names every member and target —
+    // `(input=n0) -> render -> (output=n1)` — and the editor model types each
+    // node from the cap's definition: a named target holds the output it
+    // takes, a named member the type its arg accepts. A sequence a named
+    // member feeds into an arg taking one value is still a ForEach. Without
+    // the definitions the lexical reading cannot type a named node, which is
+    // why a machine the app wrote showed "Input" and "Output" in its editor
+    // instead of "Plain Text" and "PNG".
+    #[test]
+    fn test12880_named_members_and_targets_are_typed_from_the_definitions() {
+        let input = concat!(
+            r#"[render cap:in="media:enc=utf-8;ext=txt";out="media:ext=png;image";render]"#,
+            "\n",
+            r#"[jpeg cap:in="media:ext=png;image";out="media:ext=jpeg;image";to-jpeg]"#,
+            "\n[(input=n0) -> render -> (output=n1)]\n[(input=n1) -> jpeg -> (output=n2)]"
+        );
+        let ast = parse_notation_ast(input);
+        assert!(ast.error.is_none(), "got: {:?}", ast.error);
+        let definitions = definitions_of(&ast, &[
+            ("render", "media:enc=utf-8;ext=txt", false, "media:ext=png;image", true),
+            ("jpeg", "media:ext=png;image", false, "media:ext=jpeg;image", false),
+        ]);
+
+        let node = |graph: &[NotationGraphElementInfo], name: &str| {
+            graph
+                .iter()
+                .find(|e| e.kind == NotationGraphElementKind::Node && e.label == name)
+                .unwrap_or_else(|| panic!("no graph node '{name}'"))
+                .clone()
+        };
+        let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &definitions);
+        let urn = |name: &str| node(&graph, name).linked_media_urn.map(|u| MediaUrn::from_string(&u).unwrap());
+        assert!(urn("n0").unwrap().is_equivalent(&MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap()).unwrap());
+        assert!(urn("n1").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=png;image").unwrap()).unwrap());
+        assert!(urn("n2").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap()).unwrap());
+        assert_eq!(node(&graph, "n1").is_sequence, Some(true), "a named target takes its output's cardinality");
+        let jpeg = graph
+            .iter()
+            .find(|e| e.kind == NotationGraphElementKind::Cap && e.label == "jpeg")
+            .expect("the jpeg step");
+        assert!(jpeg.is_loop, "a sequence a named member feeds into an arg taking one value maps per item");
+
+        // The lexical reading alone has nothing to type a named node with.
+        let (_, lexical) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(node(&lexical, "n0").linked_media_urn, None);
     }
 
     // TEST8014: The editor model graph includes the expected nodes and edges from parsed notation.
