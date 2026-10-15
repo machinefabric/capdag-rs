@@ -1100,20 +1100,24 @@ fn emit_strand(
         output_dir,
         force,
         input_stem,
-        output_names: strand.output_names.clone(),
+        output_names: strand.output_names(),
     };
     let mut stdout = std::io::stdout();
     if let Err(e) = capdag::orchestrator::emit_terminals(&result, &options, &mut stdout) {
         eprintln!("{e}");
         return RunEnd::Failed;
     }
+    let output_names = strand.output_names();
     for terminal in &result.terminals {
         if terminal.produced().is_none() {
-            let name = strand
-                .output_names
-                .get(terminal.output_node_id())
-                .map(String::as_str)
-                .unwrap_or_else(|| terminal.output_node_id());
+            // Every output of a plan is one the notation named.
+            let Some(name) = output_names.get(terminal.output_node_id()) else {
+                eprintln!(
+                    "internal error: the run reports output '{}', which its plan does not name",
+                    terminal.output_node_id()
+                );
+                return RunEnd::Failed;
+            };
             eprintln!("Not produced: output '{name}' ({})", terminal.media_urn());
         }
     }
@@ -1690,7 +1694,7 @@ async fn execute_notation(
             // The executor requires every input to carry an explicit
             // cardinality — a default would hide a wiring mismatch.
             let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
-            for (name, slot) in &strand.input_slots {
+            for (name, slot) in &strand.input_slots() {
                 let (input, is_sequence) = match &run.given[name] {
                     InputGiven::Values(values) if values.len() == 1 => {
                         (PlanInput::Bytes(values[0].clone()), false)
@@ -2789,14 +2793,14 @@ async fn cmd_cap(args: &[String]) -> ! {
     };
     // The cap's input, when it takes one: the plan's slot for the node the
     // synthesized notation calls `input`.
-    let input_slot_id: Option<String> = strand
-        .input_slots
+    let input_slots = strand.input_slots();
+    let input_slot_id: Option<String> = input_slots
         .get(capdag::orchestrator::SINGLE_CAP_INPUT_NODE)
         .cloned();
-    if input_slot_id.is_some() != takes_input || strand.input_slots.len() > 1 {
+    if input_slot_id.is_some() != takes_input || input_slots.len() > 1 {
         eprintln!(
             "internal error: single-cap plan has input slots {:?} for a cap that {}",
-            strand.input_slots.keys().collect::<Vec<_>>(),
+            input_slots.keys().collect::<Vec<_>>(),
             if takes_input { "takes an input" } else { "takes none" }
         );
         process::exit(1);

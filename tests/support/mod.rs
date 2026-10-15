@@ -368,11 +368,11 @@ impl Machines {
 
         let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
         let mut flags: HashMap<String, bool> = HashMap::new();
+        let input_slots = strand.input_slots();
         for (name, given) in inputs {
-            let slot = strand
-                .input_slots
+            let slot = input_slots
                 .get(*name)
-                .unwrap_or_else(|| panic!("the machine has no input '{name}': {:?}", strand.input_slots.keys()))
+                .unwrap_or_else(|| panic!("the machine has no input '{name}': {:?}", input_slots.keys()))
                 .clone();
             let (input, is_sequence) = match given {
                 Given::One(bytes) => (PlanInput::Bytes(bytes.to_vec()), false),
@@ -470,9 +470,9 @@ impl Machines {
         // What the CLI runtime persisted, read back: one file for a single
         // value, one per item for a sequence.
         let mut outputs = HashMap::new();
+        let output_names = strand.output_names();
         for terminal in &result.terminals {
-            let name = strand
-                .output_names
+            let name = output_names
                 .get(terminal.output_node_id())
                 .unwrap_or_else(|| panic!("terminal '{}' has no name", terminal.output_node_id()))
                 .clone();

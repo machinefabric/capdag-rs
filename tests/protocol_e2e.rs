@@ -149,7 +149,7 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
         .await
         .expect("the machine plans");
     let graph = plan_to_resolved_graph(&strand.plan, &machines.registry).expect("the plan converts");
-    let input = strand.input_slots[&inputs[0].name].clone();
+    let input = strand.input_slots()[&inputs[0].name].clone();
     // These machines are one step: its node is where its main output is.
     assert_eq!(graph.steps.len(), 1, "these machines are one step");
     let output = graph.steps[0].node.clone();

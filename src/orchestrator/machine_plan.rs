@@ -61,19 +61,312 @@ pub struct MachineAnchor {
 
 /// The plan of one strand for one run, with the names of what it takes and
 /// gives.
-#[derive(Debug, Clone)]
+///
+/// It is what a run IS: the host is shown it, keys every argument value by its
+/// steps' tokens, and hands it back to be run; a run keeps it, and running it
+/// again runs it again. Before a plan that came back is run it is checked to be
+/// what the machine resolves to now ([`StrandPlan::check_is_a_resolution_of`]).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StrandPlan {
+    /// The strand of the machine this is the plan of. A machine's strands are
+    /// independent, and a plan handed back is checked against its own.
+    pub strand: usize,
     pub plan: MachinePlan,
-    /// The plan's `InputSlot` node for each input, by the input's name.
-    pub input_slots: HashMap<String, String>,
-    /// The written name of each plan `Output` node, by the node's id.
-    pub output_names: HashMap<String, String>,
     /// The written name of every plan node that holds a value of the
     /// machine, by the node's id: an input slot, a step (its main output),
     /// and another output of a step. What a report names a value by — a plan
     /// node's own id means nothing to who wrote the machine. A node inside
     /// an included machine has the name `alias#use/name`.
     pub node_names: HashMap<String, String>,
+}
+
+/// How a plan handed back to be run differs from the plan its machine resolves
+/// to now. Said, never repaired: a plan that is not the machine's is not run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanMismatch {
+    pub reason: String,
+}
+
+impl PlanMismatch {
+    fn new(reason: impl Into<String>) -> Self {
+        Self { reason: reason.into() }
+    }
+}
+
+impl std::fmt::Display for PlanMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the plan is not what the machine resolves to now: {}", self.reason)
+    }
+}
+
+impl std::error::Error for PlanMismatch {}
+
+impl StrandPlan {
+    /// The plan's `InputSlot` node for each input, by the input's name. The
+    /// slot carries the name; this reads it.
+    pub fn input_slots(&self) -> HashMap<String, String> {
+        self.plan
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| match &node.node_type {
+                ExecutionNodeType::InputSlot { slot_name, .. } => Some((slot_name.clone(), id.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The written name of each plan `Output` node, by the node's id. The
+    /// node carries the name; this reads it.
+    pub fn output_names(&self) -> HashMap<String, String> {
+        self.plan
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| match &node.node_type {
+                ExecutionNodeType::Output { output_name, .. } => Some((id.clone(), output_name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Check that this plan — one a host was shown and handed back — is
+    /// `fresh`, the plan the same machine and run inputs resolve to now, in
+    /// every respect but the values of its tokens.
+    ///
+    /// Tokens are minted each time notation is parsed, so two resolutions of
+    /// one machine never share them; nothing else about them may differ. The
+    /// steps of the two are paired by the names the notation writes for them
+    /// (every step that holds a value has one, and one text writes each once),
+    /// a map by its node (named for the step that opens it, not by a token),
+    /// and a step that holds no value — a sink — by everything else it is.
+    /// With the pairs, this plan's tokens are renamed to `fresh`'s, and the two
+    /// must then be equal field for field.
+    ///
+    /// The pairing exists for this check only. What runs is this plan, with
+    /// its own tokens, so every argument value keyed by them reaches the step
+    /// it was given for.
+    pub fn check_is_a_resolution_of(&self, fresh: &StrandPlan) -> Result<(), PlanMismatch> {
+        let (our_steps, our_maps) = tokens_of(&self.plan)?;
+        let (fresh_steps, fresh_maps) = tokens_of(&fresh.plan)?;
+        if our_steps.len() != fresh_steps.len() {
+            return Err(PlanMismatch::new(format!(
+                "it has {} steps, and the machine has {}",
+                our_steps.len(),
+                fresh_steps.len()
+            )));
+        }
+
+        // Steps that hold a value: by the name the notation writes for them.
+        let fresh_by_name: HashMap<&str, &str> = fresh_steps
+            .iter()
+            .filter_map(|step| fresh.node_names.get(*step).map(|name| (name.as_str(), *step)))
+            .collect();
+        let mut renamed: HashMap<String, String> = HashMap::new();
+        let mut our_sinks = Vec::new();
+        for step in &our_steps {
+            match self.node_names.get(*step) {
+                Some(name) => {
+                    let paired = fresh_by_name.get(name.as_str()).ok_or_else(|| {
+                        PlanMismatch::new(format!("its step '{name}' is no step of the machine"))
+                    })?;
+                    renamed.insert((*step).to_string(), (*paired).to_string());
+                }
+                None => our_sinks.push(*step),
+            }
+        }
+        let fresh_sinks: Vec<&str> = fresh_steps
+            .iter()
+            .copied()
+            .filter(|step| !fresh.node_names.contains_key(*step))
+            .collect();
+
+        // Maps: by their node, which the step that opens the map names.
+        if our_maps.keys().collect::<Vec<_>>() != fresh_maps.keys().collect::<Vec<_>>() {
+            return Err(PlanMismatch::new(format!(
+                "its maps are {:?}, and the machine's are {:?}",
+                our_maps.keys().collect::<Vec<_>>(),
+                fresh_maps.keys().collect::<Vec<_>>()
+            )));
+        }
+        for (map, token) in &our_maps {
+            renamed.insert(token.clone(), fresh_maps[map].clone());
+        }
+
+        // Sinks: by everything they are, once what they read is renamed. Two
+        // sinks alike in everything are interchangeable, and paired in turn.
+        if our_sinks.len() != fresh_sinks.len() {
+            return Err(PlanMismatch::new(format!(
+                "it has {} steps that hold no value, and the machine has {}",
+                our_sinks.len(),
+                fresh_sinks.len()
+            )));
+        }
+        let mut fresh_sink_keys: Vec<(String, &str)> = fresh_sinks
+            .iter()
+            .map(|sink| Ok((sink_key(&fresh.plan, sink, &HashMap::new())?, *sink)))
+            .collect::<Result<_, PlanMismatch>>()?;
+        for sink in our_sinks {
+            let key = sink_key(&self.plan, sink, &renamed)?;
+            let position = fresh_sink_keys.iter().position(|(fresh_key, _)| *fresh_key == key).ok_or_else(|| {
+                PlanMismatch::new(format!("its step '{sink}', which holds no value, is no step of the machine"))
+            })?;
+            let (_, paired) = fresh_sink_keys.remove(position);
+            renamed.insert(sink.to_string(), paired.to_string());
+        }
+
+        // One token each way.
+        let mut images: HashSet<&str> = HashSet::new();
+        for image in renamed.values() {
+            if !images.insert(image.as_str()) {
+                return Err(PlanMismatch::new(format!("two of its steps pair with the machine's '{image}'")));
+            }
+        }
+
+        let ours = normalized(rename_tokens(plan_value(self)?, &renamed));
+        let theirs = normalized(plan_value(fresh)?);
+        match first_difference(&ours, &theirs, "") {
+            None => Ok(()),
+            Some(at) => Err(PlanMismatch::new(format!("they differ at {at}"))),
+        }
+    }
+}
+
+/// A plan's step tokens (a step's node is its token) and its maps' tokens, by
+/// map node. A token held twice addresses two steps at once, and is refused.
+fn tokens_of(plan: &MachinePlan) -> Result<(Vec<&str>, std::collections::BTreeMap<String, String>), PlanMismatch> {
+    let mut steps = Vec::new();
+    let mut maps = std::collections::BTreeMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for (id, node) in &plan.nodes {
+        let token = match &node.node_type {
+            ExecutionNodeType::Cap { token_id, .. } => {
+                if token_id.as_str() != id {
+                    return Err(PlanMismatch::new(format!(
+                        "its step node '{id}' carries the token '{token_id}', which is not the node's"
+                    )));
+                }
+                steps.push(id.as_str());
+                token_id.to_string()
+            }
+            ExecutionNodeType::ForEach { token_id, .. } => {
+                maps.insert(id.clone(), token_id.to_string());
+                token_id.to_string()
+            }
+            _ => continue,
+        };
+        if !seen.insert(token.clone()) {
+            return Err(PlanMismatch::new(format!("its token '{token}' addresses two of its nodes")));
+        }
+    }
+    steps.sort_unstable();
+    Ok((steps, maps))
+}
+
+/// What a step that holds no value is, apart from its token: its node with the
+/// token left out, and every edge into it — with `renamed` applied, so the
+/// steps it reads are named as the fresh plan names them.
+fn sink_key(plan: &MachinePlan, sink: &str, renamed: &HashMap<String, String>) -> Result<String, PlanMismatch> {
+    let node = plan
+        .nodes
+        .get(sink)
+        .ok_or_else(|| PlanMismatch::new(format!("it has no node '{sink}'")))?;
+    let mut value = serde_json::to_value(node)
+        .map_err(|e| PlanMismatch::new(format!("its node '{sink}' cannot be read: {e}")))?;
+    strip_own_token(&mut value, sink);
+    let mut edges: Vec<String> = plan
+        .edges
+        .iter()
+        .filter(|edge| edge.to_node == sink)
+        .map(|edge| {
+            serde_json::to_value(edge)
+                .map(|edge| rename_tokens(edge, renamed))
+                .map(|mut edge| {
+                    strip_own_token(&mut edge, sink);
+                    edge.to_string()
+                })
+                .map_err(|e| PlanMismatch::new(format!("an edge into '{sink}' cannot be read: {e}")))
+        })
+        .collect::<Result<_, _>>()?;
+    edges.sort_unstable();
+    Ok(format!("{}|{}", rename_tokens(value, renamed), edges.join("|")))
+}
+
+/// `value` with every string that holds `token` blanked where it does: what a
+/// node is when its own identity is set aside.
+fn strip_own_token(value: &mut serde_json::Value, token: &str) {
+    match value {
+        serde_json::Value::String(text) if text.contains(token) => *text = text.replace(token, ""),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(|item| strip_own_token(item, token)),
+        serde_json::Value::Object(fields) => fields.values_mut().for_each(|field| strip_own_token(field, token)),
+        _ => {}
+    }
+}
+
+/// A plan as a value: the plan with its names.
+fn plan_value(plan: &StrandPlan) -> Result<serde_json::Value, PlanMismatch> {
+    serde_json::to_value(plan).map_err(|e| PlanMismatch::new(format!("it cannot be read: {e}")))
+}
+
+/// `value` with every token `renamed` names replaced by its pair, in keys and
+/// in values alike — node ids, edges, bodies and names all hold them. Tokens
+/// are UUIDs: one is never part of another, or of anything that is not one.
+fn rename_tokens(value: serde_json::Value, renamed: &HashMap<String, String>) -> serde_json::Value {
+    let rename = |text: &str| -> String {
+        renamed
+            .iter()
+            .filter(|(old, _)| text.contains(old.as_str()))
+            .fold(text.to_string(), |text, (old, new)| text.replace(old.as_str(), new))
+    };
+    match value {
+        serde_json::Value::String(text) => serde_json::Value::String(rename(&text)),
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(|item| rename_tokens(item, renamed)).collect())
+        }
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, field)| (rename(&key), rename_tokens(field, renamed)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// A plan value with the lists whose order means nothing put in one order:
+/// the plan's edges, entry nodes and output nodes.
+fn normalized(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(plan) = value.get_mut("plan").and_then(|plan| plan.as_object_mut()) {
+        for list in ["edges", "entry_nodes", "output_nodes"] {
+            if let Some(serde_json::Value::Array(items)) = plan.get_mut(list) {
+                items.sort_by_key(|item| item.to_string());
+            }
+        }
+    }
+    value
+}
+
+/// Where two plan values first differ, as a path, or `None` when they do not.
+fn first_difference(a: &serde_json::Value, b: &serde_json::Value, at: &str) -> Option<String> {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Object(a), Value::Object(b)) => {
+            let keys: std::collections::BTreeSet<&String> = a.keys().chain(b.keys()).collect();
+            keys.into_iter().find_map(|key| match (a.get(key), b.get(key)) {
+                (Some(a), Some(b)) => first_difference(a, b, &format!("{at}/{key}")),
+                (Some(_), None) => Some(format!("{at}/{key}, which the machine's plan does not have")),
+                (None, _) => Some(format!("{at}/{key}, which it does not have")),
+            })
+        }
+        (Value::Array(a), Value::Array(b)) if a.len() == b.len() => a
+            .iter()
+            .zip(b)
+            .enumerate()
+            .find_map(|(index, (a, b))| first_difference(a, b, &format!("{at}/{index}"))),
+        (Value::Array(a), Value::Array(b)) => {
+            Some(format!("{at}, which holds {} items and the machine's {}", a.len(), b.len()))
+        }
+        (a, b) if a == b => None,
+        (a, b) => Some(format!("{at}: {a} where the machine's plan has {b}")),
+    }
 }
 
 /// What a run binds to the inputs of a machine, by the names the notation
@@ -340,12 +633,14 @@ impl ResolvedNotation {
                 _ => return Err(unnamed(output)),
             }
         }
-        Ok(StrandPlan {
-            plan,
-            input_slots,
-            output_names,
-            node_names,
-        })
+        // And every output of the plan is one the notation named: the node is
+        // where its name is kept.
+        if let Some(nameless) = plan.output_nodes.iter().find(|output| !output_names.contains_key(*output)) {
+            return Err(ParseOrchestrationError::InvalidGraph {
+                message: format!("strand {strand}: the plan's output '{nameless}' is no output the notation names"),
+            });
+        }
+        Ok(StrandPlan { strand, plan, node_names })
     }
 }
 
@@ -1178,17 +1473,18 @@ mod tests {
         // One value: no map. The slot and the output are found by name.
         let single = resolved.plan(doc_strand, &RunInputs::declared()).await.unwrap();
         assert!(maps(&single.plan).is_empty());
-        let slot = &single.input_slots["doc"];
+        let slot = &single.input_slots()["doc"];
         assert!(matches!(
             &single.plan.nodes[slot].node_type,
             ExecutionNodeType::InputSlot { cardinality: InputCardinality::Single, .. }
         ));
-        assert_eq!(single.input_slots.len(), 1);
+        assert_eq!(single.input_slots().len(), 1);
         assert!(matches!(
             &single.plan.nodes[slot].node_type,
             ExecutionNodeType::InputSlot { slot_name, .. } if slot_name == "doc"
         ));
-        let (output_node, name) = single.output_names.iter().next().unwrap();
+        let output_names = single.output_names();
+        let (output_node, name) = output_names.iter().next().unwrap();
         assert_eq!(name, "summary");
         assert!(matches!(
             &single.plan.nodes[output_node].node_type,
@@ -1216,7 +1512,7 @@ mod tests {
             .unwrap();
         assert_eq!(maps(&many.plan).len(), 1);
         assert!(matches!(
-            &many.plan.nodes[&many.input_slots["doc"]].node_type,
+            &many.plan.nodes[&many.input_slots()["doc"]].node_type,
             ExecutionNodeType::InputSlot { cardinality: InputCardinality::Sequence, .. }
         ));
 
@@ -1620,6 +1916,139 @@ mod tests {
         assert_ne!(plan_tokens[0], plan_tokens[1], "two steps, two tokens");
         assert_eq!(requirement_tokens, plan_tokens);
     }
+
+    /// The plan of strand 0 of `notation`, resolved afresh — new tokens each
+    /// time, as every resolution mints its own.
+    async fn resolved_plan(notation: &str, reg: Arc<FabricRegistry>, inputs: &RunInputs) -> StrandPlan {
+        ResolvedNotation::resolve(notation, reg)
+            .await
+            .unwrap_or_else(|e| panic!("{notation}: {e}"))
+            .plan(0, inputs)
+            .await
+            .unwrap_or_else(|e| panic!("{notation}: {e}"))
+    }
+
+    /// The token of every step and map of a plan.
+    fn all_tokens(plan: &MachinePlan) -> HashSet<String> {
+        plan.nodes
+            .values()
+            .filter_map(|node| match &node.node_type {
+                ExecutionNodeType::Cap { token_id, .. } | ExecutionNodeType::ForEach { token_id, .. } => {
+                    Some(token_id.to_string())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    // TEST12882: a plan a host was shown and hands back is checked against
+    // what the machine resolves to now. Two resolutions of one machine share
+    // no token, and each is a resolution of the other — through a map, an
+    // output that is not the main one, and a step the map runs.
+    #[tokio::test]
+    async fn test12882_a_plan_handed_back_is_a_resolution_of_its_machine() {
+        let reg = registry(vec![
+            cap(RENDER, true),
+            with_output(cap(TO_JPEG, false), "thumb", "media:ext=png;image;thumbnail", false),
+        ]);
+        let notation = format!(
+            "{}{}[doc -> render -> pages][pages -> to_jpeg -> (jpegs, thumb=small)]",
+            header("render", RENDER),
+            header("to_jpeg", TO_JPEG)
+        );
+        let shown = resolved_plan(&notation, reg.clone(), &RunInputs::declared()).await;
+        let now = resolved_plan(&notation, reg, &RunInputs::declared()).await;
+        assert!(
+            all_tokens(&shown.plan).is_disjoint(&all_tokens(&now.plan)),
+            "every resolution mints its own tokens"
+        );
+        assert!(!maps(&shown.plan).is_empty(), "the page sequence is mapped, so a map token is paired too");
+        shown.check_is_a_resolution_of(&now).expect("the plan shown is the machine's");
+        now.check_is_a_resolution_of(&shown).expect("and the other way round");
+
+        // It survives the wire: a plan read back is still the machine's.
+        let carried: StrandPlan = serde_json::from_str(&serde_json::to_string(&shown).unwrap()).unwrap();
+        carried.check_is_a_resolution_of(&now).expect("a plan carried as text is the same plan");
+    }
+
+    // TEST12883: a plan that is not what the machine resolves to now is
+    // refused, saying where it differs — another cap at a step, another
+    // policy, a step too many, a step whose node is not its token.
+    #[tokio::test]
+    async fn test12883_a_plan_that_is_not_the_machines_is_refused() {
+        let reg = registry(vec![cap(EXTRACT, false), cap(RENDER, false), cap(SUMMARIZE, false)]);
+        let render = format!("{}[doc -> render -> out]", header("render", RENDER));
+        let extract = format!("{}[doc -> extract -> out]", header("extract", EXTRACT));
+        let other_cap = resolved_plan(&render, reg.clone(), &RunInputs::declared()).await;
+        let now = resolved_plan(&extract, reg.clone(), &RunInputs::declared()).await;
+        let refused = other_cap.check_is_a_resolution_of(&now).expect_err("another cap at the step 'out'");
+        assert!(refused.reason.contains("cap_urn"), "it says where: {refused}");
+
+        let retried = format!("{}[doc -> extract{{retry=2}} -> out]", header("extract", EXTRACT));
+        let other_policy = resolved_plan(&retried, reg.clone(), &RunInputs::declared()).await;
+        let refused = other_policy.check_is_a_resolution_of(&now).expect_err("another policy");
+        assert!(refused.reason.contains("/policy"), "it says where: {refused}");
+
+        let longer = format!(
+            "{}{}[doc -> extract -> out][out -> summarize -> s]",
+            header("extract", EXTRACT),
+            header("summarize", SUMMARIZE)
+        );
+        let more = resolved_plan(&longer, reg.clone(), &RunInputs::declared()).await;
+        let refused = more.check_is_a_resolution_of(&now).expect_err("a step too many");
+        assert!(refused.reason.contains("2 steps"), "{refused}");
+
+        // A step whose node and token disagree addresses one step by two names.
+        let mut forged = resolved_plan(&extract, reg, &RunInputs::declared()).await;
+        let step = step_of(&forged.plan, EXTRACT);
+        if let ExecutionNodeType::Cap { token_id, .. } = &mut forged.plan.nodes.get_mut(&step).unwrap().node_type {
+            *token_id = crate::planner::StepToken::mint();
+        }
+        let refused = forged.check_is_a_resolution_of(&now).expect_err("a forged token");
+        assert!(refused.reason.contains("is not the node's"), "{refused}");
+    }
+
+    // TEST12884: steps that hold no value — sinks — have no name to be paired
+    // by; they are paired by everything else they are. Two alike in everything
+    // are interchangeable, and a plan with them is still its machine's.
+    #[tokio::test]
+    async fn test12884_steps_that_hold_no_value_are_paired_by_what_they_are() {
+        let mut publish = cap(PUBLISH, false);
+        publish.outputs.clear();
+        let reg = registry(vec![cap(NOW, false), publish]);
+        let notation = format!(
+            "{}{}[() -> now -> stamp][stamp -> publish -> ()][stamp -> publish -> ()]",
+            header("now", NOW),
+            header("publish", PUBLISH)
+        );
+        let shown = resolved_plan(&notation, reg.clone(), &RunInputs::declared()).await;
+        let now = resolved_plan(&notation, reg.clone(), &RunInputs::declared()).await;
+        shown.check_is_a_resolution_of(&now).expect("two alike sinks pair either way");
+
+        // One sink fewer is another machine.
+        let one = format!(
+            "{}{}[() -> now -> stamp][stamp -> publish -> ()]",
+            header("now", NOW),
+            header("publish", PUBLISH)
+        );
+        let fewer = resolved_plan(&one, reg, &RunInputs::declared()).await;
+        assert!(fewer.check_is_a_resolution_of(&now).is_err());
+    }
+
+    // TEST12885: a plan is checked against the plan the SAME run inputs make.
+    // The plan of one value through a step is not the plan of a sequence
+    // through it (the sequence is mapped), so one is refused as the other.
+    #[tokio::test]
+    async fn test12885_a_plan_is_the_resolution_for_its_own_run_inputs() {
+        let reg = registry(vec![cap(TO_JPEG, false)]);
+        let notation = format!("{}[png -> to_jpeg -> jpeg]", header("to_jpeg", TO_JPEG));
+        let one = resolved_plan(&notation, reg.clone(), &RunInputs::declared()).await;
+        let many_inputs = RunInputs { sequences: HashSet::from(["png".to_string()]), media: HashMap::new() };
+        let many = resolved_plan(&notation, reg.clone(), &many_inputs).await;
+        let many_again = resolved_plan(&notation, reg, &many_inputs).await;
+        many.check_is_a_resolution_of(&many_again).expect("the same run inputs, the same plan");
+        assert!(one.check_is_a_resolution_of(&many).is_err(), "one value is not a sequence");
+    }
 }
 
 #[cfg(test)]
@@ -1736,4 +2165,5 @@ mod anchor_cardinality_tests {
             }
         }
     }
+
 }
