@@ -1568,10 +1568,16 @@ async fn execute_notation(
     // ── The plans of every run, and what must hold before anything runs ──
     let mut planned: Vec<(usize, Vec<capdag::orchestrator::StrandPlan>)> = Vec::with_capacity(runs.len());
     for (index, run) in runs.iter().enumerate() {
+        // The run binds several values, and a live source's unbounded feed, as
+        // a sequence; the plan is made for what the run binds, so a cap that
+        // takes a sequence is sent the feed itself, not a gather of it.
         let sequences: std::collections::HashSet<String> = run
             .given
             .iter()
-            .filter(|(_, given)| matches!(given, InputGiven::Values(values) if values.len() > 1))
+            .filter(|(_, given)| match given {
+                InputGiven::Values(values) => values.len() > 1,
+                InputGiven::Live(_) => true,
+            })
             .map(|(name, _)| name.clone())
             .collect();
         let mut strands = Vec::with_capacity(resolved.strand_count());
@@ -1725,22 +1731,26 @@ async fn execute_notation(
                 log_fn.clone(),
             )));
         }
+        // A run ends as the worst of its strands: the summary counts runs.
+        let mut run_end = RunEnd::Completed;
         for handle in running {
-            match handle.await {
-                Ok((strand, result)) => ends.push(finish_strand(
+            let strand_end = match handle.await {
+                Ok((strand, result)) => finish_strand(
                     &strand,
                     result,
                     effective_dir.clone(),
                     force_overwrite,
                     run.stem.clone(),
                     &cli_runtime,
-                )),
+                ),
                 Err(join) => {
                     eprintln!("a strand of the run panicked: {join}");
-                    ends.push(RunEnd::Failed);
+                    RunEnd::Failed
                 }
-            }
+            };
+            run_end = run_end.max(strand_end);
         }
+        ends.push(run_end);
     }
 
     let count = |end: RunEnd| ends.iter().filter(|e| **e == end).count();
@@ -2758,7 +2768,19 @@ async fn cmd_cap(args: &[String]) -> ! {
         );
         process::exit(1);
     }
-    let strand = match resolved.plan(0, &capdag::orchestrator::RunInputs::declared()).await {
+    // A live source binds the input to its unbounded feed, a sequence; the plan
+    // is made for that, so a cap that takes a sequence is sent the feed itself.
+    let run_inputs = match &inputs {
+        InputSource::Live { .. } => capdag::orchestrator::RunInputs {
+            sequences: std::iter::once(capdag::orchestrator::SINGLE_CAP_INPUT_NODE.to_string())
+                .collect(),
+            ..capdag::orchestrator::RunInputs::default()
+        },
+        InputSource::Nothing | InputSource::Stdin(_) | InputSource::Files(_) => {
+            capdag::orchestrator::RunInputs::declared()
+        }
+    };
+    let strand = match resolved.plan(0, &run_inputs).await {
         Ok(strand) => strand,
         Err(e) => {
             eprintln!("Failed to plan cap execution: {e}");

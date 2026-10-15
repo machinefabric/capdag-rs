@@ -784,6 +784,16 @@ impl LiveCapFab {
             }
         };
 
+        // A sink (`out=media:void`) produces nothing, so a path cannot go on
+        // through it: it has no main output, and declares no other. An edge to
+        // `media:void` would be one to a value that never exists — and since
+        // every type conforms to `media:`, a path could continue from it into
+        // any cap that takes anything, a path the planner offers and that no
+        // machine can be made from.
+        if to_spec.is_void() {
+            return;
+        }
+
         // Cardinality shape from the single canonical definition (`Cap::sequence_shape`)
         // so path search, editor realization, and notation resolution never diverge.
         let (input_is_sequence, output_is_sequence) = cap.sequence_shape();
@@ -3429,5 +3439,38 @@ mod tests {
             "a concrete cap must add a runnable edge"
         );
         assert!(n_after > before.0, "a concrete cap must add graph nodes");
+    }
+
+    // TEST12877: a sink is never a step of a path. Discard takes anything and
+    // produces nothing; with it in the graph, text reached `media:void`, which
+    // conforms to `media:`, and went on into a cap that takes anything — a
+    // path to the target through a value that never exists, which the CLI then
+    // failed to make into a machine ("has no main output to take").
+    #[test]
+    fn test12877_a_sink_is_never_a_step_of_a_path() {
+        let discard = crate::standard::caps::discard_cap();
+        let render = make_test_cap("media:enc=utf-8;ext=txt", "media:ext=png;image", "render", "Render");
+        let thumbnail = make_test_cap("media:", "media:ext=png;image", "thumbnail", "Thumbnail");
+        let mut graph = LiveCapFab::new();
+        graph.add_cap(&discard);
+        graph.add_cap(&render);
+        graph.add_cap(&thumbnail);
+        graph.set_bookends(&all_bookends(&[render.clone(), thumbnail.clone()]));
+        assert_eq!(graph.edges.len(), 2, "the sink adds no edge: {:?}", graph.edges);
+
+        let text = MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap();
+        let png = MediaUrn::from_string("media:ext=png;image").unwrap();
+        let paths = graph.find_paths_to_exact_target(&text, &png, false, 4, 50);
+        let titles: Vec<Vec<String>> = paths
+            .iter()
+            .map(|p| p.steps.iter().map(|s| s.title()).collect())
+            .collect();
+        assert_eq!(paths.len(), 2, "render, and thumbnail on the text itself: {titles:?}");
+        for path in &paths {
+            assert_eq!(path.steps.len(), 1, "{titles:?}");
+            for step in &path.steps {
+                assert!(!step.to_spec.is_void(), "a step to media:void: {titles:?}");
+            }
+        }
     }
 }
