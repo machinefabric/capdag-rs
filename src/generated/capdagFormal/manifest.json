@@ -680,7 +680,7 @@
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 1581,
+  "declarations": 1588,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -764,42 +764,42 @@
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::code",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Nat",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:37:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:38:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::is_flow",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Bool",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:72:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:75:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::is_terminal",
       "lean_type": "CapDAG.Bifaci.Flow.FrameType → Bool",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:78:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:81:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::frame_type::of_code",
       "lean_type": "Nat → Option CapDAG.Bifaci.Flow.FrameType",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:54:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:56:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.Reorder.accept",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::reorder::accept",
       "lean_type": "CapDAG.Bifaci.Flow.Reorder → Nat → Nat → CapDAG.Bifaci.Flow.Accepted",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:124:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:127:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Flow.Reorder.start",
       "module": "CapDAG.Bifaci.Flow",
       "rust_path": "bifaci::flow::reorder::start",
       "lean_type": "CapDAG.Bifaci.Flow.Reorder",
-      "source": "formal/CapDAG/Bifaci/Flow.lean:92:1"
+      "source": "formal/CapDAG/Bifaci/Flow.lean:95:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.admit",

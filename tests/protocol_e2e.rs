@@ -172,7 +172,7 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
         .resolve_cartridges(&cap_urns)
         .await
         .expect("resolve_cartridges failed");
-    let mut ctx = ExecutionContext::new(machines.registry.clone())
+    let mut ctx = ExecutionContext::new(machines.registry.clone(), capdag::HostPolicy::new(capdag::NetworkPolicy::Full))
         .await
         .expect("ExecutionContext::new failed");
     ctx.add_cartridge_host(cartridges)

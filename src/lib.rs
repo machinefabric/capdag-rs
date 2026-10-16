@@ -149,6 +149,9 @@ pub use bifaci::cartridge_runtime::{
     StreamError, StreamMeta, StreamSender, WET_KEY_REQUEST,
 };
 pub use bifaci::credit::{CreditClosed, CreditGate, CreditRouter};
+pub use bifaci::policy::{
+    HostPolicy, LivePolicy, NetworkAccess, NetworkPolicy, NetworkRefused, Reach, NETWORK_POLICY_CODE,
+};
 pub use bifaci::decode_chunk_payload;
 pub use bifaci::frame::{
     CancelReason, CreditDirection, DropReason, FlowKey, Frame, FrameType, Limits, MessageId, ReorderBuffer,

@@ -669,11 +669,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.ctorElim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      110,
+      113,
       1
     ],
     "end": [
-      122,
+      125,
       29
     ]
   },
@@ -687,11 +687,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.deliver.elim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      112,
+      115,
       3
     ],
     "end": [
-      113,
+      116,
       47
     ]
   },
@@ -699,11 +699,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.duplicate.elim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      118,
+      121,
       3
     ],
     "end": [
-      119,
+      122,
       14
     ]
   },
@@ -711,11 +711,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.hold.elim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      114,
+      117,
       3
     ],
     "end": [
-      115,
+      118,
       26
     ]
   },
@@ -723,11 +723,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.overflow.elim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      120,
+      123,
       3
     ],
     "end": [
-      121,
+      124,
       13
     ]
   },
@@ -735,11 +735,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Accepted.stale.elim",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      116,
+      119,
       3
     ],
     "end": [
-      117,
+      120,
       10
     ]
   },
@@ -783,12 +783,12 @@
     "lean_name": "CapDAG.Bifaci.Flow.FrameType.code",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      37,
+      38,
       1
     ],
     "end": [
-      52,
-      23
+      54,
+      18
     ]
   },
   {
@@ -811,7 +811,7 @@
       1
     ],
     "end": [
-      35,
+      36,
       29
     ]
   },
@@ -873,11 +873,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.FrameType.isFlow",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      72,
+      75,
       1
     ],
     "end": [
-      76,
+      79,
       14
     ]
   },
@@ -885,11 +885,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.FrameType.isTerminal",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      78,
+      81,
       1
     ],
     "end": [
-      81,
+      84,
       15
     ]
   },
@@ -909,11 +909,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.FrameType.ofCode",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      54,
+      56,
       1
     ],
     "end": [
-      70,
+      73,
       14
     ]
   },
@@ -922,6 +922,18 @@
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": null,
     "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.policy.elim",
+    "file": "formal/CapDAG/Bifaci/Flow.lean",
+    "start": [
+      35,
+      3
+    ],
+    "end": [
+      35,
+      11
+    ]
   },
   {
     "lean_name": "CapDAG.Bifaci.Flow.FrameType.relayNotify.elim",
@@ -987,11 +999,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Reorder.accept",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      124,
+      127,
       1
     ],
     "end": [
-      132,
+      135,
       59
     ]
   },
@@ -999,11 +1011,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.Reorder.start",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      92,
+      95,
       1
     ],
     "end": [
-      93,
+      96,
       39
     ]
   },
@@ -1011,11 +1023,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.insertAscending",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      95,
+      98,
       1
     ],
     "end": [
-      98,
+      101,
       70
     ]
   },
@@ -1023,11 +1035,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqAccepted",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      122,
+      125,
       18
     ],
     "end": [
-      122,
+      125,
       29
     ]
   },
@@ -1035,11 +1047,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqAccepted.decEq",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      122,
+      125,
       18
     ],
     "end": [
-      122,
+      125,
       29
     ]
   },
@@ -1047,11 +1059,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqFrameType",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      35,
+      36,
       18
     ],
     "end": [
-      35,
+      36,
       29
     ]
   },
@@ -1059,11 +1071,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqReorder",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      90,
+      93,
       18
     ],
     "end": [
-      90,
+      93,
       29
     ]
   },
@@ -1071,11 +1083,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instDecidableEqReorder.decEq",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      90,
+      93,
       18
     ],
     "end": [
-      90,
+      93,
       29
     ]
   },
@@ -1083,11 +1095,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprAccepted",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      122,
+      125,
       12
     ],
     "end": [
-      122,
+      125,
       16
     ]
   },
@@ -1095,11 +1107,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprAccepted.repr",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      122,
+      125,
       12
     ],
     "end": [
-      122,
+      125,
       16
     ]
   },
@@ -1107,11 +1119,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprFrameType",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      35,
+      36,
       12
     ],
     "end": [
-      35,
+      36,
       16
     ]
   },
@@ -1119,11 +1131,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprFrameType.repr",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      35,
+      36,
       12
     ],
     "end": [
-      35,
+      36,
       16
     ]
   },
@@ -1131,11 +1143,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprReorder",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      90,
+      93,
       12
     ],
     "end": [
-      90,
+      93,
       16
     ]
   },
@@ -1143,11 +1155,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.instReprReorder.repr",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      90,
+      93,
       12
     ],
     "end": [
-      90,
+      93,
       16
     ]
   },
@@ -1155,11 +1167,11 @@
     "lean_name": "CapDAG.Bifaci.Flow.takeRun",
     "file": "formal/CapDAG/Bifaci/Flow.lean",
     "start": [
-      100,
+      103,
       1
     ],
     "end": [
-      108,
+      111,
       24
     ]
   },

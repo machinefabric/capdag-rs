@@ -69,12 +69,16 @@ pub trait FrameHandler: Send + Sync + std::fmt::Debug {
     ///
     /// The handler MUST send a complete response: either response frames
     /// (STREAM_START + CHUNK(s) + STREAM_END + END) or an error (via `output.emit_error()`).
+    ///
+    /// `network` is the host's live policy (12.2 §Policy): a handler that
+    /// reaches the network asks it before every call.
     async fn handle_request(
         &self,
         cap_urn: &str,
         input: mpsc::UnboundedReceiver<Frame>,
         output: ResponseWriter,
         peer: Arc<dyn PeerInvoker>,
+        network: crate::bifaci::policy::NetworkAccess,
     );
 }
 
@@ -461,6 +465,7 @@ impl FrameHandler for IdentityHandler {
         mut input: mpsc::UnboundedReceiver<Frame>,
         output: ResponseWriter,
         _peer: Arc<dyn PeerInvoker>,
+        _network: crate::bifaci::policy::NetworkAccess,
     ) {
         // Accumulate raw payload bytes (no CBOR decode — identity is raw passthrough)
         let mut data = Vec::new();
@@ -894,6 +899,9 @@ impl InProcessCartridgeHost {
 
         // Built-in identity handler
         let identity_handler: Arc<dyn FrameHandler> = Arc::new(IdentityHandler);
+        // The switch's latest policy (12.2 §Policy), read live by every
+        // handler; empty until the switch sends the first.
+        let policy = crate::bifaci::policy::LivePolicy::unset();
 
         let max_chunk = Limits::default().max_chunk;
 
@@ -933,6 +941,24 @@ impl InProcessCartridgeHost {
                     // Identity cap is CAP_IDENTITY / `cap:effect=none` —
                     // exact string match, NOT conforms_to.
                     let is_identity = cap_urn == CAP_IDENTITY;
+
+                    // Nothing but the identity check is served before the
+                    // switch's policy (12.2 §Policy): the switch sends one
+                    // before anything it routes.
+                    if !is_identity && policy.current().is_none() {
+                        let mut err = Frame::err(
+                            rid,
+                            "PROTOCOL_VIOLATION",
+                            crate::failure::AttributionClass::Internal,
+                            &format!(
+                                "request for '{cap_urn}' arrived before the switch sent its policy"
+                            ),
+                            None,
+                        );
+                        err.routing_id = xid;
+                        let _ = write_tx.send(err);
+                        continue;
+                    }
 
                     let (handler, registered_cap): (Arc<dyn FrameHandler>, String) = if is_identity
                     {
@@ -982,9 +1008,10 @@ impl InProcessCartridgeHost {
                         .insert(rid.clone(), registered_cap);
                     let serving_done = serving.clone();
                     let done_rid = rid.clone();
+                    let network = crate::bifaci::policy::NetworkAccess::new(Arc::clone(&policy));
                     let handle = tokio::spawn(async move {
                         handler
-                            .handle_request(&cap_urn_owned, input_rx, output, peer)
+                            .handle_request(&cap_urn_owned, input_rx, output, peer, network)
                             .await;
                         serving_done
                             .lock()
@@ -1055,6 +1082,16 @@ impl InProcessCartridgeHost {
                     }
                     drop(pending);
                 }
+
+                // The switch's policy: every handler reads it live.
+                FrameType::Policy => match frame.host_policy() {
+                    Some(Ok(new_policy)) => policy.set(new_policy),
+                    Some(Err(why)) => {
+                        tracing::error!("[InProcessCartridgeHost] {}", why);
+                        break;
+                    }
+                    None => unreachable!("a Policy frame always answers host_policy"),
+                },
 
                 FrameType::CloseStream => {
                     // An in-process handler holds no live feed taps: a
@@ -1225,6 +1262,7 @@ mod tests {
             mut input: mpsc::UnboundedReceiver<Frame>,
             output: ResponseWriter,
             _peer: Arc<dyn PeerInvoker>,
+            _network: crate::bifaci::policy::NetworkAccess,
         ) {
             match accumulate_input(&mut input).await {
                 Ok((args, meta)) => {
@@ -1255,6 +1293,7 @@ mod tests {
             mut input: mpsc::UnboundedReceiver<Frame>,
             output: ResponseWriter,
             _peer: Arc<dyn PeerInvoker>,
+            _network: crate::bifaci::policy::NetworkAccess,
         ) {
             while let Some(frame) = input.recv().await {
                 if frame.frame_type == FrameType::End {
@@ -1351,7 +1390,9 @@ mod tests {
             let (test_read, test_write) = test_sock.into_split();
             let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
             let mut reader = FrameReader::new(BufReader::new(test_read));
-            let writer = FrameWriter::new(BufWriter::new(test_write));
+            let mut writer = FrameWriter::new(BufWriter::new(test_write));
+            // The switch gives its policy before it routes anything (12.2 §Policy).
+            writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::RelayNotify);
 
             let rid = MessageId::new_uuid();
@@ -1471,6 +1512,8 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(test_read));
         let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        // The switch gives its policy before it routes anything (12.2 §Policy).
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
 
         // First frame should be RelayNotify with manifest
         let notify = reader.read().await.unwrap().unwrap();
@@ -1568,6 +1611,8 @@ mod tests {
             let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
             let mut reader = FrameReader::new(BufReader::new(test_read));
             let mut writer = FrameWriter::new(BufWriter::new(test_write));
+            // The switch gives its policy before it routes anything (12.2 §Policy).
+            writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let notify = reader.read().await.unwrap().unwrap();
             assert_eq!(notify.frame_type, FrameType::RelayNotify);
 
@@ -1664,6 +1709,8 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(test_read));
         let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        // The switch gives its policy before it routes anything (12.2 §Policy).
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
 
         // Skip RelayNotify
         let _notify = reader.read().await.unwrap().unwrap();
@@ -1734,6 +1781,8 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(test_read));
         let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        // The switch gives its policy before it routes anything (12.2 §Policy).
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
 
         // Skip RelayNotify
         let _notify = reader.read().await.unwrap().unwrap();
@@ -1816,6 +1865,8 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(test_read));
         let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        // The switch gives its policy before it routes anything (12.2 §Policy).
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
 
         // Skip RelayNotify
         let _notify = reader.read().await.unwrap().unwrap();
@@ -1860,6 +1911,7 @@ mod tests {
                 mut input: mpsc::UnboundedReceiver<Frame>,
                 output: ResponseWriter,
                 _peer: Arc<dyn PeerInvoker>,
+                _network: crate::bifaci::policy::NetworkAccess,
             ) {
                 // Drain input
                 while let Some(frame) = input.recv().await {
@@ -1890,6 +1942,8 @@ mod tests {
 
         let mut reader = FrameReader::new(BufReader::new(test_read));
         let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        // The switch gives its policy before it routes anything (12.2 §Policy).
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
 
         // Skip RelayNotify
         let _notify = reader.read().await.unwrap().unwrap();
@@ -1939,6 +1993,7 @@ mod tests {
                 mut input: mpsc::UnboundedReceiver<Frame>,
                 output: ResponseWriter,
                 _peer: Arc<dyn PeerInvoker>,
+                _network: crate::bifaci::policy::NetworkAccess,
             ) {
                 // Drain input
                 while let Some(frame) = input.recv().await {

@@ -2,7 +2,7 @@
 //!
 //! A unified CLI for executing and validating machine notation pipelines.
 
-use capdag::orchestrator::{build_plans_from_notation, execute_plan, CliRuntime, EngineRuntime, PlanInput};
+use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput};
 use capdag::{CapProgressFn, CartridgeChannel, ExecutionNodeType, FabricRegistry, PipelineLogFn};
 use std::collections::HashMap;
 use std::env;

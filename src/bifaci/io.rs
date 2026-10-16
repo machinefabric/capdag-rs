@@ -513,6 +513,13 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, CborError> {
                 ));
             }
         }
+        // A Policy that does not say a policy is refused here, so every
+        // decoded Policy reads (12.2 §Policy).
+        FrameType::Policy => {
+            if let Some(Err(why)) = frame.host_policy() {
+                return Err(CborError::InvalidFrame(why));
+            }
+        }
         _ => {} // Other frame types don't require these fields
     }
 
@@ -1108,6 +1115,30 @@ mod tests {
     use crate::bifaci::frame::CancelReason;
     use tokio::io::BufReader as TokioBufReader;
     use tokio::io::BufWriter as TokioBufWriter;
+
+    // TEST12907: a Policy frame carries each of the three policies across the wire, and one
+    // that does not say a policy — missing, not text, or a word no policy is named by — is
+    // refused at decode, so a decoded Policy always reads
+    #[test]
+    fn test12907_policy_frame_round_trips_and_a_wordless_one_is_refused() {
+        use crate::bifaci::policy::{HostPolicy, NetworkPolicy};
+        for network in [NetworkPolicy::Offline, NetworkPolicy::NoTelemetry, NetworkPolicy::Full] {
+            let decoded = decode_frame(&encode_frame(&Frame::policy(&HostPolicy::new(network))).unwrap()).unwrap();
+            assert_eq!(decoded.frame_type, FrameType::Policy);
+            assert!(!decoded.is_flow_frame(), "a policy is never held behind a flow");
+            assert_eq!(decoded.host_policy(), Some(Ok(HostPolicy::new(network))));
+        }
+        let mut bad = Frame::policy(&HostPolicy::new(NetworkPolicy::Full));
+        for meta in [
+            None,
+            Some(std::collections::BTreeMap::from([("network".to_string(), ciborium::Value::Integer(1.into()))])),
+            Some(std::collections::BTreeMap::from([("network".to_string(), ciborium::Value::Text("online".into()))])),
+        ] {
+            bad.meta = meta;
+            let err = decode_frame(&encode_frame(&bad).unwrap()).unwrap_err();
+            assert!(matches!(err, CborError::InvalidFrame(_)), "{err:?}");
+        }
+    }
 
     // TEST205: Test REQ frame encode/decode roundtrip preserves all fields
     #[test]
@@ -2406,23 +2437,23 @@ mod tests {
 
     // TEST7001: HELLO carrying another protocol version is rejected at handshake
     // with a version-mismatch error naming both — the version this one replaced
-    // included: a cartridge built for it does not name its response streams'
-    // outputs, and nothing downstream could read it.
+    // included: a cartridge built for it never reads a Policy frame, so it would
+    // reach the network whatever the operator set.
     #[tokio::test]
     async fn test7001_handshake_rejects_another_version() {
         let (host_side, cartridge_side) = tokio::io::duplex(64 * 1024);
         let (host_r, host_w) = tokio::io::split(host_side);
         let (cart_r, cart_w) = tokio::io::split(cartridge_side);
 
-        // A cartridge of the previous protocol: replies to the host HELLO with a version=4 HELLO.
+        // A cartridge of the previous protocol: replies to the host HELLO with a version=5 HELLO.
         let cart_task = tokio::spawn(async move {
             let mut reader = FrameReader::new(cart_r);
             let mut writer = FrameWriter::new(cart_w);
             let _host_hello = reader.read().await.unwrap().unwrap();
             let mut hello = Frame::hello_with_manifest(&Limits::default(), HANDSHAKE_TEST_MANIFEST, &crate::bifaci::pools::PoolStates::new());
-            hello.version = 4;
+            hello.version = 5;
             if let Some(meta) = hello.meta.as_mut() {
-                meta.insert("version".to_string(), ciborium::Value::Integer(4.into()));
+                meta.insert("version".to_string(), ciborium::Value::Integer(5.into()));
             }
             writer.write(&hello).await.unwrap();
         });
@@ -2440,7 +2471,7 @@ mod tests {
             msg
         );
         assert!(
-            msg.contains("ours 5") && msg.contains("theirs 4"),
+            msg.contains("ours 6") && msg.contains("theirs 5"),
             "error must state both versions: {}",
             msg
         );

@@ -188,6 +188,10 @@ mod tests {
         let end = Frame::end(req.id, None);
         writer.write(&end).await.unwrap();
 
+
+        // The host gives its policy before it routes anything (12.2 §Policy).
+        let policy = reader.read().await.unwrap().expect("expected the host's policy after the identity check");
+        assert_eq!(policy.frame_type, FrameType::Policy, "the frame after the identity check must be the host's policy");
         (reader, writer)
     }
 
@@ -247,6 +251,8 @@ mod tests {
         let req_id = MessageId::new_uuid();
         let engine_task = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read);
 
             let mut seq = SeqAssigner::new();
@@ -346,6 +352,8 @@ mod tests {
         let req_id = MessageId::new_uuid();
         let engine_task = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read);
 
             let mut seq = SeqAssigner::new();
@@ -455,6 +463,8 @@ mod tests {
         let req_id = MessageId::new_uuid();
         let engine_task = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read);
 
             let mut seq = SeqAssigner::new();
@@ -572,6 +582,8 @@ mod tests {
         let req_id = MessageId::new_uuid();
         let engine_task = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read);
 
             let mut seq = SeqAssigner::new();
@@ -732,6 +744,8 @@ mod tests {
 
         let engine_task = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read);
 
             let mut seq = SeqAssigner::new();
@@ -856,6 +870,8 @@ mod tests {
         let req_id_clone = req_id.clone();
         let engine_send = tokio::spawn(async move {
             let mut w = FrameWriter::new(eng_write);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut seq = SeqAssigner::new();
             let xid = MessageId::Uint(1);
             let mut req = Frame::req(
@@ -1426,6 +1442,8 @@ mod tests {
         let engine_task = tokio::spawn(async move {
             let mut seq = SeqAssigner::new();
             let mut w = FrameWriter::new(eng_write_half);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read_half);
 
             let xid = MessageId::Uint(1);
@@ -1606,6 +1624,8 @@ mod tests {
         let engine_task = tokio::spawn(async move {
             let mut seq = SeqAssigner::new();
             let mut w = FrameWriter::new(eng_write_half);
+            // As a switch does: the policy before anything routed (12.2 §Policy).
+            w.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
             let mut r = FrameReader::new(eng_read_half);
             let xid = MessageId::Uint(1);
 

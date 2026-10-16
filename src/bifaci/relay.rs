@@ -174,6 +174,19 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> RelaySlave<R, W> {
                         // RelayState is still dropped (deprecated/unused)
                         if frame.frame_type == FrameType::RelayState {
                             // Drop RelayState frames
+                        } else if frame.frame_type == FrameType::Policy {
+                            // A policy travels only toward cartridges (12.2
+                            // §Policy); one coming from the host side is a
+                            // defect, and the relay ends on it.
+                            tracing::error!("[RelaySlave] t2 Policy frame from the host side");
+                            let mut guard = err2.lock().await;
+                            if guard.is_none() {
+                                *guard = Some(CborError::Protocol(
+                                    "Policy frame sent toward the switch; a policy travels only toward cartridges"
+                                        .to_string(),
+                                ));
+                            }
+                            return;
                         } else {
                             let ready_frames = match reorder.accept(frame) {
                                 Ok(frames) => frames,
@@ -337,6 +350,11 @@ impl RelayMaster {
                         continue;
                     } else if frame.frame_type == FrameType::RelayState {
                         continue;
+                    } else if frame.frame_type == FrameType::Policy {
+                        return Err(CborError::Protocol(
+                            "Policy frame from a relay slave; a policy travels only toward cartridges"
+                                .to_string(),
+                        ));
                     }
                     let ready = self.reorder.accept(frame)?;
                     for f in &ready {

@@ -20,6 +20,7 @@ pub mod launch;
 pub mod live_feed;
 pub mod local_socket;
 pub mod manifest;
+pub mod policy;
 pub mod pools;
 pub mod protocol_trace;
 pub mod relay;

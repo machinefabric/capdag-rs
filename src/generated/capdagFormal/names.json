@@ -738,6 +738,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapDAG.Bifaci.Flow.FrameType.policy",
+    "kind": "constructor",
+    "rust_path": "bifaci::flow::FrameType::Policy",
+    "renamed": true
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Flow.Reorder.mk",
     "kind": "constructor",
     "rust_path": "bifaci::flow::Reorder",

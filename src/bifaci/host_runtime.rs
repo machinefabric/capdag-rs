@@ -941,6 +941,11 @@ fn installed_cartridge_record_from_manifest(manifest: &[u8]) -> Option<Installed
 pub struct CartridgeHostRuntime {
     /// Managed cartridge binaries.
     cartridges: Vec<ManagedCartridge>,
+    /// What this host allows its cartridges to do (12.2 §Policy): given by
+    /// the relay's Policy frames, or by `set_policy` for a host its builder
+    /// tells directly. Sent to each cartridge before anything is routed to
+    /// it; None until the first one, and no routed request is served then.
+    policy: Option<crate::bifaci::policy::HostPolicy>,
     /// Routing: cap_urn → cartridge index (for finding which cartridge handles a cap).
     cap_table: Vec<(String, usize)>,
     /// List 1: OUTGOING_RIDS - tracks peer requests sent by cartridges (RID → cartridge_idx).
@@ -1302,6 +1307,7 @@ impl CartridgeHostRuntime {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         Self {
             cartridges: Vec::new(),
+            policy: None,
             cap_table: Vec::new(),
             outgoing_rids: HashMap::new(),
             outgoing_rids_touched: HashMap::new(),
@@ -1326,6 +1332,33 @@ impl CartridgeHostRuntime {
             command_tx,
             command_rx: Some(command_rx),
             observer: None,
+        }
+    }
+
+    /// Give this host its policy (12.2 §Policy) and pass it to every
+    /// cartridge it has connected. A host behind a relay is given it by the
+    /// switch's Policy frames instead; this is for the builder of a host that
+    /// is told directly, before or instead of a relay.
+    pub fn set_policy(&mut self, policy: crate::bifaci::policy::HostPolicy) -> Result<(), AsyncHostError> {
+        self.policy = Some(policy);
+        for cartridge_idx in 0..self.cartridges.len() {
+            self.give_policy(cartridge_idx)?;
+        }
+        Ok(())
+    }
+
+    /// Send the current policy to one connected cartridge. Nothing to send
+    /// before the host has one; a cartridge not connected has no writer and
+    /// is given it when it connects.
+    fn give_policy(&self, cartridge_idx: usize) -> Result<(), AsyncHostError> {
+        let Some(policy) = self.policy else {
+            return Ok(());
+        };
+        match self.cartridges[cartridge_idx].writer_tx.as_ref() {
+            Some(writer_tx) => writer_tx
+                .send(Frame::policy(&policy))
+                .map_err(|_| AsyncHostError::SendError),
+            None => Ok(()),
         }
     }
 
@@ -1480,6 +1513,9 @@ impl CartridgeHostRuntime {
         cartridge.writer_handle = Some(wh);
 
         self.cartridges.push(cartridge);
+        // The identity check above is the only request a cartridge serves
+        // before its policy; it is given the policy before anything is routed.
+        self.give_policy(cartridge_idx)?;
         self.update_cap_table();
         self.rebuild_capabilities(None); // No relay during initialization
 
@@ -1696,6 +1732,25 @@ impl CartridgeHostRuntime {
                         ));
                     }
                 };
+
+                // Nothing is routed before the host has a policy to give the
+                // cartridge first (12.2 §Policy). The switch sends one before
+                // anything else, so this is a peer that skipped it.
+                if self.policy.is_none() {
+                    let mut err = Frame::err(
+                        frame.id.clone(),
+                        "PROTOCOL_VIOLATION",
+                        crate::failure::AttributionClass::Internal,
+                        &format!(
+                            "request for '{cap_urn}' reached a host that has not been given a policy; \
+                             the switch sends Policy before it routes anything"
+                        ),
+                        None,
+                    );
+                    err.routing_id = frame.routing_id.clone();
+                    outbound_tx.send(err).map_err(|_| AsyncHostError::SendError)?;
+                    return Ok(());
+                }
 
                 // Check for target_cartridge in meta — if present, route directly
                 // to that cartridge instead of using cap-based dispatch
@@ -2127,6 +2182,21 @@ impl CartridgeHostRuntime {
                     frame.frame_type
                 )))
             }
+            // The switch's policy (12.2 §Policy): keep it and pass it to
+            // every connected cartridge; one connected later is given it then.
+            FrameType::Policy => {
+                let policy = match frame.host_policy() {
+                    Some(Ok(policy)) => policy,
+                    Some(Err(why)) => return Err(AsyncHostError::Protocol(why)),
+                    None => unreachable!("a Policy frame always answers host_policy"),
+                };
+                tracing::info!(
+                    target: "host_runtime",
+                    network = policy.network.as_str(),
+                    "[CartridgeHostRuntime] host policy"
+                );
+                self.set_policy(policy)
+            }
         }
     }
 
@@ -2229,9 +2299,9 @@ impl CartridgeHostRuntime {
             }
 
             // Relay frames from a cartridge: fatal protocol error.
-            FrameType::RelayNotify | FrameType::RelayState => {
+            FrameType::RelayNotify | FrameType::RelayState | FrameType::Policy => {
                 Err(AsyncHostError::Protocol(format!(
-                    "Cartridge {} sent {:?} — cartridges must never send relay frames",
+                    "Cartridge {} sent {:?} — cartridges must never send relay frames or a policy",
                     cartridge_idx, frame.frame_type
                 )))
             }
@@ -3238,6 +3308,10 @@ impl CartridgeHostRuntime {
         cartridge.writer_handle = Some(wh);
         cartridge.stderr_handle = stderr;
         cartridge.last_death_message = None; // Clear any previous death message
+        // Given before the request it was spawned for is forwarded: the
+        // writer channel is ordered, so the policy precedes it.
+        self.give_policy(cartridge_idx)?;
+        let cartridge = &mut self.cartridges[cartridge_idx];
 
         // Capture observer payload while we still have an exclusive borrow.
         let observer_pid = cartridge.process.as_ref().and_then(|c| c.id());
@@ -3963,7 +4037,7 @@ mod tests {
     /// host tests, integration tests).
     #[tokio::test]
     async fn test990_observer_is_optional() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         // Ensure nothing fires when no observer is set and we
         // immediately tear the runtime down.
         runtime.kill_all_cartridges().await;
@@ -3976,7 +4050,7 @@ mod tests {
     #[tokio::test]
     async fn test989_set_observer_none_clears_previous() {
         let observer = Arc::new(RecordingObserver::new());
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.set_observer(Some(observer.clone() as Arc<dyn CartridgeHostObserver>));
         runtime.set_observer(None);
         runtime.kill_all_cartridges().await;
@@ -3996,6 +4070,17 @@ mod tests {
              firing into a cleared observer slot.",
             observer.deaths()
         );
+    }
+
+    /// A host given its policy (`full`) before anything is attached, as a host
+    /// behind a switch is before the switch routes to it (12.2 §Policy).
+    fn policed_host() -> CartridgeHostRuntime {
+        let mut host = CartridgeHostRuntime::new();
+        host.set_policy(crate::bifaci::policy::HostPolicy::new(
+            crate::bifaci::policy::NetworkPolicy::Full,
+        ))
+        .expect("a host with nothing attached takes a policy");
+        host
     }
 
     /// Helper: perform handshake_accept and handle the identity verification REQ.
@@ -4065,6 +4150,13 @@ mod tests {
         writer.write(&se).await.unwrap();
         let end = Frame::end(req.id, None);
         writer.write(&end).await.unwrap();
+
+        // The host gives its policy right after the identity check, before it
+        // routes anything (12.2 §Policy). A test that ends the host without
+        // routing anything may close it first.
+        if let Some(policy) = reader.read().await.unwrap() {
+            assert_eq!(policy.frame_type, FrameType::Policy, "the frame after the identity check must be the host's policy");
+        }
 
         (reader, writer)
     }
@@ -4490,7 +4582,7 @@ mod tests {
     // back as the canonical form.
     #[test]
     fn test413_register_cartridge_adds_to_cap_table() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge(
             Path::new("/usr/bin/test-cartridge"),
             "test-cartridge",
@@ -4524,13 +4616,13 @@ mod tests {
     // is `None`) and therefore does not appear in the relay payload.
     #[test]
     fn test6594_capabilities_empty_initially() {
-        let runtime = CartridgeHostRuntime::new();
+        let runtime = policed_host();
         assert!(
             runtime.aggregate_installed_cartridges().is_empty(),
             "No cartridges registered = empty inventory"
         );
 
-        let mut runtime2 = CartridgeHostRuntime::new();
+        let mut runtime2 = policed_host();
         runtime2.register_cartridge(
             Path::new("/nonexistent/path/to/cartridge"),
             "test",
@@ -4564,7 +4656,7 @@ mod tests {
         let entry_point = cartridge_dir.path().join("bin");
         std::fs::write(&entry_point, b"not an executable").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge_dir(
             &entry_point,
             cartridge_dir.path(),
@@ -4647,7 +4739,7 @@ mod tests {
             .await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let idx = runtime
             .attach_cartridge(cartridge_read, cartridge_write)
             .await
@@ -4751,7 +4843,7 @@ mod tests {
         });
 
         // Setup runtime
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(pa_read, pa_write).await.unwrap();
         runtime.attach_cartridge(pb_read, pb_write).await.unwrap();
 
@@ -4876,7 +4968,7 @@ mod tests {
             drop(w); // Close to signal EOF
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Relay pipes (tokio sockets)
@@ -4917,6 +5009,43 @@ mod tests {
     }
 
     // TEST420: Cartridge non-HELLO/non-HB frames forwarded to relay (pass-through)
+    #[tokio::test]
+    async fn test12909_a_host_without_a_policy_routes_nothing() {
+        // TEST12909: a request that reaches a host before it was given a policy is answered with
+        // PROTOCOL_VIOLATION and routed nowhere: no cartridge serves work without knowing what
+        // it may do
+        let (relay_rt_read, relay_eng_write) = UnixStream::pair().unwrap();
+        let (relay_eng_read, relay_rt_write) = UnixStream::pair().unwrap();
+        let (rt_read_half, _) = relay_rt_read.into_split();
+        let (_, rt_write_half) = relay_rt_write.into_split();
+        let (_, eng_write_half) = relay_eng_write.into_split();
+        let (eng_read_half, _) = relay_eng_read.into_split();
+
+        let req_id = MessageId::new_uuid();
+        let req_id_send = req_id.clone();
+        let engine_task = tokio::spawn(async move {
+            let mut w = FrameWriter::new(eng_write_half);
+            let mut r = FrameReader::new(eng_read_half);
+            let mut req = Frame::req(req_id_send.clone(), "cap:in=\"media:void\";fwd;out=\"media:void\"", vec![], "text/plain");
+            req.routing_id = Some(MessageId::Uint(1));
+            w.write(&req).await.unwrap();
+            let answer = loop {
+                let frame = r.read().await.unwrap().expect("the host answers");
+                if frame.frame_type == FrameType::Err && frame.id == req_id_send {
+                    break frame;
+                }
+            };
+            drop(w);
+            answer
+        });
+
+        let mut runtime = CartridgeHostRuntime::new();
+        let _ = runtime.run(rt_read_half, rt_write_half, || Vec::new()).await;
+        let answer = engine_task.await.unwrap();
+        assert_eq!(answer.error_code(), Some("PROTOCOL_VIOLATION"));
+        assert_eq!(answer.routing_id, Some(MessageId::Uint(1)));
+    }
+
     #[tokio::test]
     async fn test420_cartridge_frames_forwarded_to_relay() {
         let manifest = r#"{"name":"FwdCartridge","version":"1.0","channel":"release","registry_url":null,"description":"Forward cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases": ["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:in=\"media:void\";fwd;out=\"media:void\"","title":"Test","aliases": ["test"],"args":[]}],"adapter_urns":[]}]}"#;
@@ -4991,7 +5120,7 @@ mod tests {
             drop(w);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Relay (tokio sockets)
@@ -5166,7 +5295,7 @@ mod tests {
             drop(w);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Relay (tokio sockets)
@@ -5269,7 +5398,7 @@ mod tests {
             drop(r);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Before death: cap_table is the routing source of truth — it
@@ -5359,7 +5488,7 @@ mod tests {
             drop(r);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Relay (tokio sockets)
@@ -5511,7 +5640,7 @@ mod tests {
             drop(w);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(pa_read, pa_write).await.unwrap();
         runtime.attach_cartridge(pb_read, pb_write).await.unwrap();
 
@@ -5673,7 +5802,7 @@ mod tests {
             drop(w);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Relay (tokio sockets)
@@ -5773,7 +5902,7 @@ mod tests {
     // TEST425: find_cartridge_for_cap returns None for unregistered cap
     #[test]
     fn test425_find_cartridge_for_cap_unknown() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge(
             Path::new("/test"),
             "test",
@@ -5811,7 +5940,7 @@ mod tests {
             cartridge_handshake_with_identity(p_from_rt, p_to_rt, &m).await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let idx = runtime.attach_cartridge(p_read, p_write).await.unwrap();
         assert_eq!(idx, 0);
         assert!(
@@ -5874,7 +6003,7 @@ mod tests {
             writer.write(&err).await.unwrap();
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let result = runtime.attach_cartridge(p_read, p_write).await;
         assert!(
             result.is_err(),
@@ -5902,7 +6031,7 @@ mod tests {
         let bin_path = bin_dir.path().join("thumbnailcartridge");
         std::fs::write(&bin_path, b"#!/bin/false\n").expect("write binary");
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let cap_groups = cap_groups_from_urns(&[
             CAP_IDENTITY,
             "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
@@ -5955,7 +6084,7 @@ mod tests {
         std::fs::write(&bin_path_1, b"#!/bin/false\n").expect("write binary 1");
         std::fs::write(&bin_path_2, b"#!/bin/false\n").expect("write binary 2");
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let groups_1 = cap_groups_from_urns(&[
             CAP_IDENTITY,
             "cap:in=\"media:document;ext=pdf\";extract;out=\"media:text\"",
@@ -6012,7 +6141,7 @@ mod tests {
         let bin_path = bin_dir.path().join("brokencartridge");
         std::fs::write(&bin_path, b"#!/bin/false\n").expect("write binary");
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let cap_groups = cap_groups_from_urns(&[
             CAP_IDENTITY,
             "cap:in=\"media:void\";broken;out=\"media:void\"",
@@ -6080,7 +6209,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
 
         // Register with stale (probe-time) cap_groups BEFORE attaching.
         let bin_dir = tempfile::tempdir().expect("create temp dir");
@@ -6143,7 +6272,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
 
         // Attach running cartridge
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
@@ -6196,7 +6325,7 @@ mod tests {
     // TEST1250: Process snapshots start empty before any cartridges are attached or spawned.
     #[tokio::test]
     async fn test1250_process_handle_snapshot_empty_initially() {
-        let runtime = CartridgeHostRuntime::new();
+        let runtime = policed_host();
         let handle = runtime.process_handle();
         let cartridges = handle.running_cartridges();
         assert!(
@@ -6222,7 +6351,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let handle = runtime.process_handle();
 
         runtime.attach_cartridge(r_read, r_write).await.unwrap();
@@ -6240,7 +6369,7 @@ mod tests {
     // TEST1252: Cartridge process handles remain usable after clone-and-send across tasks.
     #[tokio::test]
     async fn test1252_process_handle_is_clone_and_send() {
-        let runtime = CartridgeHostRuntime::new();
+        let runtime = policed_host();
         let handle = runtime.process_handle();
         let handle2 = handle.clone();
 
@@ -6256,7 +6385,7 @@ mod tests {
     // TEST1253: Killing an unknown PID is accepted as an asynchronous no-op command.
     #[tokio::test]
     async fn test1253_process_handle_kill_unknown_pid_is_noop() {
-        let runtime = CartridgeHostRuntime::new();
+        let runtime = policed_host();
         let handle = runtime.process_handle();
 
         // Kill for a PID that doesn't exist should succeed (command sent)
@@ -6303,7 +6432,7 @@ mod tests {
             drop(r);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Set shutdown_reason to OomKill BEFORE the cartridge dies.
@@ -6429,7 +6558,7 @@ mod tests {
             drop(r);
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.attach_cartridge(p_read, p_write).await.unwrap();
 
         // Set AppExit — should suppress ERR frames
@@ -6570,7 +6699,7 @@ mod tests {
     /// which production prevents by gc-ing on every insert).
     #[test]
     fn test988_gc_reduces_table_below_soft_watermark_in_one_pass() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let pre_count = CartridgeHostRuntime::ROUTING_TABLE_SOFT_WATERMARK + 256;
         assert!(
             pre_count < CartridgeHostRuntime::ROUTING_TABLE_HARD_CAP,
@@ -6629,7 +6758,7 @@ mod tests {
     /// in-flight continuation frames.
     #[test]
     fn test0129_gc_evicts_oldest_entries_by_touch_sequence() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let pre_count = CartridgeHostRuntime::ROUTING_TABLE_SOFT_WATERMARK + 256;
         let eviction_count = std::cmp::max(
             1,
@@ -6683,7 +6812,7 @@ mod tests {
     /// between bursts.
     #[test]
     fn test987_gc_secondary_pass_enforces_hard_cap() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         // Size the seed so a SINGLE eviction-fraction pass is NOT
         // enough to bring the table under the hard cap. We need
         // `pre * (1 - eviction_fraction) >= hard_cap`, i.e.
@@ -6742,7 +6871,7 @@ mod tests {
         let entry = dir.path().join("bin");
         std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
 
         // The state a held cartridge is discovered in: no verdict yet, so the
         // install is rejected and rides the advertisement with its reason.
@@ -6826,7 +6955,7 @@ mod tests {
         let entry = dir.path().join("bin");
         std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge_dir(
             &entry,
             dir.path(),
@@ -6917,7 +7046,7 @@ mod tests {
         let entry = dir.path().join("bin");
         std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge_dir(
             &entry,
             dir.path(),
@@ -7018,7 +7147,7 @@ mod tests {
         let entry = dir.path().join("bin");
         std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         runtime.register_cartridge_dir(
             &entry,
             dir.path(),
@@ -7171,7 +7300,7 @@ mod tests {
         let entry = dir.path().join("bin");
         std::fs::write(&entry, b"#!/bin/sh\n").unwrap();
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let handle = runtime.process_handle();
 
         // Relay pipe pair: the engine side reads RelayNotify frames the host emits.
@@ -7302,7 +7431,7 @@ mod tests {
     // cartridge keeps the validated values queued for the attach-time probe.
     #[tokio::test]
     async fn test1533_apply_desired_capacities_validation_and_cold_queue() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let mut cartridge = ManagedCartridge::new_registered_binary(
             PathBuf::from("/nonexistent/test-cartridge"),
             "test-cartridge".to_string(),
@@ -7420,7 +7549,7 @@ mod tests {
 
     #[tokio::test]
     async fn test8067_heartbeat_timeout_is_generation_safe() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let mut cartridge = ManagedCartridge::new_registered_binary(
             PathBuf::from("/nonexistent/test-cartridge"),
             "test-cartridge".to_string(),
@@ -7491,7 +7620,7 @@ mod tests {
             let _ = silent_rx.await;
         });
 
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let idx = runtime.attach_cartridge(p_read, p_write).await.unwrap();
         let generation = runtime.cartridges[idx].generation;
 
@@ -7533,7 +7662,7 @@ mod tests {
     // duplicates collapse, and eviction past the cap ages a rid back out.
     #[test]
     fn test8116_released_rid_ring_discriminates_dedupes_and_ages_out() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let rid = MessageId::Uint(7);
 
         assert!(!runtime.recently_released_rid(&rid), "nothing released yet");
@@ -7571,7 +7700,7 @@ mod tests {
     // counted (L8), never errors and never silent — and never conflated.
     #[tokio::test]
     async fn test8117_unroutable_continuation_classified_by_release_ring() {
-        let mut runtime = CartridgeHostRuntime::new();
+        let mut runtime = policed_host();
         let (outbound_tx, _outbound_rx) = mpsc::unbounded_channel();
         let resource_fn = || Vec::new();
 

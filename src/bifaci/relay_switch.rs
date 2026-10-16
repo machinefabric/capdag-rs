@@ -751,6 +751,11 @@ pub struct RelaySwitch {
     /// `masters` Vec across the registration's network I/O.
     /// Tokio Mutex because the held region awaits on socket I/O.
     add_master_lock: tokio::sync::Mutex<()>,
+    /// What the engine allows the cartridges behind this switch to do (12.2
+    /// §Policy). Given at construction, so no master is ever connected
+    /// without one; sent to each master before anything else, and to every
+    /// master on each change ([`RelaySwitch::set_policy`]).
+    policy: std::sync::Mutex<crate::bifaci::policy::HostPolicy>,
 }
 
 impl std::fmt::Debug for RelaySwitch {
@@ -804,6 +809,7 @@ impl RelaySwitch {
     pub async fn new(
         sockets: Vec<(String, UnixStream)>,
         fabric_registry: Arc<FabricRegistry>,
+        policy: crate::bifaci::policy::HostPolicy,
     ) -> Result<Self, RelaySwitchError> {
         // Reject duplicate ids up front. Without this, two slots
         // would be created with the same id; the first reconnect
@@ -873,6 +879,12 @@ impl RelaySwitch {
             let mut payload = parse_relay_notify_payload(&caps_payload)?;
             let mut caps = payload.cap_urns();
             let mut limits = notify_frame.relay_notify_limits().unwrap_or_default();
+
+            // The policy goes first, before the identity probe or anything
+            // routed: the host gives it to each cartridge it connects.
+            socket_writer.write(&Frame::policy(&policy)).await.map_err(|e| {
+                RelaySwitchError::Protocol(format!("master {}: sending the policy failed: {}", master_idx, e))
+            })?;
 
             let mut seq_assigner = SeqAssigner::new();
 
@@ -1139,6 +1151,7 @@ impl RelaySwitch {
             pending_identity_probes_tx: probes_tx,
             pending_identity_probes_rx: std::sync::Mutex::new(Some(probes_rx)),
             add_master_lock: tokio::sync::Mutex::new(()),
+            policy: std::sync::Mutex::new(policy),
         };
 
         let initial_inventories = {
@@ -2770,6 +2783,60 @@ impl RelaySwitch {
     /// spawns a reader task, and returns the master index.
     ///
     /// This is used for dynamically connecting new hosts (e.g., Mac client connecting via gRPC).
+    /// The policy in force (12.2 §Policy).
+    pub fn policy(&self) -> crate::bifaci::policy::HostPolicy {
+        *self.policy.lock().expect("relay switch policy mutex poisoned")
+    }
+
+    /// Replace the policy and send it to every attached master, whose hosts
+    /// pass it to their cartridges (12.2 §Policy). Setting the policy in
+    /// force sends nothing. A master that is not attached is given the
+    /// current policy when it attaches; a master the send fails on is
+    /// retired like any other write failure, and the failures are returned.
+    pub async fn set_policy(
+        &self,
+        policy: crate::bifaci::policy::HostPolicy,
+    ) -> Result<(), RelaySwitchError> {
+        let _add_master_guard = self.add_master_lock.lock().await;
+        {
+            let mut current = self.policy.lock().expect("relay switch policy mutex poisoned");
+            if *current == policy {
+                return Ok(());
+            }
+            *current = policy;
+        }
+        let attached: Vec<usize> = {
+            let masters = self.masters.read().await;
+            let mut attached = Vec::new();
+            for (idx, master) in masters.iter().enumerate() {
+                let live = match master.reader_handle.lock().await.as_ref() {
+                    None => false,
+                    Some(handle) => !handle.is_finished(),
+                };
+                if live {
+                    attached.push(idx);
+                }
+            }
+            attached
+        };
+        let mut failures = Vec::new();
+        for idx in attached {
+            let mut frame = Frame::policy(&policy);
+            if let Err(e) = self.write_to_master_idx(idx, &mut frame).await {
+                failures.push(format!("master {idx}: {e}"));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(RelaySwitchError::Protocol(format!(
+                "the policy '{}' did not reach every master: {}",
+                policy.network,
+                failures.join("; ")
+            )))
+        }
+    }
+
     pub async fn add_master(
         &self,
         id: impl Into<String>,
@@ -2897,6 +2964,15 @@ impl RelaySwitch {
         let mut payload = parse_relay_notify_payload(&caps_payload)?;
         let mut caps = payload.cap_urns();
         let mut limits = notify_frame.relay_notify_limits().unwrap_or_default();
+
+        // The current policy goes first, before the identity probe or
+        // anything routed. `set_policy` holds the add-master lock this call
+        // holds, so a change cannot fall between this send and the slot
+        // joining the list it broadcasts to.
+        let policy = self.policy();
+        socket_writer.write(&Frame::policy(&policy)).await.map_err(|e| {
+            RelaySwitchError::Protocol(format!("new master {}: sending the policy failed: {}", master_idx, e))
+        })?;
 
         let mut seq_assigner = SeqAssigner::new();
 
@@ -4641,6 +4717,12 @@ mod tests {
     /// terse; the synthesised ids are positional (`"test-master-N"`)
     /// so each test's slot count drives unique-id generation
     /// without collision.
+    /// The policy a test switch is built with: `full`, so nothing a test
+    /// routes is refused for reaching the network.
+    fn test_policy() -> crate::bifaci::policy::HostPolicy {
+        crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full)
+    }
+
     fn wrap_with_test_ids(sockets: Vec<UnixStream>) -> Vec<(String, UnixStream)> {
         sockets
             .into_iter()
@@ -4689,7 +4771,7 @@ mod tests {
         ));
 
         let switch = Arc::new(
-            RelaySwitch::new(wrap_with_test_ids(vec![]), registry.clone())
+            RelaySwitch::new(wrap_with_test_ids(vec![]), registry.clone(), test_policy())
                 .await
                 .expect("empty relay switch must construct"),
         );
@@ -4783,6 +4865,13 @@ mod tests {
     /// them in a single synthetic installed-cartridge entry so the new
     /// payload schema (cap_groups inside installed_cartridges) is
     /// satisfied without each test having to spell out the wrapping.
+    /// Read the frame a switch sends right after a master's first RelayNotify:
+    /// its policy (12.2 §Policy).
+    async fn expect_policy<R: tokio::io::AsyncRead + Unpin>(reader: &mut FrameReader<R>) {
+        let frame = reader.read().await.unwrap().expect("expected the switch's policy after RelayNotify");
+        assert_eq!(frame.frame_type, FrameType::Policy, "the frame after RelayNotify must be the switch's policy");
+    }
+
     async fn slave_notify_with_identity(
         socket: UnixStream,
         caps_json: &serde_json::Value,
@@ -4851,6 +4940,7 @@ mod tests {
         });
         let notify = Frame::relay_notify(&serde_json::to_vec(&notify_payload).unwrap(), limits);
         writer.write(&notify).await.unwrap();
+        expect_policy(&mut reader).await;
 
         // Handle identity verification REQ
         let req = reader
@@ -4989,6 +5079,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -5091,6 +5182,7 @@ mod tests {
             ))
             .await
             .unwrap();
+        expect_policy(&mut reader).await;
 
         // 2. Populated RelayNotify — the empty→non-empty transition.
         let cap_urns_array = caps_json
@@ -5237,6 +5329,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock1, engine_sock2]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5309,6 +5402,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5401,6 +5495,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock1, engine_sock2]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5459,6 +5554,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5546,6 +5642,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock1, engine_sock2]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5627,6 +5724,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5673,7 +5771,7 @@ mod tests {
     // TEST432: Empty masters list creates empty switch, add_master works
     #[tokio::test]
     async fn test432_empty_masters_allowed() {
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), test_fabric_registry())
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), test_fabric_registry(), test_policy())
             .await
             .unwrap();
 
@@ -5721,6 +5819,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock1, engine_sock2]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5773,6 +5872,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock1, engine_sock2]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5821,6 +5921,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5920,6 +6021,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock0, engine_sock1]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -5967,6 +6069,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6007,6 +6110,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6053,6 +6157,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6068,6 +6173,35 @@ mod tests {
                 .await,
             Some(0)
         );
+    }
+
+    // TEST12908: the switch gives a master its policy before the identity probe or anything
+    // routed, and every later change of it; setting the policy in force sends nothing
+    #[tokio::test]
+    async fn test12908_switch_gives_each_master_its_policy_and_every_change() {
+        use crate::bifaci::policy::{HostPolicy, NetworkPolicy};
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (seen_tx, mut seen) = tokio::sync::mpsc::unbounded_channel::<Frame>();
+        tokio::spawn(async move {
+            // slave_notify_with_identity asserts the policy came first.
+            let (mut reader, _writer) =
+                slave_notify_with_identity(slave_sock, &serde_json::json!(["cap:effect=none"]), &Limits::default()).await;
+            while let Ok(Some(frame)) = reader.read().await {
+                if seen_tx.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy())
+            .await
+            .unwrap();
+        assert_eq!(switch.policy(), test_policy());
+
+        switch.set_policy(test_policy()).await.unwrap();
+        switch.set_policy(HostPolicy::new(NetworkPolicy::Offline)).await.unwrap();
+        let next = tokio::time::timeout(std::time::Duration::from_secs(5), seen.recv()).await.unwrap().unwrap();
+        assert_eq!(next.host_policy(), Some(Ok(HostPolicy::new(NetworkPolicy::Offline))), "the unchanged policy sent nothing");
+        assert_eq!(switch.policy(), HostPolicy::new(NetworkPolicy::Offline));
     }
 
     // TEST488: RelaySwitch construction fails when master's identity verification fails
@@ -6120,6 +6254,7 @@ mod tests {
             let notify =
                 Frame::relay_notify(&serde_json::to_vec(&caps).unwrap(), &Limits::default());
             writer.write(&notify).await.unwrap();
+            expect_policy(&mut reader).await;
 
             // Read identity REQ, respond with ERR
             let req = reader.read().await.unwrap().expect("expected identity REQ");
@@ -6137,6 +6272,7 @@ mod tests {
         let result = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await;
         assert!(
@@ -6182,6 +6318,7 @@ mod tests {
                 ))
                 .await
                 .unwrap();
+            expect_policy(&mut reader).await;
 
             // Send a runtime RelayNotify update with a real cartridge
             // declaring CAP_IDENTITY plus another cap. The relay's
@@ -6264,6 +6401,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .expect("RelaySwitch construction must succeed for empty-cap initial notify"),
@@ -6329,6 +6467,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .expect("RelaySwitch construction must succeed for empty-cap initial notify"),
@@ -6390,6 +6529,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .expect("RelaySwitch construction must succeed for empty-cap initial notify"),
@@ -6463,6 +6603,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6523,6 +6664,7 @@ mod tests {
                 mut input: mpsc::UnboundedReceiver<Frame>,
                 output: ResponseWriter,
                 _peer: Arc<dyn PeerInvoker>,
+                _network: crate::bifaci::policy::NetworkAccess,
             ) {
                 match accumulate_input(&mut input).await {
                     Ok((args, meta)) => {
@@ -6582,6 +6724,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![switch_sock]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6698,6 +6841,7 @@ mod tests {
                 mut input: mpsc::UnboundedReceiver<Frame>,
                 output: ResponseWriter,
                 _peer: Arc<dyn PeerInvoker>,
+                _network: crate::bifaci::policy::NetworkAccess,
             ) {
                 // Drain input
                 while let Some(frame) = input.recv().await {
@@ -6767,6 +6911,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![switch_sock_a]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -6915,6 +7060,7 @@ mod tests {
             RelaySwitch::new(
                 vec![("xpc-service".to_string(), engine_sock_1)],
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -7008,6 +7154,7 @@ mod tests {
             RelaySwitch::new(
                 vec![("xpc-service".to_string(), engine_sock)],
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -7076,6 +7223,7 @@ mod tests {
             RelaySwitch::new(
                 vec![("xpc-service".to_string(), engine_sock)],
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -7167,6 +7315,7 @@ mod tests {
                 ("dup-id".to_string(), sock_b),
             ],
             test_fabric_registry(),
+            test_policy(),
         )
         .await;
 
@@ -7203,6 +7352,7 @@ mod tests {
                 mut input: mpsc::UnboundedReceiver<Frame>,
                 output: ResponseWriter,
                 _peer: Arc<dyn PeerInvoker>,
+                _network: crate::bifaci::policy::NetworkAccess,
             ) {
                 // Drain input
                 while let Some(frame) = input.recv().await {
@@ -7300,6 +7450,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![switch_sock_exact, switch_sock_extra]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .unwrap();
@@ -7438,7 +7589,7 @@ mod tests {
             });
         }
         Arc::new(
-            RelaySwitch::new(wrap_with_test_ids(engine_socks), test_fabric_registry())
+            RelaySwitch::new(wrap_with_test_ids(engine_socks), test_fabric_registry(), test_policy())
                 .await
                 .unwrap(),
         )
@@ -7507,7 +7658,7 @@ mod tests {
             });
         }
         Arc::new(
-            RelaySwitch::new(wrap_with_test_ids(engine_socks), test_fabric_registry())
+            RelaySwitch::new(wrap_with_test_ids(engine_socks), test_fabric_registry(), test_policy())
                 .await
                 .unwrap(),
         )
@@ -7922,6 +8073,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -8032,6 +8184,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_sock]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .unwrap(),
@@ -8073,7 +8226,7 @@ mod tests {
     #[tokio::test]
     async fn test7025_unroutable_flow_frame_is_counted_drop() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 
@@ -8112,7 +8265,7 @@ mod tests {
     #[tokio::test]
     async fn test7035_end_terminates_and_releases_all_state() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 
@@ -8193,7 +8346,7 @@ mod tests {
     #[tokio::test]
     async fn test7036_err_terminates_and_releases_all_state() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 
@@ -8263,6 +8416,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_socket]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .expect("switch with one master must construct");
@@ -8358,6 +8512,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_socket]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .expect("switch with one master must construct");
@@ -8469,6 +8624,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_socket]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .expect("switch with one master must construct");
@@ -8551,6 +8707,7 @@ mod tests {
             RelaySwitch::new(
                 wrap_with_test_ids(vec![engine_socket]),
                 test_fabric_registry(),
+                test_policy(),
             )
             .await
             .expect("switch with one master must construct"),
@@ -8676,6 +8833,7 @@ mod tests {
         let switch = RelaySwitch::new(
             wrap_with_test_ids(vec![engine_socket]),
             test_fabric_registry(),
+            test_policy(),
         )
         .await
         .expect("switch with one master must construct");
@@ -8774,7 +8932,7 @@ mod tests {
     #[tokio::test]
     async fn test1515_incompatible_roster_record_does_not_refuse_the_master() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 
@@ -8834,7 +8992,7 @@ mod tests {
     #[tokio::test]
     async fn test8114_straggler_for_terminated_request_is_benign_not_a_drop() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 
@@ -8935,7 +9093,7 @@ mod tests {
     #[tokio::test]
     async fn test8118_send_to_master_records_outbound_flow_and_window() {
         let registry = test_fabric_registry();
-        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry)
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![]), registry, test_policy())
             .await
             .expect("empty relay switch must construct");
 

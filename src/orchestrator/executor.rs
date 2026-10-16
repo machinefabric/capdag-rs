@@ -1556,8 +1556,14 @@ impl ExecutionContext {
     /// Requires a `FabricRegistry` for the RelaySwitch to use when building
     /// the LiveCapFab for path finding queries. The registry is read at
     /// every LiveCapFab sync to compute the bookend-eligible URN set.
-    pub async fn new(fabric_registry: Arc<FabricRegistry>) -> Result<Self, ExecutionError> {
-        let switch = RelaySwitch::new(vec![], fabric_registry)
+    ///
+    /// `policy` is what the cartridges it runs may do (12.2 §Policy); the
+    /// switch gives it to every host added to it.
+    pub async fn new(
+        fabric_registry: Arc<FabricRegistry>,
+        policy: crate::bifaci::policy::HostPolicy,
+    ) -> Result<Self, ExecutionError> {
+        let switch = RelaySwitch::new(vec![], fabric_registry, policy)
             .await
             .map_err(|e| ExecutionError::HostError(format!("RelaySwitch init: {}", e)))?;
 

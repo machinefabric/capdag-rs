@@ -51,12 +51,12 @@ use crate::CapUrn;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Protocol version 5: a cap may answer with one stream per declared output.
-/// The stream of its main output names none; the stream of another output
-/// names the output it is (key 21). It keeps explicit
-/// handler capacity, strict diagnostic attribution, credit-based flow control
-/// and terminal metadata. Every other version is rejected during handshake.
-pub const PROTOCOL_VERSION: u8 = 5;
+/// Protocol version 6: the host tells its cartridges what they may do with a
+/// Policy frame (15), sent after the handshake and on every change. It keeps
+/// version 5's streams per declared output (key 21), explicit handler
+/// capacity, strict diagnostic attribution, credit-based flow control and
+/// terminal metadata. Every other version is rejected during handshake.
+pub const PROTOCOL_VERSION: u8 = 6;
 
 /// Default maximum frame size (3.5 MB) - safe margin below 3.75MB limit
 /// Larger payloads automatically use CHUNK frames
@@ -113,11 +113,15 @@ pub enum FrameType {
     /// aborted. `stream_id` (key 11) names one stream; absent means every
     /// live feed the request holds.
     CloseStream = 14,
+    /// What the host allows its cartridges to do, as it stands now (12.2
+    /// §Policy): host → cartridge only, after the handshake and on every
+    /// change. Non-flow, `id = 0`; `meta.network` is required.
+    Policy = 15,
 }
 
 impl FrameType {
     /// All variants, for counter arrays and snapshot serialization.
-    pub const ALL: [FrameType; 14] = [
+    pub const ALL: [FrameType; 15] = [
         FrameType::Hello,
         FrameType::Req,
         FrameType::Chunk,
@@ -132,6 +136,7 @@ impl FrameType {
         FrameType::Cancel,
         FrameType::Credit,
         FrameType::CloseStream,
+        FrameType::Policy,
     ];
 
     /// Stable snake_case name (the snapshot contract for mirrors and traces).
@@ -151,6 +156,7 @@ impl FrameType {
             FrameType::Cancel => "cancel",
             FrameType::Credit => "credit",
             FrameType::CloseStream => "close_stream",
+            FrameType::Policy => "policy",
         }
     }
 
@@ -174,13 +180,14 @@ impl FrameType {
             FrameType::Cancel => Model::Cancel,
             FrameType::Credit => Model::Credit,
             FrameType::CloseStream => Model::CloseStream,
+            FrameType::Policy => Model::Policy,
         }
     }
 
     /// Whether frames of this type are part of a flow: numbered by the writer
     /// and kept in order. Hello, Heartbeat, RelayNotify, RelayState, Cancel,
-    /// Credit and CloseStream are not — Credit in particular must never queue
-    /// behind the data it is the permission for.
+    /// Credit, CloseStream and Policy are not — Credit in particular must
+    /// never queue behind the data it is the permission for.
     pub fn is_flow(self) -> bool {
         crate::formal::bifaci::flow::frame_type::is_flow(self.model())
     }
@@ -207,6 +214,7 @@ impl FrameType {
             12 => Some(FrameType::Cancel),
             13 => Some(FrameType::Credit),
             14 => Some(FrameType::CloseStream),
+            15 => Some(FrameType::Policy),
             _ => None,
         }
     }
@@ -1021,6 +1029,39 @@ impl Frame {
         let mut frame = Self::new(FrameType::CloseStream, target_rid);
         frame.stream_id = stream_id;
         frame
+    }
+
+    /// Create a POLICY frame: what the host allows its cartridges to do now
+    /// (12.2 §Policy).
+    pub fn policy(policy: &crate::bifaci::policy::HostPolicy) -> Self {
+        let mut frame = Self::new(FrameType::Policy, MessageId::Uint(0));
+        let mut meta = BTreeMap::new();
+        meta.insert(
+            crate::bifaci::policy::POLICY_META_NETWORK.to_string(),
+            ciborium::Value::Text(policy.network.as_str().to_string()),
+        );
+        frame.meta = Some(meta);
+        frame
+    }
+
+    /// The policy a POLICY frame carries: None for any other frame type, an
+    /// error for a Policy frame whose `meta.network` is missing or names no
+    /// policy. Decode refuses such a frame, so a decoded Policy always reads.
+    pub fn host_policy(&self) -> Option<Result<crate::bifaci::policy::HostPolicy, String>> {
+        if self.frame_type != FrameType::Policy {
+            return None;
+        }
+        let key = crate::bifaci::policy::POLICY_META_NETWORK;
+        let word = match self.meta.as_ref().and_then(|m| m.get(key)) {
+            Some(ciborium::Value::Text(word)) => word,
+            Some(other) => return Some(Err(format!("POLICY frame's meta.{key} is not text: {other:?}"))),
+            None => return Some(Err(format!("POLICY frame missing required meta.{key}"))),
+        };
+        Some(
+            crate::bifaci::policy::NetworkPolicy::from_wire(word)
+                .map(crate::bifaci::policy::HostPolicy::new)
+                .ok_or_else(|| format!("POLICY frame's meta.{key} names no network policy: '{word}'")),
+        )
     }
 
     /// The reason this Cancel frame carries (None for a non-Cancel frame).
@@ -1838,6 +1879,7 @@ mod tests {
             FrameType::Cancel,
             FrameType::Credit,
             FrameType::CloseStream,
+            FrameType::Policy,
         ] {
             let v = t as u8;
             let recovered = FrameType::from_u8(v).expect("should recover frame type");
@@ -1849,9 +1891,10 @@ mod tests {
     #[test]
     fn test172_invalid_frame_type() {
         assert_eq!(FrameType::from_u8(14), Some(FrameType::CloseStream));
+        assert_eq!(FrameType::from_u8(15), Some(FrameType::Policy));
         assert!(
-            FrameType::from_u8(15).is_none(),
-            "value 15 is one past CloseStream"
+            FrameType::from_u8(16).is_none(),
+            "value 16 is one past Policy"
         );
         assert!(FrameType::from_u8(100).is_none());
         assert!(FrameType::from_u8(255).is_none());
@@ -2489,10 +2532,10 @@ mod tests {
         );
     }
 
-    // TEST199: Test PROTOCOL_VERSION is 5
+    // TEST199: Test PROTOCOL_VERSION is 6
     #[test]
     fn test199_protocol_version_constant() {
-        assert_eq!(PROTOCOL_VERSION, 5);
+        assert_eq!(PROTOCOL_VERSION, 6);
     }
 
     // TEST200: Test integer key constants match the protocol specification
@@ -2705,9 +2748,14 @@ mod tests {
             Some(FrameType::CloseStream),
             "14 is CloseStream (the tap-off)"
         );
+        assert_eq!(
+            FrameType::from_u8(15),
+            Some(FrameType::Policy),
+            "15 is Policy"
+        );
         assert!(
-            FrameType::from_u8(15).is_none(),
-            "15 is past the last valid frame type"
+            FrameType::from_u8(16).is_none(),
+            "16 is past the last valid frame type"
         );
         assert!(
             FrameType::from_u8(2).is_none(),

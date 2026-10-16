@@ -313,7 +313,15 @@ impl CliHost {
         // switch and starts its background frame pump, so RelayNotify capability updates
         // keep flowing between segments — the reuse invariant depends on it.
         if self.ctx.is_none() {
-            self.ctx = Some(ExecutionContext::new(rt.fabric_registry.clone()).await?);
+            // The command line is the operator's own tool: the person running it
+            // decides for themselves, so its cartridges are under `full`.
+            self.ctx = Some(
+                ExecutionContext::new(
+                    rt.fabric_registry.clone(),
+                    crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full),
+                )
+                .await?,
+            );
         }
 
         if !resolved.is_empty() {

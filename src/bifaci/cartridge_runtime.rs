@@ -50,6 +50,7 @@ use crate::urn::media_urn::MediaUrn;
 use async_trait::async_trait;
 // crossbeam is used for demux_multi_stream (bridging sync stdin reads to async handlers)
 use ops_rs::{DryContext, Op, OpError, OpMetadata, OpResult, WetContext};
+use crate::bifaci::policy::{HostPolicy, LivePolicy, NetworkAccess, NetworkPolicy};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2625,6 +2626,7 @@ pub struct Request {
     input: Mutex<Option<InputPackage>>,
     outputs: ResponseOutputs,
     peer: Arc<dyn PeerInvoker>,
+    network: NetworkAccess,
 }
 
 /// One output a request answers on (13.2 §Outputs), and its stream.
@@ -2773,10 +2775,15 @@ impl ResponseOutputs {
 }
 
 impl Request {
-    /// Create a new Request bundling input, output, and peer invoker. The
-    /// request has the one output `output` is.
-    pub fn new(input: InputPackage, output: OutputStream, peer: Arc<dyn PeerInvoker>) -> Self {
-        Self::with_outputs(input, ResponseOutputs::undeclared(output), peer)
+    /// Create a new Request bundling input, output, peer invoker and the
+    /// live network policy. The request has the one output `output` is.
+    pub fn new(
+        input: InputPackage,
+        output: OutputStream,
+        peer: Arc<dyn PeerInvoker>,
+        network: NetworkAccess,
+    ) -> Self {
+        Self::with_outputs(input, ResponseOutputs::undeclared(output), peer, network)
     }
 
     /// Create a Request that answers on the declared outputs of its cap.
@@ -2784,11 +2791,13 @@ impl Request {
         input: InputPackage,
         outputs: ResponseOutputs,
         peer: Arc<dyn PeerInvoker>,
+        network: NetworkAccess,
     ) -> Self {
         Self {
             input: Mutex::new(Some(input)),
             outputs,
             peer,
+            network,
         }
     }
 
@@ -2817,6 +2826,13 @@ impl Request {
     /// Access the peer invoker.
     pub fn peer(&self) -> &dyn PeerInvoker {
         &*self.peer
+    }
+
+    /// The host's live network policy (12.2 §Policy). Code that reaches the
+    /// network asks it before every call; it reads the runtime's current
+    /// policy, never one taken when this request was dispatched.
+    pub fn network(&self) -> &NetworkAccess {
+        &self.network
     }
 }
 
@@ -5080,6 +5096,19 @@ pub struct CartridgeRuntime {
     /// in `crate::capture` — capture is transport resolution, not a plugin
     /// surface, and there is nothing to register.
     live_feed_overruns: Arc<std::sync::atomic::AtomicU64>,
+
+    /// The host's latest policy (12.2 §Policy): empty until the first Policy
+    /// frame, replaced by every later one, read live by every handler through
+    /// [`Request::network`]. A cartridge run from a command line is under
+    /// `full` — the person running it decides for themselves.
+    policy: Arc<LivePolicy>,
+}
+
+/// Whether a request is the host's identity check (`CAP_IDENTITY`), the one
+/// request a cartridge serves before it has a policy (12.3).
+fn is_identity_request(cap_urn: &str) -> bool {
+    let identity = CapUrn::from_string(CAP_IDENTITY).expect("CAP_IDENTITY is a valid cap URN");
+    CapUrn::from_string(cap_urn).map_or(false, |urn| urn.is_equivalent(&identity))
 }
 
 /// Dispatch an Op with a Request via WetContext.
@@ -5089,8 +5118,9 @@ async fn dispatch_op(
     input: InputPackage,
     outputs: ResponseOutputs,
     peer: Arc<dyn PeerInvoker>,
+    network: NetworkAccess,
 ) -> Result<(), RuntimeError> {
-    let req = Arc::new(Request::with_outputs(input, outputs, peer));
+    let req = Arc::new(Request::with_outputs(input, outputs, peer, network));
     let mut dry = DryContext::new();
     let mut wet = WetContext::new();
     wet.insert_arc(WET_KEY_REQUEST, req.clone());
@@ -5274,7 +5304,9 @@ fn spawn_handler(
     live_feed_overruns: &Arc<std::sync::atomic::AtomicU64>,
     live_feed_handles: &Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>,
     terminal: TerminalClaim,
+    policy: &Arc<LivePolicy>,
 ) -> JoinHandle<()> {
+    let network = NetworkAccess::new(Arc::clone(policy));
     let output_tx_clone = output_tx.clone();
     let pending_clone = Arc::clone(pending_peer_requests);
     let manifest_clone = manifest.clone();
@@ -5366,7 +5398,7 @@ fn spawn_handler(
 
         let op = factory();
         let peer_arc: Arc<dyn PeerInvoker> = Arc::new(peer_invoker);
-        let result = dispatch_op(op, input_package, outputs, peer_arc).await;
+        let result = dispatch_op(op, input_package, outputs, peer_arc, network).await;
 
         // A cancel that claimed the request first ends it with its own ERR,
         // sent by the main loop once this task reports done.
@@ -5467,6 +5499,7 @@ impl CartridgeRuntime {
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            policy: LivePolicy::unset(),
         };
         rt.register_standard_caps();
         rt
@@ -5494,6 +5527,7 @@ impl CartridgeRuntime {
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            policy: LivePolicy::unset(),
         };
         rt.register_standard_caps();
         rt
@@ -5914,7 +5948,10 @@ impl CartridgeRuntime {
 
         let op = factory();
         let peer_arc: Arc<dyn PeerInvoker> = Arc::new(peer);
-        dispatch_op(op, input_package, outputs, peer_arc).await
+        // No host: the person running the command decides for themselves
+        // (12.2 §Policy), so a cartridge run from a command line is under `full`.
+        self.policy.set(HostPolicy::new(NetworkPolicy::Full));
+        dispatch_op(op, input_package, outputs, peer_arc, NetworkAccess::new(Arc::clone(&self.policy))).await
     }
 
     /// Find a cap by one of its aliases (the CLI subcommand). Aliases are
@@ -6598,6 +6635,7 @@ impl CartridgeRuntime {
                         terminal_claims.insert(handler_rid.clone(), claim.clone());
                         claim
                     },
+                    &self.policy,
                 );
                 active_handlers.insert(handler_rid.clone(), handle);
                 handler_routing_ids.insert(handler_rid, handler_xid);
@@ -6698,6 +6736,27 @@ impl CartridgeRuntime {
                         }
                     };
 
+                    // No routed request before the host's first policy: a
+                    // cartridge never serves work without knowing what it may
+                    // do. The host's identity check belongs to the handshake
+                    // and comes before any policy (12.3).
+                    if self.policy.current().is_none() && !is_identity_request(&cap_urn) {
+                        let mut err_frame = Frame::err(
+                            frame.id,
+                            "PROTOCOL_VIOLATION",
+                            crate::failure::AttributionClass::Internal,
+                            &format!(
+                                "request for '{}' arrived before the host sent its policy; \
+                                 a host sends Policy before it routes anything to a cartridge",
+                                cap_urn
+                            ),
+                            None,
+                        );
+                        err_frame.routing_id = routing_id;
+                        let _ = output_tx.send(err_frame);
+                        continue;
+                    }
+
                     if frame.payload.as_ref().map_or(false, |p| !p.is_empty()) {
                         let mut err_frame = Frame::err(
                             frame.id,
@@ -6787,6 +6846,7 @@ impl CartridgeRuntime {
                                     terminal_claims.insert(handler_rid.clone(), claim.clone());
                                     claim
                                 },
+                                &self.policy,
                             );
                             active_handlers.insert(handler_rid.clone(), handle);
                             handler_routing_ids.insert(handler_rid, handler_xid);
@@ -7045,6 +7105,21 @@ impl CartridgeRuntime {
                     ))
                     .into());
                 }
+
+                // The host's new policy (12.2 §Policy): every handler's
+                // `network()` reads it at its next check, running ones too.
+                FrameType::Policy => match frame.host_policy() {
+                    Some(Ok(policy)) => {
+                        tracing::info!(
+                            target: "cartridge_runtime",
+                            network = policy.network.as_str(),
+                            "host policy"
+                        );
+                        self.policy.set(policy);
+                    }
+                    Some(Err(why)) => return Err(CborError::Protocol(why).into()),
+                    None => unreachable!("a Policy frame always answers host_policy"),
+                },
             }
         }
 
@@ -7065,6 +7140,14 @@ impl CartridgeRuntime {
         }
 
         Ok(())
+    }
+
+    /// The host's live network policy (12.2 §Policy), for what a cartridge
+    /// builds once and keeps — an HTTP client, a connection pool — and asks
+    /// before every call. It is the same policy every request's
+    /// [`Request::network`] reads.
+    pub fn network(&self) -> NetworkAccess {
+        NetworkAccess::new(Arc::clone(&self.policy))
     }
 
     /// Get the current protocol limits
@@ -9403,6 +9486,11 @@ mod tests {
         }
     }
 
+    /// A network handle under `full`, for handlers run directly by tests.
+    fn full_network() -> NetworkAccess {
+        NetworkAccess::new(LivePolicy::with(HostPolicy::new(NetworkPolicy::Full)))
+    }
+
     /// Helper: invoke a factory-produced Op with test input/output
     async fn invoke_op(
         factory: &OpFactory,
@@ -9411,7 +9499,7 @@ mod tests {
     ) -> Result<(), RuntimeError> {
         let op = factory();
         let peer: Arc<dyn PeerInvoker> = Arc::new(NoPeerInvoker);
-        dispatch_op(op, input, ResponseOutputs::undeclared(output), peer).await
+        dispatch_op(op, input, ResponseOutputs::undeclared(output), peer, full_network()).await
     }
 
     /// Create an InputPackage from a list of streams for testing.
@@ -12950,6 +13038,7 @@ mod tests {
             demux_multi_stream(input_rx, None, None, None),
             outputs,
             Arc::new(NoPeerInvoker),
+            full_network(),
         );
 
         // The main output is the one whose URN is `out=`, wherever it is declared.
@@ -13013,7 +13102,7 @@ mod tests {
         );
         let (input_tx, input_rx) = crossbeam_channel::unbounded();
         drop(input_tx);
-        let lone = Request::new(demux_multi_stream(input_rx, None, None, None), bare, Arc::new(NoPeerInvoker));
+        let lone = Request::new(demux_multi_stream(input_rx, None, None, None), bare, Arc::new(NoPeerInvoker), full_network());
         assert!(std::ptr::eq(lone.output(), lone.output_for("media:").unwrap()));
         match lone.output_for("media:integer") {
             Err(RuntimeError::UnknownOutput { cap_urn, output }) => {
@@ -13072,7 +13161,7 @@ mod tests {
         let peer = || -> Arc<dyn PeerInvoker> { Arc::new(NoPeerInvoker) };
 
         let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
-        dispatch_op(Box::new(ResidualsOnlyOp { fail: false }), empty_input(), outputs, peer())
+        dispatch_op(Box::new(ResidualsOnlyOp { fail: false }), empty_input(), outputs, peer(), full_network())
             .await
             .unwrap();
         let sent = starts(&frames);
@@ -13105,7 +13194,7 @@ mod tests {
             }
         }
         let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 2, "{sent:?}");
         let residuals = sent.iter().find(|(o, ..)| o.as_deref() == Some(RESIDUALS)).unwrap();
@@ -13114,7 +13203,7 @@ mod tests {
         // A failed handler: only what it wrote itself, and that left open —
         // the request ends with ERR, not with outputs made up for it.
         let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
-        dispatch_op(Box::new(ResidualsOnlyOp { fail: true }), empty_input(), outputs, peer())
+        dispatch_op(Box::new(ResidualsOnlyOp { fail: true }), empty_input(), outputs, peer(), full_network())
             .await
             .expect_err("the handler failed");
         let sent = starts(&frames);
@@ -13124,7 +13213,7 @@ mod tests {
 
         // A cap whose `out=` is void has no output: nothing is opened for it.
         let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";sink;out=media:void"#, None);
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         assert!(frames.lock().unwrap().is_empty());
 
         // The main output's label follows the cap's effect, and is not its
@@ -13132,7 +13221,7 @@ mod tests {
         // input's type and names the output its `out=`.
         let pass = r#"cap:effect=none;in="media:enc=utf-8;line";out="media:enc=utf-8";pass"#;
         let (outputs, frames) = recorded_outputs(pass, None);
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, None, "the main output's stream names no output");
@@ -13141,7 +13230,7 @@ mod tests {
 
         // A cap served without a definition answers on the one output its URN states.
         let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";count;out="media:integer""#, None);
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
         assert_eq!((sent[0].0.as_deref(), sent[0].1.as_str()), (None, "media:integer"));
@@ -13168,7 +13257,7 @@ mod tests {
             output
         });
         let (outputs, frames) = recorded_outputs(&listing.urn_string(), Some(&manifest));
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1, "{sent:?}");
         assert_eq!((sent[0].0.as_deref(), sent[0].2), (None, Some(true)));
@@ -13176,7 +13265,7 @@ mod tests {
         // nobody wrote to it.
         let (maybe, manifest) = one_output(r#"cap:in="media:enc=utf-8";maybe;out="media:integer""#, "maybe", &|output| output.optional(true));
         let (outputs, frames) = recorded_outputs(&maybe.urn_string(), Some(&manifest));
-        dispatch_op(Box::new(Silent), empty_input(), outputs, peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         assert!(frames.lock().unwrap().is_empty());
 
         // A request made from a bare stream has an output nothing is known
@@ -13190,7 +13279,7 @@ mod tests {
             None,
             Limits::default().max_chunk,
         );
-        dispatch_op(Box::new(Silent), empty_input(), ResponseOutputs::undeclared(bare), peer()).await.unwrap();
+        dispatch_op(Box::new(Silent), empty_input(), ResponseOutputs::undeclared(bare), peer(), full_network()).await.unwrap();
         assert!(frames.lock().unwrap().is_empty());
     }
 
