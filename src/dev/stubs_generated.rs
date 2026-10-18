@@ -213,7 +213,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.211.2212",
+        version="1.214.2248",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.211.2212"
+version = "1.214.2248"
 edition = "2021"
 
 [dependencies]
@@ -513,7 +513,7 @@ anyhow = "1.0"
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
 # what capdag's next release tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.929.432" }
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.936.75" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -531,7 +531,7 @@ tokio = { version = "1.0", features = ["full"] }
 # They pin which fabric manifest and which cartridge registry regime this
 # cartridge is compiled against, and they must match the capdag version above.
 [env]
-MFR_FABRIC_MANIFEST_VERSION = "9"
+MFR_FABRIC_MANIFEST_VERSION = "10"
 MFR_CARTRIDGE_REGISTRY_VERSION = "2"
 "#,
                 executable: false,
@@ -791,7 +791,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.211.2212",
+		"1.214.2248",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -827,7 +827,7 @@ go 1.21
 // always ahead of the newest tag -- asked for one no tag satisfies and
 // resolved whatever older one it could, so every fix to the mirror stayed
 // invisible to the stub suite until a release happened to catch up.
-require github.com/machinefabric/capdag-go v1.551.333
+require github.com/machinefabric/capdag-go v1.555.40
 "#,
                 executable: false,
             },
@@ -1055,7 +1055,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.211.2212",
+        version: "1.214.2248",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
@@ -1089,7 +1089,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.636.310"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.640.58"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.19.17"),
     ],
     targets: [
