@@ -4872,6 +4872,18 @@ mod tests {
         assert_eq!(frame.frame_type, FrameType::Policy, "the frame after RelayNotify must be the switch's policy");
     }
 
+    /// A fake master that has answered stays connected until the switch hangs
+    /// up, as a real one does. Returning right after the answer closed the
+    /// socket while the switch was still writing to it, and on Windows a socket
+    /// closed with unread data is reset: the switch's next write failed (os
+    /// error 10054), or the answer itself was discarded before the switch read
+    /// it, so a probe that had passed never reached the switch (TEST0135) and
+    /// one that had failed read as a failed send (TEST488). The writer is kept
+    /// by the caller for as long as this runs.
+    async fn hold_until_hangup<R: tokio::io::AsyncRead + Unpin>(reader: &mut FrameReader<R>) {
+        while let Ok(Some(_)) = reader.read().await {}
+    }
+
     async fn slave_notify_with_identity(
         socket: UnixStream,
         caps_json: &serde_json::Value,
@@ -5257,6 +5269,7 @@ mod tests {
                         );
                         err.routing_id = f.routing_id.clone();
                         let _ = writer.write(&err).await;
+                        hold_until_hangup(&mut reader).await;
                         return;
                     }
                 }
@@ -5289,6 +5302,7 @@ mod tests {
                     for fr in [ss, chunk, se, end] {
                         writer.write(&fr).await.unwrap();
                     }
+                    hold_until_hangup(&mut reader).await;
                     return;
                 }
                 _ => {}
@@ -6267,13 +6281,9 @@ mod tests {
                 None,
             );
             writer.write(&err).await.unwrap();
-            // Open until the switch hangs up, as a real master is. The switch
-            // is still sending the rest of the request (stream, chunk, end)
-            // when the ERR goes out; returning here closed the socket under
-            // those writes, and on Windows the next one was refused (os error
-            // 10054) before the ERR was read — a send failure, not the
-            // master's answer, which is what this test is about.
-            while let Ok(Some(_)) = reader.read().await {}
+            // The switch is still sending the rest of the request (stream,
+            // chunk, end) when the ERR goes out.
+            hold_until_hangup(&mut reader).await;
         });
 
         let result = RelaySwitch::new(
@@ -6399,6 +6409,7 @@ mod tests {
                     );
                     err.routing_id = frame.routing_id.clone();
                     let _ = writer.write(&err).await;
+                    hold_until_hangup(&mut reader).await;
                     return;
                 }
             }
