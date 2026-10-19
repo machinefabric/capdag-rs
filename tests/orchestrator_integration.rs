@@ -13,7 +13,7 @@ mod support;
 
 use capdag::orchestrator::{build_plans_from_notation, ParseOrchestrationError, ResolvedNotation};
 use capdag::{AttributionClass, RunVerdict, StepOutcome};
-use support::{Given, Machines};
+use support::{Given, Machines, Ran};
 
 const TAG: &str = "TestcartridgeTest";
 
@@ -677,31 +677,57 @@ async fn test12815_a_machine_runs_as_a_step_of_another() {
 // =============================================================================
 
 // TEST12800: steps with no path between them run at the same time. Two
-// steps that each take three seconds, and the step that needs both: the run
-// takes about three seconds, not six.
+// steps that each take three seconds, and the step that needs both, take about
+// as long as ONE three-second step run the same way — not three seconds more.
+//
+// Measured against that run rather than against the clock. A run's time is
+// its steps plus starting its cartridges, and starting them is what a busy
+// machine slows: with a fixed bound of 5.5 seconds the test failed a release
+// gate at 7.8 seconds, on a machine where that file took thirty minutes, which
+// says nothing about whether the two steps overlapped (19 Oct 2026). The one-
+// step run pays the same start-up, so the difference is the scheduling alone:
+// side by side it is near zero, one after the other it is the second three
+// seconds.
 #[tokio::test]
 async fn test12800_independent_steps_run_at_the_same_time() {
+    async fn timed(machines: &Machines, notation: &str, given: &[(&str, Given<'_>)]) -> (Ran, std::time::Duration) {
+        let started = std::time::Instant::now();
+        let ran = machines.run(notation, given).await.expect("Execution failed");
+        (ran, started.elapsed())
+    }
     let machines = Machines::new(TAG);
-    let notation = format!(
-        "{}[(a, delay-ms=3000) -> shout -> x][(b, delay-ms=3000) -> shout -> y][(x, right=y) -> pair -> p]",
-        dag_headers()
-    );
-    // The cartridge is built before the clock starts.
+    // The cartridge is built before any clock starts.
     support::testcartridge_bin(TAG);
-    let started = std::time::Instant::now();
-    let ran = machines
-        .run(&notation, &[("a", Given::One(b"a")), ("b", Given::One(b"b"))])
-        .await
-        .expect("Execution failed");
-    let elapsed = started.elapsed();
-    assert_eq!(ran.text("p"), "A|B");
+
+    let (one, alone) = timed(
+        &machines,
+        &format!("{}[(a, delay-ms=3000) -> shout -> x][(x, right=x) -> pair -> p]", dag_headers()),
+        &[("a", Given::One(b"a"))],
+    )
+    .await;
+    assert_eq!(one.text("p"), "A|A");
+
+    let (both, together) = timed(
+        &machines,
+        &format!(
+            "{}[(a, delay-ms=3000) -> shout -> x][(b, delay-ms=3000) -> shout -> y][(x, right=y) -> pair -> p]",
+            dag_headers()
+        ),
+        &[("a", Given::One(b"a")), ("b", Given::One(b"b"))],
+    )
+    .await;
+    assert_eq!(both.text("p"), "A|B");
+
     assert!(
-        elapsed >= std::time::Duration::from_secs(3),
-        "each step takes three seconds: {elapsed:?}"
+        alone >= std::time::Duration::from_secs(3) && together >= std::time::Duration::from_secs(3),
+        "each step takes three seconds: one step {alone:?}, two steps {together:?}"
     );
+    // Half the second step's three seconds: well clear of noise between two
+    // runs that start the same cartridges, and well short of running in turn.
     assert!(
-        elapsed < std::time::Duration::from_millis(5500),
-        "two three-second steps side by side took {elapsed:?} — as long as one after the other"
+        together < alone + std::time::Duration::from_millis(1500),
+        "two three-second steps took {together:?} where one took {alone:?}: the second ran after \
+         the first instead of beside it"
     );
 }
 
