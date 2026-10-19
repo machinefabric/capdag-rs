@@ -6267,6 +6267,13 @@ mod tests {
                 None,
             );
             writer.write(&err).await.unwrap();
+            // Open until the switch hangs up, as a real master is. The switch
+            // is still sending the rest of the request (stream, chunk, end)
+            // when the ERR goes out; returning here closed the socket under
+            // those writes, and on Windows the next one was refused (os error
+            // 10054) before the ERR was read — a send failure, not the
+            // master's answer, which is what this test is about.
+            while let Ok(Some(_)) = reader.read().await {}
         });
 
         let result = RelaySwitch::new(
