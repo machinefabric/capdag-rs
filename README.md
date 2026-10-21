@@ -21,6 +21,7 @@ projects.
 
 - [Develop a cartridge](https://machinefabric.com/capdag/docs/18.2-getting-started-cartridge-development/)
 - [Run one capability or a machine](https://machinefabric.com/capdag/docs/18.1-cli-reference/)
+- [Watch a run, plan and edit machines in the terminal](https://machinefabric.com/capdag/docs/18.3-terminal-interface/)
 - [Contribute capability and media definitions](https://machinefabric.com/capdag/docs/99-contributing/)
 
 ### Look up exact behavior
