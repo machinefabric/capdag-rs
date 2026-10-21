@@ -892,6 +892,7 @@ impl CartridgeManager {
         let mut child = crate::bifaci::launch::tokio_command(bin_path)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| ExecutionError::CartridgeExecutionFailed {
                 cap_urn: "manifest-discovery".to_string(),
@@ -904,13 +905,24 @@ impl CartridgeManager {
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = crate::bifaci::launch::drain_stderr_tail(child.stderr.take().unwrap());
 
         let mut reader = FrameReader::new(stdout);
         let mut writer = FrameWriter::new(stdin);
 
-        let result = handshake(&mut reader, &mut writer)
-            .await
-            .map_err(|e| ExecutionError::HostError(format!("Handshake failed: {:?}", e)))?;
+        let result = match handshake(&mut reader, &mut writer).await {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = child.kill().await;
+                return Err(ExecutionError::HostError(
+                    crate::bifaci::launch::with_stderr(
+                        format!("Handshake with '{}' failed: {:?}", bin_path.display(), e),
+                        stderr,
+                    )
+                    .await,
+                ));
+            }
+        };
 
         let _ = child.kill().await;
         CapManifest::from_advertised(&result.manifest)

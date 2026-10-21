@@ -110,6 +110,64 @@ pub fn tokio_command(entry: &Path) -> tokio::process::Command {
     command
 }
 
+/// How much of what a probed cartridge writes on stderr is kept: the end of
+/// it, where a crash or a refusal says why.
+pub const PROBE_STDERR_TAIL: usize = 4096;
+
+/// Drain a started cartridge's stderr and keep its last
+/// [`PROBE_STDERR_TAIL`] bytes, for a start that only asks the cartridge who
+/// it is (its manifest) and stops it again.
+///
+/// Such a start never lets the cartridge write on the caller's own stderr:
+/// whoever ran the command owns that stream — a terminal interface drawing
+/// on it, a pipe being parsed — and a cartridge's start-up chatter has no
+/// place in it. What it wrote is not thrown away either: a probe that fails
+/// says what the cartridge said ([`with_stderr`]). The pipe is drained to its
+/// end, so a cartridge that writes a lot is never blocked on it; the task
+/// ends when the process does.
+pub fn drain_stderr_tail(
+    stderr: tokio::process::ChildStderr,
+) -> tokio::task::JoinHandle<Vec<u8>> {
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut stderr = stderr;
+        let mut tail: Vec<u8> = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            match stderr.read(&mut buffer).await {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    tail.extend_from_slice(&buffer[..read]);
+                    if tail.len() > PROBE_STDERR_TAIL {
+                        tail.drain(..tail.len() - PROBE_STDERR_TAIL);
+                    }
+                }
+            }
+        }
+        tail
+    })
+}
+
+/// `message`, followed by what the cartridge wrote on stderr when it wrote
+/// anything. Waits for the drain to end — call it once the process has been
+/// stopped, or it waits for the process to end.
+pub async fn with_stderr(
+    message: String,
+    tail: tokio::task::JoinHandle<Vec<u8>>,
+) -> String {
+    match tail.await {
+        Ok(bytes) if bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
+            format!(
+                "{message}\n--- cartridge stderr (last {} bytes) ---\n{}",
+                bytes.len(),
+                String::from_utf8_lossy(&bytes).trim_end()
+            )
+        }
+        Ok(_) => message,
+        Err(join) => format!("{message}\n(its stderr could not be read: {join})"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

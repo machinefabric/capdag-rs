@@ -68,6 +68,20 @@ pub fn emit_terminals(
     options: &EmitOptions,
     stdout: &mut dyn Write,
 ) -> Result<Vec<PathBuf>, String> {
+    Ok(emit_terminals_by_output(result, options, stdout)?
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect())
+}
+
+/// [`emit_terminals`], saying which output each written file is of: the
+/// plan `Output` node id and the file's absolute path, in the order they were
+/// written. Empty when the result went to stdout.
+pub fn emit_terminals_by_output(
+    result: &PipelineResult,
+    options: &EmitOptions,
+    stdout: &mut dyn Write,
+) -> Result<Vec<(String, PathBuf)>, String> {
     // The stdout fast path: one terminal, scalar, one item, no explicit dir.
     // The item may be in memory or a single persisted part-file (the CLI's disk
     // writer, L16) — persisted, its bytes stream to stdout and the part is
@@ -132,7 +146,7 @@ pub fn emit_terminals(
         format!("refusing to overwrite existing file {path:?} (pass --force to allow)")
     };
 
-    let mut written: Vec<PathBuf> = Vec::new();
+    let mut written: Vec<(String, PathBuf)> = Vec::new();
     for terminal in produced {
         let ext = extension_for_media(&terminal.media_urn);
         let node = options.output_names.get(&terminal.output_node_id).ok_or_else(|| {
@@ -163,7 +177,7 @@ pub fn emit_terminals(
                 let absolute = absolutize(&path);
                 writeln!(stdout, "{}", absolute.display())
                     .map_err(|e| format!("failed to report written path: {e}"))?;
-                written.push(absolute);
+                written.push((terminal.output_node_id.clone(), absolute));
             }
         } else {
             // Persisted terminal (CLI disk writer): rename each part-file to its
@@ -192,7 +206,7 @@ pub fn emit_terminals(
                 let absolute = absolutize(&path);
                 writeln!(stdout, "{}", absolute.display())
                     .map_err(|e| format!("failed to report written path: {e}"))?;
-                written.push(absolute);
+                written.push((terminal.output_node_id.clone(), absolute));
             }
         }
     }

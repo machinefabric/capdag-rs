@@ -14,11 +14,17 @@
 //! Reference-regime specifics vs the engine: terminal sinks are persisted through
 //! [`CliDiskWriter`] part-files in the emit target directory (so UNBOUNDED terminals
 //! stream to disk per L16, and `emit_terminals` renames the parts to their contract
-//! names), the flow observer tracks ONLY feed-bearing rids (for the Ctrl-C
-//! stop-input control), and a run of a map's body that fails fails the whole
-//! plan unless the machine itself says otherwise (failures are exposed; the
-//! CLI adds no tolerance of its own). Everything else — the segment
-//! orchestration — is the shared `EngineRuntime::run_segment` default.
+//! names), and a run of a map's body that fails fails the whole plan unless the
+//! machine itself says otherwise (failures are exposed; the CLI adds no
+//! tolerance of its own). Everything else — the segment orchestration — is the
+//! shared `EngineRuntime::run_segment` default.
+//!
+//! Every invocation's request id is correlated to its step in one
+//! [`RunFlowRegistry`] the switch's terminations fold into, exactly as in the
+//! engine: a run started through [`CliRuntime::scope`] is recorded under its
+//! own scope, so its protocol flow can be read step by step while it runs and
+//! summarised after. The same registry holds the FEED-BEARING requests the
+//! stop-input control closes.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -35,8 +41,15 @@ use crate::orchestrator::execute_plan::{EngineRuntime, MapFailurePolicy};
 use crate::orchestrator::executor::{
     discover_bundled_cartridges, segment_activity_timeout, CartridgeManager, ExecutionContext,
 };
+use crate::orchestrator::observe::RunKey;
+use crate::orchestrator::run_flow::{FlowRecorder, FlowScopeGuard, RunFlowRegistry};
+use crate::orchestrator::transient::TransientArtifact;
 use crate::orchestrator::types::ResolvedGraph;
 use crate::ExecutionError;
+
+/// The flow scope a [`CliRuntime`] used directly — not through
+/// [`CliRuntime::scope`] — records its invocations under.
+pub const CLI_UNSCOPED_FLOW: &str = "cli";
 
 /// The capdag CLI's cartridge-hosting runtime. Build with [`CliRuntime::new`]; the
 /// shared cartridge host is constructed lazily on first segment and torn down when the
@@ -67,31 +80,22 @@ pub struct CliRuntime {
     /// interior mutability under the `&self` trait hooks; the lock is held only while
     /// registering newly-needed cartridges, never across segment execution.
     host: Mutex<CliHost>,
-    /// Live-input state for the stop-input control (15.2 §Runs Stop): taps of
-    /// HOST-opened feeds and the rids of FEED-BEARING requests (cartridge-side
-    /// taps). First Ctrl-C in `capdag run` closes the taps and the machine
+    /// Taps of HOST-opened live feeds, for the stop-input control (15.2 §Runs
+    /// Stop). The rids of FEED-BEARING requests (cartridge-side taps) are in
+    /// `run_flows`. First Ctrl-C in `capdag run` closes both and the machine
     /// drains to complete outputs; a second Ctrl-C aborts.
-    live_inputs: CliLiveInputs,
-}
-
-/// Tracks everything a stop-input must close, and doubles as the CLI's
-/// [`FlowObserver`] (rid→step correlation is a no-op here; only feed-bearing
-/// rids matter to the CLI).
-#[derive(Default)]
-struct CliLiveInputs {
     host_taps: std::sync::Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>,
-    feed_bearing: std::sync::Mutex<Vec<crate::bifaci::frame::MessageId>>,
-}
-
-impl crate::orchestrator::stream_io::FlowObserver for CliLiveInputs {
-    fn record(&self, _rid: &crate::bifaci::frame::MessageId, _token_id: &str) {}
-
-    fn record_feed_bearing(&self, rid: &crate::bifaci::frame::MessageId) {
-        self.feed_bearing
-            .lock()
-            .expect("CLI feed-bearing registry mutex poisoned")
-            .push(rid.clone());
-    }
+    /// rid → step correlation of every invocation, by run scope; fed by the
+    /// switch's terminations once the switch exists.
+    run_flows: Arc<RunFlowRegistry>,
+    /// The scope this runtime's own invocations are recorded under when it is
+    /// used directly rather than through [`CliRuntime::scope`]. Held for the
+    /// runtime's lifetime.
+    _unscoped_flow: FlowScopeGuard,
+    unscoped_recorder: FlowRecorder,
+    /// Where a scoped run captures its intermediate values, when it does
+    /// ([`CliRuntime::with_transient_root`]).
+    transient_root: Option<PathBuf>,
 }
 
 /// Lazily-initialised shared host state. `ctx` owns the switch, the host tasks, and
@@ -125,6 +129,9 @@ impl CliRuntime {
         trace_sink: Option<Arc<ProtocolTraceSink>>,
         persist_dir: PathBuf,
     ) -> Self {
+        let run_flows = Arc::new(RunFlowRegistry::new());
+        let unscoped_flow = FlowScopeGuard::new(CLI_UNSCOPED_FLOW.to_string(), run_flows.clone());
+        let unscoped_recorder = unscoped_flow.recorder();
         Self {
             cartridge_dir,
             registry_url,
@@ -145,7 +152,59 @@ impl CliRuntime {
                 bundled_registered: false,
                 bundled_caps: Vec::new(),
             }),
-            live_inputs: CliLiveInputs::default(),
+            host_taps: std::sync::Mutex::new(Vec::new()),
+            run_flows,
+            _unscoped_flow: unscoped_flow,
+            unscoped_recorder,
+            transient_root: None,
+        }
+    }
+
+    /// Capture every intermediate value of a scoped run under `root` — one
+    /// directory per run scope — so it can be inspected while the run goes
+    /// on, as the engine captures a machine run's. The caller owns `root`
+    /// and removes it when what it holds is no longer wanted.
+    pub fn with_transient_root(mut self, root: PathBuf) -> Self {
+        self.transient_root = Some(root);
+        self
+    }
+
+    /// The run-flow registry every invocation of this runtime is correlated
+    /// in. Read a scope's live flow with
+    /// [`join_flow_states`](crate::orchestrator::join_flow_states) against
+    /// [`protocol_stats`](RelaySwitch::protocol_stats), and its summary with
+    /// [`RunFlowRegistry::take_flow_summary`].
+    pub fn run_flows(&self) -> &Arc<RunFlowRegistry> {
+        &self.run_flows
+    }
+
+    /// The shared relay switch, once the first segment has built it. `None`
+    /// before anything has run.
+    pub async fn switch(&self) -> Option<Arc<RelaySwitch>> {
+        let host = self.host.lock().await;
+        host.ctx.as_ref().map(|ctx| ctx.switch().clone())
+    }
+
+    /// A view of this runtime that records the invocations of run `key`
+    /// under its own flow scope ([`RunKey::flow_scope`]) and, when a
+    /// transient root is set, captures its intermediates in a directory of
+    /// their own. `on_transient` hears of every capture. Everything else —
+    /// the shared switch, the hosted cartridges, the writers — is this
+    /// runtime's.
+    pub fn scope(
+        self: &Arc<Self>,
+        key: RunKey,
+        on_transient: Option<TransientSink>,
+    ) -> CliRunScope {
+        let scope = key.flow_scope();
+        let guard = FlowScopeGuard::new(scope.clone(), self.run_flows.clone());
+        let recorder = guard.recorder();
+        CliRunScope {
+            runtime: self.clone(),
+            transient_root: self.transient_root.as_ref().map(|root| root.join(&scope)),
+            on_transient,
+            recorder,
+            _guard: guard,
         }
     }
 
@@ -178,7 +237,6 @@ impl CliRuntime {
     > {
         let host_taps_closed = {
             let mut taps = self
-                .live_inputs
                 .host_taps
                 .lock()
                 .expect("CLI host tap registry mutex poisoned");
@@ -189,14 +247,7 @@ impl CliRuntime {
             taps.clear();
             n
         };
-        let rids: Vec<crate::bifaci::frame::MessageId> = {
-            let mut rids = self
-                .live_inputs
-                .feed_bearing
-                .lock()
-                .expect("CLI feed-bearing registry mutex poisoned");
-            std::mem::take(&mut *rids)
-        };
+        let rids: Vec<crate::bifaci::frame::MessageId> = self.run_flows.take_feed_bearing();
         if rids.is_empty() && host_taps_closed == 0 {
             return Err(crate::bifaci::live_feed::StopInputsError::NothingToStop);
         }
@@ -221,6 +272,85 @@ impl CliRuntime {
             crate::bifaci::live_feed::STOP_INPUT_DRAIN_TIMEOUT,
         )
         .await
+    }
+}
+
+impl CliRuntime {
+    fn register_host_tap(&self, handle: &crate::bifaci::live_feed::LiveFeedHandle) {
+        let mut taps = self
+            .host_taps
+            .lock()
+            .expect("CLI host tap registry mutex poisoned");
+        taps.retain(|t| !t.is_closed());
+        taps.push(handle.clone());
+    }
+}
+
+/// Hears of each intermediate value a scoped run captures. A failure is a
+/// hard execution error: a run whose inspection surface diverges from what
+/// it captured is in an illegal state.
+pub type TransientSink = Arc<dyn Fn(&TransientArtifact) -> Result<(), ExecutionError> + Send + Sync>;
+
+/// One run's view of a [`CliRuntime`] ([`CliRuntime::scope`]): the shared
+/// switch and cartridges, with the run's own flow scope and transient
+/// directory. Hold it for as long as the run executes; dropping it ends the
+/// scope (its flow summary stays readable from the registry).
+pub struct CliRunScope {
+    runtime: Arc<CliRuntime>,
+    transient_root: Option<PathBuf>,
+    on_transient: Option<TransientSink>,
+    recorder: FlowRecorder,
+    _guard: FlowScopeGuard,
+}
+
+#[async_trait]
+impl EngineRuntime for CliRunScope {
+    async fn segment_switch(
+        &self,
+        graph: &ResolvedGraph,
+    ) -> Result<Arc<RelaySwitch>, ExecutionError> {
+        self.runtime.segment_switch(graph).await
+    }
+
+    async fn activity_timeout_secs(&self, graph: &ResolvedGraph) -> Result<u64, ExecutionError> {
+        self.runtime.activity_timeout_secs(graph).await
+    }
+
+    fn trace_sink(&self) -> Option<Arc<ProtocolTraceSink>> {
+        self.runtime.trace_sink()
+    }
+
+    fn flow_observer(&self) -> Option<&dyn crate::orchestrator::stream_io::FlowObserver> {
+        Some(&self.recorder)
+    }
+
+    fn on_host_feed_open(&self, handle: &crate::bifaci::live_feed::LiveFeedHandle) {
+        self.runtime.register_host_tap(handle);
+    }
+
+    fn writer_factory(
+        &self,
+    ) -> Option<Box<crate::orchestrator::stream_io::SegmentWriterFactory>> {
+        self.runtime.writer_factory()
+    }
+
+    fn transient_artifact_root(&self) -> Option<PathBuf> {
+        self.transient_root.clone()
+    }
+
+    fn on_transient_artifact(&self, artifact: &TransientArtifact) -> Result<(), ExecutionError> {
+        match &self.on_transient {
+            Some(sink) => sink(artifact),
+            None => Ok(()),
+        }
+    }
+
+    fn fabric_registry(&self) -> Arc<FabricRegistry> {
+        self.runtime.fabric_registry()
+    }
+
+    async fn map_failure_policy(&self) -> Result<MapFailurePolicy, ExecutionError> {
+        self.runtime.map_failure_policy().await
     }
 }
 
@@ -315,13 +445,22 @@ impl CliHost {
         if self.ctx.is_none() {
             // The command line is the operator's own tool: the person running it
             // decides for themselves, so its cartridges are under `full`.
-            self.ctx = Some(
-                ExecutionContext::new(
-                    rt.fabric_registry.clone(),
-                    crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full),
-                )
-                .await?,
-            );
+            let ctx = ExecutionContext::new(
+                rt.fabric_registry.clone(),
+                crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full),
+            )
+            .await?;
+            // Every termination folds into its run's flow summary the moment
+            // it happens (the switch's terminated ring is bounded — reading it
+            // later would miss some). The fold is one map update, no I/O: it
+            // runs under the request-table guard.
+            let flows = rt.run_flows.clone();
+            ctx.switch()
+                .set_terminate_observer(Box::new(move |summary| {
+                    flows.accumulate_termination(summary)
+                }))
+                .await;
+            self.ctx = Some(ctx);
         }
 
         if !resolved.is_empty() {
@@ -369,19 +508,11 @@ impl EngineRuntime for CliRuntime {
     }
 
     fn flow_observer(&self) -> Option<&dyn crate::orchestrator::stream_io::FlowObserver> {
-        // The CLI observes ONLY feed-bearing rids (for the stop-input
-        // control); step correlation is engine-side machinery.
-        Some(&self.live_inputs)
+        Some(&self.unscoped_recorder)
     }
 
     fn on_host_feed_open(&self, handle: &crate::bifaci::live_feed::LiveFeedHandle) {
-        let mut taps = self
-            .live_inputs
-            .host_taps
-            .lock()
-            .expect("CLI host tap registry mutex poisoned");
-        taps.retain(|t| !t.is_closed());
-        taps.push(handle.clone());
+        self.register_host_tap(handle);
     }
 
     /// Persist every terminal sink through a [`CliDiskWriter`] part-file in the

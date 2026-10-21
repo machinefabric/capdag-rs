@@ -52,6 +52,9 @@ pub mod media;
 pub mod model_storage;
 pub mod net_retry;
 pub mod orchestrator;
+// The terminal interface — only the CLI builds it.
+#[cfg(feature = "tui")]
+pub mod tui;
 pub mod pages;
 pub mod planner;
 pub mod self_update;
@@ -321,6 +324,10 @@ pub use orchestrator::{
     map_progress,
     plan_to_resolved_graph,
     run_dag_on_context,
+    // Run-flow correlation — the protocol joined to a run's steps, shared by
+    // every host that draws a run (the engine and the CLI).
+    join_flow_states, FlowRecorder, FlowScopeGuard, RunFlowRegistry, RunFlowState, RunStreamFlow,
+    StepFlowTotals,
     send_one_stream,
     split_cbor_array,
     split_cbor_sequence,

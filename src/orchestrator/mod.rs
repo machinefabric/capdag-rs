@@ -22,12 +22,16 @@ pub mod cbor_util;
 pub mod cli_cap;
 pub mod cli_output;
 pub mod cli_runtime;
+pub mod cli_session;
 pub mod cli_writer;
 pub mod execute_plan;
 pub mod executor;
 pub mod machine_plan;
+pub mod observe;
 pub mod plan_converter;
+pub mod plan_view;
 pub mod run_arguments;
+pub mod run_flow;
 pub mod stream_io;
 pub mod transient;
 pub mod types;
@@ -36,6 +40,8 @@ pub mod types;
 pub use types::{
     ParseOrchestrationError, ResolvedGraph, ResolvedStep, StepInput, StepOutput, StepSource,
 };
+
+pub use observe::{RunEvent, RunKey, RunObserver, RunSignal};
 
 pub use machine_plan::{
     build_plans_from_notation, build_plans_from_notation_from, MachineAnchor, ResolvedNotation,
@@ -53,8 +59,12 @@ pub use cli_cap::{
     classify_cap_token, map_invocation, render_cap_interface, synthesize_single_cap_notation,
     CapInvocation, CapToken, SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
 };
-pub use cli_output::{emit_terminals, extension_for_media, EmitOptions};
-pub use cli_runtime::CliRuntime;
+pub use cli_output::{emit_terminals, emit_terminals_by_output, extension_for_media, EmitOptions};
+pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_UNSCOPED_FLOW};
+pub use cli_session::{
+    finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, RunEnd, StrandHandle,
+    StrandReport, StrandRun,
+};
 pub use cli_writer::{CliDiskWriter, PART_FILE_PREFIX};
 pub use transient::{
     read_sidecar, read_transient_item, TransientArtifact, TransientSidecar, TRANSIENT_DATA_FILE,
@@ -62,10 +72,19 @@ pub use transient::{
 };
 
 pub use plan_converter::{plan_to_resolved_graph, steps_to_resolved_graph};
+pub use plan_view::{
+    plan_media, PlanView, PlanViewConstant, PlanViewEdge, PlanViewEdgeKind, PlanViewError,
+    PlanViewKind, PlanViewMedia, PlanViewNode, PlanViewStep,
+};
 
 pub use run_arguments::{
     AppliedArgumentUpdate, ArgumentUpdate, ArgumentUpdateDisposition, ArgumentUpdateOutcome,
     RunArgumentError, RunArgumentLedger,
+};
+
+pub use run_flow::{
+    join_flow_states, FlowRecorder, FlowScopeGuard, RunFlowRegistry, RunFlowState, RunStreamFlow,
+    StepFlowTotals,
 };
 
 pub use cbor_util::{

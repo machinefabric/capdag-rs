@@ -2,8 +2,11 @@
 //!
 //! A unified CLI for executing and validating machine notation pipelines.
 
-use capdag::orchestrator::{execute_plan, CliRuntime, EngineRuntime, PlanInput};
-use capdag::{CapProgressFn, CartridgeChannel, ExecutionNodeType, FabricRegistry, PipelineLogFn};
+use capdag::orchestrator::{
+    finish_strand, spawn_strand, CliRuntime, EmitTarget, PlanInput, PlannedStrand, RunEnd, RunEvent,
+    RunKey, RunObserver, RunSignal, StrandRun,
+};
+use capdag::{CartridgeChannel, ExecutionNodeType, FabricRegistry};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -118,34 +121,67 @@ fn arm_ctrl_c(cli_runtime: Arc<CliRuntime>) {
     });
 }
 
-/// The stderr progress/log hooks shared by every execution mode.
-fn progress_hooks() -> (CapProgressFn, PipelineLogFn) {
-    let progress: CapProgressFn = Arc::new(|p: f32, cap_urn: &str, msg: &str| {
-        eprintln!("  [{:5.1}%] {} {}", p * 100.0, cap_urn, msg);
-    });
-    let log_fn: PipelineLogFn = Arc::new(|record| {
-        let meta_suffix = record
-            .meta
-            .as_ref()
-            .map(|meta| format!(" [meta {:?}]", meta))
-            .unwrap_or_default();
-        let step_token = record.step_token_id.as_deref().unwrap_or("machine");
-        let cap_urn = record.cap_urn.as_deref().unwrap_or("machine");
-        let body_suffix = record
-            .body_index
-            .map(|index| format!(" body={index}"))
-            .unwrap_or_default();
-        let arg_suffix = record
-            .arg_urn
-            .as_deref()
-            .map(|arg_urn| format!(" arg='{arg_urn}'"))
-            .unwrap_or_default();
-        eprintln!(
-            "  [log:{}{} step='{}'{}]{} {} {}",
-            record.level, body_suffix, step_token, arg_suffix, meta_suffix, cap_urn, record.message
-        );
-    });
-    (progress, log_fn)
+/// What a run says, as the plain-text CLI prints it on stderr: its overall
+/// progress and its diagnostics. The other signals a run gives — each step's
+/// own progress, map items and outcomes, step reports — are what the terminal
+/// interface draws; in plain text a run's end is reported once it has ended
+/// ([`finish_strand`]).
+fn print_run_event(event: &RunEvent) {
+    match &event.signal {
+        RunSignal::Progress {
+            progress,
+            cap_urn,
+            message,
+        } => eprintln!("  [{:5.1}%] {} {}", progress * 100.0, cap_urn, message),
+        RunSignal::Log(record) => {
+            let meta_suffix = record
+                .meta
+                .as_ref()
+                .map(|meta| format!(" [meta {:?}]", meta))
+                .unwrap_or_default();
+            let step_token = record.step_token_id.as_deref().unwrap_or("machine");
+            let cap_urn = record.cap_urn.as_deref().unwrap_or("machine");
+            let body_suffix = record
+                .body_index
+                .map(|index| format!(" body={index}"))
+                .unwrap_or_default();
+            let arg_suffix = record
+                .arg_urn
+                .as_deref()
+                .map(|arg_urn| format!(" arg='{arg_urn}'"))
+                .unwrap_or_default();
+            eprintln!(
+                "  [log:{}{} step='{}'{}]{} {} {}",
+                record.level, body_suffix, step_token, arg_suffix, meta_suffix, cap_urn, record.message
+            );
+        }
+        RunSignal::StepProgress { .. }
+        | RunSignal::BodyOutcomes(_)
+        | RunSignal::ForEachItems { .. }
+        | RunSignal::StepReport(_) => {}
+    }
+}
+
+/// Wait for a spawned strand, printing what every run says meanwhile. Once
+/// the strand has returned, everything any run said before that is printed
+/// too — a run's callbacks speak before it returns, so nothing it said can
+/// follow what is reported of its end.
+async fn await_strand_printing(
+    mut handle: tokio::task::JoinHandle<StrandRun>,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<RunEvent>,
+) -> Result<StrandRun, tokio::task::JoinError> {
+    loop {
+        tokio::select! {
+            biased;
+            Some(event) = events.recv() => print_run_event(&event),
+            joined = &mut handle => {
+                while let Ok(event) = events.try_recv() {
+                    print_run_event(&event);
+                }
+                return joined;
+            }
+        }
+    }
 }
 
 /// Expand dev binary path - supports single file or directory of executables
@@ -334,7 +370,9 @@ fn print_usage(program: &str) {
            {p} <cap-alias-or-urn> [cap args] [inputs...] [options]   Run one cap\n\
            {p} run <machine-file> [inputs...] [options]              Run a .machine file\n\
            {p} plan <files...> [--to <t>]... [plan options]          Plan machines for a file set (multi-source aware)\n\
-           {p} dag-viz <machine-file> [--mermaid|--dot]              Render the execution plan as a diagram\n\
+           {p} edit <machine-file> [inputs...] [options]             Edit a machine in the terminal (and run it)\n\
+           {p} view <machine-file> [inputs...] [options]             Look at a machine in the terminal\n\
+           {p} dag-viz <machine-file> [--mermaid|--dot|--text]       Render the execution plan as a diagram\n\
            {p} find <cap-alias-or-urn>                               Show the providing cartridge(s)\n\
            {p} resolve [--no-cache] <cap-alias-or-urn>...            Print cap definition JSON (array for >1)\n\
            {p} cache [clear|refresh]                                 Invalidate/renew the local fabric cache\n\
@@ -375,6 +413,11 @@ fn print_usage(program: &str) {
                                     (repeatable; run mode; @<path> reads a file)\n\
            --dev-bins <binary> ...  Use local cartridge binaries\n\
            --trace <file.trace>     Write a per-segment bifaci protocol trace (JSONL)\n\
+           --tui                    Show the run (run, plan --run) or the planner (plan)\n\
+                                    in the terminal, live; edit and view always do\n\
+           --theme <dark|light>     The terminal interface's colours (default: dark)\n\
+           --glyphs <unicode|ascii> Its lines and marks (default: from the locale)\n\
+           --reduced-motion         Nothing in it moves\n\
            --help                   Show this help; after a cap name, that cap's interface\n\
                                     (input / required options / options)\n\n\
          Plan options (capdag plan — the unified configurable planner):\n\
@@ -502,6 +545,8 @@ async fn main() {
         "run" => cmd_run(&args).await,
         "plan" => cmd_plan(&args).await,
         "dag-viz" => cmd_dag_viz(&args).await,
+        "edit" => cmd_edit(&args, false).await,
+        "view" => cmd_edit(&args, true).await,
         "find" => cmd_find(&args).await,
         "resolve" => cmd_resolve(&args).await,
         "cache" => cmd_cache(&args).await,
@@ -536,30 +581,78 @@ async fn main() {
     }
 }
 
-/// `capdag dag-viz <machine-file> [--mermaid|--dot]` — render the machine's
-/// execution plan(s) as a diagram. This walks the SAME planner output the
-/// engine executes (`build_plans_from_notation`), so it faithfully expresses
-/// everything machine notation can model — ForEach fan-out, Collect/Merge
-/// fan-in, Split, input slots, outputs, and every typed edge — not the old
-/// flat cap-to-cap view. `--mermaid` (default) or `--dot` selects the format.
+/// `capdag dag-viz <machine-file> [--mermaid|--dot|--text]` — render the
+/// machine's execution plan(s) as a diagram. This walks the SAME planner
+/// output the engine executes, so it expresses everything machine notation
+/// can model — maps, gathers, input slots, outputs, and every typed edge.
+/// `--mermaid` (default) and `--dot` print diagram source; `--text` draws the
+/// picture the terminal run view draws (`--lod`, `--width`, `--glyphs`), in
+/// colour when standard output is a terminal.
 async fn cmd_dag_viz(args: &[String]) -> ! {
-    let mut want_dot = false;
+    #[derive(PartialEq)]
+    enum Format {
+        Mermaid,
+        Dot,
+        Text,
+    }
+    let usage = || -> ! { dag_viz_usage(&args[0]) };
+    let mut format = Format::Mermaid;
+    let mut lod: Option<capdag::tui::layout::Lod> = None;
+    let mut width: Option<i32> = None;
+    let mut glyphs: Option<capdag::tui::theme::GlyphSet> = None;
     let mut machine_file: Option<&str> = None;
-    for a in &args[2..] {
-        match a.as_str() {
-            "--mermaid" => want_dot = false,
-            "--dot" => want_dot = true,
+    let mut i = 2;
+    while i < args.len() {
+        let value = |i: &mut usize| -> &str {
+            *i += 1;
+            match args.get(*i) {
+                Some(v) => v.as_str(),
+                None => usage(),
+            }
+        };
+        match args[i].as_str() {
+            "--mermaid" => format = Format::Mermaid,
+            "--dot" => format = Format::Dot,
+            "--text" => format = Format::Text,
+            "--lod" => {
+                lod = Some(match value(&mut i) {
+                    "full" => capdag::tui::layout::Lod::Full,
+                    "compact" => capdag::tui::layout::Lod::Compact,
+                    "lines" => capdag::tui::layout::Lod::Glyph,
+                    "dots" => capdag::tui::layout::Lod::Dot,
+                    other => {
+                        eprintln!("--lod '{other}' is not full, compact, lines or dots");
+                        process::exit(2);
+                    }
+                })
+            }
+            "--width" => {
+                let raw = value(&mut i);
+                width = Some(match raw.parse::<i32>() {
+                    Ok(w) if w >= 20 => w,
+                    _ => {
+                        eprintln!("--width '{raw}' is not a number of columns of at least 20");
+                        process::exit(2);
+                    }
+                })
+            }
+            "--glyphs" => {
+                glyphs = Some(match value(&mut i) {
+                    "unicode" => capdag::tui::theme::GlyphSet::Unicode,
+                    "ascii" => capdag::tui::theme::GlyphSet::Ascii,
+                    other => {
+                        eprintln!("--glyphs '{other}' is neither unicode nor ascii");
+                        process::exit(2);
+                    }
+                })
+            }
             "--help" | "-h" => {
                 print_usage(&args[0]);
                 process::exit(0);
             }
             other if other.starts_with('-') => {
                 eprintln!("Unknown dag-viz option '{other}'.");
-                eprintln!(
-                    "Usage: {} dag-viz <machine-file> [--mermaid|--dot]",
-                    args[0]
-                );
-                process::exit(2);
+                usage();
             }
             path => {
                 if machine_file.is_some() {
@@ -569,14 +662,13 @@ async fn cmd_dag_viz(args: &[String]) -> ! {
                 machine_file = Some(path);
             }
         }
+        i += 1;
     }
-    let Some(machine_file) = machine_file else {
-        eprintln!(
-            "Usage: {} dag-viz <machine-file> [--mermaid|--dot]",
-            args[0]
-        );
+    if format != Format::Text && (lod.is_some() || width.is_some() || glyphs.is_some()) {
+        eprintln!("--lod, --width and --glyphs are options of --text");
         process::exit(2);
-    };
+    }
+    let Some(machine_file) = machine_file else { usage() };
 
     let notation = match fs::read_to_string(machine_file) {
         Ok(content) => content,
@@ -593,6 +685,10 @@ async fn cmd_dag_viz(args: &[String]) -> ! {
         }
     };
     let (machines, machine_id) = machines_beside(Some(Path::new(machine_file)));
+    if format == Format::Text {
+        print_machine_picture(&notation, registry, &machines, machine_id.as_deref(), lod, width, glyphs).await;
+        process::exit(0);
+    }
     let plans = match capdag::orchestrator::build_plans_from_notation_from(
         &notation,
         registry.clone(),
@@ -607,12 +703,91 @@ async fn cmd_dag_viz(args: &[String]) -> ! {
             process::exit(1);
         }
     };
-    if want_dot {
+    if format == Format::Dot {
         println!("{}", capdag::planner::plans_to_dot(&plans));
     } else {
         println!("{}", capdag::planner::plans_to_mermaid(&plans));
     }
     process::exit(0);
+}
+
+fn dag_viz_usage(program: &str) -> ! {
+    eprintln!(
+        "Usage: {program} dag-viz <machine-file> [--mermaid|--dot|--text [--lod full|compact|lines|dots] \
+         [--width <columns>] [--glyphs unicode|ascii]]"
+    );
+    process::exit(2);
+}
+
+/// Print the picture of every strand of a machine, as the run view draws it
+/// before a run: inputs, steps, maps, gathers, outputs, and what each edge
+/// carries.
+async fn print_machine_picture(
+    notation: &str,
+    registry: Arc<FabricRegistry>,
+    machines: &capdag::FileMachineSource,
+    machine_id: Option<&str>,
+    lod: Option<capdag::tui::layout::Lod>,
+    width: Option<i32>,
+    glyphs: Option<capdag::tui::theme::GlyphSet>,
+) {
+    use std::io::{IsTerminal, Write};
+    use capdag::tui::layout::{self, Arrangement, LayoutOptions, Lod};
+    let resolved = match capdag::orchestrator::ResolvedNotation::resolve_from(notation, registry.clone(), machines, machine_id).await {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Validation failed: {e}");
+            process::exit(1);
+        }
+    };
+    let terminal = std::io::stdout().is_terminal();
+    let width = width.or_else(|| {
+        terminal
+            .then(|| crossterm::terminal::size().ok().map(|(w, _)| w as i32))
+            .flatten()
+    });
+    let theme = capdag::tui::theme::Theme::new(
+        capdag::tui::theme::Appearance::Dark,
+        if terminal { capdag::tui::theme::ColorDepth::from_environment() } else { capdag::tui::theme::ColorDepth::None },
+        glyphs.unwrap_or_else(capdag::tui::theme::GlyphSet::from_environment),
+        false,
+    );
+    let arrangement = match width {
+        Some(width) => Arrangement::Wrapped { width },
+        None => Arrangement::Rows,
+    };
+    let scenes = match capdag::tui::scene::planned_scenes(&resolved, &registry).await {
+        Ok(scenes) => scenes,
+        Err(e) => {
+            eprintln!("The machine cannot be drawn: {e}");
+            process::exit(1);
+        }
+    };
+    let mut stdout = std::io::stdout();
+    for (strand, scene) in scenes.iter().enumerate() {
+        let laid = match lod {
+            Some(lod) => layout::layout(scene, &LayoutOptions { lod, arrangement, chip_width: 0 }),
+            None => match width {
+                Some(width) => layout::fit(scene, width, i32::MAX, &[Arrangement::Rows, arrangement], 0),
+                None => layout::layout(scene, &LayoutOptions { lod: Lod::Full, arrangement, chip_width: 0 }),
+            },
+        };
+        let laid = match laid {
+            Ok(laid) => laid,
+            Err(e) => {
+                eprintln!("The machine cannot be laid out: {e}");
+                process::exit(1);
+            }
+        };
+        if scenes.len() > 1 {
+            let _ = writeln!(stdout, "strand {}", strand + 1);
+        }
+        let picture = capdag::tui::canvas::to_text(&capdag::tui::canvas::render_whole(scene, &laid, &theme), terminal);
+        if let Err(e) = stdout.write_all(picture.as_bytes()) {
+            eprintln!("failed to write the picture: {e}");
+            process::exit(1);
+        }
+    }
 }
 
 /// Warm the fabric caches from the pinned manifest — the same warm the engine
@@ -833,6 +1008,7 @@ async fn cmd_run(args: &[String]) -> ! {
     let mut positionals: Vec<String> = Vec::new();
     let mut named_inputs: Vec<(String, String)> = Vec::new();
     let mut selector: Option<String> = None;
+    let mut view = ViewFlags::default();
     let mut arg_idx = 2;
 
     // Flags are recognized in ANY position — `run m.machine input --force` is
@@ -908,6 +1084,9 @@ async fn cmd_run(args: &[String]) -> ! {
                     arg_idx += 1;
                 }
             }
+            flag if view.take(args, &mut arg_idx) => {
+                let _ = flag;
+            }
             flag if flag.starts_with('-') && flag.len() > 1 => {
                 eprintln!("capdag run: unknown flag '{flag}'");
                 process::exit(2);
@@ -936,6 +1115,7 @@ async fn cmd_run(args: &[String]) -> ! {
         }
     };
 
+    let ui = view.settings_or_exit("run");
     execute_notation(
         notation,
         machine_file,
@@ -947,8 +1127,262 @@ async fn cmd_run(args: &[String]) -> ! {
         trace_file,
         output_dir,
         force_overwrite,
+        ui,
     )
     .await
+}
+
+/// `capdag edit <machine-file> [inputs...]` — the machine editor; `capdag
+/// view` is the same surface, changing nothing. Both are the terminal
+/// interface, so both need a terminal. The editor's `x` runs the machine on
+/// the inputs given here, in the live run view, with the same options as
+/// `capdag run`. A file that does not exist yet is a new machine, written on
+/// the first save.
+async fn cmd_edit(args: &[String], read_only: bool) -> ! {
+    let command = if read_only { "view" } else { "edit" };
+    let mut dev_binaries = Vec::new();
+    let mut output_dir: Option<PathBuf> = None;
+    let mut force_overwrite = false;
+    let mut positionals: Vec<String> = Vec::new();
+    let mut named_inputs: Vec<(String, String)> = Vec::new();
+    let mut view = ViewFlags::default();
+    let mut arg_idx = 2;
+    while arg_idx < args.len() {
+        match args[arg_idx].as_str() {
+            "--help" | "-h" => {
+                print_usage(&args[0]);
+                process::exit(0);
+            }
+            "-o" | "--output" => {
+                arg_idx += 1;
+                let Some(dir) = args.get(arg_idx) else {
+                    eprintln!("--output requires a directory path");
+                    process::exit(2);
+                };
+                output_dir = Some(PathBuf::from(dir));
+                arg_idx += 1;
+            }
+            "--force" => {
+                force_overwrite = true;
+                arg_idx += 1;
+            }
+            "--input" => {
+                arg_idx += 1;
+                let Some(pair) = args.get(arg_idx) else {
+                    eprintln!("--input requires <node>=<value>");
+                    process::exit(2);
+                };
+                match pair.split_once('=') {
+                    Some((name, value)) if !name.is_empty() => {
+                        named_inputs.push((name.to_string(), value.to_string()))
+                    }
+                    _ => {
+                        eprintln!("--input '{pair}' is not of the form <node>=<value>");
+                        process::exit(2);
+                    }
+                }
+                arg_idx += 1;
+            }
+            "--dev-bins" => {
+                arg_idx += 1;
+                while arg_idx < args.len()
+                    && !args[arg_idx].starts_with("--")
+                    && !args[arg_idx].ends_with(".machine")
+                {
+                    let expanded = expand_dev_binary_path(&args[arg_idx]);
+                    if expanded.is_empty() {
+                        eprintln!("No executables found in: {}", args[arg_idx]);
+                        process::exit(1);
+                    }
+                    dev_binaries.extend(expanded);
+                    arg_idx += 1;
+                }
+            }
+            "--tui" => {
+                eprintln!("capdag {command} is always the terminal interface: drop --tui");
+                process::exit(2);
+            }
+            flag if view.take(args, &mut arg_idx) => {
+                let _ = flag;
+            }
+            flag if flag.starts_with('-') && flag.len() > 1 => {
+                eprintln!("capdag {command}: unknown flag '{flag}'");
+                process::exit(2);
+            }
+            positional => {
+                positionals.push(positional.to_string());
+                arg_idx += 1;
+            }
+        }
+    }
+    let Some(machine_file) = positionals.first().cloned() else {
+        eprintln!("capdag {command} needs a machine file");
+        print_usage(&args[0]);
+        process::exit(2);
+    };
+    view.tui = true;
+    let settings = view
+        .settings_or_exit(command)
+        .expect("a view asked for is given, or the command exits");
+    let path = PathBuf::from(&machine_file);
+    let (text, machine_id) = match fs::read_to_string(&path) {
+        Ok(text) => (text, machines_beside(Some(&path)).1),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !read_only => {
+            // A new machine: known by where it will be written, so the
+            // machines it includes are read beside it from the start.
+            let parent = match path.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                _ => PathBuf::from("."),
+            };
+            let id = match (fs::canonicalize(&parent), path.file_name()) {
+                (Ok(dir), Some(name)) => dir.join(name).to_string_lossy().into_owned(),
+                (Err(e), _) => {
+                    eprintln!("Error reading the directory of '{machine_file}': {e}");
+                    process::exit(1);
+                }
+                (_, None) => {
+                    eprintln!("'{machine_file}' names no file");
+                    process::exit(2);
+                }
+            };
+            (String::new(), Some(id))
+        }
+        Err(e) => {
+            eprintln!("Error reading machine file '{machine_file}': {e}");
+            process::exit(1);
+        }
+    };
+    let (machines, _) = machines_beside(None);
+    let registry = fabric_registry_or_exit().await;
+    // The palette offers every cap of the fabric, as the planner plans with.
+    warm_fabric_from_manifest(&registry).await;
+    let catalog = match capdag::tui::app::edit::CatalogCap::from_registry(&registry).await {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            eprintln!("capdag {command}: {e}");
+            process::exit(1);
+        }
+    };
+    let spec = capdag::tui::app::edit::EditorSpec {
+        path: path.clone(),
+        text,
+        read_only,
+        registry,
+        machines: Arc::new(machines),
+        machine_id,
+        catalog,
+        inputs_given: positionals.len() > 1 || !named_inputs.is_empty(),
+    };
+    match capdag::tui::app::edit::edit_session(spec, settings).await {
+        Ok(capdag::tui::app::edit::EditorOutcome::Closed { saved }) => {
+            if saved {
+                eprintln!("Saved {}", path.display());
+            }
+            process::exit(0);
+        }
+        Ok(capdag::tui::app::edit::EditorOutcome::Run(notation)) => {
+            execute_notation(
+                notation,
+                &machine_file,
+                Some(&path),
+                &positionals[1..],
+                named_inputs,
+                None,
+                dev_binaries,
+                None,
+                output_dir,
+                force_overwrite,
+                Some(settings),
+            )
+            .await
+        }
+        Err(e) => {
+            eprintln!("capdag {command}: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+/// The terminal interface's flags, recognised wherever a command takes them.
+#[derive(Default)]
+struct ViewFlags {
+    tui: bool,
+    theme: Option<capdag::tui::theme::Appearance>,
+    glyphs: Option<capdag::tui::theme::GlyphSet>,
+    reduced_motion: bool,
+}
+
+impl ViewFlags {
+    /// Take the flag at `args[*at]` if it is one of these, advancing `at`
+    /// past it and its value. A bad value is a usage error.
+    fn take(&mut self, args: &[String], at: &mut usize) -> bool {
+        let value = |at: &mut usize, flag: &str| -> String {
+            *at += 1;
+            match args.get(*at) {
+                Some(v) => v.clone(),
+                None => {
+                    eprintln!("{flag} needs a value");
+                    process::exit(2);
+                }
+            }
+        };
+        match args[*at].as_str() {
+            "--tui" => self.tui = true,
+            "--reduced-motion" => self.reduced_motion = true,
+            "--theme" => {
+                self.theme = Some(match value(at, "--theme").as_str() {
+                    "light" => capdag::tui::theme::Appearance::Light,
+                    "dark" => capdag::tui::theme::Appearance::Dark,
+                    other => {
+                        eprintln!("--theme '{other}' is neither light nor dark");
+                        process::exit(2);
+                    }
+                })
+            }
+            "--glyphs" => {
+                self.glyphs = Some(match value(at, "--glyphs").as_str() {
+                    "unicode" => capdag::tui::theme::GlyphSet::Unicode,
+                    "ascii" => capdag::tui::theme::GlyphSet::Ascii,
+                    other => {
+                        eprintln!("--glyphs '{other}' is neither unicode nor ascii");
+                        process::exit(2);
+                    }
+                })
+            }
+            _ => return false,
+        }
+        *at += 1;
+        true
+    }
+
+    /// The view's settings when `--tui` was given. The view needs a terminal
+    /// on both ends: without one it is a usage error, decided before
+    /// anything runs. Its other flags without `--tui` are one too.
+    fn settings_or_exit(&self, command: &str) -> Option<capdag::tui::app::TuiSettings> {
+        use std::io::IsTerminal;
+        if !self.tui {
+            if self.theme.is_some() || self.glyphs.is_some() || self.reduced_motion {
+                eprintln!("capdag {command}: --theme, --glyphs and --reduced-motion are flags of --tui");
+                process::exit(2);
+            }
+            return None;
+        }
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            eprintln!(
+                "capdag {command} --tui draws in a terminal: standard input and standard output \
+                 must both be one (drop --tui to pipe the run)"
+            );
+            process::exit(2);
+        }
+        Some(capdag::tui::app::TuiSettings {
+            appearance: self.theme.unwrap_or(capdag::tui::theme::Appearance::Dark),
+            glyphs: self
+                .glyphs
+                .unwrap_or_else(capdag::tui::theme::GlyphSet::from_environment),
+            depth: capdag::tui::theme::ColorDepth::from_environment(),
+            motion: !self.reduced_motion,
+        })
+    }
 }
 
 /// Where the machines a machine file includes are read from, and what the
@@ -967,33 +1401,6 @@ fn machines_beside(machine_file: Option<&Path>) -> (capdag::FileMachineSource, O
         })
     });
     (capdag::FileMachineSource::new(working_directory), id)
-}
-
-/// How a run ended, least to most severe: the process's exit status is the
-/// worst over everything it ran.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum RunEnd {
-    /// Every output was produced, or was reported not produced by a branch
-    /// that did not fire.
-    Completed,
-    /// Outputs were written, and at least one step failed under a policy
-    /// that tolerates it.
-    Tolerated,
-    /// A step failed and nothing tolerated it.
-    Failed,
-    /// The user cancelled.
-    Cancelled,
-}
-
-impl RunEnd {
-    fn exit_code(self) -> i32 {
-        match self {
-            RunEnd::Completed => 0,
-            RunEnd::Tolerated => 3,
-            RunEnd::Failed => 1,
-            RunEnd::Cancelled => 130,
-        }
-    }
 }
 
 /// Every required arg of a step of `plan` that the machine does not bind and
@@ -1023,171 +1430,6 @@ async fn unbound_required_args(
         }
     }
     Ok(missing)
-}
-
-/// Run one strand's plan to its end, write what it produced, and say on
-/// stderr everything that did not simply complete: steps skipped, attempted
-/// again or tolerated, and outputs that were not produced.
-#[allow(clippy::too_many_arguments)]
-async fn run_strand(
-    strand: capdag::orchestrator::StrandPlan,
-    runtime: Arc<dyn EngineRuntime>,
-    initial_inputs: HashMap<String, PlanInput>,
-    initial_is_sequence: HashMap<String, bool>,
-    cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>>,
-    progress: CapProgressFn,
-    log_fn: PipelineLogFn,
-) -> (capdag::orchestrator::StrandPlan, Result<capdag::PipelineResult, capdag::ExecutionError>) {
-    let ledger = match capdag::RunArgumentLedger::new(&strand.plan, cap_arguments) {
-        Ok(ledger) => Arc::new(ledger),
-        Err(e) => {
-            let error = capdag::ExecutionError::HostError(format!("argument values refused: {e}"));
-            return (strand, Err(error));
-        }
-    };
-    let callbacks = capdag::RunCallbacks {
-        progress: Some(progress),
-        log: Some(log_fn),
-        ..Default::default()
-    };
-    let result = execute_plan(
-        &strand.plan,
-        runtime,
-        initial_inputs,
-        initial_is_sequence,
-        ledger,
-        callbacks,
-    )
-    .await;
-    (strand, result)
-}
-
-/// Write a finished strand's outputs and report how it ended. Whatever the
-/// run persisted and did not turn into an output — everything, when it
-/// failed — is removed: nothing of a run is left behind but its outputs.
-fn finish_strand(
-    strand: &capdag::orchestrator::StrandPlan,
-    result: Result<capdag::PipelineResult, capdag::ExecutionError>,
-    output_dir: Option<PathBuf>,
-    force: bool,
-    input_stem: String,
-    runtime: &CliRuntime,
-) -> RunEnd {
-    let end = emit_strand(strand, result, output_dir, force, input_stem);
-    runtime.discard_parts(&strand.plan);
-    end
-}
-
-fn emit_strand(
-    strand: &capdag::orchestrator::StrandPlan,
-    result: Result<capdag::PipelineResult, capdag::ExecutionError>,
-    output_dir: Option<PathBuf>,
-    force: bool,
-    input_stem: String,
-) -> RunEnd {
-    let result = match result {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("{e}");
-            return if e.attribution_class() == capdag::AttributionClass::User {
-                RunEnd::Cancelled
-            } else {
-                RunEnd::Failed
-            };
-        }
-    };
-    let options = capdag::orchestrator::EmitOptions {
-        output_dir,
-        force,
-        input_stem,
-        output_names: strand.output_names(),
-    };
-    let mut stdout = std::io::stdout();
-    if let Err(e) = capdag::orchestrator::emit_terminals(&result, &options, &mut stdout) {
-        eprintln!("{e}");
-        return RunEnd::Failed;
-    }
-    let output_names = strand.output_names();
-    for terminal in &result.terminals {
-        if terminal.produced().is_none() {
-            // Every output of a plan is one the notation named.
-            let Some(name) = output_names.get(terminal.output_node_id()) else {
-                eprintln!(
-                    "internal error: the run reports output '{}', which its plan does not name",
-                    terminal.output_node_id()
-                );
-                return RunEnd::Failed;
-            };
-            eprintln!("Not produced: output '{name}' ({})", terminal.media_urn());
-        }
-    }
-    let describe = |failure: &capdag::StepFailure| {
-        format!(
-            "[{}{}] {}",
-            failure.class,
-            failure
-                .code
-                .as_deref()
-                .map(|code| format!("/{code}"))
-                .unwrap_or_default(),
-            failure.message
-        )
-    };
-    // A value is named as the machine named it. An item of a map is named
-    // by the sequence it is an item of.
-    let name_of = |node: &String| -> String {
-        if let Some(name) = strand.node_names.get(node) {
-            return format!("'{name}'");
-        }
-        match strand.plan.nodes.get(node).map(|n| &n.node_type) {
-            Some(ExecutionNodeType::Item { source, .. }) => match strand.node_names.get(source) {
-                Some(name) => format!("an item of '{name}'"),
-                None => format!("an item of {source}"),
-            },
-            _ => node.clone(),
-        }
-    };
-    for report in &result.steps {
-        let run = report
-            .body
-            .as_ref()
-            .map(|body| format!(" (item {})", body.body_index))
-            .unwrap_or_default();
-        match &report.outcome {
-            capdag::StepOutcome::Skipped { absent } => eprintln!(
-                "Skipped: step {}{run} — it needs {}, which was not produced",
-                report.cap_urn,
-                absent.iter().map(name_of).collect::<Vec<_>>().join(", ")
-            ),
-            capdag::StepOutcome::Completed { failed_attempts } => {
-                for (attempt, failure) in failed_attempts.iter().enumerate() {
-                    eprintln!(
-                        "Attempted again: step {}{run}, attempt {} failed {}",
-                        report.cap_urn,
-                        attempt + 1,
-                        describe(failure)
-                    );
-                }
-            }
-            capdag::StepOutcome::FailedTolerated {
-                failure,
-                failed_attempts,
-            } => eprintln!(
-                "Tolerated failure: step {}{run} {}{}",
-                report.cap_urn,
-                describe(failure),
-                if failed_attempts.is_empty() {
-                    String::new()
-                } else {
-                    format!(" (after {} earlier attempt(s))", failed_attempts.len())
-                }
-            ),
-        }
-    }
-    match result.verdict {
-        capdag::RunVerdict::Completed => RunEnd::Completed,
-        capdag::RunVerdict::CompletedWithToleratedFailures => RunEnd::Tolerated,
-    }
 }
 
 /// What one input of a machine is given for one run.
@@ -1230,6 +1472,7 @@ async fn execute_notation(
     trace_file: Option<String>,
     output_dir: Option<PathBuf>,
     force_overwrite: bool,
+    ui: Option<capdag::tui::app::TuiSettings>,
 ) -> ! {
     // Create the unified FabricRegistry. Holds cap definitions and media defs
     // together; consumed by notation resolution and the runtime (for cap
@@ -1665,11 +1908,9 @@ async fn execute_notation(
         trace_sink,
         output_dir.clone().unwrap_or_else(|| PathBuf::from(".")),
     ));
-    let runtime: Arc<dyn EngineRuntime> = cli_runtime.clone();
-
     arm_ctrl_c(cli_runtime.clone());
 
-    let (progress, log_fn) = progress_hooks();
+    let (observer, mut events) = RunObserver::new();
 
     // The stdout fast-path only applies when this execution can produce
     // exactly one scalar result overall — with several strands or several
@@ -1680,15 +1921,11 @@ async fn execute_notation(
         output_dir.clone()
     };
 
-    let mut ends: Vec<RunEnd> = Vec::new();
+    // What each strand of each run is given.
+    let mut planned_runs: Vec<Vec<PlannedStrand>> = Vec::with_capacity(planned.len());
     for (index, strands) in planned {
         let run = &runs[index];
-        eprintln!("--- Processing: {} ---", run.label);
-        eprintln!("Run: {}", notation);
-
-        // The strands of a machine have no path between them: they run at
-        // the same time. What each produced is written in strand order.
-        let mut running = Vec::with_capacity(strands.len());
+        let mut of_run = Vec::with_capacity(strands.len());
         for strand in strands {
             let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
             // The executor requires every input to carry an explicit
@@ -1725,28 +1962,181 @@ async fn execute_notation(
                 initial_inputs.insert(slot.clone(), input);
                 initial_is_sequence.insert(slot.clone(), is_sequence);
             }
-            running.push(tokio::spawn(run_strand(
+            of_run.push(PlannedStrand {
                 strand,
-                runtime.clone(),
-                initial_inputs,
-                initial_is_sequence,
-                cap_arguments.clone(),
-                progress.clone(),
-                log_fn.clone(),
-            )));
+                inputs: initial_inputs,
+                is_sequence: initial_is_sequence,
+                cap_arguments: cap_arguments.clone(),
+            });
         }
+        planned_runs.push(of_run);
+    }
+
+    if let Some(settings) = ui {
+        // What each run's inputs were given, by input name: the files it
+        // reads, the values named on the command line, the live sources.
+        let mut run_sources: Vec<HashMap<String, Vec<capdag::tui::scene::Source>>> = Vec::with_capacity(runs.len());
+        for index in 0..runs.len() {
+            let mut sources: HashMap<String, Vec<capdag::tui::scene::Source>> = HashMap::new();
+            let files: Vec<&(String, PathBuf, Vec<u8>)> = if once_per_path {
+                vec![&file_inputs[index]]
+            } else {
+                file_inputs.iter().collect()
+            };
+            for (name, path, _) in files {
+                sources
+                    .entry(name.clone())
+                    .or_default()
+                    .push(capdag::tui::scene::Source::File(path.clone()));
+            }
+            if !once_per_path {
+                for (name, value) in &named_inputs {
+                    let source = match value.strip_prefix('@') {
+                        Some(path) => capdag::tui::scene::Source::File(PathBuf::from(path)),
+                        None => capdag::tui::scene::Source::Value(value.clone()),
+                    };
+                    sources.entry(name.clone()).or_default().push(source);
+                }
+                for (name, reference) in &live_inputs {
+                    let content = live_sources
+                        .iter()
+                        .find(|(r, _)| r == reference)
+                        .map(|(_, content)| content.to_string())
+                        .expect("every live input is one of the live sources");
+                    sources.entry(name.clone()).or_default().push(capdag::tui::scene::Source::Live {
+                        reference_urn: reference.clone(),
+                        content_urn: content,
+                    });
+                }
+            }
+            run_sources.push(sources);
+        }
+        let mut session_runs = Vec::with_capacity(planned_runs.len());
+        for (index, strands) in planned_runs.into_iter().enumerate() {
+            let run = &runs[index];
+            let mut session_strands = Vec::with_capacity(strands.len());
+            for planned_strand in strands {
+                let view = match capdag::orchestrator::PlanView::of(
+                    &registry,
+                    &planned_strand.strand.plan,
+                    &planned_strand.strand.node_names,
+                ) {
+                    Ok(view) => view,
+                    Err(e) => {
+                        eprintln!("The run cannot be drawn: {e}");
+                        process::exit(1);
+                    }
+                };
+                let arguments = match capdag::tui::app::run::step_arguments(registry.clone(), &planned_strand, &view).await {
+                    Ok(arguments) => arguments,
+                    Err(e) => {
+                        eprintln!("The run cannot be drawn: {e}");
+                        process::exit(1);
+                    }
+                };
+                let slots = planned_strand.strand.input_slots();
+                let sources = run_sources[index]
+                    .iter()
+                    .filter_map(|(name, given)| slots.get(name).map(|slot| (slot.clone(), given.clone())))
+                    .collect();
+                session_strands.push(capdag::tui::app::run::SessionStrand {
+                    planned: planned_strand,
+                    view,
+                    arguments,
+                    sources,
+                });
+            }
+            session_runs.push(capdag::tui::app::run::SessionRun {
+                label: run.label.clone(),
+                stem: run.stem.clone(),
+                strands: session_strands,
+            });
+        }
+        let run_count = session_runs.len();
+        let spec = capdag::tui::app::run::RunSessionSpec {
+            machine: machine_label.to_string(),
+            notation: notation.clone(),
+            runs: session_runs,
+            output_dir: effective_dir.clone(),
+            force: force_overwrite,
+        };
+        let outcome = match capdag::tui::app::run::run_session(cli_runtime.clone(), spec, settings).await {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                eprintln!("The terminal interface stopped: {e}");
+                process::exit(1);
+            }
+        };
+        // The terminal is the shell's again: what the session held is
+        // written where the plain CLI writes it.
+        {
+            use std::io::Write;
+            let mut stdout = std::io::stdout();
+            if let Err(e) = stdout.write_all(&outcome.stdout).and_then(|_| stdout.flush()) {
+                eprintln!("failed to write the run's result to stdout: {e}");
+                process::exit(1);
+            }
+        }
+        let mut label = None;
+        for (run_label, notes) in &outcome.notes {
+            if label.as_ref() != Some(run_label) {
+                eprintln!("--- Processing: {run_label} ---");
+                label = Some(run_label.clone());
+            }
+            for note in notes {
+                eprintln!("{note}");
+            }
+        }
+        if outcome.aborted {
+            eprintln!("Aborted by user.");
+            process::exit(RunEnd::Cancelled.exit_code());
+        }
+        let count = |end: RunEnd| outcome.ends.iter().filter(|e| **e == end).count();
+        eprintln!("=== Summary ===");
+        eprintln!("Runs: {}", outcome.ends.len().max(run_count));
+        eprintln!("Completed: {}", count(RunEnd::Completed));
+        eprintln!("Completed with tolerated failures: {}", count(RunEnd::Tolerated));
+        eprintln!("Failed: {}", count(RunEnd::Failed));
+        eprintln!("Cancelled: {}", count(RunEnd::Cancelled));
+        process::exit(outcome.ends.into_iter().max().unwrap_or(RunEnd::Completed).exit_code());
+    }
+
+    let mut stdout = std::io::stdout();
+    let mut ends: Vec<RunEnd> = Vec::new();
+    for (index, strands) in planned_runs.into_iter().enumerate() {
+        let run = &runs[index];
+        eprintln!("--- Processing: {} ---", run.label);
+        eprintln!("Run: {}", notation);
+
+        // The strands of a machine have no path between them: they run at
+        // the same time. What each produced is written in strand order.
+        let mut running = Vec::with_capacity(strands.len());
+        for (strand_index, planned_strand) in strands.into_iter().enumerate() {
+            let key = RunKey {
+                run: index,
+                strand: strand_index,
+            };
+            running.push(match spawn_strand(&cli_runtime, &observer, key, planned_strand, None) {
+                Ok(handle) => handle.task,
+                Err((strand, e)) => tokio::spawn(async move { (strand, Err(e)) }),
+            });
+        }
+        let target = EmitTarget {
+            output_dir: effective_dir.clone(),
+            force: force_overwrite,
+            stem: run.stem.clone(),
+        };
         // A run ends as the worst of its strands: the summary counts runs.
         let mut run_end = RunEnd::Completed;
         for handle in running {
-            let strand_end = match handle.await {
-                Ok((strand, result)) => finish_strand(
-                    &strand,
-                    result,
-                    effective_dir.clone(),
-                    force_overwrite,
-                    run.stem.clone(),
-                    &cli_runtime,
-                ),
+            let strand_end = match await_strand_printing(handle, &mut events).await {
+                Ok((strand, result)) => {
+                    let report = finish_strand(&strand, result, &target, &mut stdout, &cli_runtime);
+                    for note in &report.notes {
+                        eprintln!("{note}");
+                    }
+                    report.end
+                }
                 Err(join) => {
                     eprintln!("a strand of the run panicked: {join}");
                     RunEnd::Failed
@@ -1895,6 +2285,7 @@ async fn cmd_plan(args: &[String]) -> ! {
     let mut trace_file: Option<String> = None;
     let mut file_args: Vec<String> = Vec::new();
     let mut configured = false; // any explicitly-set knob ⇒ Configured mode
+    let mut view = ViewFlags::default();
 
     let take_value = |args: &[String], i: &mut usize, flag: &str| -> String {
         *i += 1;
@@ -1964,6 +2355,10 @@ async fn cmd_plan(args: &[String]) -> ! {
                 print_usage(&args[0]);
                 process::exit(0);
             }
+            tok if view.take(args, &mut i) => {
+                let _ = tok;
+                continue;
+            }
             tok if tok.starts_with('-') => {
                 eprintln!("Unknown plan option '{tok}'.");
                 process::exit(2);
@@ -1971,6 +2366,14 @@ async fn cmd_plan(args: &[String]) -> ! {
             tok => file_args.push(tok.to_string()),
         }
         i += 1;
+    }
+    let ui = view.settings_or_exit("plan");
+    // With --tui the planner is shown — unless the command line already
+    // chose the machine to run, which goes straight to the run view.
+    let planner = ui.is_some() && !(run_after && pick.is_some() && !to_targets.is_empty());
+    if planner && to_targets.len() > 1 {
+        eprintln!("capdag plan --tui plans for one target at a time: give one --to, or drop --tui");
+        process::exit(2);
     }
 
     let mut files: Vec<PathBuf> = Vec::new();
@@ -2049,7 +2452,7 @@ async fn cmd_plan(args: &[String]) -> ! {
     fab.sync_from_caps(&caps, &bookends);
 
     // ── Discover mode: no --to ──
-    if to_targets.is_empty() {
+    if to_targets.is_empty() && !planner {
         let discovered = match fab.discover_convergent_targets(&sources, max_depth) {
             Ok(t) => t,
             Err(e) => {
@@ -2195,8 +2598,10 @@ async fn cmd_plan(args: &[String]) -> ! {
         }
     };
 
-    let mk_request = |targets: Vec<capdag::MediaUrn>| p::PlanRequest {
-        sources: sources.clone(),
+    // Owned, so the planner can keep asking for requests as it is shown.
+    let request_sources = sources.clone();
+    let mk_request = move |targets: Vec<capdag::MediaUrn>| p::PlanRequest {
+        sources: request_sources.clone(),
         targets: p::TargetSpec::Exact(targets),
         convergence: p::ConvergencePolicy {
             presence: presence.clone(),
@@ -2217,6 +2622,81 @@ async fn cmd_plan(args: &[String]) -> ! {
         max_paths,
         max_candidates,
     };
+
+    // ── The planner, in the terminal ──
+    if planner {
+        let settings = ui.expect("the planner is shown only with --tui");
+        let discovered = match fab.discover_convergent_targets(&sources, max_depth) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("{e}");
+                process::exit(1);
+            }
+        };
+        let mut targets: Vec<capdag::tui::app::plan::PlannerTarget> = discovered
+            .targets
+            .iter()
+            .map(|t| capdag::tui::app::plan::PlannerTarget {
+                media: t.media_def.clone(),
+                title: registry
+                    .get_cached_media_def(&t.media_def.to_string())
+                    .map(|d| d.title)
+                    .unwrap_or_else(|| t.display_name.clone()),
+                apex: t.apex.clone(),
+                steps: t.min_total_steps,
+            })
+            .collect();
+        // One --to: plan for it at once. One that names several reachable
+        // targets leaves exactly those to choose from.
+        let chosen = if let Some(target) = target_urns.first() {
+            targets.iter().position(|t| t.media.is_equivalent(target).unwrap_or(false))
+        } else if let Some((_, nodes)) = ambiguous_targets.first() {
+            targets.retain(|t| nodes.iter().any(|n| n.is_equivalent(&t.media).unwrap_or(false)));
+            None
+        } else {
+            None
+        };
+        if !to_targets.is_empty() && chosen.is_none() && ambiguous_targets.is_empty() {
+            eprintln!("--to '{}' is not among the reachable targets", to_targets[0]);
+            process::exit(1);
+        }
+        let spec = capdag::tui::app::plan::PlannerSpec {
+            files: files.clone(),
+            sources: groups.clone(),
+            targets,
+            chosen,
+            dead_ends: discovered.dead_end_sources.clone(),
+            fab: Arc::new(fab),
+            registry: registry.clone(),
+            request_for: Box::new(move |target| mk_request(vec![target])),
+            save_to: save.as_ref().map(PathBuf::from),
+        };
+        match capdag::tui::app::plan::plan_session(spec, settings).await {
+            Ok(capdag::tui::app::plan::PlannerOutcome::Closed) => process::exit(0),
+            Ok(capdag::tui::app::plan::PlannerOutcome::Run { notation, rank }) => {
+                let file_strings: Vec<String> =
+                    files.iter().map(|f| f.to_string_lossy().into_owned()).collect();
+                execute_notation(
+                    notation,
+                    &format!("plan candidate [{rank}]"),
+                    None,
+                    &file_strings,
+                    Vec::new(),
+                    None,
+                    dev_binaries,
+                    trace_file,
+                    output_dir,
+                    force,
+                    ui,
+                )
+                .await
+            }
+            Err(e) => {
+                eprintln!("capdag plan: {e}");
+                process::exit(1);
+            }
+        }
+    }
 
     // ── Ambiguous general targets: present every option as machine notation ──
     // A `--to` that names several reachable targets is a question with several
@@ -2349,6 +2829,7 @@ async fn cmd_plan(args: &[String]) -> ! {
             trace_file,
             output_dir,
             force,
+            ui,
         )
         .await
     }
@@ -2858,10 +3339,8 @@ async fn cmd_cap(args: &[String]) -> ! {
         trace_sink,
         output_dir.clone().unwrap_or_else(|| PathBuf::from(".")),
     ));
-    let runtime: Arc<dyn EngineRuntime> = cli_runtime.clone();
-
     arm_ctrl_c(cli_runtime.clone());
-    let (progress, log_fn) = progress_hooks();
+    let (observer, mut events) = RunObserver::new();
 
     // One run per input: stdin and a live source are a single run each, and a
     // cap that takes no input is run once, on nothing.
@@ -2902,7 +3381,7 @@ async fn cmd_cap(args: &[String]) -> ! {
     let multi_run = runs.len() > 1;
 
     let mut end = RunEnd::Completed;
-    for (stem, input) in runs {
+    for (index, (stem, input)) in runs.into_iter().enumerate() {
         let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
         let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
         if let (Some(slot), Some(input)) = (&input_slot_id, input) {
@@ -2911,31 +3390,43 @@ async fn cmd_cap(args: &[String]) -> ! {
             initial_is_sequence.insert(slot.clone(), matches!(input, PlanInput::LiveReference { .. }));
             initial_inputs.insert(slot.clone(), input);
         }
-        let (strand, result) = run_strand(
-            strand.clone(),
-            runtime.clone(),
-            initial_inputs,
-            initial_is_sequence,
-            cap_arguments.clone(),
-            progress.clone(),
-            log_fn.clone(),
-        )
-        .await;
+        let key = RunKey {
+            run: index,
+            strand: 0,
+        };
+        let planned_strand = PlannedStrand {
+            strand: strand.clone(),
+            inputs: initial_inputs,
+            is_sequence: initial_is_sequence,
+            cap_arguments: cap_arguments.clone(),
+        };
+        let handle = match spawn_strand(&cli_runtime, &observer, key, planned_strand, None) {
+            Ok(handle) => handle.task,
+            Err((strand, e)) => tokio::spawn(async move { (strand, Err(e)) }),
+        };
+        let (strand, result) = match await_strand_printing(handle, &mut events).await {
+            Ok(finished) => finished,
+            Err(join) => {
+                eprintln!("the run panicked: {join}");
+                process::exit(RunEnd::Failed.exit_code());
+            }
+        };
         // Several inputs must never interleave raw results on stdout — force
         // file mode.
-        let effective_dir = if multi_run {
-            Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
-        } else {
-            output_dir.clone()
-        };
-        end = end.max(finish_strand(
-            &strand,
-            result,
-            effective_dir,
-            force_overwrite,
+        let target = EmitTarget {
+            output_dir: if multi_run {
+                Some(output_dir.clone().unwrap_or_else(|| PathBuf::from(".")))
+            } else {
+                output_dir.clone()
+            },
+            force: force_overwrite,
             stem,
-            &cli_runtime,
-        ));
+        };
+        let report = finish_strand(&strand, result, &target, &mut std::io::stdout(), &cli_runtime);
+        for note in &report.notes {
+            eprintln!("{note}");
+        }
+        end = end.max(report.end);
     }
 
     process::exit(end.exit_code());

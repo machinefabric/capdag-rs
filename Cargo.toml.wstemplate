@@ -92,21 +92,64 @@ default-features = false
 features = ["png"]
 optional = true
 
+# The terminal interface (tui/ module): machines and their runs drawn as
+# graphs. Optional — only the CLI binary enables `tui`; a host embedding the
+# library (the engine) never compiles a terminal stack.
+[dependencies.ratatui]
+version = "0.30"
+optional = true
+
+[dependencies.crossterm]
+version = "0.29"
+features = ["event-stream"]
+optional = true
+
+[dependencies.futures-util]
+version = "0.3"
+optional = true
+
+[dependencies.unicode-width]
+version = "0.2"
+optional = true
+
+[dependencies.unicode-segmentation]
+version = "1"
+optional = true
+
 [features]
 capture = ["dep:ffmpeg-bundle", "dep:image"]
+tui = [
+    "dep:ratatui",
+    "dep:crossterm",
+    "dep:futures-util",
+    "dep:unicode-width",
+    "dep:unicode-segmentation",
+    # Previews of what a run produced: an image is drawn in half blocks.
+    "dep:image",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+]
 
 [[bin]]
 name = "capdag"
 path = "src/bin/capdag.rs"
 # The CLI is a capture-capable host (it resolves device references for
-# machines it runs) — built by the workspace build tool, which passes the feature.
-required-features = ["capture"]
+# machines it runs) with a terminal interface — built by the workspace build
+# tool, which passes both features.
+required-features = ["capture", "tui"]
 
 [[test]]
 name = "dev_cartridge_e2e"
 # Exercises the built CLI binary (CARGO_BIN_EXE_capdag), which itself
-# requires the capture feature.
-required-features = ["capture"]
+# requires the capture and tui features.
+required-features = ["capture", "tui"]
+
+[[test]]
+name = "tui_session"
+# Drives the terminal run view end to end on the test cartridge.
+required-features = ["tui"]
 
 [dev-dependencies]
 serial_test = "3.0"

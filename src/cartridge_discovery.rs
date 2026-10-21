@@ -121,9 +121,15 @@ pub async fn probe_cartridge_cap_groups(path: &Path) -> anyhow::Result<Vec<CapGr
     let mut child = crate::bifaci::launch::tokio_command(path)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to spawn cartridge {:?}: {}", path, e))?;
+    let stderr = crate::bifaci::launch::drain_stderr_tail(
+        child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("cartridge {:?} stderr pipe missing", path))?,
+    );
 
     let stdin = child
         .stdin
@@ -137,9 +143,19 @@ pub async fn probe_cartridge_cap_groups(path: &Path) -> anyhow::Result<Vec<CapGr
     let mut reader = FrameReader::new(BufReader::new(stdout));
     let mut writer = FrameWriter::new(BufWriter::new(stdin));
 
-    let result = handshake(&mut reader, &mut writer)
-        .await
-        .map_err(|e| anyhow::anyhow!("cartridge {:?} HELLO failed: {}", path, e))?;
+    let result = match handshake(&mut reader, &mut writer).await {
+        Ok(result) => result,
+        Err(e) => {
+            let _ = child.start_kill();
+            return Err(anyhow::anyhow!(
+                crate::bifaci::launch::with_stderr(
+                    format!("cartridge {:?} HELLO failed: {}", path, e),
+                    stderr,
+                )
+                .await
+            ));
+        }
+    };
 
     // SIGKILL immediately — we have the manifest and don't wait for a clean exit.
     if let Err(e) = child.start_kill() {
