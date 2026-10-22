@@ -245,6 +245,7 @@ mod tests {
         // Seed the registry with the schema-bearing media def; caps no
         // longer carry inline media defs.
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:fmt=json;record;user-data".to_string(),
             media_type: "application/json".to_string(),
@@ -288,6 +289,7 @@ mod tests {
         // Seed the registry with the schema-bearing media def; caps no
         // longer carry inline media defs.
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:fmt=json;record;user-data".to_string(),
             media_type: "application/json".to_string(),
@@ -332,6 +334,7 @@ mod tests {
         // Seed the registry with the schema-bearing media def; caps no
         // longer carry inline media defs.
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:fmt=json;query-result;record".to_string(),
             media_type: "application/json".to_string(),
@@ -364,6 +367,7 @@ mod tests {
         // validator should resolve the URN and short-circuit on
         // "no schema → nothing to enforce".
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: MEDIA_STRING.to_string(),
             media_type: "text/plain".to_string(),
@@ -457,6 +461,7 @@ mod tests {
         });
 
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:user-data;enc=utf-8;record".to_string(),
             media_type: "application/json".to_string(),
@@ -511,6 +516,7 @@ mod tests {
             ("media:fmt=json;record", "application/json"),
         ] {
             registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+                dims: Vec::new(),
                 version: 0,
                 urn: urn.to_string(),
                 media_type: mt.to_string(),

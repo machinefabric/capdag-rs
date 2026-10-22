@@ -1727,6 +1727,7 @@ mod tests {
             .expect("Failed to build test cap URN");
 
         Cap {
+            dims: Vec::new(),
             urn: cap_urn,
             version: 1,
             title: title.to_string(),

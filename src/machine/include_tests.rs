@@ -148,6 +148,7 @@ fn test12803_an_included_machine_is_its_steps_written_in() {
     for urn in [SERIES, COMPARISON, RESIDUALS, "media:numeric;score"] {
         if registry.get_cached_media_def(urn).is_none() {
             registry.insert_cached_media_def_for_test(StoredMediaDef {
+                dims: Vec::new(),
                 version: 0,
                 urn: urn.to_string(),
                 media_type: "application/json".to_string(),

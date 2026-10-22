@@ -204,6 +204,7 @@ pub fn testcartridge_registry(tag: &str, extra: Vec<capdag::Cap>) -> std::sync::
     for cap in &caps {
         for arg in cap.get_args() {
             registry.insert_cached_media_def_for_test(capdag::StoredMediaDef {
+                dims: Vec::new(),
                 version: 0,
                 urn: arg.media_urn.clone(),
                 media_type: "application/octet-stream".to_string(),

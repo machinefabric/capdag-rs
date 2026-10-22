@@ -334,8 +334,17 @@ pub struct MediaDef {
     /// triple-quoted literal string (`'''...'''`) so markdown
     /// punctuation and newlines pass through unchanged; the JSON
     /// generator escapes newlines per JSON rules on output.
+    ///
+    /// Only what is specific to this media def: what the dims it was built
+    /// from mean is documented with each dim (see `dims`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation: Option<String>,
+    /// The dims this media def was built from, and the value chosen from
+    /// each, in the order its source references them. Each dim is published
+    /// on its own (`FabricRegistry::get_dim`); a reader shows its
+    /// documentation beside `documentation`. Empty when built from no dim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dims: Vec<crate::DimRef>,
     /// Optional validation rules for this media type
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation: Option<MediaValidation>,
@@ -362,6 +371,7 @@ impl MediaDef {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -383,6 +393,7 @@ impl MediaDef {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -405,6 +416,7 @@ impl MediaDef {
             schema: Some(schema),
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -426,6 +438,7 @@ impl MediaDef {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: Some(validation),
             metadata: None,
             extensions: Vec::new(),
@@ -474,8 +487,10 @@ pub struct ResolvedMediaDef {
     ///
     /// Rendered in media info panels, the cap navigator,
     /// capdag-dot-com, and anywhere else a rich-text explanation of
-    /// the media def is useful.
+    /// the media def is useful. Only what is specific to the media def.
     pub documentation: Option<String>,
+    /// The dims the media def was built from, and the value chosen from each.
+    pub dims: Vec<crate::DimRef>,
     /// Optional validation rules from the media definition
     pub validation: Option<MediaValidation>,
     /// Optional metadata (arbitrary key-value pairs for display/categorization)
@@ -588,6 +603,7 @@ pub async fn resolve_media_urn(
             title: Some(stored_spec.title),
             description: stored_spec.description,
             documentation: stored_spec.documentation,
+            dims: stored_spec.dims,
             validation: stored_spec.validation,
             metadata: stored_spec.metadata,
             extensions: stored_spec.extensions,
@@ -687,6 +703,7 @@ mod tests {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -717,6 +734,7 @@ mod tests {
             schema: Some(schema.clone()),
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -769,6 +787,7 @@ mod tests {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -844,6 +863,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -864,6 +884,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -884,6 +905,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -904,6 +926,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -924,6 +947,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -946,6 +970,7 @@ mod tests {
             title: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -963,6 +988,7 @@ mod tests {
     async fn test105_metadata_propagation() {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:custom-setting".to_string(),
             media_type: "text/plain".to_string(),
@@ -993,6 +1019,7 @@ mod tests {
     async fn test106_metadata_with_validation() {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:bounded-number;numeric".to_string(),
             media_type: "text/plain".to_string(),
@@ -1041,6 +1068,7 @@ mod tests {
     async fn test107_extensions_propagation() {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:custom-pdf".to_string(),
             media_type: "application/pdf".to_string(),
@@ -1071,6 +1099,7 @@ mod tests {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: vec!["json".to_string()],
@@ -1088,6 +1117,7 @@ mod tests {
     async fn test893_extensions_with_metadata_and_validation() {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:custom-output;fmt=json".to_string(),
             media_type: "application/json".to_string(),
@@ -1125,6 +1155,7 @@ mod tests {
     async fn test894_multiple_extensions() {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:ext=jpeg;image".to_string(),
             media_type: "image/jpeg".to_string(),
@@ -1159,6 +1190,7 @@ mod tests {
         let registry = test_registry().await;
         let body = "## Markdown body\n\nWith `code` and a [link](https://example.com).";
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:doc-test;enc=utf-8".to_string(),
             media_type: "text/plain".to_string(),
@@ -1192,6 +1224,7 @@ mod tests {
     fn test289_media_def_def_documentation_round_trip() {
         let body = "Body with newline\nand backslash \\";
         let with_doc = MediaDef {
+            dims: Vec::new(),
             urn: "media:rt-test".to_string(),
             media_type: "text/plain".to_string(),
             title: "Round Trip".to_string(),
@@ -1216,6 +1249,7 @@ mod tests {
             schema: None,
             description: None,
             documentation: None,
+            dims: Vec::new(),
             validation: None,
             metadata: None,
             extensions: Vec::new(),
@@ -1235,6 +1269,7 @@ mod tests {
     #[test]
     fn test1133_media_def_def_documentation_lifecycle() {
         let mut spec = MediaDef {
+            dims: Vec::new(),
             urn: "media:doc-test".to_string(),
             media_type: "text/plain".to_string(),
             title: "Doc Test".to_string(),
@@ -1258,6 +1293,38 @@ mod tests {
         assert!(spec.get_documentation().is_none());
         // clearer must not touch description
         assert_eq!(spec.description.as_deref(), Some("short"));
+    }
+
+    // TEST1970: a media def's `dims` survive from the registry body through
+    // StoredMediaDef to MediaDef and back, in order; a media def built from
+    // no dim carries no `dims` key; an entry with a key this capdag does not
+    // know is refused.
+    #[test]
+    fn test1970_media_def_dims_survive_and_refuse_unknown_keys() {
+        use crate::fabric::registry::StoredMediaDef;
+        let body = r#"{"urn":"media:document;ext=pdf","version":2,"media_type":"application/pdf","title":"PDF Document","documentation":"Only about PDFs.","dims":[{"dim":"file-type","value":"pdf"},{"dim":"medium","value":"document"}],"extensions":["pdf"]}"#;
+        let stored: StoredMediaDef = serde_json::from_str(body).expect("a media def with dims parses");
+        let expected = vec![
+            crate::DimRef::new("file-type", "pdf"),
+            crate::DimRef::new("medium", "document"),
+        ];
+        assert_eq!(stored.dims, expected);
+        let def = stored.to_media_def_def();
+        assert_eq!(def.dims, expected);
+        let json = serde_json::to_value(&def).unwrap();
+        assert_eq!(
+            json["dims"],
+            serde_json::json!([{"dim":"file-type","value":"pdf"},{"dim":"medium","value":"document"}])
+        );
+        let back: MediaDef = serde_json::from_value(json).unwrap();
+        assert_eq!(back.dims, expected);
+
+        let bare = MediaDef::new("media:void", "application/x-void", "Void");
+        assert!(serde_json::to_value(&bare).unwrap().get("dims").is_none());
+
+        let extra = body.replace(r#""value":"pdf"}"#, r#""value":"pdf","title":"PDF"}"#);
+        let err = serde_json::from_str::<StoredMediaDef>(&extra).expect_err("an unknown dims key is refused");
+        assert!(err.to_string().contains("title"), "{err}");
     }
 
     // TEST12835: the one decision of whether a value breaks a media

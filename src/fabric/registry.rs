@@ -1,8 +1,10 @@
-//! Unified fabric registry: caps + media defs.
+//! Unified fabric registry: caps, media defs, aliases and dims.
 //!
-//! Two domain payload types:
+//! Four domain payload types:
 //! - `Cap` (cap definitions) at `<base>/caps/<sha256-of-canonical-urn>`
 //! - `StoredMediaDef` (media defs) at `<base>/media/<sha256-of-canonical-urn>`
+//! - `StoredAlias` (aliases) at `<base>/aliases/<sha256-of-name>`
+//! - `StoredDim` (dims) at `<base>/dims/<sha256-of-name>`
 //!
 //! On disk:
 //! - `<cache_dir>/caps/<sha256>.json`
@@ -18,8 +20,14 @@
 //! to fetch, the cap is NOT cached. This guarantees that any cap landing
 //! in the cap cache has every one of its referenced media defs already in
 //! the media cache (and the extension index).
+//!
+//! A cap or media def is likewise cached only once every dim it names
+//! (`dims`) is cached, at the version the manifest pins, with the value it
+//! names. So a reader holding a cached definition can always read the
+//! documentation of the dims it was built from (`get_cached_dim`).
 
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
+use crate::fabric::dim::{is_dim_name, DimRef, StoredDim};
 use crate::media::spec::MediaDef;
 use crate::Cap;
 use crate::StoredAlias;
@@ -137,6 +145,9 @@ pub struct StoredMediaDef {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation: Option<String>,
+    /// The dims this media def was built from (see `MediaDef::dims`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dims: Vec<crate::DimRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation: Option<crate::MediaValidation>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,6 +170,7 @@ impl StoredMediaDef {
             schema: self.schema.clone(),
             description: self.description.clone(),
             documentation: self.documentation.clone(),
+            dims: self.dims.clone(),
             validation: self.validation.clone(),
             metadata: self.metadata.clone(),
             extensions: self.extensions.clone(),
@@ -183,6 +195,13 @@ struct MediaCacheEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AliasCacheEntry {
     alias: StoredAlias,
+    cached_at: u64,
+    ttl_hours: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DimCacheEntry {
+    dim: StoredDim,
     cached_at: u64,
     ttl_hours: u64,
 }
@@ -255,7 +274,8 @@ fn normalize_media_urn(urn: &str) -> Result<String, FabricRegistryError> {
 
 /// Distinguishes domain on the background-fetch queue. Pairs URN with
 /// defver so the consumer always hits the right R2 path. Alias keys carry
-/// the (normalized) alias name instead of a URN.
+/// the (normalized) alias name instead of a URN. Dims are never queued: they
+/// are fetched with the definitions that name them, or by `get_dim`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FetchKey {
     Cap { urn: String, defver: u32 },
@@ -287,6 +307,12 @@ pub struct Manifest {
     /// `name -> target` mapping) lives at `aliases/<sha256-of-name>/<defver>.json`.
     #[serde(default)]
     pub aliases: HashMap<String, u32>,
+    /// Map from dim name to its per-definition version. The body (the dim's
+    /// title, documentation and values) lives at
+    /// `dims/<sha256-of-name>/<defver>.json`. Every dim a cap or media def of
+    /// the snapshot names is here. Required: a manifest without it is not one
+    /// this library reads.
+    pub dims: HashMap<String, u32>,
 }
 
 impl Manifest {
@@ -299,6 +325,7 @@ impl Manifest {
             caps: HashMap::new(),
             media: HashMap::new(),
             aliases: HashMap::new(),
+            dims: HashMap::new(),
         }
     }
 }
@@ -322,6 +349,10 @@ pub struct FabricRegistry {
     /// `aliases/<sha>/<defver>.json` cache on disk and the background/sync
     /// fetch path, filtered to the pinned manifest's defvers.
     cached_aliases: Arc<Mutex<HashMap<String, StoredAlias>>>,
+    /// Dim name → resolved `StoredDim`. Populated from the
+    /// `dims/<sha>/<defver>.json` cache on disk and the fetch path, filtered
+    /// to the pinned manifest's defvers.
+    cached_dims: Arc<Mutex<HashMap<String, StoredDim>>>,
     /// Lower-case extension → list of canonical media URNs.
     extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     config: RegistryConfig,
@@ -491,8 +522,9 @@ impl FabricRegistry {
         let caps_dir = cache_dir.join("caps");
         let media_dir = cache_dir.join("media");
         let aliases_dir = cache_dir.join("aliases");
+        let dims_dir = cache_dir.join("dims");
         let manifests_dir = cache_dir.join("manifests");
-        for d in [&caps_dir, &media_dir, &aliases_dir, &manifests_dir] {
+        for d in [&caps_dir, &media_dir, &aliases_dir, &dims_dir, &manifests_dir] {
             fs::create_dir_all(d).map_err(|e| {
                 FabricRegistryError::CacheError(format!(
                     "Failed to create cache directory {:?}: {}",
@@ -530,39 +562,31 @@ impl FabricRegistry {
         // alias body is fetched fresh on demand against the (just re-fetched)
         // manifest, so a mutable channel can never serve a stale body under a
         // reused defver. The fresh bytes still write through to the cache.
-        let (mut cached_caps_map, mut cached_specs_map, mut cached_aliases_map) =
+        let (mut cached_caps_map, mut cached_specs_map, mut cached_aliases_map, mut cached_dims_map) =
             if config.bypass_cache {
-                (HashMap::new(), HashMap::new(), HashMap::new())
+                (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
             } else {
                 (
                     Self::load_all_cached_caps(&caps_dir)?,
                     Self::load_all_cached_media_defs(&media_dir)?,
                     Self::load_all_cached_aliases(&aliases_dir)?,
+                    Self::load_all_cached_dims(&dims_dir)?,
                 )
             };
-        // Filter loaded caches by manifest pin: only retain entries
-        // whose URN's defver in the manifest matches the cached entry's
-        // own version. At v0 the manifest is empty and we retain
-        // everything (the load function only walks flat paths anyway
-        // because no versioned subdirs are written under v0 mode).
-        if manifest_version >= 1 {
-            cached_caps_map
-                .retain(|urn, cap| manifest.caps.get(urn).copied().unwrap_or(0) == cap.version);
-            cached_specs_map
-                .retain(|urn, spec| manifest.media.get(urn).copied().unwrap_or(0) == spec.version);
-            cached_aliases_map.retain(|name, alias| {
-                manifest.aliases.get(name).copied().unwrap_or(0) == alias.version
-            });
-        } else {
-            // Aliases are a versioned-regime concept; there is no v0
-            // flat-path alias. At v0 the alias cache is always empty.
-            cached_aliases_map.clear();
-        }
+        retain_pinned(
+            &manifest,
+            manifest_version,
+            &mut cached_caps_map,
+            &mut cached_specs_map,
+            &mut cached_aliases_map,
+            &mut cached_dims_map,
+        );
         let extension_index_map = Self::build_extension_index(&cached_specs_map);
 
         let cached_caps = Arc::new(Mutex::new(cached_caps_map));
         let cached_media_defs = Arc::new(Mutex::new(cached_specs_map));
         let cached_aliases = Arc::new(Mutex::new(cached_aliases_map));
+        let cached_dims = Arc::new(Mutex::new(cached_dims_map));
         let extension_index = Arc::new(Mutex::new(extension_index_map));
         let manifest_arc = Arc::new(Mutex::new(manifest));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
@@ -579,6 +603,7 @@ impl FabricRegistry {
                     Arc::clone(&cached_caps),
                     Arc::clone(&cached_media_defs),
                     Arc::clone(&cached_aliases),
+                    Arc::clone(&cached_dims),
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
@@ -597,6 +622,7 @@ impl FabricRegistry {
             cached_caps,
             cached_media_defs,
             cached_aliases,
+            cached_dims,
             extension_index,
             config,
             manifest_version,
@@ -737,6 +763,7 @@ impl FabricRegistry {
             &self.cache_dir,
             &self.cached_caps,
             &self.cached_media_defs,
+            &self.cached_dims,
             &self.extension_index,
             &self.manifest,
             &self.offline_flag,
@@ -993,6 +1020,91 @@ impl FabricRegistry {
                 m.aliases.insert(name, version);
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // DIM API
+    // -------------------------------------------------------------------------
+
+    /// Resolve a dim name to its defver under the pinned manifest. Dims exist
+    /// only in the versioned regime: at v0 any dim lookup is a hard
+    /// `NotFound`. At v >= 1 the name must be in the manifest's `dims` map.
+    fn dim_defver(&self, name: &str) -> Result<u32, FabricRegistryError> {
+        if self.manifest_version == 0 {
+            return Err(FabricRegistryError::NotFound(format!(
+                "dim '{}' cannot resolve: registry is pinned at v0 (dims are a versioned-regime concept)",
+                name
+            )));
+        }
+        let m = self.manifest.lock().map_err(|e| {
+            FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
+        })?;
+        m.dims.get(name).copied().ok_or_else(|| {
+            FabricRegistryError::NotFound(format!(
+                "dim '{}' is not part of manifest v{}",
+                name, self.manifest_version
+            ))
+        })
+    }
+
+    /// Fetch a dim's definition — its title, documentation and values, each
+    /// value with its own — by name (cache-first, then network), at the
+    /// version the pinned manifest names.
+    pub async fn get_dim(&self, name: &str) -> Result<StoredDim, FabricRegistryError> {
+        if !is_dim_name(name) {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "'{}' is not a dim name",
+                name
+            )));
+        }
+        if let Some(dim) = self.get_cached_dim(name) {
+            return Ok(dim);
+        }
+        let defver = self.dim_defver(name)?;
+        fetch_one_dim(
+            &self.client,
+            &self.cache_dir,
+            &self.cached_dims,
+            &self.offline_flag,
+            &self.config,
+            &self.cache_revision_tx,
+            name,
+            defver,
+        )
+        .await
+    }
+
+    /// Synchronous, in-memory-only dim lookup. Every dim a cached cap or
+    /// media def names is cached with it, so a reader holding a definition
+    /// from this registry finds its dims here.
+    pub fn get_cached_dim(&self, name: &str) -> Option<StoredDim> {
+        self.cached_dims
+            .lock()
+            .ok()
+            .and_then(|m| m.get(name).cloned())
+    }
+
+    /// Look up a dim name's pinned defver under this registry's manifest
+    /// without fetching the body.
+    pub fn dim_defver_for(&self, name: &str) -> Result<u32, FabricRegistryError> {
+        self.dim_defver(name)
+    }
+
+    /// Test-only: insert a dim directly into the in-memory cache and register
+    /// its defver in the manifest, bypassing the network. Mirrors
+    /// `insert_cached_alias_for_test`.
+    pub fn insert_cached_dim_for_test(&self, dim: StoredDim) {
+        let name = dim.name.clone();
+        let version = dim.version;
+        if let Ok(mut guard) = self.cached_dims.lock() {
+            guard.insert(name.clone(), dim);
+        }
+        if self.manifest_version >= 1 {
+            if let Ok(mut m) = self.manifest.lock() {
+                m.dims.insert(name, version);
+            }
+        }
+        publish_cache_revision(&self.cache_revision_tx);
     }
 
     /// Get multiple caps at once - fails if any cap is not available.
@@ -1275,6 +1387,7 @@ impl FabricRegistry {
         let cache_dir = self.cache_dir.clone();
         let cached_caps = Arc::clone(&self.cached_caps);
         let cached_media_defs = Arc::clone(&self.cached_media_defs);
+        let cached_dims = Arc::clone(&self.cached_dims);
         let extension_index = Arc::clone(&self.extension_index);
         let manifest = Arc::clone(&self.manifest);
         let offline_flag = Arc::clone(&self.offline_flag);
@@ -1306,6 +1419,7 @@ impl FabricRegistry {
                 &cache_dir,
                 &cached_caps,
                 &cached_media_defs,
+                &cached_dims,
                 &extension_index,
                 &manifest,
                 &offline_flag,
@@ -1437,6 +1551,7 @@ impl FabricRegistry {
                         &self.cache_dir,
                         &self.cached_caps,
                         &self.cached_media_defs,
+                        &self.cached_dims,
                         &self.extension_index,
                         &self.manifest,
                         &self.offline_flag,
@@ -1663,7 +1778,10 @@ impl FabricRegistry {
             &self.client,
             &self.cache_dir,
             &self.cached_media_defs,
+            &self.cached_dims,
             &self.extension_index,
+            &self.manifest,
+            self.manifest_version,
             &self.offline_flag,
             &self.config,
             &self.cache_revision_tx,
@@ -1739,7 +1857,10 @@ impl FabricRegistry {
                         &self.client,
                         &self.cache_dir,
                         &self.cached_media_defs,
+                        &self.cached_dims,
                         &self.extension_index,
+                        &self.manifest,
+                        self.manifest_version,
                         &self.offline_flag,
                         &self.config,
                         &self.cache_revision_tx,
@@ -1990,6 +2111,9 @@ impl FabricRegistry {
         if let Ok(mut g) = self.cached_aliases.lock() {
             g.clear();
         }
+        if let Ok(mut g) = self.cached_dims.lock() {
+            g.clear();
+        }
         if let Ok(mut g) = self.extension_index.lock() {
             g.clear();
         }
@@ -2005,7 +2129,7 @@ impl FabricRegistry {
         // tolerates a peer having done the same thing first. The end state is
         // the same — an empty cache — and no peer is ever left with the tree
         // missing underneath it.
-        for sub in ["caps", "media", "aliases", "manifests"] {
+        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
             let directory = self.cache_dir.join(sub);
             fs::create_dir_all(&directory).map_err(|e| {
                 FabricRegistryError::CacheError(format!(
@@ -2328,6 +2452,74 @@ impl FabricRegistry {
         Ok(aliases)
     }
 
+    /// Walk the dim cache directory (`dims/<sha>/<defver>.json`) and load
+    /// every cached `StoredDim` keyed by its name. Dims are versioned-only —
+    /// there is no v0 flat path and no TTL expiry (a published defver is
+    /// immutable). A cached body this library cannot hold is dropped like an
+    /// unparseable one, and fetched anew.
+    fn load_all_cached_dims(
+        dims_dir: &Path,
+    ) -> Result<HashMap<String, StoredDim>, FabricRegistryError> {
+        let mut dims = HashMap::new();
+        if !dims_dir.exists() {
+            return Ok(dims);
+        }
+        let mut stack: Vec<PathBuf> = vec![dims_dir.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            // A directory removed between its parent being listed and it
+            // being opened contributes nothing. See `load_all_cached_aliases`.
+            let listing = match fs::read_dir(&dir) {
+                Ok(listing) => listing,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(FabricRegistryError::CacheError(format!(
+                        "Failed to read dim cache directory {:?}: {}",
+                        dir, e
+                    )))
+                }
+            };
+            for entry in listing {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::warn!("Failed to read dim cache entry: {}", e);
+                        continue;
+                    }
+                };
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!("Failed to read dim cache file {:?}: {}", path, e);
+                        continue;
+                    }
+                };
+                let cache_entry: DimCacheEntry = match serde_json::from_str(&content) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::warn!("Failed to parse dim cache file {:?}: {}", path, e);
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                };
+                if let Err(e) = cache_entry.dim.validate() {
+                    tracing::warn!("Dropping dim cache file {:?}: {}", path, e);
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
+                dims.insert(cache_entry.dim.name.clone(), cache_entry.dim);
+            }
+        }
+        Ok(dims)
+    }
+
     fn build_extension_index(
         specs: &HashMap<String, StoredMediaDef>,
     ) -> HashMap<String, Vec<String>> {
@@ -2369,10 +2561,12 @@ impl FabricRegistry {
         let _ = fs::create_dir_all(cache_dir.join("caps"));
         let _ = fs::create_dir_all(cache_dir.join("media"));
         let _ = fs::create_dir_all(cache_dir.join("aliases"));
+        let _ = fs::create_dir_all(cache_dir.join("dims"));
         let _ = fs::create_dir_all(cache_dir.join("manifests"));
         let cached_caps = Arc::new(Mutex::new(HashMap::new()));
         let cached_media_defs = Arc::new(Mutex::new(HashMap::new()));
         let cached_aliases = Arc::new(Mutex::new(HashMap::new()));
+        let cached_dims = Arc::new(Mutex::new(HashMap::new()));
         let extension_index = Arc::new(Mutex::new(HashMap::new()));
         let manifest_arc = Arc::new(Mutex::new(Manifest::empty(manifest_version)));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
@@ -2390,6 +2584,7 @@ impl FabricRegistry {
                     Arc::clone(&cached_caps),
                     Arc::clone(&cached_media_defs),
                     Arc::clone(&cached_aliases),
+                    Arc::clone(&cached_dims),
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
@@ -2408,6 +2603,7 @@ impl FabricRegistry {
             cached_caps,
             cached_media_defs,
             cached_aliases,
+            cached_dims,
             extension_index,
             config,
             manifest_version,
@@ -2661,6 +2857,236 @@ fn cache_alias_entry(
     Ok(())
 }
 
+/// Build the R2 URL for a per-dim object at the given defver. Dims are keyed
+/// by `sha256(name)` and are versioned-only (defver >= 1).
+fn dim_url_and_cache_path(
+    cache_dir: &Path,
+    config: &RegistryConfig,
+    name: &str,
+    defver: u32,
+) -> (String, PathBuf) {
+    let mut hasher = Sha256::new();
+    hasher.update(name.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    (
+        format!("{}/dims/{}/{}.json", config.registry_base_url, hash, defver),
+        cache_dir
+            .join("dims")
+            .join(&hash)
+            .join(format!("{}.json", defver)),
+    )
+}
+
+/// Fetch a single dim body at its pinned defver, check it, and cache it in
+/// memory and on disk. The fetched body's `name` and `version` must match
+/// what was requested — a registry that serves another object is a hard
+/// error, never silently accepted — and the body must hold
+/// ([`StoredDim::validate`]).
+#[allow(clippy::too_many_arguments)]
+async fn fetch_one_dim(
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
+    offline_flag: &Arc<AtomicBool>,
+    config: &RegistryConfig,
+    cache_revision_tx: &watch::Sender<u64>,
+    name: &str,
+    defver: u32,
+) -> Result<StoredDim, FabricRegistryError> {
+    if offline_flag.load(Ordering::Relaxed) {
+        return Err(FabricRegistryError::NetworkBlocked(format!(
+            "offline: cannot fetch dim '{}'",
+            name
+        )));
+    }
+    if defver < 1 {
+        return Err(FabricRegistryError::NotFound(format!(
+            "dim '{}' has non-positive defver {}; dims are versioned-only",
+            name, defver
+        )));
+    }
+    let (url, cache_path) = dim_url_and_cache_path(cache_dir, config, name, defver);
+    let (status, body) = fetch_body(client, &url, &format!("fetch dim '{name}'"))
+        .await
+        .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch dim '{}': {}", name, e)))?;
+    if !status.is_success() {
+        return Err(FabricRegistryError::NotFound(format!(
+            "dim '{}' not found in registry (HTTP {}) at {}",
+            name, status, url
+        )));
+    }
+    let dim = checked_dim(&body, name, defver)?;
+    let entry = DimCacheEntry {
+        dim: dim.clone(),
+        cached_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        ttl_hours: CACHE_DURATION_HOURS,
+    };
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            FabricRegistryError::CacheError(format!(
+                "Failed to create dim cache dir {:?}: {}",
+                parent, e
+            ))
+        })?;
+    }
+    let serialized = serde_json::to_string(&entry).map_err(|e| {
+        FabricRegistryError::CacheError(format!("Failed to serialize dim cache entry: {}", e))
+    })?;
+    fs::write(&cache_path, serialized).map_err(|e| {
+        FabricRegistryError::CacheError(format!(
+            "Failed to write dim cache file {:?}: {}",
+            cache_path, e
+        ))
+    })?;
+    if let Ok(mut guard) = cached_dims.lock() {
+        guard.insert(dim.name.clone(), dim.clone());
+    }
+    publish_cache_revision(cache_revision_tx);
+    Ok(dim)
+}
+
+/// A dim body as a registry served it, for the dim `name` at `defver`:
+/// parsed (unknown fields refused), named and versioned as requested, and
+/// holding ([`StoredDim::validate`]).
+fn checked_dim(body: &[u8], name: &str, defver: u32) -> Result<StoredDim, FabricRegistryError> {
+    let dim: StoredDim = serde_json::from_slice(body).map_err(|e| {
+        FabricRegistryError::ParseError(format!("Failed to parse dim '{}': {}", name, e))
+    })?;
+    if dim.name != name {
+        return Err(FabricRegistryError::ParseError(format!(
+            "dim object name '{}' does not match requested name '{}'",
+            dim.name, name
+        )));
+    }
+    if dim.version != defver {
+        return Err(FabricRegistryError::ParseError(format!(
+            "dim '{}' object reports version {} but manifest pins defver {}",
+            dim.name, dim.version, defver
+        )));
+    }
+    dim.validate()
+        .map_err(|e| FabricRegistryError::ValidationError(e.to_string()))?;
+    Ok(dim)
+}
+
+/// Keep, of what was loaded from the disk cache, only what the pinned
+/// manifest names at the version it names, and only definitions whose dims
+/// all survive with them. At v0 the manifest is empty and caps and media are
+/// all retained (the loaders only walk flat paths then); aliases and dims are
+/// versioned-regime concepts and are all dropped.
+///
+/// A definition whose dims did not survive is dropped here and fetched again,
+/// with its dims, when it is next asked for — so a cached definition always
+/// has its dims cached.
+fn retain_pinned(
+    manifest: &Manifest,
+    manifest_version: u32,
+    caps: &mut HashMap<String, Cap>,
+    specs: &mut HashMap<String, StoredMediaDef>,
+    aliases: &mut HashMap<String, StoredAlias>,
+    dims: &mut HashMap<String, StoredDim>,
+) {
+    if manifest_version >= 1 {
+        caps.retain(|urn, cap| manifest.caps.get(urn).copied().unwrap_or(0) == cap.version);
+        specs.retain(|urn, spec| manifest.media.get(urn).copied().unwrap_or(0) == spec.version);
+        aliases.retain(|name, alias| manifest.aliases.get(name).copied().unwrap_or(0) == alias.version);
+        dims.retain(|name, dim| manifest.dims.get(name).copied().unwrap_or(0) == dim.version);
+    } else {
+        aliases.clear();
+        dims.clear();
+    }
+    caps.retain(|_, cap| dims_resolve_in(&cap.dims, dims));
+    specs.retain(|_, spec| dims_resolve_in(&spec.dims, dims));
+}
+
+/// Whether every dim `dims` names is in `cached` with the value it names.
+fn dims_resolve_in(dims: &[DimRef], cached: &HashMap<String, StoredDim>) -> bool {
+    dims.iter().all(|r| {
+        cached
+            .get(&r.dim)
+            .map(|d| d.value(&r.value).is_some())
+            .unwrap_or(false)
+    })
+}
+
+/// Make sure every dim a definition names is cached, fetching the ones that
+/// are not at the defver the manifest pins, and that each names a value the
+/// dim declares. `owner` names the definition in errors. Nothing about the
+/// definition itself is cached here: its fetcher caches it only once this
+/// succeeds.
+#[allow(clippy::too_many_arguments)]
+async fn ensure_dims_cached(
+    owner: &str,
+    dims: &[DimRef],
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
+    manifest: &Arc<Mutex<Manifest>>,
+    manifest_version: u32,
+    offline_flag: &Arc<AtomicBool>,
+    config: &RegistryConfig,
+    cache_revision_tx: &watch::Sender<u64>,
+) -> Result<(), FabricRegistryError> {
+    crate::fabric::dim::check_dim_refs(dims)
+        .map_err(|e| FabricRegistryError::ValidationError(format!("{} dims: {}", owner, e)))?;
+    for r in dims {
+        let cached = cached_dims.lock().ok().and_then(|m| m.get(&r.dim).cloned());
+        let dim = match cached {
+            Some(dim) => dim,
+            None => {
+                if manifest_version == 0 {
+                    return Err(FabricRegistryError::NotFound(format!(
+                        "{} names dim '{}', but the registry is pinned at v0 (dims are a versioned-regime concept)",
+                        owner, r.dim
+                    )));
+                }
+                let defver = match manifest.lock() {
+                    Ok(m) => m.dims.get(&r.dim).copied(),
+                    Err(e) => {
+                        return Err(FabricRegistryError::CacheError(format!(
+                            "failed to lock manifest while resolving dims: {}",
+                            e
+                        )))
+                    }
+                };
+                let defver = defver.ok_or_else(|| {
+                    FabricRegistryError::NotFound(format!(
+                        "{} names dim '{}', which is not in manifest v{}",
+                        owner, r.dim, manifest_version
+                    ))
+                })?;
+                fetch_one_dim(
+                    client,
+                    cache_dir,
+                    cached_dims,
+                    offline_flag,
+                    config,
+                    cache_revision_tx,
+                    &r.dim,
+                    defver,
+                )
+                .await
+                .map_err(|e| {
+                    FabricRegistryError::NotFound(format!(
+                        "{} names dim '{}', which could not be fetched: {}",
+                        owner, r.dim, e
+                    ))
+                })?
+            }
+        };
+        if dim.value(&r.value).is_none() {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "{} names value '{}' of dim '{}', which the dim does not declare",
+                owner, r.value, r.dim
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Every media URN a cap definition references, normalized, each once: its
 /// `in=` and `out=`, every arg's URN and the type it accepts (its stdin
 /// source's, or its `accepts`), and every output's URN — the main one and
@@ -2704,6 +3130,7 @@ async fn fetch_one_cap_atomic(
     cache_dir: &Path,
     cached_caps: &Arc<Mutex<HashMap<String, Cap>>>,
     cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
     extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: &Arc<Mutex<Manifest>>,
     offline_flag: &Arc<AtomicBool>,
@@ -2771,7 +3198,10 @@ async fn fetch_one_cap_atomic(
             client,
             cache_dir,
             cached_media_defs,
+            cached_dims,
             extension_index,
+            manifest,
+            manifest_version,
             offline_flag,
             config,
             cache_revision_tx,
@@ -2795,7 +3225,22 @@ async fn fetch_one_cap_atomic(
         }
     }
 
-    // All referenced media defs in cache. Write the cap.
+    // Every dim the cap names, at its pinned version, with the value named.
+    ensure_dims_cached(
+        &format!("cap '{}'", normalized_urn),
+        &cap.dims,
+        client,
+        cache_dir,
+        cached_dims,
+        manifest,
+        manifest_version,
+        offline_flag,
+        config,
+        cache_revision_tx,
+    )
+    .await?;
+
+    // All referenced media defs and dims in cache. Write the cap.
     let cache_entry = CapCacheEntry {
         definition: cap.clone(),
         cached_at: SystemTime::now()
@@ -2827,13 +3272,17 @@ async fn fetch_one_cap_atomic(
     Ok(cap)
 }
 
-/// Atomic media-def fetcher.
+/// Atomic media-def fetcher: the media def is cached only once every dim it
+/// names is cached (see `ensure_dims_cached`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fetch_one_media_def(
     client: &reqwest::Client,
     cache_dir: &Path,
     cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
     extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    manifest: &Arc<Mutex<Manifest>>,
+    manifest_version: u32,
     offline_flag: &Arc<AtomicBool>,
     config: &RegistryConfig,
     cache_revision_tx: &watch::Sender<u64>,
@@ -2864,6 +3313,20 @@ pub(crate) async fn fetch_one_media_def(
             normalized_urn, e
         ))
     })?;
+
+    ensure_dims_cached(
+        &format!("media def '{}'", normalized_urn),
+        &spec.dims,
+        client,
+        cache_dir,
+        cached_dims,
+        manifest,
+        manifest_version,
+        offline_flag,
+        config,
+        cache_revision_tx,
+    )
+    .await?;
 
     let cache_entry = MediaCacheEntry {
         spec: spec.clone(),
@@ -2998,6 +3461,7 @@ async fn run_fetch_consumer(
     cached_caps: Arc<Mutex<HashMap<String, Cap>>>,
     cached_media_defs: Arc<Mutex<HashMap<String, StoredMediaDef>>>,
     cached_aliases: Arc<Mutex<HashMap<String, StoredAlias>>>,
+    cached_dims: Arc<Mutex<HashMap<String, StoredDim>>>,
     extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: Arc<Mutex<Manifest>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
@@ -3023,6 +3487,7 @@ async fn run_fetch_consumer(
                         &cache_dir,
                         &cached_caps,
                         &cached_media_defs,
+                        &cached_dims,
                         &extension_index,
                         &manifest,
                         &offline_flag,
@@ -3065,7 +3530,10 @@ async fn run_fetch_consumer(
                         &client,
                         &cache_dir,
                         &cached_media_defs,
+                        &cached_dims,
                         &extension_index,
+                        &manifest,
+                        manifest_version,
                         &offline_flag,
                         &config,
                         &cache_revision_tx,
@@ -3179,6 +3647,7 @@ mod alias_tests {
     fn cap_with_urn(urn_str: &str) -> Cap {
         let urn = CapUrn::from_string(urn_str).expect("valid cap urn");
         Cap {
+            dims: Vec::new(),
             urn,
             version: 1,
             title: "T".to_string(),
@@ -3251,6 +3720,7 @@ mod alias_tests {
 
     fn media_spec(urn: &str) -> StoredMediaDef {
         StoredMediaDef {
+            dims: Vec::new(),
             version: 1,
             urn: urn.to_string(),
             media_type: "application/json".to_string(),
@@ -3271,7 +3741,7 @@ mod alias_tests {
     // the alias section from a fetched manifest.
     #[test]
     fn test1887_manifest_serde_round_trips_aliases() {
-        let json = r#"{"version":1,"previous":0,"caps":{},"media":{},"aliases":{"pdf2text":3,"jsondoc":1}}"#;
+        let json = r#"{"version":1,"previous":0,"caps":{},"media":{},"aliases":{"pdf2text":3,"jsondoc":1},"dims":{}}"#;
         let m: Manifest = serde_json::from_str(json).expect("manifest parses");
         assert_eq!(m.aliases.get("pdf2text").copied(), Some(3));
         assert_eq!(m.aliases.get("jsondoc").copied(), Some(1));
@@ -3531,6 +4001,7 @@ mod parity_port_tests {
 
     fn spec(urn: &str, title: &str) -> StoredMediaDef {
         StoredMediaDef {
+            dims: Vec::new(),
             urn: urn.to_string(),
             version: 0,
             media_type: "application/octet-stream".to_string(),
@@ -3850,6 +4321,7 @@ mod parity_port_tests {
         let urn =
             crate::CapUrn::from_string("cap:in=media:void;test-offline;out=media:void").unwrap();
         let cap = Cap {
+            dims: Vec::new(),
             urn,
             version: 0,
             title: "Test Cap".to_string(),
@@ -4246,7 +4718,7 @@ mod concurrent_cache_tests {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let cache = dir.path().join("never-existed");
         registry_at(cache.clone()).clear_cache().expect("clears");
-        for sub in ["caps", "media", "aliases", "manifests"] {
+        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
             assert!(cache.join(sub).is_dir(), "{sub} exists after clearing");
         }
     }
@@ -4299,8 +4771,225 @@ mod concurrent_cache_tests {
             !failures.iter().any(|f| f.contains("not empty") || f.contains("No such file")),
             "neither platform's symptom may survive: {failures:?}"
         );
-        for sub in ["caps", "media", "aliases", "manifests"] {
+        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
             assert!(cache.join(sub).is_dir(), "{sub} is present at the end");
         }
+    }
+}
+
+// =============================================================================
+// DIM TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod dim_tests {
+    use super::*;
+    use crate::fabric::dim::{DimTag, StoredDimValue};
+
+    fn dim(name: &str, version: u32, values: &[&str]) -> StoredDim {
+        StoredDim {
+            name: name.to_string(),
+            version,
+            title: format!("Title of {name}"),
+            documentation: format!("## {name}\nWhat {name} is."),
+            values: values
+                .iter()
+                .map(|v| StoredDimValue {
+                    name: v.to_string(),
+                    title: v.to_uppercase(),
+                    tags: vec![DimTag {
+                        key: name.to_string(),
+                        value: v.to_string(),
+                    }],
+                    documentation: Some(format!("The {v} value.")),
+                    media_type: None,
+                    extensions: Vec::new(),
+                })
+                .collect(),
+        }
+    }
+
+    // TEST1966: the Manifest type round-trips a `dims` map (name -> defver)
+    // through serde, and a manifest without one is refused: every manifest
+    // this library reads names the dims of its snapshot.
+    #[test]
+    fn test1966_manifest_carries_a_dims_map_and_requires_it() {
+        let json = r#"{"version":11,"previous":10,"caps":{},"media":{},"aliases":{},"dims":{"language":1,"file-type":2}}"#;
+        let m: Manifest = serde_json::from_str(json).expect("manifest parses");
+        assert_eq!(m.dims.get("language").copied(), Some(1));
+        assert_eq!(m.dims.get("file-type").copied(), Some(2));
+        let back = serde_json::to_value(&m).expect("serializes");
+        assert_eq!(back["dims"]["file-type"], 2);
+
+        let without = r#"{"version":11,"previous":10,"caps":{},"media":{},"aliases":{}}"#;
+        let err = serde_json::from_str::<Manifest>(without).expect_err("a manifest without dims is refused");
+        assert!(err.to_string().contains("dims"), "{err}");
+    }
+
+    // TEST1967: get_dim returns a dim the registry holds; a name the pinned
+    // manifest does not list is NotFound naming the manifest version, decided
+    // before any fetch (the registry is offline, and the error is not the
+    // offline one); a string that is no dim name is refused as such.
+    #[tokio::test]
+    async fn test1967_get_dim_resolves_through_the_manifest() {
+        let registry = FabricRegistry::new_for_test();
+        registry.insert_cached_dim_for_test(dim("language", 1, &["en", "es"]));
+        let got = registry.get_dim("language").await.expect("a held dim resolves");
+        assert_eq!(got.value("es").map(|v| v.title.as_str()), Some("ES"));
+        assert_eq!(registry.dim_defver_for("language").unwrap(), 1);
+
+        registry.set_offline(true);
+        let err = registry.get_dim("tone").await.expect_err("an unlisted dim is not found");
+        assert!(
+            matches!(&err, FabricRegistryError::NotFound(m) if m.contains("dim 'tone' is not part of manifest v1")),
+            "{err}"
+        );
+        assert!(matches!(
+            registry.get_dim("Tone").await,
+            Err(FabricRegistryError::ValidationError(_))
+        ));
+    }
+
+    // TEST1968: a dim is addressed at dims/<sha256-of-name>/<defver>.json, on
+    // the registry and in the cache; a body served for it must be that dim at
+    // that version, with no field this library does not know, and must hold
+    // (values present, names unique).
+    #[test]
+    fn test1968_a_dim_object_is_the_dim_and_version_asked_for() {
+        let config = RegistryConfig::new().with_registry_url("https://fabric.example.test");
+        let cache = Path::new("/tmp/capdag-test-cache-1968");
+        let mut hasher = Sha256::new();
+        hasher.update("language".as_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        let (url, path) = dim_url_and_cache_path(cache, &config, "language", 3);
+        assert_eq!(url, format!("https://fabric.example.test/dims/{hash}/3.json"));
+        assert_eq!(path, cache.join("dims").join(&hash).join("3.json"));
+
+        let good = serde_json::to_vec(&dim("language", 3, &["en"])).unwrap();
+        assert_eq!(checked_dim(&good, "language", 3).unwrap().name, "language");
+        assert!(matches!(checked_dim(&good, "file-type", 3), Err(FabricRegistryError::ParseError(m)) if m.contains("does not match requested name")));
+        assert!(matches!(checked_dim(&good, "language", 2), Err(FabricRegistryError::ParseError(m)) if m.contains("manifest pins defver 2")));
+
+        let mut extra: serde_json::Value = serde_json::from_slice(&good).unwrap();
+        extra["predicates"] = serde_json::json!([]);
+        assert!(matches!(
+            checked_dim(&serde_json::to_vec(&extra).unwrap(), "language", 3),
+            Err(FabricRegistryError::ParseError(m)) if m.contains("predicates")
+        ));
+        let twice = serde_json::to_vec(&dim("language", 3, &["en", "en"])).unwrap();
+        assert!(matches!(
+            checked_dim(&twice, "language", 3),
+            Err(FabricRegistryError::ValidationError(m)) if m.contains("declares value 'en' more than once")
+        ));
+        let none = serde_json::to_vec(&dim("language", 3, &[])).unwrap();
+        assert!(matches!(checked_dim(&none, "language", 3), Err(FabricRegistryError::ValidationError(_))));
+    }
+
+    fn cap_with_dims(urn: &str, dims: &[(&str, &str)]) -> Cap {
+        let mut cap = Cap::new(CapUrn::from_string(urn).unwrap(), "t".into(), vec!["t".into()]);
+        cap.version = 1;
+        cap.dims = dims.iter().map(|(d, v)| DimRef::new(*d, *v)).collect();
+        cap
+    }
+
+    fn spec_with_dims(urn: &str, dims: &[(&str, &str)]) -> StoredMediaDef {
+        StoredMediaDef {
+            urn: urn.to_string(),
+            version: 1,
+            media_type: "text/plain".into(),
+            title: "t".into(),
+            dims: dims.iter().map(|(d, v)| DimRef::new(*d, *v)).collect(),
+            ..Default::default()
+        }
+    }
+
+    use crate::CapUrn;
+
+    // TEST1971: what is loaded from the disk cache is kept only as the pinned
+    // manifest names it — a dim at another version is dropped — and a
+    // definition is kept only when every dim it names survives with the value
+    // it names. At v0 there are no dims.
+    #[test]
+    fn test1971_the_disk_cache_keeps_definitions_only_with_their_pinned_dims() {
+        let mut manifest = Manifest::empty(11);
+        manifest.dims.insert("language".into(), 2);
+        manifest.dims.insert("medium".into(), 1);
+        let caps_urns = ["cap:a;in=media:;out=media:", "cap:b;in=media:;out=media:", "cap:c;in=media:;out=media:"];
+        for u in caps_urns {
+            manifest.caps.insert(normalize_cap_urn(u).unwrap(), 1);
+        }
+        manifest.media.insert("media:x".into(), 1);
+        manifest.media.insert("media:y".into(), 1);
+
+        let mut caps: HashMap<String, Cap> = HashMap::new();
+        caps.insert(normalize_cap_urn(caps_urns[0]).unwrap(), cap_with_dims(caps_urns[0], &[("medium", "text")]));
+        caps.insert(normalize_cap_urn(caps_urns[1]).unwrap(), cap_with_dims(caps_urns[1], &[("language", "en")]));
+        caps.insert(normalize_cap_urn(caps_urns[2]).unwrap(), cap_with_dims(caps_urns[2], &[]));
+        let mut specs: HashMap<String, StoredMediaDef> = HashMap::new();
+        specs.insert("media:x".into(), spec_with_dims("media:x", &[("medium", "text")]));
+        specs.insert("media:y".into(), spec_with_dims("media:y", &[("medium", "audio")]));
+        let mut aliases = HashMap::new();
+        let mut dims: HashMap<String, StoredDim> = HashMap::new();
+        dims.insert("language".into(), dim("language", 1, &["en"])); // the manifest pins 2
+        dims.insert("medium".into(), dim("medium", 1, &["text"]));
+
+        retain_pinned(&manifest, 11, &mut caps, &mut specs, &mut aliases, &mut dims);
+        assert_eq!(dims.keys().collect::<Vec<_>>(), vec!["medium"], "a dim at another version is dropped");
+        let mut kept: Vec<_> = caps.values().map(|c| c.urn_string()).collect();
+        kept.sort();
+        assert_eq!(
+            kept,
+            vec![normalize_cap_urn(caps_urns[0]).unwrap(), normalize_cap_urn(caps_urns[2]).unwrap()],
+            "the cap naming the dropped dim is dropped with it"
+        );
+        assert_eq!(specs.keys().collect::<Vec<_>>(), vec!["media:x"], "a value the dim lacks drops the definition");
+
+        let mut v0_dims = HashMap::from([("medium".to_string(), dim("medium", 1, &["text"]))]);
+        retain_pinned(&Manifest::empty(0), 0, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), &mut v0_dims);
+        assert!(v0_dims.is_empty(), "v0 has no dims");
+    }
+
+    // TEST1972: a definition is cached only once every dim it names is held,
+    // with the value it names. A dim the manifest does not list is refused
+    // naming the definition, the dim and the manifest version, before any
+    // fetch; a value the dim does not declare is refused naming all three;
+    // one dim named twice is refused.
+    #[tokio::test]
+    async fn test1972_a_definition_needs_every_dim_it_names() {
+        let registry = FabricRegistry::new_for_test();
+        registry.insert_cached_dim_for_test(dim("language", 1, &["en"]));
+        registry.set_offline(true);
+        let ensure = |refs: Vec<DimRef>| {
+            let r = &registry;
+            async move {
+                ensure_dims_cached(
+                    "cap 'cap:probe'",
+                    &refs,
+                    &r.client,
+                    &r.cache_dir,
+                    &r.cached_dims,
+                    &r.manifest,
+                    r.manifest_version,
+                    &r.offline_flag,
+                    &r.config,
+                    &r.cache_revision_tx,
+                )
+                .await
+            }
+        };
+        ensure(vec![DimRef::new("language", "en")]).await.expect("a held dim and value pass");
+
+        let err = ensure(vec![DimRef::new("language", "fr")]).await.unwrap_err();
+        assert!(
+            matches!(&err, FabricRegistryError::ValidationError(m) if m == "cap 'cap:probe' names value 'fr' of dim 'language', which the dim does not declare"),
+            "{err}"
+        );
+        let err = ensure(vec![DimRef::new("tone", "formal")]).await.unwrap_err();
+        assert!(
+            matches!(&err, FabricRegistryError::NotFound(m) if m == "cap 'cap:probe' names dim 'tone', which is not in manifest v1"),
+            "{err}"
+        );
+        let err = ensure(vec![DimRef::new("language", "en"), DimRef::new("language", "en")]).await.unwrap_err();
+        assert!(matches!(&err, FabricRegistryError::ValidationError(m) if m.contains("named more than once")), "{err}");
     }
 }

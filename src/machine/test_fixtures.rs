@@ -62,6 +62,7 @@ pub(crate) fn build_cap_with_slot_stdin_pairs(
         })
         .collect();
     Cap {
+        dims: Vec::new(),
         urn,
         version: 1,
         title: title.to_string(),
@@ -98,6 +99,7 @@ pub(crate) fn seed_media_titles(registry: &FabricRegistry, urns: &[&str]) {
     use crate::StoredMediaDef;
     for urn in urns {
         registry.insert_cached_media_def_for_test(StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: urn.to_string(),
             media_type: "application/octet-stream".to_string(),

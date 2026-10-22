@@ -1,4 +1,4 @@
-//! Unified fabric registry — caps and media defs in one type.
+//! Unified fabric registry — caps, media defs, aliases and dims in one type.
 //!
 //! Both cap definitions and media definitions live in the same online
 //! registry (`https://fabric.capdag.com/{caps,media}/<sha256>`). They share
@@ -13,4 +13,5 @@
 //! footprint.
 
 pub mod alias;
+pub mod dim;
 pub mod registry;

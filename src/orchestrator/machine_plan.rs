@@ -697,6 +697,7 @@ mod tests {
             )]
         };
         Cap {
+            dims: Vec::new(),
             urn: cap_urn,
             version: 1,
             title: "t".to_string(),
@@ -1351,6 +1352,7 @@ mod tests {
         let reg = registry(vec![with_arg(cap(FETCH, false), "reference", REFERENCE, None)]);
         // A constant is held to its arg's media definition, which must be known.
         reg.insert_cached_media_def_for_test(crate::fabric::registry::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: REFERENCE.to_string(),
             media_type: "text/plain".to_string(),
@@ -1716,6 +1718,7 @@ mod tests {
         // A constant is held to its arg's media definition, which says it is
         // a string.
         reg.insert_cached_media_def_for_test(crate::fabric::registry::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:enc=utf-8;instruction".to_string(),
             media_type: "text/plain".to_string(),

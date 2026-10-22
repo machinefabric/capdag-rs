@@ -88,6 +88,7 @@ pub use fabric::alias::{
     classify_alias_target, is_alias_token, normalize_alias_name, token_is_urn, AliasNameError,
     AliasTargetKind, StoredAlias,
 };
+pub use fabric::dim::{check_dim_refs, DimError, DimRef, DimTag, StoredDim, StoredDimValue};
 pub use fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef};
 
 // Build-time-baked fabric manifest version (see capdag/build.rs).

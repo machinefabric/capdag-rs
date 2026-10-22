@@ -31,6 +31,7 @@ const REFERENCE: &str = "media:enc=utf-8;series-ref";
 
 pub(super) fn definition(urn: &str, title: &str, args: Vec<CapArg>, outputs: Vec<CapOutput>) -> Cap {
     let cap = Cap {
+        dims: Vec::new(),
         urn: CapUrn::from_string(urn).unwrap_or_else(|e| panic!("{urn}: {e}")),
         version: 1,
         title: title.to_string(),
@@ -130,6 +131,7 @@ fn score_cap() -> Cap {
 
 fn media_def(urn: &str, validation: Option<MediaValidation>, schema: Option<serde_json::Value>) -> StoredMediaDef {
     StoredMediaDef {
+        dims: Vec::new(),
         version: 0,
         urn: urn.to_string(),
         media_type: "application/json".to_string(),

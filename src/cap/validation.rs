@@ -1224,6 +1224,7 @@ mod tests {
         // Seed MEDIA_STRING so the validator can resolve the cap's arg
         // URN to a media def under the test registry's empty manifest.
         fabric_registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: MEDIA_STRING.to_string(),
             media_type: "text/plain".to_string(),
@@ -1310,6 +1311,7 @@ mod tests {
         // Seed the registry with the schema-bearing media def; caps no
         // longer carry inline media defs.
         fabric_registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: MEDIA_INTEGER.to_string(),
             media_type: "text/plain".to_string(),

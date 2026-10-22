@@ -665,6 +665,7 @@ mod tests {
 
         // PDF
         registry.insert_cached_media_def_for_test(StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:document;ext=pdf".to_string(),
             media_type: "application/pdf".to_string(),
@@ -680,6 +681,7 @@ mod tests {
 
         // JSON family
         registry.insert_cached_media_def_for_test(StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:fmt=json;record".to_string(),
             media_type: "application/json".to_string(),
@@ -695,6 +697,7 @@ mod tests {
 
         // Plain text
         registry.insert_cached_media_def_for_test(StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:enc=utf-8;ext=txt;list".to_string(),
             media_type: "text/plain".to_string(),
@@ -714,6 +717,7 @@ mod tests {
         // matches the canonical `family:model:variant` shape so plain
         // prose is filtered out.
         registry.insert_cached_media_def_for_test(StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: "media:enc=utf-8;model-spec".to_string(),
             media_type: "text/plain".to_string(),

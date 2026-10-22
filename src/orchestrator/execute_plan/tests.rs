@@ -135,6 +135,7 @@ fn registry() -> Arc<FabricRegistry> {
     ]);
     // A constant is held to its arg's media definition.
     registry.insert_cached_media_def_for_test(crate::fabric::registry::StoredMediaDef {
+        dims: Vec::new(),
         version: 0,
         urn: SAID.to_string(),
         media_type: "text/plain".to_string(),

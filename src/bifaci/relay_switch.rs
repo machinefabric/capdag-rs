@@ -4737,6 +4737,7 @@ mod tests {
         extensions: &[&str],
     ) -> crate::fabric::registry::StoredMediaDef {
         crate::fabric::registry::StoredMediaDef {
+            dims: Vec::new(),
             version: 0,
             urn: urn.to_string(),
             media_type: urn.to_string(),
@@ -6696,6 +6697,7 @@ mod tests {
 
         let cap_urn_str = "cap:in=\"media:text\";echo;out=\"media:text\"";
         let cap = Cap {
+            dims: Vec::new(),
             urn: crate::CapUrn::from_string(cap_urn_str).unwrap(),
             version: 1,
             title: "echo".to_string(),
@@ -6906,6 +6908,7 @@ mod tests {
             vec![(
                 "alpha".to_string(),
                 vec![Cap {
+                    dims: Vec::new(),
                     version: 1,
                     urn: crate::CapUrn::from_string(cap_a).unwrap(),
                     title: "alpha".to_string(),
@@ -6942,6 +6945,7 @@ mod tests {
             vec![(
                 "beta".to_string(),
                 vec![Cap {
+                    dims: Vec::new(),
                     version: 1,
                     urn: crate::CapUrn::from_string(cap_b).unwrap(),
                     title: "beta".to_string(),
@@ -7417,6 +7421,7 @@ mod tests {
             vec![(
                 "exact".to_string(),
                 vec![Cap {
+                    dims: Vec::new(),
                     version: 1,
                     urn: crate::CapUrn::from_string(cap_exact).unwrap(),
                     title: "exact".to_string(),
@@ -7443,6 +7448,7 @@ mod tests {
             vec![(
                 "extra".to_string(),
                 vec![Cap {
+                    dims: Vec::new(),
                     version: 1,
                     urn: crate::CapUrn::from_string(cap_extra).unwrap(),
                     title: "extra".to_string(),

@@ -512,7 +512,17 @@ pub struct Cap {
     /// literal string (`'''...'''`) so markdown punctuation and
     /// newlines pass through unchanged; the JSON generator escapes
     /// newlines per JSON rules on output.
+    ///
+    /// Only what is specific to this cap: what the dims it was built from
+    /// mean is documented with each dim (see `dims`).
     pub documentation: Option<String>,
+
+    /// The dims this cap was built from, and the value chosen from each, in
+    /// the order its source references them. Each dim is published on its own
+    /// (`FabricRegistry::get_dim`) with its documentation and each value's; a
+    /// reader shows that beside `documentation`. Empty when the cap was built
+    /// from no dim. Descriptive only: matching and dispatch never read it.
+    pub dims: Vec<crate::DimRef>,
 
     /// Optional metadata as key-value pairs
     pub metadata: HashMap<String, String>,
@@ -564,7 +574,7 @@ impl Serialize for Cap {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("Cap", 12)?;
+        let mut state = serializer.serialize_struct("Cap", 13)?;
 
         // Serialize urn as canonical string format
         state.serialize_field("urn", &self.urn.to_string())?;
@@ -589,6 +599,12 @@ impl Serialize for Cap {
 
         if self.documentation.is_some() {
             state.serialize_field("documentation", &self.documentation)?;
+        }
+
+        // Emit `dims` only when the cap was built from some; absent ⇒ none,
+        // exactly as the registry publishes it.
+        if !self.dims.is_empty() {
+            state.serialize_field("dims", &self.dims)?;
         }
 
         if !self.metadata.is_empty() {
@@ -637,6 +653,8 @@ impl<'de> Deserialize<'de> for Cap {
             cap_description: Option<String>,
             documentation: Option<String>,
             #[serde(default)]
+            dims: Vec<crate::DimRef>,
+            #[serde(default)]
             metadata: HashMap<String, String>,
             aliases: Vec<String>,
             #[serde(rename = "abstract", default)]
@@ -673,12 +691,19 @@ impl<'de> Deserialize<'de> for Cap {
             )));
         }
 
+        // A dim is named at most once: a definition cannot have been built
+        // with two values of one dim.
+        crate::check_dim_refs(&wire.dims).map_err(|e| {
+            serde::de::Error::custom(format!("cap '{}' dims: {}", urn, e))
+        })?;
+
         Ok(Cap {
             urn,
             version: wire.version,
             title: wire.title,
             cap_description: wire.cap_description,
             documentation: wire.documentation,
+            dims: wire.dims,
             metadata: wire.metadata,
             aliases: wire.aliases,
             is_abstract: wire.is_abstract,
@@ -701,6 +726,7 @@ impl Cap {
             title,
             cap_description: None,
             documentation: None,
+            dims: Vec::new(),
             metadata: HashMap::new(),
             aliases,
             is_abstract: false,
@@ -726,6 +752,7 @@ impl Cap {
             title,
             cap_description: Some(description),
             documentation: None,
+            dims: Vec::new(),
             metadata: HashMap::new(),
             aliases,
             is_abstract: false,
@@ -751,6 +778,7 @@ impl Cap {
             title,
             cap_description: None,
             documentation: None,
+            dims: Vec::new(),
             metadata,
             aliases,
             is_abstract: false,
@@ -777,6 +805,7 @@ impl Cap {
             title,
             cap_description: Some(description),
             documentation: None,
+            dims: Vec::new(),
             metadata,
             aliases,
             is_abstract: false,
@@ -797,6 +826,7 @@ impl Cap {
             title,
             cap_description: None,
             documentation: None,
+            dims: Vec::new(),
             metadata: HashMap::new(),
             aliases,
             is_abstract: false,
@@ -826,6 +856,7 @@ impl Cap {
             title,
             cap_description: description,
             documentation: None,
+            dims: Vec::new(),
             metadata,
             aliases,
             is_abstract: false,
@@ -2007,6 +2038,47 @@ mod tests {
         let out = r#"{"media_urn":"media:enc=utf-8","name":"output","output_description":"x","windowed":true}"#;
         let err = serde_json::from_str::<CapOutput>(out).expect_err("unknown output field must be refused");
         assert!(err.to_string().contains("windowed"), "{err}");
+    }
+
+    // TEST1969: a cap's `dims` — the dims it was built from and the value
+    // chosen from each — survive a round-trip in order, under the wire key the
+    // registry publishes; a cap built from no dim carries no `dims` key; an
+    // entry with a key this capdag does not know is refused like an argument's,
+    // and so is one dim named twice. A cartridge re-serializes the caps it
+    // declares, so a dropped `dims` would leave its copy without them.
+    #[test]
+    fn test1969_cap_dims_round_trip_in_order_and_refuse_what_they_cannot_hold() {
+        let json = r#"{"urn":"cap:ask;constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8\"","version":3,"title":"Ask","aliases":["ask-en"],"documentation":"Only about asking.","dims":[{"dim":"constrained","value":"constrained"},{"dim":"language","value":"en"}]}"#;
+        let cap: Cap = serde_json::from_str(json).expect("a cap with dims parses");
+        assert_eq!(
+            cap.dims,
+            vec![
+                crate::DimRef::new("constrained", "constrained"),
+                crate::DimRef::new("language", "en"),
+            ]
+        );
+        let back = serde_json::to_value(&cap).expect("serializes");
+        assert_eq!(
+            back["dims"],
+            serde_json::json!([{"dim":"constrained","value":"constrained"},{"dim":"language","value":"en"}])
+        );
+        let again: Cap = serde_json::from_value(back).expect("parses again");
+        assert_eq!(again.dims, cap.dims);
+
+        let bare = Cap::new(
+            CapUrn::from_string("cap:effect=none").expect("valid urn"),
+            "Identity".to_string(),
+            vec!["identity".to_string()],
+        );
+        assert!(serde_json::to_value(&bare).unwrap().get("dims").is_none());
+
+        let extra = json.replace(r#"{"dim":"language","value":"en"}"#, r#"{"dim":"language","value":"en","version":1}"#);
+        let err = serde_json::from_str::<Cap>(&extra).expect_err("an unknown dims key is refused");
+        assert!(err.to_string().contains("version"), "{err}");
+
+        let twice = json.replace(r#"{"dim":"constrained","value":"constrained"}"#, r#"{"dim":"language","value":"es"}"#);
+        let err = serde_json::from_str::<Cap>(&twice).expect_err("one dim named twice is refused");
+        assert!(err.to_string().contains("dim 'language' is named more than once"), "{err}");
     }
 
     // TEST7150: a cap's OUTPUT survives a manifest round-trip, under the wire
