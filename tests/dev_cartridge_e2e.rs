@@ -59,8 +59,12 @@ fn spawn_mock_fabric() -> String {
     // exactly the failure that guard exists to catch. So the mock reports the
     // version this build is pinned to rather than a literal, and bumping
     // `fabric/manifest-version.txt` can never leave this test behind.
+    //
+    // Every map a manifest carries, empty. `dims` is required since manifest
+    // 11, and a manifest without it is refused ("missing field `dims`"), which
+    // stopped the capdag release of 23 Oct here.
     let body = format!(
-        r#"{{"version":{},"previous":0,"caps":{{}},"media":{{}},"aliases":{{}}}}"#,
+        r#"{{"version":{},"previous":0,"caps":{{}},"media":{{}},"aliases":{{}},"dims":{{}}}}"#,
         capdag::FABRIC_MANIFEST_VERSION
     );
     std::thread::spawn(move || {
