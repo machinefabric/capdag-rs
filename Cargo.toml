@@ -52,12 +52,12 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-version = "=1.153.0"
+version = "=1.155.9"
 
 # The runtime the code generated from ../formal runs on (see ../lungo.toml). The
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
-version = "=1.115.34"
+version = "=1.116.0"
 
 [dependencies.tokio]
 features = ["full"]
@@ -115,4 +115,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.961.36"
+version = "1.962.45"
