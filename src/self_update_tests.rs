@@ -82,8 +82,15 @@ impl Line {
         }
     }
 
-    /// The signature file of `manifest`, as a publish writes it.
-    fn sign(&self, manifest: &[u8]) -> Vec<u8> {
+    /// The same roots, as the charter trust — MachineFabric's roots sign both
+    /// a prod line's certificates and every charter's.
+    fn charter_trust(&self) -> CharterTrust {
+        CharterTrust { root_pubkeys: self.roots.iter().map(Key::public).collect() }
+    }
+
+    /// The prod certificate of this line's release key, with two root
+    /// signatures, as `(certificate, root_signatures)`.
+    fn certificate(&self) -> (String, Vec<serde_json::Value>) {
         let certificate = json!({
             "format": "machinefabric-release-key-cert/1",
             "release_pubkey": self.release.public(),
@@ -97,6 +104,12 @@ impl Line {
             .iter()
             .map(|root| json!({ "root_key_id": root.id(), "signature": root.sign(certificate.as_bytes()) }))
             .collect();
+        (certificate, root_signatures)
+    }
+
+    /// The signature file of `manifest`, as a publish writes it.
+    fn sign(&self, manifest: &[u8]) -> Vec<u8> {
+        let (certificate, root_signatures) = self.certificate();
         json!({
             "format": "machinefabric-manifest-sig/1",
             "certificates": [{ "certificate": certificate, "root_signatures": root_signatures }],
@@ -105,6 +118,38 @@ impl Line {
         .to_string()
         .into_bytes()
     }
+
+    /// The release registry's charter at [`REGISTRY`], for `environment`, with
+    /// its manifests at `manifest_template`, and its signature file — as
+    /// `sdx charter issue` writes them.
+    fn charter(&self, environment: &str, manifest_template: &str) -> (Vec<u8>, Vec<u8>) {
+        let body = json!({
+            "format": "machinefabric-registry-charter/1",
+            "anchor": REGISTRY,
+            "kind": "releases",
+            "slug": "release.example",
+            "environment": environment,
+            "locations": { "manifest": manifest_template },
+            "issued_at": ISSUED_AT,
+            "not_after": null,
+        })
+        .to_string()
+        .into_bytes();
+        let (certificate, root_signatures) = self.certificate();
+        let signature = json!({
+            "format": "machinefabric-charter-sig/1",
+            "certificates": [{ "certificate": certificate, "root_signatures": root_signatures }],
+            "charter_signature": { "key_id": self.release.id(), "signature": self.release.sign(&body) },
+        })
+        .to_string()
+        .into_bytes();
+        (body, signature)
+    }
+}
+
+/// Where a release registry's charter and its signature are.
+fn charter_urls() -> [String; 2] {
+    [format!("{REGISTRY}/charter.json"), format!("{REGISTRY}/charter.json.sig")]
 }
 
 /// The command's manifest with `version` on the release channel for
@@ -172,10 +217,20 @@ impl Served {
         let url = Served::archive_url(version);
         let digest: String = Sha256::digest(archive).iter().map(|b| format!("{b:02x}")).collect();
         let manifest = manifest(version, &url, &digest, archive.len() as u64);
-        let mut served = Served::default();
+        let mut served = Served::chartered(line);
         served.files.insert(format!("{REGISTRY}/capdag-cli/manifest.sig"), line.sign(&manifest));
         served.files.insert(format!("{REGISTRY}/capdag-cli/manifest"), manifest);
         served.files.insert(url, archive.to_vec());
+        served
+    }
+
+    /// A release registry with its prod charter and nothing published.
+    fn chartered(line: &Line) -> Served {
+        let (body, signature) = line.charter("prod", &format!("{REGISTRY}/{{app_id}}/manifest"));
+        let [charter, charter_sig] = charter_urls();
+        let mut served = Served::default();
+        served.files.insert(charter, body);
+        served.files.insert(charter_sig, signature);
         served
     }
 
@@ -194,6 +249,7 @@ impl Served {
                 registry: REGISTRY,
                 channel: "release",
                 trust: &trust,
+                charter_trust: &line.charter_trust(),
                 now: NOW,
                 installed,
                 current,
@@ -276,10 +332,11 @@ async fn test12691_the_latest_release_is_left_as_it_is_and_nothing_is_downloaded
         let updated = served.update(&line, &capdag, current).await.unwrap();
         assert_eq!(updated, Updated { from: current.into(), to: current.into() });
         assert_installed(&capdag, current);
+        let [charter, charter_sig] = charter_urls();
         assert_eq!(
             served.asked(),
-            [format!("{REGISTRY}/capdag-cli/manifest"), format!("{REGISTRY}/capdag-cli/manifest.sig")],
-            "only the manifest and its signature were read"
+            [charter, charter_sig, format!("{REGISTRY}/capdag-cli/manifest"), format!("{REGISTRY}/capdag-cli/manifest.sig")],
+            "only the charter, the manifest and their signatures were read"
         );
     }
 }
@@ -300,7 +357,7 @@ async fn test12692_a_manifest_this_capdag_does_not_trust_changes_nothing() {
     let e = served.update(&line, &capdag, "1.100.0").await.unwrap_err();
     assert!(matches!(e, UpdateError::Untrusted(_)), "{e}");
     assert!(e.to_string().contains("not one this capdag trusts"), "{e}");
-    assert_eq!(served.asked().len(), 2, "no bundle is fetched on the word of an untrusted manifest");
+    assert_eq!(served.asked().len(), 4, "no bundle is fetched on the word of an untrusted manifest");
 
     // Signed by this line, and then changed by one byte.
     served.files.insert(format!("{manifest_url}.sig"), line.sign(&manifest));
@@ -493,10 +550,12 @@ async fn test12700_a_channel_or_a_registry_that_has_published_nothing_is_said() 
     let served = Served::publishing(&line, "1.200.0", &archive(scratch.path(), ARCHIVE_ROOT, "1.200.0", true));
     let trust = line.trust();
     let served = &served;
+    let charter_trust = line.charter_trust();
     let nightly = Installation {
         registry: REGISTRY,
         channel: "nightly",
         trust: &trust,
+        charter_trust: &charter_trust,
         now: NOW,
         installed: &capdag,
         current: "1.100.0",
@@ -506,7 +565,7 @@ async fn test12700_a_channel_or_a_registry_that_has_published_nothing_is_said() 
     assert!(matches!(e, UpdateError::Unavailable(_)), "{e}");
     assert!(e.to_string().contains("no capdag release is published on the nightly channel"), "{e}");
 
-    let e = Served::default().update(&line, &capdag, "1.100.0").await.unwrap_err();
+    let e = Served::chartered(&line).update(&line, &capdag, "1.100.0").await.unwrap_err();
     assert!(e.to_string().contains("no capdag release is published at https://release.example yet"), "{e}");
 
     // A platform the release was not built for is said, with the ones it was.
@@ -524,8 +583,49 @@ fn test12701_the_release_line_is_read_back_as_it_was_baked() {
         parse_release_line("https://release.example nightly"),
         ReleaseLine { registry: "https://release.example".into(), channel: "nightly".into() }
     );
-    assert_eq!(manifest_url("https://release.example"), "https://release.example/capdag-cli/manifest");
-    assert_eq!(manifest_url("https://release.example/"), "https://release.example/capdag-cli/manifest");
+}
+
+/// TEST12924: an update reads the release registry's charter before anything
+/// else, and takes the manifest's address from it: no charter, or a charter
+/// for another environment, and nothing more is asked; a charter that puts the
+/// manifest elsewhere is followed there.
+#[tokio::test]
+async fn test12924_an_update_goes_through_the_release_registrys_charter() {
+    let scratch = tempfile::tempdir().unwrap();
+    let line = Line::new();
+    let capdag = installed(scratch.path(), "1.100.0");
+    let bundle = archive(scratch.path(), ARCHIVE_ROOT, "1.200.0", true);
+    let [charter, charter_sig] = charter_urls();
+
+    // No charter: not a registry, and nothing past the charter is fetched.
+    let mut served = Served::publishing(&line, "1.200.0", &bundle);
+    served.files.remove(&charter);
+    let e = served.update(&line, &capdag, "1.100.0").await.unwrap_err();
+    assert!(matches!(e, UpdateError::Untrusted(_)) && e.to_string().contains("has no charter"), "{e}");
+    assert_eq!(served.asked(), [charter.clone()]);
+
+    // A staging registry's charter, for a prod capdag: refused at the charter.
+    let mut served = Served::publishing(&line, "1.200.0", &bundle);
+    let (body, signature) = line.charter("staging", &format!("{REGISTRY}/{{app_id}}/manifest"));
+    served.files.insert(charter.clone(), body);
+    served.files.insert(charter_sig.clone(), signature);
+    let e = served.update(&line, &capdag, "1.100.0").await.unwrap_err();
+    assert!(e.to_string().contains("signed under 'staging'"), "{e}");
+    assert_eq!(served.asked().len(), 2, "no manifest is read on the word of a refused charter");
+
+    // A charter that puts the manifests under /apps/: they are read there.
+    let mut served = Served::publishing(&line, "1.200.0", &bundle);
+    let (body, signature) = line.charter("prod", &format!("{REGISTRY}/apps/{{app_id}}/manifest"));
+    served.files.insert(charter.clone(), body);
+    served.files.insert(charter_sig.clone(), signature);
+    for name in ["manifest", "manifest.sig"] {
+        let bytes = served.files.remove(&format!("{REGISTRY}/capdag-cli/{name}")).unwrap();
+        served.files.insert(format!("{REGISTRY}/apps/capdag-cli/{name}"), bytes);
+    }
+    let updated = served.update(&line, &capdag, "1.100.0").await.unwrap();
+    assert_eq!(updated, Updated { from: "1.100.0".into(), to: "1.200.0".into() });
+    assert!(served.asked().contains(&format!("{REGISTRY}/apps/capdag-cli/manifest")));
+    assert_installed(&capdag, "1.200.0");
 }
 
 /// TEST12702: another products manifest and an archive off https are refused

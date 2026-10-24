@@ -164,10 +164,10 @@ pub enum CartridgeAttachmentErrorKind {
     /// Cartridge repeatedly crashed the host during discovery; held in quarantine.
     Quarantined,
     /// On-disk install context disagrees with the cartridge.json the
-    /// cartridge declares — the slug folder doesn't match the
-    /// `slug_for(registry_url)` of the manifest, the channel folder
-    /// doesn't match the manifest's `channel`, or the name/version
-    /// directory components don't match. The cartridge is structurally
+    /// cartridge declares — the top-level folder holds no charter that
+    /// verifies, or its charter's anchor is not the manifest's
+    /// `registry_url`, the channel folder doesn't match the manifest's
+    /// `channel`, or the name/version directory components don't match. The cartridge is structurally
     /// well-formed but cannot be trusted because its placement on
     /// disk does not match what it claims to be. Distinct from
     /// `Quarantined` (host decided after a crash) and from
@@ -492,13 +492,6 @@ impl InstalledCartridgeRecord {
 }
 
 impl InstalledCartridgeRecord {
-    /// On-disk slug derived from `registry_url`. Dev installs hash to
-    /// the literal `dev`; published installs hash to the first 16
-    /// hex chars of the URL's SHA-256.
-    pub fn registry_slug(&self) -> String {
-        crate::bifaci::cartridge_slug::slug_for(self.registry_url.as_deref())
-    }
-
     /// Flat cap-URN view across this cartridge's groups, deduplicated
     /// while preserving the order in which urns first appear. Returned
     /// rather than stored on the wire — `cap_groups` is the canonical
@@ -7920,55 +7913,6 @@ mod tests {
         // exposes a regression that drops more than just lifecycle.
         assert_eq!(record.id, "test");
         assert_eq!(record.channel, CartridgeChannel::Release);
-    }
-
-    /// TEST1733: `validate_registry_url_scheme` accepts https
-    /// unconditionally, rejects non-https in production builds,
-    /// and accepts non-https in dev mode. Pins the deepest layer
-    /// of the HTTPS rule.
-    #[test]
-    fn test1733_registry_url_scheme_validator() {
-        use super::super::cartridge_json::{validate_registry_url_scheme, RegistryUrlSchemeResult};
-        // https always OK.
-        assert_eq!(
-            validate_registry_url_scheme("https://example.com/manifest", false),
-            RegistryUrlSchemeResult::Ok
-        );
-        assert_eq!(
-            validate_registry_url_scheme("https://example.com/manifest", true),
-            RegistryUrlSchemeResult::Ok
-        );
-        // http rejected in production, accepted in dev.
-        assert_eq!(
-            validate_registry_url_scheme("http://localhost:8080/manifest", false),
-            RegistryUrlSchemeResult::NonHttps {
-                scheme: "http".to_string()
-            }
-        );
-        assert_eq!(
-            validate_registry_url_scheme("http://localhost:8080/manifest", true),
-            RegistryUrlSchemeResult::Ok
-        );
-        // Malformed URL is always NotAUrl, regardless of mode.
-        assert_eq!(
-            validate_registry_url_scheme("not a url", false),
-            RegistryUrlSchemeResult::NotAUrl("not a url".to_string())
-        );
-        assert_eq!(
-            validate_registry_url_scheme("not a url", true),
-            RegistryUrlSchemeResult::NotAUrl("not a url".to_string())
-        );
-        // Empty rest after `://` is also NotAUrl.
-        assert_eq!(
-            validate_registry_url_scheme("https://", false),
-            RegistryUrlSchemeResult::NotAUrl("https://".to_string())
-        );
-        // Case-insensitive on the scheme — `HTTPS` is still
-        // https. RFC 3986 says schemes are case-insensitive.
-        assert_eq!(
-            validate_registry_url_scheme("HTTPS://example.com", false),
-            RegistryUrlSchemeResult::Ok
-        );
     }
 
     /// TEST1722: An unknown wire kind FAILS to decode rather than

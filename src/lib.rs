@@ -129,10 +129,18 @@ pub use bifaci::release_cert::{
 pub const CARTRIDGE_ROOT_PUBKEYS: Option<&'static str> =
     root_pubkeys_from_build_env(option_env!("MFR_CARTRIDGE_ROOT_PUBKEYS"));
 
-/// The signing environment label (`prod` / `staging`) this build is bound
-/// to, baked from `MFR_SIGNING_ENVIRONMENT`. Release-key certificates carry
-/// the environment they were issued for; a certificate for the other
-/// environment is rejected even though the root set is shared.
+/// MachineFabric's root public keys, comma-separated, which every charter
+/// chains to. Baked into every build whatever its environment —
+/// `capdag/build.rs` refuses a build without at least three — because a
+/// registry exists only if MachineFabric chartered it, and a build that could
+/// not check a charter could not use any registry. Charters only: content is
+/// verified against [`CARTRIDGE_ROOT_PUBKEYS`].
+pub const CHARTER_ROOT_PUBKEYS: &str = env!("MFR_CHARTER_ROOT_PUBKEYS");
+
+/// The content label (`prod`, `staging`, `lab`, …) this build is bound to,
+/// baked from `MFR_SIGNING_ENVIRONMENT`. Release-key certificates carry the
+/// label they were issued for; a certificate for another label is rejected
+/// even where the root set is shared.
 pub const SIGNING_ENVIRONMENT: Option<&'static str> =
     signing_environment_from_build_env(option_env!("MFR_SIGNING_ENVIRONMENT"));
 
@@ -215,12 +223,16 @@ pub use bifaci::host_runtime::{
 
 // Cartridge install metadata
 pub use bifaci::cartridge_json::{
-    hash_cartridge_directory, validate_registry_url_scheme, CartridgeInstallSource, CartridgeJson,
-    CartridgeJsonError, RegistryUrlSchemeResult,
+    hash_cartridge_directory, CartridgeInstallSource, CartridgeJson, CartridgeJsonError,
 };
 
-// Registry slug — deterministic on-disk folder name for a registry URL.
-pub use bifaci::cartridge_slug::{is_registry_slug, slug_for, DEV_SLUG};
+// Registry charters — what makes a URL a registry, and everything about it.
+pub use bifaci::charter::{
+    is_experiment_id, is_slug, Charter, CharterError, CharterExpectation, CharterFetchError,
+    CharterSigEnvelope, CharterSignature, CharterTrust, RegistryKind, StoredCharterError,
+    VerifiedCharter, CHARTER_FILE, CHARTER_FORMAT, CHARTER_SIGNING_ENVIRONMENT, CHARTER_SIG_FILE,
+    CHARTER_SIG_FORMAT, DEV_SLUG,
+};
 
 // Shared cartridge discovery (engine + unifloom-daemon)
 pub use cartridge_discovery::{

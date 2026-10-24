@@ -14,7 +14,8 @@
 //!   [`HttpError`](RegistryVerdictState::HttpError),
 //!   [`Malformed`](RegistryVerdictState::Malformed). We do not know what the
 //!   registry says. Retrying, or changing a setting, may change the answer.
-//! * **It got an answer and refused it.** [`Unsigned`](RegistryVerdictState::Unsigned),
+//! * **It got an answer and refused it.** [`Unchartered`](RegistryVerdictState::Unchartered),
+//!   [`Unsigned`](RegistryVerdictState::Unsigned),
 //!   [`Untrusted`](RegistryVerdictState::Untrusted),
 //!   [`Unverifiable`](RegistryVerdictState::Unverifiable). We know what the
 //!   registry says and we will not act on it. Retrying changes nothing.
@@ -68,6 +69,11 @@ pub enum RegistryVerdictState {
     /// The registry answered with a body this build cannot read as a manifest:
     /// not JSON, or not the manifest schema.
     Malformed,
+    /// Nothing is at `<anchor>/charter.json`: the URL is not a registry
+    /// MachineFabric chartered, and nothing it serves is used. A charter that
+    /// IS there and is refused is [`Untrusted`](Self::Untrusted) or
+    /// [`Unverifiable`](Self::Unverifiable), with a `charter_` reason.
+    Unchartered,
     /// The registry served no signature sidecar where one is required. An
     /// unsigned registry is refused rather than trusted.
     Unsigned,
@@ -103,6 +109,7 @@ impl RegistryVerdictState {
             Self::Unreachable => "unreachable",
             Self::HttpError => "http_error",
             Self::Malformed => "malformed",
+            Self::Unchartered => "unchartered",
             Self::Unsigned => "unsigned",
             Self::Untrusted => "untrusted",
             Self::Unverifiable => "unverifiable",
@@ -121,6 +128,7 @@ impl RegistryVerdictState {
             "unreachable" => Ok(Self::Unreachable),
             "http_error" => Ok(Self::HttpError),
             "malformed" => Ok(Self::Malformed),
+            "unchartered" => Ok(Self::Unchartered),
             "unsigned" => Ok(Self::Unsigned),
             "untrusted" => Ok(Self::Untrusted),
             "unverifiable" => Ok(Self::Unverifiable),
@@ -139,7 +147,10 @@ impl RegistryVerdictState {
     /// Whether this state is a refusal of an answer we DID get, as opposed to
     /// not having got one. A refusal will not change on retry.
     pub fn is_trust_failure(self) -> bool {
-        matches!(self, Self::Unsigned | Self::Untrusted | Self::Unverifiable)
+        matches!(
+            self,
+            Self::Unchartered | Self::Unsigned | Self::Untrusted | Self::Unverifiable
+        )
     }
 
     /// Whether trying again, unattended, could plausibly reach a different
@@ -154,13 +165,14 @@ impl RegistryVerdictState {
 
     /// Every state, in declaration order — for exhaustive tests and for
     /// mirrors' round-trip checks.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Verified,
         Self::Pending,
         Self::Offline,
         Self::Unreachable,
         Self::HttpError,
         Self::Malformed,
+        Self::Unchartered,
         Self::Unsigned,
         Self::Untrusted,
         Self::Unverifiable,
@@ -232,7 +244,7 @@ impl RegistryVerdictState {
             Self::Unreachable => RegistryRemedy::CheckNetwork,
             Self::HttpError | Self::Malformed => RegistryRemedy::RetryLater,
             Self::Unverifiable => RegistryRemedy::UpdateClient,
-            Self::Unsigned | Self::Untrusted => RegistryRemedy::DoNotProceed,
+            Self::Unchartered | Self::Unsigned | Self::Untrusted => RegistryRemedy::DoNotProceed,
         }
     }
 }
@@ -277,6 +289,33 @@ pub enum ChainFailureReason {
     NoAuthorizingCertificate,
     /// The manifest signature does not verify over the fetched bytes.
     ManifestSignatureInvalid,
+    /// The registry's charter is not a charter document, or breaks its shape.
+    CharterMalformed,
+    /// The charter declares a format this build does not read.
+    CharterUnsupportedFormat,
+    /// The charter's signature does not verify over its bytes.
+    CharterSignatureInvalid,
+    /// The charter is for another anchor than the one asked.
+    CharterAnchorMismatch,
+    /// The charter is for another kind of registry.
+    CharterKindMismatch,
+    /// The charter's registry is signed under another environment than this
+    /// build verifies.
+    CharterEnvironmentMismatch,
+    /// The cartridge registry's charter names another fabric than the one
+    /// this client resolves caps against.
+    CharterFabricMismatch,
+    /// The charter is issued in the future.
+    CharterNotYetValid,
+    /// The charter's own validity has ended.
+    CharterExpired,
+    /// A stored charter is in a folder not named for its slug.
+    CharterFolderMismatch,
+    /// The charter names a slug another registry's charter already holds.
+    /// Charters are unique by slug where they are issued; two that verify
+    /// with one slug is an invalid state, and neither is given the other's
+    /// folder.
+    CharterSlugTaken,
 }
 
 impl ChainFailureReason {
@@ -295,6 +334,17 @@ impl ChainFailureReason {
             Self::KeyIdMismatch => "key_id_mismatch",
             Self::NoAuthorizingCertificate => "no_authorizing_certificate",
             Self::ManifestSignatureInvalid => "manifest_signature_invalid",
+            Self::CharterMalformed => "charter_malformed",
+            Self::CharterUnsupportedFormat => "charter_unsupported_format",
+            Self::CharterSignatureInvalid => "charter_signature_invalid",
+            Self::CharterAnchorMismatch => "charter_anchor_mismatch",
+            Self::CharterKindMismatch => "charter_kind_mismatch",
+            Self::CharterEnvironmentMismatch => "charter_environment_mismatch",
+            Self::CharterFabricMismatch => "charter_fabric_mismatch",
+            Self::CharterNotYetValid => "charter_not_yet_valid",
+            Self::CharterExpired => "charter_expired",
+            Self::CharterFolderMismatch => "charter_folder_mismatch",
+            Self::CharterSlugTaken => "charter_slug_taken",
         }
     }
 
@@ -313,6 +363,17 @@ impl ChainFailureReason {
             "key_id_mismatch" => Ok(Self::KeyIdMismatch),
             "no_authorizing_certificate" => Ok(Self::NoAuthorizingCertificate),
             "manifest_signature_invalid" => Ok(Self::ManifestSignatureInvalid),
+            "charter_malformed" => Ok(Self::CharterMalformed),
+            "charter_unsupported_format" => Ok(Self::CharterUnsupportedFormat),
+            "charter_signature_invalid" => Ok(Self::CharterSignatureInvalid),
+            "charter_anchor_mismatch" => Ok(Self::CharterAnchorMismatch),
+            "charter_kind_mismatch" => Ok(Self::CharterKindMismatch),
+            "charter_environment_mismatch" => Ok(Self::CharterEnvironmentMismatch),
+            "charter_fabric_mismatch" => Ok(Self::CharterFabricMismatch),
+            "charter_not_yet_valid" => Ok(Self::CharterNotYetValid),
+            "charter_expired" => Ok(Self::CharterExpired),
+            "charter_folder_mismatch" => Ok(Self::CharterFolderMismatch),
+            "charter_slug_taken" => Ok(Self::CharterSlugTaken),
             other => Err(RegistryVerdictError::UnknownChainFailureReason(
                 other.to_string(),
             )),
@@ -320,7 +381,7 @@ impl ChainFailureReason {
     }
 
     /// Every reason, in declaration order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 23] = [
         Self::MalformedEnvelope,
         Self::UnsupportedEnvelopeFormat,
         Self::MalformedCertificate,
@@ -333,6 +394,17 @@ impl ChainFailureReason {
         Self::KeyIdMismatch,
         Self::NoAuthorizingCertificate,
         Self::ManifestSignatureInvalid,
+        Self::CharterMalformed,
+        Self::CharterUnsupportedFormat,
+        Self::CharterSignatureInvalid,
+        Self::CharterAnchorMismatch,
+        Self::CharterKindMismatch,
+        Self::CharterEnvironmentMismatch,
+        Self::CharterFabricMismatch,
+        Self::CharterNotYetValid,
+        Self::CharterExpired,
+        Self::CharterFolderMismatch,
+        Self::CharterSlugTaken,
     ];
 }
 
@@ -350,14 +422,25 @@ impl RegistryVerdictState {
             | ChainFailureReason::UnsupportedEnvelopeFormat
             | ChainFailureReason::MalformedCertificate
             | ChainFailureReason::UnsupportedCertificateFormat
-            | ChainFailureReason::EmptyCertificateList => Self::Unverifiable,
+            | ChainFailureReason::EmptyCertificateList
+            | ChainFailureReason::CharterMalformed
+            | ChainFailureReason::CharterUnsupportedFormat => Self::Unverifiable,
             ChainFailureReason::InsufficientRootSignatures
             | ChainFailureReason::ExpiredCertificate
             | ChainFailureReason::NotYetValidCertificate
             | ChainFailureReason::EnvironmentMismatch
             | ChainFailureReason::KeyIdMismatch
             | ChainFailureReason::NoAuthorizingCertificate
-            | ChainFailureReason::ManifestSignatureInvalid => Self::Untrusted,
+            | ChainFailureReason::ManifestSignatureInvalid
+            | ChainFailureReason::CharterSignatureInvalid
+            | ChainFailureReason::CharterAnchorMismatch
+            | ChainFailureReason::CharterKindMismatch
+            | ChainFailureReason::CharterEnvironmentMismatch
+            | ChainFailureReason::CharterFabricMismatch
+            | ChainFailureReason::CharterNotYetValid
+            | ChainFailureReason::CharterExpired
+            | ChainFailureReason::CharterFolderMismatch
+            | ChainFailureReason::CharterSlugTaken => Self::Untrusted,
         }
     }
 }
@@ -478,7 +561,7 @@ impl RegistryVerdict {
     }
 
     /// A state that carries only a detail line: `Offline`, `Unreachable`,
-    /// `Malformed`, `Unsigned`. The other states have their own constructors
+    /// `Malformed`, `Unchartered`, `Unsigned`. The other states have their own constructors
     /// because they require more, and this refuses them rather than letting a
     /// caller build a verdict missing what it needs.
     pub fn stated(
@@ -491,6 +574,7 @@ impl RegistryVerdict {
             RegistryVerdictState::Offline
             | RegistryVerdictState::Unreachable
             | RegistryVerdictState::Malformed
+            | RegistryVerdictState::Unchartered
             | RegistryVerdictState::Unsigned => {}
             RegistryVerdictState::Verified
             | RegistryVerdictState::Pending

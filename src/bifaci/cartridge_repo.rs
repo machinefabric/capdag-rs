@@ -40,6 +40,33 @@ pub enum CartridgeRepoError {
         reason: ChainFailureReason,
         detail: String,
     },
+    /// Nothing is at `<anchor>/charter.json`: the URL is not a registry
+    /// MachineFabric chartered, and nothing it serves is used.
+    #[error("Unchartered: {0}")]
+    Unchartered(String),
+    /// The registry's charter is there and was refused. `reason` is the
+    /// closed vocabulary, as for a manifest's chain.
+    #[error("Charter refused: {detail}")]
+    CharterRefused {
+        reason: ChainFailureReason,
+        detail: String,
+    },
+}
+
+impl From<crate::bifaci::charter::CharterFetchError> for CartridgeRepoError {
+    fn from(e: crate::bifaci::charter::CharterFetchError) -> Self {
+        use crate::bifaci::charter::CharterFetchError;
+        let detail = e.to_string();
+        match e {
+            CharterFetchError::Offline(_) => Self::NetworkBlocked(detail),
+            CharterFetchError::Unreachable { .. } => Self::HttpError(detail),
+            CharterFetchError::Unchartered { .. } => Self::Unchartered(detail),
+            CharterFetchError::Http { status, .. } => Self::StatusError(status),
+            CharterFetchError::Refused { error, .. } => {
+                Self::CharterRefused { reason: error.reason(), detail }
+            }
+        }
+    }
 }
 
 impl CartridgeRepoError {
@@ -82,9 +109,16 @@ impl CartridgeRepoError {
                 detail,
                 checked_at_unix_seconds,
             ),
-            Self::ManifestChainFailed { reason, detail } => RegistryVerdict::chain_failed(
+            Self::ManifestChainFailed { reason, detail }
+            | Self::CharterRefused { reason, detail } => RegistryVerdict::chain_failed(
                 registry_url,
                 *reason,
+                detail,
+                checked_at_unix_seconds,
+            ),
+            Self::Unchartered(detail) => RegistryVerdict::stated(
+                registry_url,
+                RegistryVerdictState::Unchartered,
                 detail,
                 checked_at_unix_seconds,
             ),
@@ -211,7 +245,7 @@ const fn const_eq(a: &str, b: &str) -> bool {
 }
 
 /// The schema revision of the cartridge registry this build reads and writes
-/// (`schemas/cartridge-registry/v7.json`): its cap groups carry each
+/// (`schemas/cartridge-registry/v8.json`): its cap groups carry each
 /// cartridge's cap definitions exactly as its manifest declares them,
 /// including the dims each was built from.
 pub const CARTRIDGE_REGISTRY_SCHEMA_VERSION: &str = "7.0";
@@ -670,10 +704,18 @@ pub struct CartridgeRepo {
     /// One verdict per registry URL — what the last sync concluded about it.
     registry_verdicts: Arc<RwLock<HashMap<String, RegistryVerdict>>>,
     /// The fabric registry THIS client resolves caps against (its baked
-    /// `CDG_FABRIC_REGISTRY_URL`). Every fetched cartridge registry must declare
-    /// this same fabric (`CartridgeRepoServer::new` enforces it) so all
-    /// registries a client uses share one fabric and their caps are comparable.
+    /// `CDG_FABRIC_REGISTRY_URL`). Every fetched cartridge registry's charter
+    /// must name this same fabric, and its manifest must declare it
+    /// (`CartridgeRepoServer::new` enforces the second), so all registries a
+    /// client uses share one fabric and their caps are comparable.
     expected_fabric_url: String,
+    /// The verified charter of every registry synced, by anchor. Where a
+    /// registry's manifest is, and the folder its cartridges install into,
+    /// are read from here and nowhere else.
+    charters: Arc<RwLock<HashMap<String, crate::bifaci::charter::VerifiedCharter>>>,
+    /// The roots every registry's charter is verified against —
+    /// MachineFabric's, which a build bakes.
+    charter_trust: crate::bifaci::charter::CharterTrust,
 }
 
 impl CartridgeInfo {
@@ -715,7 +757,13 @@ impl CartridgeRepo {
     /// Create a new cartridge repo service. `expected_fabric_url` is the fabric
     /// this client resolves caps against (its baked `CDG_FABRIC_REGISTRY_URL`);
     /// every fetched cartridge registry must declare the same fabric.
-    pub fn new(cache_ttl_seconds: u64, expected_fabric_url: impl Into<String>) -> Self {
+    /// `charter_trust` is the roots every registry's charter must chain to: a
+    /// build's own (`CharterTrust::from_build_constants`).
+    pub fn new(
+        cache_ttl_seconds: u64,
+        expected_fabric_url: impl Into<String>,
+        charter_trust: crate::bifaci::charter::CharterTrust,
+    ) -> Self {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
             .user_agent("CapDAG/1.0.0")
@@ -731,7 +779,53 @@ impl CartridgeRepo {
             verified_release_keys: Arc::new(RwLock::new(HashMap::new())),
             registry_verdicts: Arc::new(RwLock::new(HashMap::new())),
             expected_fabric_url: expected_fabric_url.into(),
+            charters: Arc::new(RwLock::new(HashMap::new())),
+            charter_trust,
         }
+    }
+
+    /// The same repo, fetching registries with `client` — one that trusts the
+    /// certificate authorities a deployment serves its registries under.
+    pub fn with_http_client(mut self, client: Client) -> Self {
+        self.http_client = client;
+        self
+    }
+
+    /// The verified charter of a registry this repo has synced, by anchor.
+    pub async fn charter(&self, anchor: &str) -> Option<crate::bifaci::charter::VerifiedCharter> {
+        self.charters.read().await.get(anchor).cloned()
+    }
+
+    /// Hold a verified charter as `anchor`'s. A SLUG IS ONE REGISTRY'S:
+    /// charters are unique by slug where they are issued, so a second anchor
+    /// whose charter names a slug another registry's charter already holds is
+    /// an invalid state, and is refused rather than given that registry's
+    /// folder. The check and the insert are one step under one lock, so two
+    /// syncs cannot both find a slug free.
+    async fn admit_charter(
+        &self,
+        anchor: &str,
+        verified: crate::bifaci::charter::VerifiedCharter,
+    ) -> Result<()> {
+        let mut charters = self.charters.write().await;
+        if let Some(holder) = charters
+            .iter()
+            .find(|(held_anchor, held)| {
+                held_anchor.as_str() != anchor && held.charter.slug == verified.charter.slug
+            })
+            .map(|(held_anchor, _)| held_anchor.clone())
+        {
+            return Err(CartridgeRepoError::CharterRefused {
+                reason: ChainFailureReason::CharterSlugTaken,
+                detail: format!(
+                    "the charter of {anchor} names the slug '{}', which the charter of {holder} \
+                     already holds",
+                    verified.charter.slug
+                ),
+            });
+        }
+        charters.insert(anchor.to_string(), verified);
+        Ok(())
     }
 
     /// Set the offline flag. When true, all registry fetches are blocked.
@@ -782,12 +876,13 @@ impl CartridgeRepo {
     }
 
     /// Fetch and chain-verify the manifest signature sidecar at
-    /// `<repo_url>.sig` over the exact `manifest_bytes`, returning the
+    /// `<manifest_url>.sig` over the exact `manifest_bytes`, returning the
     /// trusted release keys. Every failure names its cause; none fall
     /// through.
     async fn verify_manifest_sidecar(
         &self,
         repo_url: &str,
+        manifest_url: &str,
         cache_bust: u64,
         manifest_bytes: &[u8],
         trust: &crate::bifaci::release_cert::RegistryTrust,
@@ -795,7 +890,7 @@ impl CartridgeRepo {
         // Same cache-bust token as the manifest fetch: signature verification
         // only holds over a COHERENT (manifest, sidecar) pair, and two
         // independently CDN-cached objects can come from different publishes.
-        let sidecar_url = format!("{repo_url}.sig?cb={cache_bust}");
+        let sidecar_url = format!("{manifest_url}.sig?cb={cache_bust}");
         let response = self
             .http_client
             .get(&sidecar_url)
@@ -834,10 +929,15 @@ impl CartridgeRepo {
         Ok(chain.trusted_release_keys)
     }
 
-    /// Fetch the v5.0 channel-partitioned cartridge manifest from a URL
-    /// and flatten it via `CartridgeRepoServer` into the
+    /// Fetch a registry's charter from its anchor, then the channel-
+    /// partitioned cartridge manifest from where the charter says it is, and
+    /// flatten it via `CartridgeRepoServer` into the
     /// `CartridgeRegistryResponse` shape the cache expects (one
     /// `CartridgeInfo` per `(channel, id)` pair, channel set on each).
+    ///
+    /// The charter comes first and decides everything after it: a URL with
+    /// no charter, or one whose charter is refused, is never asked for a
+    /// manifest. Its charter must name this client's fabric.
     ///
     /// 404 is treated as "no cartridges published yet" — equivalent to
     /// an empty manifest. Any other non-success status, network failure,
@@ -851,6 +951,38 @@ impl CartridgeRepo {
                 repo_url
             )));
         }
+        let content_label = self.trust.read().await.as_ref().map(|t| t.environment.clone());
+        let charter = crate::bifaci::charter::fetch(
+            &self.http_client,
+            repo_url,
+            &self.charter_trust,
+            crate::bifaci::charter::RegistryKind::Cartridges,
+            content_label.as_deref(),
+            crate::bifaci::release_cert::unix_now(),
+        )
+        .await?;
+        if charter.charter.fabric.as_deref() != Some(self.expected_fabric_url.as_str()) {
+            return Err(CartridgeRepoError::CharterRefused {
+                reason: ChainFailureReason::CharterFabricMismatch,
+                detail: format!(
+                    "the charter of {repo_url} names the fabric {:?}, and this client resolves \
+                     caps against {}",
+                    charter.charter.fabric, self.expected_fabric_url
+                ),
+            });
+        }
+        let manifest_url = charter
+            .charter
+            .location(
+                "manifest",
+                &[("registry_version", &crate::CARTRIDGE_REGISTRY_VERSION.to_string())],
+            )
+            .map_err(|e| CartridgeRepoError::CharterRefused {
+                reason: ChainFailureReason::CharterMalformed,
+                detail: format!("the charter of {repo_url}: {e}"),
+            })?;
+        self.admit_charter(repo_url, charter).await?;
+
         // The manifest is mutable and signed by a separate sidecar object; a
         // CDN may cache the two from DIFFERENT publishes, which fails
         // signature verification (and, downstream, artifact sha checks) with
@@ -860,17 +992,17 @@ impl CartridgeRepo {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock before epoch")
             .as_millis() as u64;
-        let manifest_fetch_url = format!(
-            "{repo_url}{}cb={cache_bust}",
-            if repo_url.contains('?') { "&" } else { "?" }
-        );
+        let manifest_fetch_url = format!("{manifest_url}?cb={cache_bust}");
         let response = self
             .http_client
             .get(&manifest_fetch_url)
             .send()
             .await
             .map_err(|e| {
-                CartridgeRepoError::HttpError(format!("Failed to fetch from {}: {}", repo_url, e))
+                CartridgeRepoError::HttpError(format!(
+                    "Failed to fetch the manifest of {} from {}: {}",
+                    repo_url, manifest_url, e
+                ))
             })?;
 
         if response.status().as_u16() == 404 {
@@ -912,7 +1044,7 @@ impl CartridgeRepo {
         let trust = self.trust.read().await.clone();
         if let Some(trust) = trust {
             let release_keys = self
-                .verify_manifest_sidecar(repo_url, cache_bust, &body_bytes, &trust)
+                .verify_manifest_sidecar(repo_url, &manifest_url, cache_bust, &body_bytes, &trust)
                 .await?;
             self.verified_release_keys
                 .write()
@@ -948,15 +1080,15 @@ impl CartridgeRepo {
             ))
         })?;
 
-        // Self-referential check: the manifest declares its own URL.
-        // It must match the URL we just fetched from byte-for-byte —
-        // a mismatch is a manifest-corruption signal (the publisher
-        // wrote the wrong self-URL, or the manifest is being served
-        // from an unexpected mirror). Either way, refuse to ingest;
-        // identity downstream depends on this string.
+        // The manifest names its registry by anchor. It must be the anchor
+        // whose charter we just verified, byte-for-byte — a mismatch is a
+        // manifest-corruption signal (the publisher wrote another registry's
+        // anchor, or the manifest is served under the wrong registry). Either
+        // way, refuse to ingest; identity downstream depends on this string.
         if manifest.registry_url != repo_url {
             return Err(CartridgeRepoError::ParseError(format!(
-                "Manifest from {} declares registry_url='{}' — these must match byte-for-byte",
+                "The manifest of {} declares registry_url='{}' — it must be the registry's \
+                 anchor, byte-for-byte",
                 repo_url, manifest.registry_url
             )));
         }
@@ -1598,6 +1730,11 @@ mod tests {
     /// fabric-match check passes and the OTHER behaviour under test is exercised.
     const TEST_FABRIC_URL: &str = "https://fabric.test";
 
+    /// Charter roots for a repo these tests never sync against the network.
+    fn test_charter_trust() -> crate::bifaci::charter::CharterTrust {
+        crate::bifaci::charter::CharterTrust { root_pubkeys: Vec::new() }
+    }
+
     // ----------------------------------------------------------------------
     // Fixture builders shared by the cap_groups test suite.
     // ----------------------------------------------------------------------
@@ -1719,14 +1856,14 @@ mod tests {
     // TEST630: CartridgeRepo creation starts with empty cartridge list.
     #[tokio::test]
     async fn test630_cartridge_repo_creation() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         assert!(repo.get_all_cartridges().await.is_empty());
     }
 
     // TEST631: needs_sync returns true with empty cache and non-empty URLs.
     #[tokio::test]
     async fn test631_needs_sync_empty_cache() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let urls = vec!["https://example.com/cartridges".to_string()];
         assert!(repo.needs_sync(&urls).await);
     }
@@ -2746,7 +2883,7 @@ mod tests {
     // URNs.
     #[tokio::test]
     async fn test330_cartridge_repo_client_update_cache() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let registry = CartridgeRegistryResponse {
             cartridges: vec![build_cartridge_info(
                 "testcartridge",
@@ -2787,7 +2924,7 @@ mod tests {
     // request, even if declared with different tag order.
     #[tokio::test]
     async fn test331_cartridge_repo_client_get_suggestions() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let declared_urn =
             "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
         let request_urn =
@@ -2827,7 +2964,7 @@ mod tests {
     // the wrong channel must miss.
     #[tokio::test]
     async fn test332_cartridge_repo_client_get_cartridge() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let registry = CartridgeRegistryResponse {
             cartridges: vec![build_cartridge_info_in(
                 CartridgeChannel::Nightly,
@@ -2875,7 +3012,7 @@ mod tests {
     // normalized URNs across cartridges.
     #[tokio::test]
     async fn test333_cartridge_repo_client_get_all_caps() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let cap1 = "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
         let cap2 =
             "cap:in=\"media:enc=utf-8;ext=txt\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
@@ -2915,7 +3052,7 @@ mod tests {
     // after a successful update.
     #[tokio::test]
     async fn test334_cartridge_repo_client_needs_sync() {
-        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL);
+        let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let urls = vec!["https://example.com/cartridges".to_string()];
         assert!(repo.needs_sync(&urls).await);
 
@@ -3055,5 +3192,70 @@ mod tests {
         // situations for whoever has to act on them.
         let http = CartridgeRepoError::StatusError(404).verdict(URL, now);
         assert_eq!(http.http_status, Some(404));
+    }
+
+    /// A cartridges charter for `anchor` naming `slug`, as one that verified.
+    fn verified_charter(anchor: &str, slug: &str) -> crate::bifaci::charter::VerifiedCharter {
+        crate::bifaci::charter::VerifiedCharter {
+            charter: crate::bifaci::charter::Charter {
+                format: crate::bifaci::charter::CHARTER_FORMAT.to_string(),
+                anchor: anchor.to_string(),
+                kind: crate::bifaci::charter::RegistryKind::Cartridges,
+                slug: slug.to_string(),
+                environment: "prod".to_string(),
+                experiment: None,
+                locations: [(
+                    "manifest".to_string(),
+                    format!("{anchor}/v{{registry_version}}/manifest"),
+                )]
+                .into_iter()
+                .collect(),
+                fabric: Some("https://fabric.example".to_string()),
+                issued_at: 1_700_000_000,
+                not_after: None,
+            },
+            body: Vec::new(),
+            envelope: String::new(),
+        }
+    }
+
+    /// TEST13010: a slug is one registry's. A second anchor whose verified
+    /// charter names a slug another registry already holds is refused — at
+    /// its charter, as a registry judged and found wanting — and is never
+    /// given that registry's folder; the registry that holds the slug syncs
+    /// again under its own charter.
+    #[tokio::test]
+    async fn test13010_a_slug_is_one_registrys() {
+        const FIRST: &str = "https://first.example/cartridges";
+        const SECOND: &str = "https://second.example/cartridges";
+        let repo = CartridgeRepo::new(3600, "https://fabric.example", test_charter_trust());
+        repo.admit_charter(FIRST, verified_charter(FIRST, "shared"))
+            .await
+            .expect("the first registry holds its slug");
+
+        let refused = repo
+            .admit_charter(SECOND, verified_charter(SECOND, "shared"))
+            .await
+            .expect_err("a second registry with a held slug is refused");
+        match &refused {
+            CartridgeRepoError::CharterRefused { reason, detail } => {
+                assert_eq!(*reason, ChainFailureReason::CharterSlugTaken);
+                assert!(detail.contains(FIRST), "the refusal names the holder: {detail}");
+            }
+            other => panic!("refused as {other:?}, not at its charter"),
+        }
+        assert_eq!(
+            refused.verdict(SECOND, 1_700_000_000).state,
+            RegistryVerdictState::Untrusted
+        );
+        assert!(repo.charter(SECOND).await.is_none(), "the refused charter is not held");
+
+        repo.admit_charter(FIRST, verified_charter(FIRST, "shared"))
+            .await
+            .expect("the holder syncs again under its own charter");
+        repo.admit_charter(SECOND, verified_charter(SECOND, "second"))
+            .await
+            .expect("a slug of its own is admitted");
+        assert_eq!(repo.charter(FIRST).await.unwrap().charter.slug, "shared");
     }
 }

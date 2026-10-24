@@ -26,6 +26,7 @@
 //! names. So a reader holding a cached definition can always read the
 //! documentation of the dims it was built from (`get_cached_dim`).
 
+use crate::bifaci::charter::{Charter, CharterTrust, RegistryKind, VerifiedCharter};
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
 use crate::fabric::dim::{is_dim_name, DimRef, StoredDim};
 use crate::media::spec::MediaDef;
@@ -42,7 +43,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, watch};
 
-const DEFAULT_REGISTRY_BASE_URL: &str = "https://fabric.capdag.com";
+/// The anchor of MachineFabric's production fabric, used when nothing names
+/// another. Only the anchor: where its objects are is read from its charter.
+const DEFAULT_FABRIC_ANCHOR: &str = "https://fabric.capdag.com";
 
 /// Wall-clock TTL retained only for the v0 (legacy, flat-path) resolution
 /// mode. Versioned objects at v >= 1 are immutable by protocol — once a
@@ -60,17 +63,16 @@ const SYNC_FETCH_DEADLINE: Duration = Duration::from_millis(500);
 // CONFIGURATION
 // =============================================================================
 
-/// Configuration for the fabric registry.
+/// What a fabric registry client is asked to use.
 ///
-/// Sources, in priority order:
-/// 1. Builder methods.
-/// 2. Environment variables (`CDG_FABRIC_REGISTRY_URL`, `CDG_SCHEMA_BASE_URL`).
-/// 3. Defaults: `https://fabric.capdag.com` for the registry, `<registry>/schema`
-///    for schemas.
+/// The ANCHOR names the registry and is all a client is told; where its
+/// manifest and definitions are, and the folder its cache lives in, come from
+/// the registry's charter ([`FabricLocations`]). Sources, in priority order:
+/// the builder methods, then `CDG_FABRIC_REGISTRY_URL`, then MachineFabric's
+/// production fabric.
 #[derive(Debug, Clone)]
 pub struct RegistryConfig {
-    pub registry_base_url: String,
-    pub schema_base_url: String,
+    pub anchor: String,
     /// When true, the registry ignores every on-disk cache entry: the
     /// manifest is re-fetched from the network (rather than read from
     /// `manifests/<v>.json`) and the disk cap/media/alias bodies are NOT
@@ -84,13 +86,9 @@ pub struct RegistryConfig {
 
 impl Default for RegistryConfig {
     fn default() -> Self {
-        let registry_base = env::var("CDG_FABRIC_REGISTRY_URL")
-            .unwrap_or_else(|_| DEFAULT_REGISTRY_BASE_URL.to_string());
-        let schema_base =
-            env::var("CDG_SCHEMA_BASE_URL").unwrap_or_else(|_| format!("{}/schema", registry_base));
         Self {
-            registry_base_url: registry_base,
-            schema_base_url: schema_base,
+            anchor: env::var("CDG_FABRIC_REGISTRY_URL")
+                .unwrap_or_else(|_| DEFAULT_FABRIC_ANCHOR.to_string()),
             bypass_cache: false,
         }
     }
@@ -101,17 +99,8 @@ impl RegistryConfig {
         Self::default()
     }
 
-    pub fn with_registry_url(mut self, url: impl Into<String>) -> Self {
-        let url = url.into();
-        if self.schema_base_url == format!("{}/schema", self.registry_base_url) {
-            self.schema_base_url = format!("{}/schema", url);
-        }
-        self.registry_base_url = url;
-        self
-    }
-
-    pub fn with_schema_url(mut self, url: impl Into<String>) -> Self {
-        self.schema_base_url = url.into();
+    pub fn with_anchor(mut self, anchor: impl Into<String>) -> Self {
+        self.anchor = anchor.into();
         self
     }
 
@@ -119,6 +108,51 @@ impl RegistryConfig {
     pub fn with_bypass_cache(mut self, bypass: bool) -> Self {
         self.bypass_cache = bypass;
         self
+    }
+}
+
+/// Where a fabric registry's objects are, as its charter states them.
+///
+/// Built once from a verified charter, whose shape check guarantees each
+/// template uses exactly the placeholders filled here — so filling one cannot
+/// fail, and nothing in the client composes a fabric URL any other way.
+#[derive(Debug, Clone)]
+pub struct FabricLocations {
+    manifest: String,
+    definition: String,
+}
+
+impl FabricLocations {
+    pub fn from_charter(charter: &Charter) -> Result<Self, FabricRegistryError> {
+        if charter.kind != RegistryKind::Fabric {
+            return Err(FabricRegistryError::Charter(format!(
+                "{} is chartered as a {} registry, not a fabric",
+                charter.anchor,
+                charter.kind.wire_name()
+            )));
+        }
+        let take = |name: &str| {
+            charter.locations.get(name).cloned().ok_or_else(|| {
+                FabricRegistryError::Charter(format!(
+                    "the fabric charter of {} declares no '{name}' location",
+                    charter.anchor
+                ))
+            })
+        };
+        Ok(Self { manifest: take("manifest")?, definition: take("definition")? })
+    }
+
+    /// The URL of manifest `version`.
+    pub fn manifest(&self, version: u32) -> String {
+        self.manifest.replace("{manifest_version}", &version.to_string())
+    }
+
+    /// The URL of one definition: `kind` is `caps`, `media`, `aliases` or `dims`.
+    pub fn definition(&self, kind: &str, urn_hash: &str, version: u32) -> String {
+        self.definition
+            .replace("{kind}", kind)
+            .replace("{urn_hash}", urn_hash)
+            .replace("{version}", &version.to_string())
     }
 }
 
@@ -337,11 +371,9 @@ impl Manifest {
 #[derive(Debug)]
 pub struct FabricRegistry {
     client: reqwest::Client,
-    /// Root cache directory. Caps and media defs live in `caps/` and
-    /// `media/` subdirectories respectively, mirroring the registry's
-    /// own URL layout. v0 entries live at `caps/<sha>.json` and
-    /// `media/<sha>.json`; v >= 1 entries live at `caps/<sha>/<defver>.json`
-    /// and `media/<sha>/<defver>.json`. Manifests live in `manifests/<N>.json`.
+    /// Root cache directory, `<os cache>/capdag/<charter slug>`. Definitions
+    /// live at `<kind>/<sha>/<defver>.json` and manifests at
+    /// `manifests/<N>.json`, beside the stored charter.
     cache_dir: PathBuf,
     cached_caps: Arc<Mutex<HashMap<String, Cap>>>,
     cached_media_defs: Arc<Mutex<HashMap<String, StoredMediaDef>>>,
@@ -356,15 +388,17 @@ pub struct FabricRegistry {
     /// Lower-case extension → list of canonical media URNs.
     extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     config: RegistryConfig,
-    /// Fabric manifest version this registry is pinned to. 0 means
-    /// legacy v0 / flat-path resolution (the implicit pre-versioning
-    /// mode). >= 1 means manifest-driven resolution. Set at construction
-    /// from the caller (engine bakes `capdag::FABRIC_MANIFEST_VERSION`).
+    /// The registry's verified charter: its slug names `cache_dir`, and its
+    /// locations are where everything is fetched from.
+    charter: Arc<VerifiedCharter>,
+    locations: FabricLocations,
+    /// Fabric manifest version this registry is pinned to (>= 1). Set at
+    /// construction from the caller (the engine bakes
+    /// `capdag::FABRIC_MANIFEST_VERSION`).
     manifest_version: u32,
-    /// Live snapshot of the registry pinned at `manifest_version`. For
-    /// v0 this is an `empty(0)` placeholder and never consulted for
-    /// resolution. For v >= 1 every URN lookup hits this map first to
-    /// turn the URN into a `(urn, defver)` pair before fetching.
+    /// Live snapshot of the registry pinned at `manifest_version`. Every URN
+    /// lookup hits this map first to turn the URN into a `(urn, defver)` pair
+    /// before fetching.
     /// Wrapped in Mutex because test helpers like `add_caps_to_cache`
     /// mutate it.
     manifest: Arc<Mutex<Manifest>>,
@@ -505,20 +539,40 @@ impl FabricRegistry {
 
     /// Full constructor: custom config + explicit pinned manifest version.
     ///
-    /// `manifest_version == 0` → legacy v0 / flat-path mode. No manifest
-    /// fetch is performed; resolution falls through to the frozen flat
-    /// R2 paths.
-    ///
-    /// `manifest_version >= 1` → manifest-driven. The constructor
-    /// **blocks** on a network round-trip to fetch `manifest/<N>.json`
-    /// if no local cache copy is present. If neither local cache nor
-    /// network can provide it, the constructor returns
-    /// `FabricRegistryError::NotFound`. There is no fallback to v0.
+    /// The registry's charter is resolved first — the one stored in the cache
+    /// when it still verifies, else fetched from the anchor — and everything
+    /// after it is read from the charter: the cache folder is its slug, and
+    /// the manifest is fetched from its location. The constructor **blocks**
+    /// on the network when either is not cached. A version below 1 names no
+    /// manifest and is refused.
     pub async fn with_config_and_manifest_version(
         config: RegistryConfig,
         manifest_version: u32,
     ) -> Result<Self, FabricRegistryError> {
-        let cache_dir = Self::default_cache_root(&config.registry_base_url)?;
+        if manifest_version == 0 {
+            return Err(FabricRegistryError::ValidationError(
+                "fabric manifest version 0 names no manifest; a registry is pinned at 1 or later"
+                    .to_string(),
+            ));
+        }
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| {
+                FabricRegistryError::HttpError(format!("Failed to create HTTP client: {}", e))
+            })?;
+        let capdag_cache = Self::capdag_cache_root()?;
+        let charter = resolve_charter(
+            &client,
+            &capdag_cache,
+            &config.anchor,
+            config.bypass_cache,
+            &CharterTrust::from_build_constants(),
+            crate::bifaci::release_cert::unix_now(),
+        )
+        .await?;
+        let locations = FabricLocations::from_charter(&charter.charter)?;
+        let cache_dir = capdag_cache.join(&charter.charter.slug);
         let caps_dir = cache_dir.join("caps");
         let media_dir = cache_dir.join("media");
         let aliases_dir = cache_dir.join("aliases");
@@ -533,30 +587,17 @@ impl FabricRegistry {
             })?;
         }
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| {
-                FabricRegistryError::HttpError(format!("Failed to create HTTP client: {}", e))
-            })?;
-
-        // Bootstrap the manifest before loading on-disk caches so the
-        // cache loaders can hydrate the in-memory map with entries
-        // matching the manifest's pinned defvers (rather than blindly
-        // pulling in stale v0 flat-path bytes that may belong to a
-        // different snapshot).
-        let manifest = if manifest_version == 0 {
-            Manifest::empty(0)
-        } else {
-            load_or_fetch_manifest(
-                &manifests_dir,
-                &client,
-                &config,
-                manifest_version,
-                config.bypass_cache,
-            )
-            .await?
-        };
+        // Bootstrap the manifest before loading on-disk caches so the cache
+        // loaders hydrate the in-memory map with entries matching the
+        // manifest's pinned defvers, never bytes from another snapshot.
+        let manifest = load_or_fetch_manifest(
+            &manifests_dir,
+            &client,
+            &locations,
+            manifest_version,
+            config.bypass_cache,
+        )
+        .await?;
 
         // In bypass-cache mode we do NOT hydrate from disk: every cap/media/
         // alias body is fetched fresh on demand against the (just re-fetched)
@@ -608,7 +649,7 @@ impl FabricRegistry {
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
                     Arc::clone(&offline_flag),
-                    config.clone(),
+                    locations.clone(),
                     cache_revision_tx.clone(),
                 ));
                 Some(tx)
@@ -625,6 +666,8 @@ impl FabricRegistry {
             cached_dims,
             extension_index,
             config,
+            charter: Arc::new(charter),
+            locations,
             manifest_version,
             manifest: manifest_arc,
             offline_flag,
@@ -652,6 +695,11 @@ impl FabricRegistry {
         &self.config
     }
 
+    /// The verified charter of the registry this client reads.
+    pub fn charter(&self) -> &VerifiedCharter {
+        &self.charter
+    }
+
     pub fn set_offline(&self, offline: bool) {
         self.offline_flag.store(offline, Ordering::Relaxed);
     }
@@ -660,28 +708,14 @@ impl FabricRegistry {
         self.cache_revision_tx.subscribe()
     }
 
-    /// The on-disk cache root for a given registry origin.
-    ///
-    /// The cache holds per-cap, per-media, and per-manifest JSON keyed by
-    /// URN-hash / version — values that DIFFER between registry origins (the
-    /// staging registry serves different cap/media/manifest bytes than prod for
-    /// the same URN). Sharing one directory across origins would let a prod-
-    /// populated cache satisfy a staging lookup (and vice versa), silently
-    /// serving the wrong snapshot — the exact failure that makes a
-    /// `CDG_FABRIC_REGISTRY_URL=staging` run resolve against stale prod data.
-    ///
-    /// So the root is namespaced by a stable slug of the registry base URL,
-    /// using the SAME `slug_for` scheme as the cartridge registry layout
-    /// (`<os_cache>/capdag/<registry_slug>/…`). Two origins therefore never
-    /// share a cache slot; switching origins switches cache trees.
-    fn default_cache_root(registry_base_url: &str) -> Result<PathBuf, FabricRegistryError> {
+    /// The directory every registry's cache folder lives under:
+    /// `<os cache>/capdag`. A registry's own folder is its charter's slug,
+    /// so two registries never share one, whatever their URLs look like.
+    fn capdag_cache_root() -> Result<PathBuf, FabricRegistryError> {
         let mut cache_dir = dirs::cache_dir().ok_or_else(|| {
             FabricRegistryError::CacheError("Could not determine cache directory".to_string())
         })?;
         cache_dir.push("capdag");
-        cache_dir.push(crate::bifaci::cartridge_slug::slug_for(Some(
-            registry_base_url,
-        )));
         Ok(cache_dir)
     }
 
@@ -767,7 +801,7 @@ impl FabricRegistry {
             &self.extension_index,
             &self.manifest,
             &self.offline_flag,
-            &self.config,
+            &self.locations,
             self.manifest_version,
             &self.cache_revision_tx,
             &normalized_urn,
@@ -912,7 +946,7 @@ impl FabricRegistry {
             &self.cache_dir,
             &self.cached_aliases,
             &self.offline_flag,
-            &self.config,
+            &self.locations,
             &self.cache_revision_tx,
             &normalized,
             defver,
@@ -1066,7 +1100,7 @@ impl FabricRegistry {
             &self.cache_dir,
             &self.cached_dims,
             &self.offline_flag,
-            &self.config,
+            &self.locations,
             &self.cache_revision_tx,
             name,
             defver,
@@ -1334,7 +1368,7 @@ impl FabricRegistry {
         let cache_dir = self.cache_dir.clone();
         let cached_aliases = Arc::clone(&self.cached_aliases);
         let offline_flag = Arc::clone(&self.offline_flag);
-        let config = self.config.clone();
+        let locations = self.locations.clone();
         let cache_revision_tx = self.cache_revision_tx.clone();
         // Resolve the defver under the manifest lock BEFORE spawning — the
         // task then owns everything it needs.
@@ -1366,7 +1400,7 @@ impl FabricRegistry {
                 &cache_dir,
                 &cached_aliases,
                 &offline_flag,
-                &config,
+                &locations,
                 &cache_revision_tx,
                 &normalized,
                 defver,
@@ -1391,7 +1425,7 @@ impl FabricRegistry {
         let extension_index = Arc::clone(&self.extension_index);
         let manifest = Arc::clone(&self.manifest);
         let offline_flag = Arc::clone(&self.offline_flag);
-        let config = self.config.clone();
+        let locations = self.locations.clone();
         let manifest_version = self.manifest_version;
         let cache_revision_tx = self.cache_revision_tx.clone();
         set.spawn(async move {
@@ -1423,7 +1457,7 @@ impl FabricRegistry {
                 &extension_index,
                 &manifest,
                 &offline_flag,
-                &config,
+                &locations,
                 manifest_version,
                 &cache_revision_tx,
                 &normalized_urn,
@@ -1555,7 +1589,7 @@ impl FabricRegistry {
                         &self.extension_index,
                         &self.manifest,
                         &self.offline_flag,
-                        &self.config,
+                        &self.locations,
                         self.manifest_version,
                         &self.cache_revision_tx,
                         &normalized_urn,
@@ -1783,7 +1817,7 @@ impl FabricRegistry {
             &self.manifest,
             self.manifest_version,
             &self.offline_flag,
-            &self.config,
+            &self.locations,
             &self.cache_revision_tx,
             &normalized,
             defver,
@@ -1862,7 +1896,7 @@ impl FabricRegistry {
                         &self.manifest,
                         self.manifest_version,
                         &self.offline_flag,
-                        &self.config,
+                        &self.locations,
                         &self.cache_revision_tx,
                         &normalized,
                         defver,
@@ -2557,6 +2591,16 @@ impl FabricRegistry {
         config: RegistryConfig,
         manifest_version: u32,
     ) -> Self {
+        // The charter a published fabric at this anchor carries. It is not
+        // signed: nothing is fetched from it, and a test registry is the one
+        // registry that is not resolved through `resolve_charter`.
+        let charter = VerifiedCharter {
+            charter: publisher_layout_charter(&config.anchor),
+            body: Vec::new(),
+            envelope: String::new(),
+        };
+        let locations = FabricLocations::from_charter(&charter.charter)
+            .expect("the test charter is a fabric charter with both locations");
         let cache_dir = PathBuf::from("/tmp/capdag-test-cache");
         let _ = fs::create_dir_all(cache_dir.join("caps"));
         let _ = fs::create_dir_all(cache_dir.join("media"));
@@ -2589,7 +2633,7 @@ impl FabricRegistry {
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
                     Arc::clone(&offline_flag),
-                    config.clone(),
+                    locations.clone(),
                     cache_revision_tx.clone(),
                 ));
                 Some(tx)
@@ -2606,6 +2650,8 @@ impl FabricRegistry {
             cached_dims,
             extension_index,
             config,
+            charter: Arc::new(charter),
+            locations,
             manifest_version,
             manifest: manifest_arc,
             offline_flag,
@@ -2622,61 +2668,44 @@ impl FabricRegistry {
 // ATOMIC FETCH HELPERS (free functions)
 // =============================================================================
 
-/// Build the R2 URL for a per-cap object at the given defver. defver==0
-/// addresses the frozen v0 flat path; defver>=1 addresses the versioned
-/// subpath. The cache file path mirrors the URL structure.
+/// The URL of a cap at the given defver, from the charter's `definition`
+/// location, and the cache file it is kept in.
 fn cap_url_and_cache_path(
     cache_dir: &Path,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     normalized_urn: &str,
     defver: u32,
 ) -> (String, PathBuf) {
     let mut hasher = Sha256::new();
     hasher.update(normalized_urn.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
-    if defver == 0 {
-        (
-            format!("{}/caps/{}", config.registry_base_url, hash),
-            cache_dir.join("caps").join(format!("{}.json", hash)),
-        )
-    } else {
-        (
-            format!("{}/caps/{}/{}.json", config.registry_base_url, hash, defver),
-            cache_dir
-                .join("caps")
-                .join(&hash)
-                .join(format!("{}.json", defver)),
-        )
-    }
+    (
+        locations.definition("caps", &hash, defver),
+        cache_dir
+            .join("caps")
+            .join(&hash)
+            .join(format!("{}.json", defver)),
+    )
 }
 
-/// Build the R2 URL for a per-media object at the given defver.
+/// The URL of a media definition at the given defver, from the charter's
+/// `definition` location, and the cache file it is kept in.
 fn media_url_and_cache_path(
     cache_dir: &Path,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     normalized_urn: &str,
     defver: u32,
 ) -> (String, PathBuf) {
     let mut hasher = Sha256::new();
     hasher.update(normalized_urn.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
-    if defver == 0 {
-        (
-            format!("{}/media/{}", config.registry_base_url, hash),
-            cache_dir.join("media").join(format!("{}.json", hash)),
-        )
-    } else {
-        (
-            format!(
-                "{}/media/{}/{}.json",
-                config.registry_base_url, hash, defver
-            ),
-            cache_dir
-                .join("media")
-                .join(&hash)
-                .join(format!("{}.json", defver)),
-        )
-    }
+    (
+        locations.definition("media", &hash, defver),
+        cache_dir
+            .join("media")
+            .join(&hash)
+            .join(format!("{}.json", defver)),
+    )
 }
 
 /// One registry object's whole body and its status, the request repeated
@@ -2714,7 +2743,7 @@ fn checked_cap_definition(body: &[u8], normalized_urn: &str) -> Result<Cap, Fabr
 /// >= 1); there is no v0 flat path.
 fn alias_url_and_cache_path(
     cache_dir: &Path,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     normalized_name: &str,
     defver: u32,
 ) -> (String, PathBuf) {
@@ -2722,10 +2751,7 @@ fn alias_url_and_cache_path(
     hasher.update(normalized_name.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
     (
-        format!(
-            "{}/aliases/{}/{}.json",
-            config.registry_base_url, hash, defver
-        ),
+        locations.definition("aliases", &hash, defver),
         cache_dir
             .join("aliases")
             .join(&hash)
@@ -2744,7 +2770,7 @@ async fn fetch_one_alias(
     cache_dir: &Path,
     cached_aliases: &Arc<Mutex<HashMap<String, StoredAlias>>>,
     offline_flag: &Arc<AtomicBool>,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
     normalized_name: &str,
     defver: u32,
@@ -2761,7 +2787,7 @@ async fn fetch_one_alias(
             normalized_name, defver
         )));
     }
-    let (url, cache_path) = alias_url_and_cache_path(cache_dir, config, normalized_name, defver);
+    let (url, cache_path) = alias_url_and_cache_path(cache_dir, locations, normalized_name, defver);
     let (status, body) = fetch_body(client, &url, &format!("fetch alias '{normalized_name}'"))
         .await
         .map_err(|e| {
@@ -2861,7 +2887,7 @@ fn cache_alias_entry(
 /// by `sha256(name)` and are versioned-only (defver >= 1).
 fn dim_url_and_cache_path(
     cache_dir: &Path,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     name: &str,
     defver: u32,
 ) -> (String, PathBuf) {
@@ -2869,7 +2895,7 @@ fn dim_url_and_cache_path(
     hasher.update(name.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
     (
-        format!("{}/dims/{}/{}.json", config.registry_base_url, hash, defver),
+        locations.definition("dims", &hash, defver),
         cache_dir
             .join("dims")
             .join(&hash)
@@ -2888,7 +2914,7 @@ async fn fetch_one_dim(
     cache_dir: &Path,
     cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
     offline_flag: &Arc<AtomicBool>,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
     name: &str,
     defver: u32,
@@ -2905,7 +2931,7 @@ async fn fetch_one_dim(
             name, defver
         )));
     }
-    let (url, cache_path) = dim_url_and_cache_path(cache_dir, config, name, defver);
+    let (url, cache_path) = dim_url_and_cache_path(cache_dir, locations, name, defver);
     let (status, body) = fetch_body(client, &url, &format!("fetch dim '{name}'"))
         .await
         .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch dim '{}': {}", name, e)))?;
@@ -3027,7 +3053,7 @@ async fn ensure_dims_cached(
     manifest: &Arc<Mutex<Manifest>>,
     manifest_version: u32,
     offline_flag: &Arc<AtomicBool>,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
 ) -> Result<(), FabricRegistryError> {
     crate::fabric::dim::check_dim_refs(dims)
@@ -3063,7 +3089,7 @@ async fn ensure_dims_cached(
                     cache_dir,
                     cached_dims,
                     offline_flag,
-                    config,
+                    locations,
                     cache_revision_tx,
                     &r.dim,
                     defver,
@@ -3134,7 +3160,7 @@ async fn fetch_one_cap_atomic(
     extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: &Arc<Mutex<Manifest>>,
     offline_flag: &Arc<AtomicBool>,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     manifest_version: u32,
     cache_revision_tx: &watch::Sender<u64>,
     normalized_urn: &str,
@@ -3147,7 +3173,7 @@ async fn fetch_one_cap_atomic(
         )));
     }
 
-    let (url, cache_file) = cap_url_and_cache_path(cache_dir, config, normalized_urn, defver);
+    let (url, cache_file) = cap_url_and_cache_path(cache_dir, locations, normalized_urn, defver);
 
     let (status, body) = fetch_body(client, &url, &format!("fetch cap '{normalized_urn}'"))
         .await
@@ -3203,7 +3229,7 @@ async fn fetch_one_cap_atomic(
             manifest,
             manifest_version,
             offline_flag,
-            config,
+            locations,
             cache_revision_tx,
             media_urn,
             media_defver,
@@ -3235,7 +3261,7 @@ async fn fetch_one_cap_atomic(
         manifest,
         manifest_version,
         offline_flag,
-        config,
+        locations,
         cache_revision_tx,
     )
     .await?;
@@ -3284,7 +3310,7 @@ pub(crate) async fn fetch_one_media_def(
     manifest: &Arc<Mutex<Manifest>>,
     manifest_version: u32,
     offline_flag: &Arc<AtomicBool>,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
     normalized_urn: &str,
     defver: u32,
@@ -3296,7 +3322,7 @@ pub(crate) async fn fetch_one_media_def(
         )));
     }
 
-    let (url, cache_file) = media_url_and_cache_path(cache_dir, config, normalized_urn, defver);
+    let (url, cache_file) = media_url_and_cache_path(cache_dir, locations, normalized_urn, defver);
 
     let (status, body) = fetch_body(client, &url, &format!("fetch media def '{normalized_urn}'"))
         .await
@@ -3323,7 +3349,7 @@ pub(crate) async fn fetch_one_media_def(
         manifest,
         manifest_version,
         offline_flag,
-        config,
+        locations,
         cache_revision_tx,
     )
     .await?;
@@ -3373,7 +3399,7 @@ pub(crate) async fn fetch_one_media_def(
 async fn load_or_fetch_manifest(
     manifests_dir: &Path,
     client: &reqwest::Client,
-    config: &RegistryConfig,
+    locations: &FabricLocations,
     version: u32,
     bypass_cache: bool,
 ) -> Result<Manifest, FabricRegistryError> {
@@ -3408,7 +3434,7 @@ async fn load_or_fetch_manifest(
         }
     }
 
-    let url = format!("{}/manifest/{}.json", config.registry_base_url, version);
+    let url = locations.manifest(version);
     let (status, body) = fetch_body(client, &url, &format!("fetch manifest v{version}"))
         .await
         .map_err(|e| {
@@ -3441,6 +3467,103 @@ async fn load_or_fetch_manifest(
     Ok(manifest)
 }
 
+/// The charter of a fabric published at `anchor` the way the publisher lays a
+/// fabric out (`fabric/src/fabric.js`). For a registry that is never fetched:
+/// the test constructors, and tests of where things are.
+pub(crate) fn publisher_layout_charter(anchor: &str) -> Charter {
+    Charter {
+        format: crate::bifaci::charter::CHARTER_FORMAT.to_string(),
+        anchor: anchor.to_string(),
+        kind: RegistryKind::Fabric,
+        slug: "test-fabric".to_string(),
+        environment: "prod".to_string(),
+        experiment: None,
+        locations: [
+            ("manifest", format!("{anchor}/manifest/{{manifest_version}}.json")),
+            ("latest", format!("{anchor}/manifest/latest.json")),
+            ("definition", format!("{anchor}/{{kind}}/{{urn_hash}}/{{version}}.json")),
+        ]
+        .into_iter()
+        .map(|(name, url)| (name.to_string(), url))
+        .collect(),
+        fabric: None,
+        issued_at: 0,
+        not_after: None,
+    }
+}
+
+/// The locations of a fabric published at `anchor` in the publisher's layout.
+#[cfg(test)]
+pub(crate) fn layout_locations(anchor: &str) -> FabricLocations {
+    FabricLocations::from_charter(&publisher_layout_charter(anchor)).expect("a fabric charter")
+}
+
+/// The verified charter of the fabric registry at `anchor`.
+///
+/// A fabric's contents carry no signature, so no content environment is
+/// expected of its charter: any chartered fabric can be resolved against
+/// (`capdag --fabric`), and what keeps one client's registries on one fabric is
+/// each cartridge registry's charter naming it.
+///
+/// The cached one, when a folder under `capdag_cache` holds a charter for this
+/// anchor that still verifies — so an offline client keeps its fabric. Else,
+/// or when the cache is bypassed, the charter is fetched from the anchor and
+/// stored in the folder its slug names. A stored charter that no longer
+/// verifies (its certificate expired at a key rotation, say) is not used; the
+/// registry's current one is fetched in its place.
+async fn resolve_charter(
+    client: &reqwest::Client,
+    capdag_cache: &Path,
+    anchor: &str,
+    bypass_cache: bool,
+    trust: &CharterTrust,
+    now: u64,
+) -> Result<VerifiedCharter, FabricRegistryError> {
+    if !bypass_cache {
+        if let Ok(entries) = fs::read_dir(capdag_cache) {
+            for entry in entries.flatten() {
+                let folder = entry.path();
+                if !folder.join(crate::bifaci::charter::CHARTER_FILE).is_file() {
+                    continue;
+                }
+                match crate::bifaci::charter::verify_stored(
+                    &folder,
+                    trust,
+                    RegistryKind::Fabric,
+                    None,
+                    now,
+                ) {
+                    Ok(verified) if verified.charter.anchor == anchor => return Ok(verified),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(
+                        "the charter stored in {:?} is not used: {}",
+                        folder,
+                        e
+                    ),
+                }
+            }
+        }
+    }
+    let verified = crate::bifaci::charter::fetch(
+        client,
+        anchor,
+        trust,
+        RegistryKind::Fabric,
+        None,
+        now,
+    )
+    .await
+    .map_err(|e| FabricRegistryError::Charter(e.to_string()))?;
+    let folder = capdag_cache.join(&verified.charter.slug);
+    crate::bifaci::charter::store(&verified, &folder).map_err(|e| {
+        FabricRegistryError::CacheError(format!(
+            "Failed to store the charter of {} in {:?}: {}",
+            anchor, folder, e
+        ))
+    })?;
+    Ok(verified)
+}
+
 fn publish_cache_revision(tx: &watch::Sender<u64>) {
     let next = {
         let current = *tx.borrow();
@@ -3466,7 +3589,7 @@ async fn run_fetch_consumer(
     manifest: Arc<Mutex<Manifest>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
     offline_flag: Arc<AtomicBool>,
-    config: RegistryConfig,
+    locations: FabricLocations,
     cache_revision_tx: watch::Sender<u64>,
 ) {
     let manifest_version = manifest.lock().map(|m| m.version).unwrap_or(0);
@@ -3491,7 +3614,7 @@ async fn run_fetch_consumer(
                         &extension_index,
                         &manifest,
                         &offline_flag,
-                        &config,
+                        &locations,
                         manifest_version,
                         &cache_revision_tx,
                         normalized_urn,
@@ -3535,7 +3658,7 @@ async fn run_fetch_consumer(
                         &manifest,
                         manifest_version,
                         &offline_flag,
-                        &config,
+                        &locations,
                         &cache_revision_tx,
                         normalized_urn,
                         *defver,
@@ -3574,7 +3697,7 @@ async fn run_fetch_consumer(
                         &cache_dir,
                         &cached_aliases,
                         &offline_flag,
-                        &config,
+                        &locations,
                         &cache_revision_tx,
                         normalized_name,
                         *defver,
@@ -3628,6 +3751,11 @@ pub enum FabricRegistryError {
 
     #[error("Network access blocked: {0}")]
     NetworkBlocked(String),
+
+    /// The registry's charter could not be had, or was refused. Nothing the
+    /// registry serves is used without one.
+    #[error("Charter: {0}")]
+    Charter(String),
 
     #[error("No media def registered for extension: {0}")]
     ExtensionNotFound(String),
@@ -4129,42 +4257,33 @@ mod parity_port_tests {
     // TEST147: Test registry for test with custom config creates registry with specified URLs
     #[test]
     fn test147_registry_for_test_with_custom_config() {
-        let config = RegistryConfig::new().with_registry_url("https://example.test/registry");
+        let config = RegistryConfig::new().with_anchor("https://example.test/registry");
         let registry = FabricRegistry::new_for_test_with_config(config);
-        assert_eq!(
-            registry.config().registry_base_url,
-            "https://example.test/registry"
-        );
+        assert_eq!(registry.config().anchor, "https://example.test/registry");
+        assert_eq!(registry.charter().charter.anchor, "https://example.test/registry");
     }
 
-    // TEST1899: a media def published under a manifest (v>=1) resolves to the
-    // VERSIONED object path `/media/<sha>/<defver>.json`, never the legacy
-    // flat path `/media/<sha>`. The flat path is the pre-manifest (v0) layout;
-    // a registry that silently runs in v0 mode fetches it and 404s every
-    // lookup against a versioned registry — the exact regression where a
-    // fabric-registry mirror defaulted its manifest version to 0. This pins
-    // both the URL rule and the manifest-driven defver resolution.
+
+    // TEST1899: a media def resolves to the charter's `definition` location at
+    // the defver its manifest pins — `/media/<sha>/<defver>.json` in the
+    // publisher's layout. There is no other path: the pre-manifest flat
+    // layout is gone, and a client that composed one would 404 every lookup.
+    // This pins both the URL rule and the manifest-driven defver resolution.
     #[test]
     fn test1899_media_def_resolves_to_versioned_object_path_under_manifest() {
-        // 1. Object-path rule: defver >= 1 → versioned; defver 0 → flat.
-        let config = RegistryConfig::new().with_registry_url("https://fabric.example.test");
+        // 1. Object-path rule: the charter's definition location, at the defver.
+        let locations = layout_locations("https://fabric.example.test");
         let cache = std::path::Path::new("/tmp/capdag-test-cache-0144");
         let urn = "media:enc=utf-8;ext=md";
         let mut hasher = Sha256::new();
         hasher.update(urn.as_bytes());
         let hash = format!("{:x}", hasher.finalize());
 
-        let (versioned, _) = media_url_and_cache_path(cache, &config, urn, 1);
+        let (versioned, _) = media_url_and_cache_path(cache, &locations, urn, 1);
         assert_eq!(
             versioned,
             format!("https://fabric.example.test/media/{}/1.json", hash),
             "a def at manifest defver 1 must resolve to the versioned object path"
-        );
-        let (flat, _) = media_url_and_cache_path(cache, &config, urn, 0);
-        assert_eq!(
-            flat,
-            format!("https://fabric.example.test/media/{}", hash),
-            "defver 0 is the legacy flat path — the wrong target for a versioned registry"
         );
 
         // 2. Manifest-driven defver: a registry pinned at v>=1 resolves a
@@ -4348,13 +4467,18 @@ mod parity_port_tests {
 
     // ---- RegistryConfig + per-cap URL parity ports ----
 
-    // The per-cap registry URL: SHA-256 hex of the canonical cap URN under the
-    // `/caps/` prefix. Mirrors the construction in `cap_url_and_cache_path`.
-    fn cap_registry_url(config: &RegistryConfig, cap_urn: &str) -> String {
+    // The per-cap registry URL at defver 1, through `cap_url_and_cache_path`
+    // and the publisher's layout: the SHA-256 hex of the canonical cap URN is
+    // the `{urn_hash}` of the `definition` location.
+    fn cap_registry_url(cap_urn: &str) -> String {
         let normalized = normalize_cap_urn(cap_urn).expect("test passes a valid cap URN");
-        let mut hasher = Sha256::new();
-        hasher.update(normalized.as_bytes());
-        format!("{}/caps/{:x}", config.registry_base_url, hasher.finalize())
+        let locations = layout_locations("https://fabric.capdag.com");
+        cap_url_and_cache_path(Path::new("/tmp/capdag-test-cache-caps"), &locations, &normalized, 1).0
+    }
+
+    /// The `{urn_hash}` segment of a per-cap URL.
+    fn urn_hash_of(url: &str) -> &str {
+        url.split("/caps/").nth(1).and_then(|rest| rest.split('/').next()).expect("URL has /caps/<hash>/")
     }
 
     // TEST138: Test parsing registry JSON with stdin args verifies stdin media URN extraction
@@ -4466,26 +4590,22 @@ mod parity_port_tests {
     // TEST141: URL has the right shape — protocol, host, /caps/ prefix, 64 hex chars, no extension.
     #[test]
     fn test141_per_cap_url_shape() {
-        let config = RegistryConfig::default();
         let url = cap_registry_url(
-            &config,
             "cap:in=\"media:listing-id\";use-grinder;out=\"media:id;task\"",
         );
-        let after = url.split("/caps/").nth(1).expect("URL has /caps/ segment");
-        assert_eq!(after.len(), 64, "SHA-256 hex digest is 64 characters");
-        assert!(after.chars().all(|c| c.is_ascii_hexdigit()));
+        let hash = urn_hash_of(&url);
+        assert_eq!(hash.len(), 64, "SHA-256 hex digest is 64 characters");
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(url.ends_with("/1.json"), "the defver is the last segment: {url}");
     }
 
     // TEST142: Different tag orders normalise to the same URL — the canonicaliser strips the variation before hashing.
     #[test]
     fn test142_normalize_handles_different_tag_orders() {
-        let config = RegistryConfig::default();
         let a = cap_registry_url(
-            &config,
             "cap:test;in=\"media:enc=utf-8\";out=\"media:record\"",
         );
         let b = cap_registry_url(
-            &config,
             "cap:in=\"media:enc=utf-8\";out=\"media:record\";test",
         );
         assert_eq!(a, b, "different tag orders produce the same URL");
@@ -4496,84 +4616,62 @@ mod parity_port_tests {
     fn test143_default_config() {
         let config = RegistryConfig::default();
         match std::env::var("CDG_FABRIC_REGISTRY_URL") {
-            Ok(url) if !url.is_empty() => assert_eq!(config.registry_base_url, url),
-            _ => assert_eq!(config.registry_base_url, "https://fabric.capdag.com"),
+            Ok(url) if !url.is_empty() => assert_eq!(config.anchor, url),
+            _ => assert_eq!(config.anchor, "https://fabric.capdag.com"),
         }
-        assert!(config.schema_base_url.contains("/schema"));
     }
 
-    // TEST144: Test custom registry URL updates both registry and schema base URLs
+    // TEST144: Test custom registry URL updates the anchor, which is all a client is told
     #[test]
     fn test144_custom_registry_url() {
-        let config = RegistryConfig::default().with_registry_url("https://localhost:8888");
-        assert_eq!(config.registry_base_url, "https://localhost:8888");
-        assert_eq!(config.schema_base_url, "https://localhost:8888/schema");
+        let config = RegistryConfig::default().with_anchor("https://localhost:8888");
+        assert_eq!(config.anchor, "https://localhost:8888");
     }
 
-    // TEST145: Test custom registry and schema URLs set independently
-    #[test]
-    fn test145_custom_registry_and_schema_url() {
-        let config = RegistryConfig::default()
-            .with_registry_url("https://localhost:8888")
-            .with_schema_url("https://schemas.example.com");
-        assert_eq!(config.registry_base_url, "https://localhost:8888");
-        assert_eq!(config.schema_base_url, "https://schemas.example.com");
-    }
+    // TEST1893: a fabric's cache folder is its CHARTER's slug, and a charter
+    // stored there is what an offline client finds its fabric by — matched by
+    // anchor, never by folder name. A prod-populated cache can therefore
+    // never satisfy a staging lookup: two registries have two charters and
+    // two slugs, whatever their URLs look like. The charter used is a real
+    // signed fixture, checked against its own roots.
+    #[tokio::test]
+    async fn test1893_cache_folder_is_the_charters_slug_and_found_by_anchor() {
+        const ROOT_A: &str = include_str!("../../tests/fixtures/nocommit/signing/root_a.pubkey");
+        const ROOT_B: &str = include_str!("../../tests/fixtures/nocommit/signing/root_b.pubkey");
+        const ROOT_C: &str = include_str!("../../tests/fixtures/nocommit/signing/root_c.pubkey");
+        const META: &str = include_str!("../../tests/fixtures/nocommit/signing/meta.json");
+        const FABRIC: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-fabric.json");
+        const FABRIC_SIG: &str = include_str!("../../tests/fixtures/nocommit/signing/charter-fabric.json.sig");
+        let trust = CharterTrust {
+            root_pubkeys: [ROOT_A, ROOT_B, ROOT_C].iter().map(|k| k.trim().to_string()).collect(),
+        };
+        let meta: serde_json::Value = serde_json::from_str(META).unwrap();
+        let now = meta["issued_at"].as_u64().unwrap() + 86_400;
+        let anchor = "https://registry.example/fabric";
+        let verified = crate::bifaci::charter::verify(
+            FABRIC,
+            FABRIC_SIG,
+            &trust,
+            &crate::bifaci::charter::CharterExpectation { anchor: Some(anchor), kind: RegistryKind::Fabric, environment: None },
+            now,
+        )
+        .expect("the fixture fabric charter verifies");
 
-    // TEST146: Test schema URL not overwritten when set explicitly before registry URL
-    #[test]
-    fn test146_schema_url_not_overwritten_when_explicit() {
-        let config = RegistryConfig::default()
-            .with_schema_url("https://schemas.example.com")
-            .with_registry_url("https://localhost:8888");
-        assert_eq!(config.registry_base_url, "https://localhost:8888");
-        assert_eq!(config.schema_base_url, "https://schemas.example.com");
-    }
+        let cache = tempfile::tempdir().unwrap();
+        // Another registry's folder is beside it, and is not taken for it.
+        std::fs::create_dir_all(cache.path().join("fabric.capdag.com")).unwrap();
+        crate::bifaci::charter::store(&verified, &cache.path().join("example-fabric")).unwrap();
 
-    // TEST1893: The on-disk cache root is namespaced per registry origin, so a
-    // prod-populated cache can never satisfy a staging lookup (and vice versa).
-    // Without this, a `CDG_FABRIC_REGISTRY_URL=staging` run reuses the
-    // prod-cached manifest/caps under one shared `capdag/` directory and
-    // resolves against the wrong snapshot — the bug that made `--staging`
-    // appear not to reach the scenario tests. This pins three properties:
-    // distinct origins → distinct roots; same origin → identical root
-    // (deterministic, so caching actually hits); and the slug is the same
-    // `slug_for` scheme the cartridge registry layout uses.
-    #[test]
-    fn test1893_cache_root_is_namespaced_per_registry_origin() {
-        let prod = FabricRegistry::default_cache_root("https://fabric.capdag.com")
-            .expect("prod cache root");
-        let staging = FabricRegistry::default_cache_root("https://fabric-staging.capdag.com")
-            .expect("staging cache root");
-        let staging_again = FabricRegistry::default_cache_root("https://fabric-staging.capdag.com")
-            .expect("staging cache root again");
-
-        assert_ne!(
-            prod, staging,
-            "prod and staging must not share a cache root — they serve different bytes for the same URN/version"
-        );
+        let client = reqwest::Client::new();
+        let found = resolve_charter(&client, cache.path(), anchor, false, &trust, now)
+            .await
+            .expect("the stored charter is found offline, by its anchor");
+        assert_eq!(found.charter.slug, "example-fabric");
+        let locations = FabricLocations::from_charter(&found.charter).unwrap();
         assert_eq!(
-            staging, staging_again,
-            "the same registry origin must map to a stable cache root, or caching never hits"
-        );
-
-        // The final path component is exactly the cartridge-registry slug of
-        // the origin URL — one slug scheme across the codebase.
-        let slug =
-            crate::bifaci::cartridge_slug::slug_for(Some("https://fabric-staging.capdag.com"));
-        assert_eq!(
-            staging.file_name().and_then(|s| s.to_str()),
-            Some(slug.as_str()),
-            "cache root must end in slug_for(registry_url)"
-        );
-        // And the parent of that slug is the shared `capdag` cache directory.
-        assert_eq!(
-            staging
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str()),
-            Some("capdag"),
-            "the per-origin slug must live under the capdag cache directory"
+            locations.manifest(11),
+            "https://registry.example/fabric/manifest/11.json",
+            "the manifest is where the charter says, not where a URL convention would put it"
         );
     }
 
@@ -4652,9 +4750,7 @@ mod parity_port_tests {
     // TEST6388: Per-cap URL is /caps/<sha256-hex> — no URN-grammar characters in the path, no percent-encoding gymnastics.
     #[test]
     fn test6388_per_cap_url_uses_sha256() {
-        let config = RegistryConfig::default();
         let url = cap_registry_url(
-            &config,
             "cap:in=\"media:enc=utf-8\";test;out=\"media:record\"",
         );
         assert!(url.contains("/caps/"));
@@ -4671,13 +4767,10 @@ mod parity_port_tests {
     // TEST6391: Equivalent URNs (different tag order, etc.) hash to the same key.
     #[test]
     fn test6391_same_cap_different_spellings_same_url() {
-        let config = RegistryConfig::default();
         let a = cap_registry_url(
-            &config,
             "cap:in=\"media:listing-id\";use-grinder;out=\"media:id;task\"",
         );
         let b = cap_registry_url(
-            &config,
             "cap:out=\"media:id;task\";in=\"media:listing-id\";use-grinder",
         );
         assert_eq!(a, b, "equivalent URNs must hash to the same registry key");
@@ -4856,12 +4949,12 @@ mod dim_tests {
     // (values present, names unique).
     #[test]
     fn test1968_a_dim_object_is_the_dim_and_version_asked_for() {
-        let config = RegistryConfig::new().with_registry_url("https://fabric.example.test");
+        let locations = layout_locations("https://fabric.example.test");
         let cache = Path::new("/tmp/capdag-test-cache-1968");
         let mut hasher = Sha256::new();
         hasher.update("language".as_bytes());
         let hash = format!("{:x}", hasher.finalize());
-        let (url, path) = dim_url_and_cache_path(cache, &config, "language", 3);
+        let (url, path) = dim_url_and_cache_path(cache, &locations, "language", 3);
         assert_eq!(url, format!("https://fabric.example.test/dims/{hash}/3.json"));
         assert_eq!(path, cache.join("dims").join(&hash).join("3.json"));
 
@@ -4971,7 +5064,7 @@ mod dim_tests {
                     &r.manifest,
                     r.manifest_version,
                     &r.offline_flag,
-                    &r.config,
+                    &r.locations,
                     &r.cache_revision_tx,
                 )
                 .await

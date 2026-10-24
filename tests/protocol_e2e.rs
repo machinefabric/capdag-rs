@@ -165,7 +165,8 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
         capdag::FABRIC_MANIFEST_VERSION,
         vec![support::testcartridge_bin(TAG)],
         None,
-        capdag::RegistryConfig::default().registry_base_url,
+        capdag::RegistryConfig::default().anchor,
+        capdag::CharterTrust::from_build_constants(),
     );
     manager.init().await.expect("CartridgeManager init failed");
     let cartridges = manager

@@ -272,7 +272,7 @@ fn distinct_trusted_root_signers(
 
 /// Validate one certificate entry against the baked roots / environment / clock
 /// and return its parsed body. Every check is a hard error.
-fn verify_certificate_entry(
+pub(crate) fn verify_certificate_entry(
     entry: &CertificateEntry,
     root_pubkeys: &[&str],
     build_environment: &str,

@@ -10,7 +10,7 @@ pub mod bundle_manifest;
 pub mod cartridge_json;
 pub mod cartridge_repo;
 pub mod cartridge_runtime;
-pub mod cartridge_slug;
+pub mod charter;
 pub mod credit;
 pub mod frame;
 pub mod host_runtime;

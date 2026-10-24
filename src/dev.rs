@@ -27,7 +27,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::bifaci::cartridge_slug::DEV_SLUG;
+use crate::bifaci::charter::DEV_SLUG;
 use crate::bifaci::manifest::CapManifest;
 use crate::cap::definition::Cap;
 use crate::fabric::registry::FabricRegistry;

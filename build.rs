@@ -49,8 +49,53 @@ fn main() {
     );
 
     bake_capdag_version();
+    enforce_charter_roots();
     enforce_signing_pubkey_pairing();
     bake_release_line();
+}
+
+/// Every build bakes MachineFabric's root public keys as its CHARTER trust
+/// (`MFR_CHARTER_ROOT_PUBKEYS`): a registry exists only if MachineFabric
+/// chartered it, so a build that could not check a charter could use no
+/// registry at all — not even to resolve a cap. There is no build without
+/// them, dev builds included. They are never the content trust: a charter is
+/// verified against these and nothing else is.
+fn enforce_charter_roots() {
+    println!("cargo:rerun-if-env-changed=MFR_CHARTER_ROOT_PUBKEYS");
+    let keys = env::var("MFR_CHARTER_ROOT_PUBKEYS")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "MFR_CHARTER_ROOT_PUBKEYS is not set. Every build bakes MachineFabric's root \
+                 public keys (workspace.json `signing_roots`), which every registry's charter \
+                 chains to. The workspace build tool exports it; build through it."
+            )
+        });
+    let count = validate_root_list("MFR_CHARTER_ROOT_PUBKEYS", &keys);
+    if count < 3 {
+        panic!(
+            "MFR_CHARTER_ROOT_PUBKEYS has {count} key(s); at least 3 are required \
+             (a charter's certificate verifies under 2 of 3 roots)"
+        );
+    }
+}
+
+/// Validate a comma-separated list of root public keys, returning how many.
+fn validate_root_list(variable: &str, keys: &str) -> usize {
+    let mut count = 0usize;
+    for key in keys.split(',') {
+        let key = key.trim();
+        if key.is_empty() {
+            panic!(
+                "{variable} contains an empty entry: {keys:?}. Provide a comma-separated list \
+                 of base64 minisign root public keys."
+            );
+        }
+        validate_minisign_pubkey(variable, key);
+        count += 1;
+    }
+    count
 }
 
 /// Bake `capdag/version.txt` as the `CAPDAG_VERSION` compile-time env so
@@ -127,8 +172,7 @@ fn bake_registry_version(
 /// the ROOT public key set (`MFR_CARTRIDGE_ROOT_PUBKEYS`, comma-separated —
 /// roots sign release-key certificates, which in turn authorize the release
 /// key that signs binaries and manifests) and the environment label
-/// (`MFR_SIGNING_ENVIRONMENT`, `prod`/`staging`, which certificates are bound
-/// to). The registry URL says where artifacts come from; the roots + label
+/// (`MFR_SIGNING_ENVIRONMENT`, which certificates are bound to). The registry URL says where artifacts come from; the roots + label
 /// say what they must chain to. A registry-baking build missing either would
 /// compile a binary whose registry downloads can never verify — a
 /// misconfiguration that must fail here, not at a user's first download.
@@ -142,13 +186,13 @@ fn bake_registry_version(
 /// - registry set, roots absent/empty or label absent/empty.
 /// - any root key not a decodable minisign public key (`RW` + base64,
 ///   56 chars decoding to 42 bytes).
-/// - label not `prod` or `staging`.
+/// - label not `prod`, `staging`, `lab` or `dev`.
+/// - label `lab` with roots other than exactly the dev roots.
 fn enforce_signing_pubkey_pairing() {
     println!("cargo:rerun-if-env-changed=MFR_CARTRIDGE_REGISTRY_URL");
     println!("cargo:rerun-if-env-changed=MFR_CARTRIDGE_ROOT_PUBKEYS");
     println!("cargo:rerun-if-env-changed=MFR_SIGNING_ENVIRONMENT");
     println!("cargo:rerun-if-env-changed=CDG_FABRIC_REGISTRY_URL");
-    println!("cargo:rerun-if-env-changed=CDG_SCHEMA_BASE_URL");
 
     let registry = env::var("MFR_CARTRIDGE_REGISTRY_URL")
         .ok()
@@ -177,37 +221,23 @@ fn enforce_signing_pubkey_pairing() {
             panic!(
                 "MFR_CARTRIDGE_REGISTRY_URL is set ({url:?}) but MFR_SIGNING_ENVIRONMENT is \
                  absent or empty. A registry-baking build must carry its signing environment \
-                 label ('prod' or 'staging') so release-key certificates bind to it."
+                 label, so release-key certificates bind to it."
             );
         }
         if fabric.is_none() {
             panic!(
                 "MFR_CARTRIDGE_REGISTRY_URL is set ({url:?}) but CDG_FABRIC_REGISTRY_URL is \
                  absent or empty. A product build binds the cartridge registry AND the fabric \
-                 registry (caps/media/aliases) together — otherwise the shipped CLI silently \
-                 resolves caps and aliases against the prod fabric default even in a staging \
-                 build. Set CDG_FABRIC_REGISTRY_URL (the workspace build tool exports it when it selects a fabric target: \
-                 https://fabric.capdag.com for prod, https://fabric-staging.capdag.com for \
-                 staging), or unset the cartridge registry URL for a dev build."
+                 registry (caps/media/aliases) together — otherwise the shipped CLI would \
+                 resolve caps and aliases against a fabric other than the one its cartridge \
+                 registry's charter names. Set CDG_FABRIC_REGISTRY_URL (the workspace build \
+                 tool exports the selected environment's fabric anchor), or unset the cartridge \
+                 registry URL for a dev build."
             );
         }
     }
     if let Some(keys) = &roots {
-        let mut count = 0usize;
-        for key in keys.split(',') {
-            let key = key.trim();
-            if key.is_empty() {
-                panic!(
-                    "MFR_CARTRIDGE_ROOT_PUBKEYS contains an empty entry: {keys:?}. Provide a \
-                     comma-separated list of base64 minisign root public keys."
-                );
-            }
-            validate_minisign_pubkey(key);
-            count += 1;
-        }
-        if count == 0 {
-            panic!("MFR_CARTRIDGE_ROOT_PUBKEYS decodes to zero keys: {keys:?}");
-        }
+        let count = validate_root_list("MFR_CARTRIDGE_ROOT_PUBKEYS", keys);
         // Release-key certificates require two distinct trusted roots to verify
         // (2-of-3). A published build must therefore bake at least three roots,
         // so any single root can be lost without making a certificate
@@ -221,11 +251,43 @@ fn enforce_signing_pubkey_pairing() {
     }
     if let Some(label) = &environment {
         let label = label.trim();
-        if label != "prod" && label != "staging" && label != DEV_ENVIRONMENT {
+        if label != "prod" && label != "staging" && label != LAB_ENVIRONMENT && label != DEV_ENVIRONMENT {
             panic!(
-                "MFR_SIGNING_ENVIRONMENT must be 'prod', 'staging' or '{DEV_ENVIRONMENT}', \
-                 got {label:?}."
+                "MFR_SIGNING_ENVIRONMENT must be 'prod', 'staging', '{LAB_ENVIRONMENT}' or \
+                 '{DEV_ENVIRONMENT}', got {label:?}."
             );
+        }
+        // A lab build's content is signed by the dev release key, certified
+        // for `lab` by the dev roots — keys that live on developer machines.
+        // That is safe only while a lab build trusts NOTHING else: paired with
+        // the prod roots, the lab label would let a laptop-resident key sign
+        // for a build that also accepts prod's certificates. So a lab build
+        // must bake exactly the dev roots, handed to it as
+        // MFR_DEV_ROOT_PUBKEYS, and the comparison is here rather than left to
+        // whoever set the variables.
+        if label == LAB_ENVIRONMENT {
+            println!("cargo:rerun-if-env-changed=MFR_DEV_ROOT_PUBKEYS");
+            let dev = env::var("MFR_DEV_ROOT_PUBKEYS")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "MFR_SIGNING_ENVIRONMENT is '{LAB_ENVIRONMENT}' but MFR_DEV_ROOT_PUBKEYS \
+                         is not set: a lab build must bake exactly the dev roots, and this \
+                         build cannot tell whether it does."
+                    )
+                });
+            let as_set = |keys: &str| -> std::collections::BTreeSet<String> {
+                keys.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect()
+            };
+            let baked = roots.as_deref().map(as_set).unwrap_or_default();
+            if baked != as_set(&dev) {
+                panic!(
+                    "MFR_SIGNING_ENVIRONMENT is '{LAB_ENVIRONMENT}' and MFR_CARTRIDGE_ROOT_PUBKEYS \
+                     is not exactly the dev roots (MFR_DEV_ROOT_PUBKEYS). A lab build trusts the \
+                     dev roots and nothing else."
+                );
+            }
         }
         // ── The one-environment guard ────────────────────────────────────────
         //
@@ -254,7 +316,7 @@ fn enforce_signing_pubkey_pairing() {
                      published (MFR_PUBLISHED_BUILD={marker:?}). The dev signing keys live on \
                      developer machines and in CI; a released build that trusted them would \
                      accept anything any of those machines signed. Build with \
-                     MFR_SIGNING_ENVIRONMENT=prod or staging."
+                     MFR_SIGNING_ENVIRONMENT=prod, staging or lab."
                 );
             }
         }
@@ -274,7 +336,7 @@ fn enforce_signing_pubkey_pairing() {
 /// not update itself.
 fn bake_release_line() {
     println!("cargo:rerun-if-env-changed=MFR_RELEASE_CHANNEL");
-    println!("cargo:rerun-if-env-changed=MFR_RELEASES_BASE_URL");
+    println!("cargo:rerun-if-env-changed=MFR_RELEASES_REGISTRY_URL");
     let given = |name: &str| {
         env::var(name)
             .ok()
@@ -287,23 +349,24 @@ fn bake_release_line() {
     if !matches!(channel.as_str(), "release" | "nightly") {
         panic!("MFR_RELEASE_CHANNEL must be `release` or `nightly`, got {channel:?}");
     }
-    let Some(url) = given("MFR_RELEASES_BASE_URL") else {
+    let Some(url) = given("MFR_RELEASES_REGISTRY_URL") else {
         panic!(
-            "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_RELEASES_BASE_URL is not: a \
-             published capdag bakes the release registry it updates from"
+            "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_RELEASES_REGISTRY_URL is not: a \
+             published capdag bakes the anchor of the release registry it updates from"
         );
     };
     if !url.starts_with("https://") || url.ends_with('/') || url.contains(' ') {
         panic!(
-            "MFR_RELEASES_BASE_URL must be an https URL with no space and no trailing slash, \
+            "MFR_RELEASES_REGISTRY_URL must be an https URL with no space and no trailing slash, \
              got {url:?}"
         );
     }
     match given("MFR_SIGNING_ENVIRONMENT").as_deref() {
-        Some("prod") | Some("staging") => {}
+        Some("prod") | Some("staging") | Some(LAB_ENVIRONMENT) => {}
         other => panic!(
             "MFR_RELEASE_CHANNEL is set ({channel:?}) but MFR_SIGNING_ENVIRONMENT is {other:?}: \
-             a published capdag verifies its releases under `prod` or `staging`"
+             a published capdag verifies its releases under `prod`, `staging` or \
+             `{LAB_ENVIRONMENT}`"
         ),
     }
     let Some(roots) = given("MFR_CARTRIDGE_ROOT_PUBKEYS") else {
@@ -321,7 +384,7 @@ fn bake_release_line() {
         );
     }
     for root in &roots {
-        validate_minisign_pubkey(root);
+        validate_minisign_pubkey("MFR_CARTRIDGE_ROOT_PUBKEYS", root);
     }
     println!("cargo:rustc-env=CAPDAG_BAKED_RELEASE_LINE={url} {channel}");
 }
@@ -335,17 +398,20 @@ fn bake_release_line() {
 /// key was available.
 pub(crate) const DEV_ENVIRONMENT: &str = "dev";
 
+/// The environment of lab experiments. Its content is signed by the dev
+/// release key under this label, and verified against the dev roots alone.
+pub(crate) const LAB_ENVIRONMENT: &str = "lab";
+
 /// Structural validation of a base64 minisign public key: 56 base64 chars
 /// decoding to 42 bytes whose first two are the `Ed` signature-algorithm tag.
 /// Hand-rolled base64 (no new build-deps) — this is a build-time sanity gate;
 /// full cryptographic validation happens in `minisign-verify` at runtime.
-fn validate_minisign_pubkey(key: &str) {
+fn validate_minisign_pubkey(variable: &str, key: &str) {
     const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let fail = |why: &str| -> ! {
         panic!(
-            "MFR_CARTRIDGE_ROOT_PUBKEYS entry is not a valid base64 minisign public key \
-             ({why}): {key:?}. Expected the second line of a minisign .pub file (starts \
-             with \"RW\")."
+            "{variable} entry is not a valid base64 minisign public key ({why}): {key:?}. \
+             Expected the second line of a minisign .pub file (starts with \"RW\")."
         )
     };
     if key.len() != 56 {

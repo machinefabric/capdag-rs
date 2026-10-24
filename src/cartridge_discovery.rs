@@ -14,13 +14,13 @@
 //! same code serves a host built for any channel/registry.
 //!
 //! Managed layout (relative to the root passed to [`discover_cartridges`]):
-//! `{root}/{slug}/v{cartridge_registry_version}/{channel}/{name}/{version}/cartridge.json`.
+//! `{root}/{slug}/v{cartridge_registry_version}/{channel}/{name}/{version}/cartridge.json`,
+//! where `{slug}` is `dev` or a folder holding its registry's charter
+//! (`charter.json` + `.sig`), named for the charter's slug.
 
-use crate::bifaci::cartridge_json::{
-    validate_registry_url_scheme, CartridgeJson, RegistryUrlSchemeResult,
-};
+use crate::bifaci::cartridge_json::CartridgeJson;
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::bifaci::cartridge_slug::slug_for;
+use crate::bifaci::charter::{CharterTrust, RegistryFolder};
 use crate::bifaci::manifest::CapManifest;
 use crate::bifaci::relay_switch::{CartridgeAttachmentError, CartridgeAttachmentErrorKind};
 use crate::CapGroup;
@@ -33,9 +33,20 @@ use tracing::{error, warn};
 #[derive(Debug, Clone)]
 pub struct DiscoveryIdentity {
     pub channel: CartridgeChannel,
-    /// `Some(url)` for release/nightly hosts, `None` for dev hosts (cartridges
-    /// then live under the reserved dev slug and any registry scheme is allowed).
+    /// `Some(anchor)` for release/nightly hosts, `None` for dev hosts
+    /// (cartridges then live under the reserved dev folder and any registry
+    /// scheme is allowed).
     pub registry_url: Option<String>,
+    /// The content label this host verifies registries under — the build's
+    /// `MFR_SIGNING_ENVIRONMENT`. A registry folder whose charter states
+    /// another environment is not this host's. `None` for a dev host.
+    pub signing_environment: Option<String>,
+    /// The roots registry folders' charters are verified against — the
+    /// build's charter trust.
+    pub charter_trust: CharterTrust,
+    /// The moment charters are judged at, unix seconds: the caller's clock,
+    /// carried rather than read here, as the bundle's proof is.
+    pub now_unix: u64,
     pub fabric_manifest_version: u32,
     /// Cartridge registry regime version this host speaks (the baked
     /// [`crate::CARTRIDGE_REGISTRY_VERSION`]). It is an on-disk PATH level —
@@ -52,18 +63,6 @@ pub struct DiscoveryIdentity {
     /// bundled while sitting there is refused for exactly that reason instead
     /// of being hosted because nobody asked.
     pub bundle: crate::bifaci::bundle_manifest::BundleProof,
-}
-
-impl DiscoveryIdentity {
-    /// On-disk top-level slug for THIS host's own baked registry (`dev` when
-    /// `registry_url` is None). Discovery no longer restricts scanning to this
-    /// slug — it enumerates every slug folder on disk (full macOS parity) and
-    /// validates each cartridge against the folder it sits under. Retained as a
-    /// public helper for callers that need the host's own slug (e.g. to locate
-    /// where this build's bundled cartridges were staged).
-    pub fn slug(&self) -> String {
-        slug_for(self.registry_url.as_deref())
-    }
 }
 
 /// A discovered cartridge version directory, classified.
@@ -170,10 +169,11 @@ pub async fn discover_cartridges(
         return Ok(discovered);
     }
 
-    // Scan EVERY slug folder present on disk — full macOS parity. The host's
-    // baked `identity.registry_url` does NOT restrict which slugs are scanned;
-    // each cartridge is instead validated in place against the slug folder it
-    // sits under (the three-place rule in `read_from_dir`), so a registry-
+    // Scan EVERY registry folder present on disk — full macOS parity. The
+    // host's baked `identity.registry_url` does NOT restrict which folders are
+    // scanned; each folder is opened through the charter stored in it, and
+    // each cartridge is validated in place against that folder (the charter
+    // rule in `read_from_dir`), so a registry-
     // installed cartridge (under its registry's slug), the reserved `dev/` slot
     // (unpublished user cartridges, null registry_url), and the engine's bundled
     // cartridges (under the build's registry slug, `installed_from: "bundle"`,
@@ -202,10 +202,17 @@ pub async fn discover_cartridges(
             }
             continue;
         }
-        let expected_slug = slug_dir
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        // The folder is what its stored charter proves, never what its name
+        // says. A folder whose charter is missing or refused still has its
+        // cartridges surfaced — each as misplaced, with the charter's reason —
+        // so the operator sees what is there and why none of it runs.
+        let folder = RegistryFolder::open(
+            &slug_dir,
+            &identity.charter_trust,
+            identity.signing_environment.as_deref(),
+            identity.now_unix,
+        )
+        .map_err(|e| e.to_string());
         // `{slug}/v{cartridge_registry_version}/{channel}/…` — the registry
         // regime version is an on-disk level pinned to the host's version (like
         // the channel), so a v1 host never scans a v2 cartridge tree.
@@ -216,20 +223,21 @@ pub async fn discover_cartridges(
             // This slug has no subtree for the host's (version, channel) — skip.
             continue;
         }
-        scan_channel_root(&scan_root, &expected_slug, identity, &mut discovered).await?;
+        scan_channel_root(&scan_root, &folder, identity, &mut discovered).await?;
     }
 
     Ok(discovered)
 }
 
 /// Scan one `{slug}/{channel}/` root: classify each cartridge name directory's
-/// newest version against the host identity and the slug folder it sits under.
-/// `expected_slug` is the on-disk slug folder name — passed to
-/// `read_from_dir` so the three-place rule (folder slug ⇔ `slug_for(registry_url)`)
-/// is enforced per cartridge. Appends results to `discovered`.
+/// newest version against the host identity and the registry folder it sits
+/// under. `folder` is that folder, opened through its charter — or why it
+/// could not be — passed to `read_from_dir` so the charter rule (folder's
+/// anchor ⇔ `registry_url`) is enforced per cartridge. Appends results to
+/// `discovered`.
 async fn scan_channel_root(
     scan_root: &Path,
-    expected_slug: &str,
+    folder: &Result<RegistryFolder, String>,
     identity: &DiscoveryIdentity,
     discovered: &mut Vec<DiscoveredCartridge>,
 ) -> anyhow::Result<()> {
@@ -302,13 +310,36 @@ async fn scan_channel_root(
 
         let detected_at = unix_seconds_now();
 
-        // `read_from_dir` enforces the three-place rule against the ACTUAL slug
-        // folder (`expected_slug`): the cartridge's declared `registry_url` must
-        // hash to it. A non-null registry_url under `dev/` (or any slug≠
-        // slug_for(registry_url)) fails here as a slug mismatch — surfaced
-        // incompatible and logged, never hosted. A null registry_url is valid
-        // only under the reserved `dev/` slot.
-        let cj = match CartridgeJson::read_from_dir(version_dir, expected_slug) {
+        // `read_from_dir` enforces the charter rule against the folder the
+        // cartridge ACTUALLY sits in: its declared `registry_url` must be the
+        // folder's anchor. A non-null registry_url under `dev/`, or another
+        // registry's anchor, fails here as misplaced — surfaced incompatible
+        // and logged, never hosted. A null registry_url is valid only under
+        // the reserved `dev/` folder. A folder with no charter that verifies
+        // makes every cartridge in it misplaced, for the charter's reason.
+        let opened = match folder {
+            Ok(opened) => opened,
+            Err(reason) => {
+                error!(dir = %version_dir.display(), reason = %reason, "registry folder has no charter that verifies — surfacing as incompatible");
+                discovered.push(DiscoveredCartridge::Incompatible {
+                    version_dir: version_dir.clone(),
+                    id: path_derived_name.clone(),
+                    channel: identity.channel,
+                    registry_url: None,
+                    version: path_derived_version.clone(),
+                    error: CartridgeAttachmentError {
+                        kind: CartridgeAttachmentErrorKind::Misplaced,
+                        message: format!(
+                            "the registry folder {} has no charter that verifies: {reason}",
+                            scan_root.parent().and_then(Path::parent).unwrap_or(scan_root).display()
+                        ),
+                        detected_at_unix_seconds: detected_at,
+                    },
+                });
+                continue;
+            }
+        };
+        let cj = match CartridgeJson::read_from_dir(version_dir, opened) {
             Ok(cj) => cj,
             Err(e) => {
                 // A slug mismatch (declared registry_url doesn't hash to this
@@ -318,12 +349,12 @@ async fn scan_channel_root(
                 // cartridge.json (ManifestInvalid). Both are surfaced + logged,
                 // never hosted.
                 let kind = match &e {
-                    crate::bifaci::cartridge_json::CartridgeJsonError::RegistrySlugMismatch {
+                    crate::bifaci::cartridge_json::CartridgeJsonError::RegistryFolderMismatch {
                         ..
                     } => CartridgeAttachmentErrorKind::Misplaced,
                     _ => CartridgeAttachmentErrorKind::ManifestInvalid,
                 };
-                error!(dir = %version_dir.display(), slug = %expected_slug, error = %e, "cartridge.json invalid or mis-placed — surfacing as incompatible");
+                error!(dir = %version_dir.display(), folder = %opened.slug(), error = %e, "cartridge.json invalid or mis-placed — surfacing as incompatible");
                 discovered.push(DiscoveredCartridge::Incompatible {
                     version_dir: version_dir.clone(),
                     id: path_derived_name.clone(),
@@ -333,8 +364,8 @@ async fn scan_channel_root(
                     error: CartridgeAttachmentError {
                         kind,
                         message: format!(
-                            "cartridge.json failed to load under slug '{}': {}",
-                            expected_slug, e
+                            "cartridge.json failed to load in the registry folder '{}': {}",
+                            opened.slug(), e
                         ),
                         detected_at_unix_seconds: detected_at,
                     },
@@ -363,53 +394,11 @@ async fn scan_channel_root(
         }
 
         // NO registry pin: the host's baked registry does NOT restrict which
-        // registries' cartridges are discovered. A self-consistent cartridge
-        // (its registry_url hashes to its slug folder, validated above) from any
-        // registry present on disk is accepted; whether its version is actually
-        // LISTED upstream is the verdict layer's call, applied after discovery.
-
-        // Scheme check is per-cartridge: a dev cartridge (null registry_url)
-        // never reaches here; a registry cartridge must use https (dev_mode=false
-        // for the scheme relaxation, which only ever applied to null-registry
-        // dev cartridges).
-        if let Some(url) = cj.registry_url.as_deref() {
-            match validate_registry_url_scheme(url, false) {
-                RegistryUrlSchemeResult::Ok => {}
-                RegistryUrlSchemeResult::NonHttps { scheme } => {
-                    discovered.push(DiscoveredCartridge::Incompatible {
-                        version_dir: version_dir.clone(),
-                        id: cj.name.clone(),
-                        channel: cj.channel,
-                        registry_url: cj.registry_url.clone(),
-                        version: cj.version.clone(),
-                        error: CartridgeAttachmentError {
-                            kind: CartridgeAttachmentErrorKind::Incompatible,
-                            message: format!(
-                                "registry_url uses '{}' scheme, must be https in non-dev builds. Rebuild the cartridge with an https registry URL.",
-                                scheme
-                            ),
-                            detected_at_unix_seconds: detected_at,
-                        },
-                    });
-                    continue;
-                }
-                RegistryUrlSchemeResult::NotAUrl(bad) => {
-                    discovered.push(DiscoveredCartridge::Incompatible {
-                        version_dir: version_dir.clone(),
-                        id: cj.name.clone(),
-                        channel: cj.channel,
-                        registry_url: cj.registry_url.clone(),
-                        version: cj.version.clone(),
-                        error: CartridgeAttachmentError {
-                            kind: CartridgeAttachmentErrorKind::Incompatible,
-                            message: format!("registry_url '{}' is not a well-formed URL.", bad),
-                            detected_at_unix_seconds: detected_at,
-                        },
-                    });
-                    continue;
-                }
-            }
-        }
+        // registries' cartridges are discovered. A cartridge that records its
+        // folder's anchor (validated above, against a charter that verified —
+        // and so an https anchor MachineFabric chartered) from any registry
+        // present on disk is accepted; whether its version is actually LISTED
+        // upstream is the verdict layer's call, applied after discovery.
 
         if cj.fabric_manifest_version != identity.fabric_manifest_version {
             discovered.push(DiscoveredCartridge::Incompatible {
@@ -507,12 +496,58 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    // Real charters, signed by sdx (`capdag-signing-fixtures`): a registry
+    // folder is only what its stored charter proves, so these tests store
+    // real ones rather than naming folders.
+    const ROOT_A: &str = include_str!("../tests/fixtures/nocommit/signing/root_a.pubkey");
+    const ROOT_B: &str = include_str!("../tests/fixtures/nocommit/signing/root_b.pubkey");
+    const ROOT_C: &str = include_str!("../tests/fixtures/nocommit/signing/root_c.pubkey");
+    const META: &str = include_str!("../tests/fixtures/nocommit/signing/meta.json");
+    const CHARTER: &[u8] = include_bytes!("../tests/fixtures/nocommit/signing/charter-cartridges.json");
+    const CHARTER_SIG: &str =
+        include_str!("../tests/fixtures/nocommit/signing/charter-cartridges.json.sig");
+    /// The anchor and slug the fixture charter states.
+    const ANCHOR: &str = "https://registry.example/cartridges";
+    const SLUG: &str = "example-cartridges";
+
+    fn fixture_trust() -> CharterTrust {
+        CharterTrust {
+            root_pubkeys: [ROOT_A, ROOT_B, ROOT_C].iter().map(|k| k.trim().to_string()).collect(),
+        }
+    }
+
+    /// A moment inside the fixtures' validity.
+    fn fixture_now() -> u64 {
+        let meta: serde_json::Value = serde_json::from_str(META).unwrap();
+        meta["issued_at"].as_u64().unwrap() + 86_400
+    }
+
+    /// Store the fixture charter in `{root}/{folder}`, as an installer does.
+    fn store_charter(root: &Path, folder: &str) {
+        let verified = crate::bifaci::charter::verify(
+            CHARTER,
+            CHARTER_SIG,
+            &fixture_trust(),
+            &crate::bifaci::charter::CharterExpectation {
+                anchor: Some(ANCHOR),
+                kind: crate::bifaci::charter::RegistryKind::Cartridges,
+                environment: Some("prod"),
+            },
+            fixture_now(),
+        )
+        .expect("the fixture charter verifies");
+        crate::bifaci::charter::store(&verified, &root.join(folder)).unwrap();
+    }
+
     fn nightly_dev_identity() -> DiscoveryIdentity {
         DiscoveryIdentity {
             channel: CartridgeChannel::Nightly,
             registry_url: None,
             fabric_manifest_version: 1,
             cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
+            signing_environment: Some("prod".to_string()),
+            charter_trust: fixture_trust(),
+            now_unix: fixture_now(),
             // A root that ships no bundle. Every test below that is not ABOUT
             // the bundle scans a tree nothing built, so a cartridge claiming to
             // be bundled there is in the wrong place — which is what this says.
@@ -669,11 +704,11 @@ mod tests {
     #[tokio::test]
     async fn test0120_registry_url_under_dev_slug_is_rejected() {
         let root = tempdir().unwrap();
-        // A non-null registry_url placed under the reserved dev slug violates the
-        // three-place rule — read_from_dir rejects it as a bad install context
-        // (BadInstallation), surfaced + logged, never hosted. This is the
+        // A non-null registry_url placed under the reserved dev folder violates
+        // the charter rule — read_from_dir rejects it as a bad install context
+        // (Misplaced), surfaced + logged, never hosted. This is the
         // "registry-defined url under dev/ is invalid" rule.
-        let json = r#"{"name":"cart","version":"1.0.0","channel":"nightly","registry_url":"https://cartridges.example.com/manifest","entry":"cart","installed_at":"2024-01-01T00:00:00Z","fabric_manifest_version":1}"#;
+        let json = r#"{"name":"cart","version":"1.0.0","channel":"nightly","registry_url":"https://registry.example/cartridges","entry":"cart","installed_at":"2024-01-01T00:00:00Z","fabric_manifest_version":1}"#;
         install_fixture(
             root.path(),
             "dev",
@@ -689,22 +724,16 @@ mod tests {
         expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
     }
 
-    // The registry slug for a fixed URL, so tests can place a registry cartridge
-    // under the folder that matches its declared registry_url (three-place rule).
-    fn registry_slug_for(url: &str) -> String {
-        crate::bifaci::cartridge_slug::slug_for(Some(url))
-    }
-
     fn registry_cartridge_json(url: &str, channel: &str, fmv: u32) -> String {
         format!(
             r#"{{"name":"cart","version":"1.0.0","channel":"{channel}","registry_url":"{url}","entry":"cart","installed_at":"2024-01-01T00:00:00Z","fabric_manifest_version":{fmv}}}"#
         )
     }
 
-    // TEST1875: scan-all — a registry slug folder AND the dev slot present on
-    // disk are BOTH scanned, regardless of the host's own baked registry. The
+    // TEST1875: scan-all — a chartered registry folder AND the dev slot present
+    // on disk are BOTH scanned, regardless of the host's own baked registry. The
     // dev cartridge (null registry under dev/) and the registry cartridge (its
-    // url hashing to its slug folder) each reach their probe. Both fixtures lack
+    // url the anchor of its folder's charter) each reach their probe. Both fixtures lack
     // a real bifaci binary, so both end at HandshakeFailed — proving discovery
     // REACHED them (was not filtered out by a registry pin), which is the
     // behavior under test. A registry-pin rejection would instead surface
@@ -712,11 +741,10 @@ mod tests {
     #[tokio::test]
     async fn test1875_scan_all_reaches_both_dev_and_registry_slugs() {
         let root = tempdir().unwrap();
-        let url = "https://cartridges.example.com/manifest";
-        let rslug = registry_slug_for(url);
+        store_charter(root.path(), SLUG);
         // Host baked for a DIFFERENT registry than the on-disk registry cartridge.
         let host = DiscoveryIdentity {
-            registry_url: Some("https://other.example.com/manifest".to_string()),
+            registry_url: Some("https://other.example.com/cartridges".to_string()),
             ..nightly_dev_identity()
         };
         install_fixture(
@@ -730,11 +758,11 @@ mod tests {
         );
         install_fixture(
             root.path(),
-            &rslug,
+            SLUG,
             "nightly",
             "regcart",
             "1.0.0",
-            Some(&registry_cartridge_json(url, "nightly", 1)),
+            Some(&registry_cartridge_json(ANCHOR, "nightly", 1)),
             "cart",
         );
         let out = discover_cartridges(root.path(), &host).await.unwrap();
@@ -760,15 +788,14 @@ mod tests {
     #[tokio::test]
     async fn test1876_other_channel_subtree_is_skipped() {
         let root = tempdir().unwrap();
-        let url = "https://cartridges.example.com/manifest";
-        let rslug = registry_slug_for(url);
+        store_charter(root.path(), SLUG);
         install_fixture(
             root.path(),
-            &rslug,
+            SLUG,
             "release",
             "regcart",
             "1.0.0",
-            Some(&registry_cartridge_json(url, "release", 1)),
+            Some(&registry_cartridge_json(ANCHOR, "release", 1)),
             "cart",
         );
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
@@ -787,14 +814,13 @@ mod tests {
     #[tokio::test]
     async fn test1879_other_registry_version_subtree_is_skipped() {
         let root = tempdir().unwrap();
-        let url = "https://cartridges.example.com/manifest";
-        let rslug = registry_slug_for(url);
+        store_charter(root.path(), SLUG);
         // Hand-place a cartridge under the NEXT registry version's subtree
         // (install_fixture always writes the host's version, so compose directly).
         let other_version = crate::CARTRIDGE_REGISTRY_VERSION + 1;
         let dir = root
             .path()
-            .join(&rslug)
+            .join(SLUG)
             .join(format!("v{other_version}"))
             .join("nightly")
             .join("regcart")
@@ -802,7 +828,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("cartridge.json"),
-            registry_cartridge_json(url, "nightly", 1),
+            registry_cartridge_json(ANCHOR, "nightly", 1),
         )
         .unwrap();
         let entry = dir.join("cart");
@@ -821,28 +847,53 @@ mod tests {
         );
     }
 
-    // TEST1877: a registry cartridge hand-copied under the WRONG registry slug
-    // folder fails the three-place rule (BadInstallation) — scan-all does not
-    // mean "accept anywhere", placement must still be self-consistent.
+    // TEST1877: a registry cartridge hand-copied into the folder of ANOTHER
+    // registry fails the charter rule (Misplaced) — scan-all does not mean
+    // "accept anywhere", placement must still be self-consistent.
     #[tokio::test]
     async fn test1877_registry_cartridge_under_wrong_slug_is_bad_install() {
         let root = tempdir().unwrap();
-        let url = "https://cartridges.example.com/manifest";
-        let wrong_slug = registry_slug_for("https://somewhere-else.example.com/manifest");
-        let json = registry_cartridge_json(url, "nightly", 1);
-        install_fixture(
-            root.path(),
-            &wrong_slug,
-            "nightly",
-            "cart",
-            "1.0.0",
-            Some(&json),
-            "cart",
-        );
+        store_charter(root.path(), SLUG);
+        let json = registry_cartridge_json("https://somewhere-else.example/cartridges", "nightly", 1);
+        install_fixture(root.path(), SLUG, "nightly", "cart", "1.0.0", Some(&json), "cart");
         let out = discover_cartridges(root.path(), &nightly_dev_identity())
             .await
             .unwrap();
         expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
+    }
+
+    // TEST12923: a registry folder is what its stored charter proves, never
+    // what its name says. The same cartridge, recording the same anchor, is
+    // misplaced in a folder with no charter and in a folder whose charter is
+    // stored under another name; it reaches its probe only in the folder its
+    // charter names.
+    #[tokio::test]
+    async fn test12923_a_registry_folder_is_proven_by_its_charter_not_its_name() {
+        let json = registry_cartridge_json(ANCHOR, "nightly", 1);
+
+        // A folder named for the registry, holding no charter.
+        let unchartered = tempdir().unwrap();
+        install_fixture(unchartered.path(), SLUG, "nightly", "cart", "1.0.0", Some(&json), "cart");
+        let out = discover_cartridges(unchartered.path(), &nightly_dev_identity()).await.unwrap();
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
+        if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
+            assert!(error.message.contains("no charter that verifies"), "{}", error.message);
+        }
+
+        // The registry's charter, stored in a folder of another name.
+        let renamed = tempdir().unwrap();
+        store_charter(renamed.path(), "cartridges.example.com");
+        install_fixture(renamed.path(), "cartridges.example.com", "nightly", "cart", "1.0.0", Some(&json), "cart");
+        let out = discover_cartridges(renamed.path(), &nightly_dev_identity()).await.unwrap();
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
+
+        // Its charter, in the folder the charter names: placement holds, and
+        // discovery goes on to probe the (fake) binary.
+        let placed = tempdir().unwrap();
+        store_charter(placed.path(), SLUG);
+        install_fixture(placed.path(), SLUG, "nightly", "cart", "1.0.0", Some(&json), "cart");
+        let out = discover_cartridges(placed.path(), &nightly_dev_identity()).await.unwrap();
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::HandshakeFailed);
     }
 
     /// The `cartridge.json` of a bundled cartridge in the dev slot.

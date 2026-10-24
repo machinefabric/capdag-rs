@@ -3,10 +3,13 @@
 //!
 //! The command is published in a release registry as a bundle — the `capdag`
 //! executable and the `bundled-cartridges/` tree it runs beside — with one
-//! manifest at `<registry>/capdag-cli/manifest` and a signature beside it at
-//! `<registry>/capdag-cli/manifest.sig`. An update believes nothing it has
-//! not checked:
+//! manifest, at the location the registry's charter gives for `capdag-cli`,
+//! and a signature beside it at the same URL with `.sig` appended. An update
+//! believes nothing it has not checked:
 //!
+//! 0. the registry, only through its charter: signed by MachineFabric's prod
+//!    release key, for this anchor, as a release registry of this build's
+//!    environment ([`crate::bifaci::charter`]);
 //! 1. the manifest, only through its signature: a release-key certificate
 //!    signed by two of the roots this build was given, for this build's
 //!    signing environment and inside its validity, and the manifest signed by
@@ -30,6 +33,7 @@
 //! manager's, and says so with a file named `installed-by` beside the
 //! executable.
 
+use crate::bifaci::charter::{CharterExpectation, CharterTrust, RegistryKind};
 use crate::bifaci::release_cert::{verify_manifest_envelope, RegistryTrust};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -173,11 +177,6 @@ fn archive_type(platform: &str) -> &'static str {
     }
 }
 
-/// The URL of the command's manifest in `registry`; its signature is at the
-/// same URL with `.sig` appended.
-pub fn manifest_url(registry: &str) -> String {
-    format!("{}/{APP_ID}/manifest", registry.trim_end_matches('/'))
-}
 
 /// Verifies `manifest` against `envelope` (the bytes of `manifest.sig`) under
 /// `trust` at `now`, and returns the latest release of `channel` for
@@ -313,9 +312,12 @@ fn upgrade_with(manager: &str) -> String {
 /// Everything an update is decided by: what a build bakes in, the clock, and
 /// where the bundle is.
 pub struct Installation<'a> {
+    /// The release registry's anchor.
     pub registry: &'a str,
     pub channel: &'a str,
     pub trust: &'a RegistryTrust,
+    /// The roots the registry's charter is verified against.
+    pub charter_trust: &'a CharterTrust,
     /// Seconds since 1970.
     pub now: u64,
     /// The executable to replace: a file, not a link to one. Its directory is
@@ -369,6 +371,7 @@ pub async fn update(current: &str) -> Result<Updated, UpdateError> {
             registry: &line.registry,
             channel: &line.channel,
             trust: &trust,
+            charter_trust: &CharterTrust::from_build_constants(),
             now: crate::bifaci::release_cert::unix_now(),
             installed: &installed,
             current,
@@ -424,7 +427,42 @@ where
     // decided: what is installed is then what it was.
     recover(bundle)?;
 
-    let url = manifest_url(at.registry);
+    // The registry first: nothing at an anchor MachineFabric did not charter
+    // is read, and where the manifest is comes from the charter.
+    let charter_url = format!("{}/{}", at.registry, crate::bifaci::charter::CHARTER_FILE);
+    let Some(charter_body) = get(charter_url.clone()).await? else {
+        return Err(UpdateError::Untrusted(format!(
+            "{} has no charter ({charter_url} is missing), so it is not a release registry \
+             MachineFabric chartered",
+            at.registry
+        )));
+    };
+    let charter_sig_url = format!("{}/{}", at.registry, crate::bifaci::charter::CHARTER_SIG_FILE);
+    let Some(charter_sig) = get(charter_sig_url.clone()).await? else {
+        return Err(UpdateError::Untrusted(format!(
+            "{} has a charter and no signature for it ({charter_sig_url} is missing)",
+            at.registry
+        )));
+    };
+    let charter_sig = String::from_utf8(charter_sig).map_err(|e| {
+        UpdateError::Untrusted(format!("the charter's signature file is not text: {e}"))
+    })?;
+    let charter = crate::bifaci::charter::verify(
+        &charter_body,
+        &charter_sig,
+        at.charter_trust,
+        &CharterExpectation {
+            anchor: Some(at.registry),
+            kind: RegistryKind::Releases,
+            environment: Some(&at.trust.environment),
+        },
+        at.now,
+    )
+    .map_err(|e| UpdateError::Untrusted(format!("the charter of {} was refused: {e}", at.registry)))?;
+    let url = charter
+        .charter
+        .location("manifest", &[("app_id", APP_ID)])
+        .map_err(|e| UpdateError::Untrusted(format!("the charter of {}: {e}", at.registry)))?;
     let Some(manifest) = get(url.clone()).await? else {
         return Err(UpdateError::Unavailable(format!(
             "no capdag release is published at {} yet",

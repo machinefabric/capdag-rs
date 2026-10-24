@@ -732,6 +732,9 @@ impl CartridgeManager {
         // registry fetched must declare this same fabric (enforced in
         // `CartridgeRepoServer::new`) so all registries share one fabric.
         fabric_registry_url: String,
+        // The roots every registry's charter must chain to: the build's own
+        // (`CharterTrust::from_build_constants`).
+        charter_trust: crate::bifaci::charter::CharterTrust,
     ) -> Self {
         use crate::bifaci::cartridge_json::CartridgeJson;
 
@@ -740,15 +743,15 @@ impl CartridgeManager {
         // executable file inside is a separate binary cartridge.
         let mut resolved: Vec<PathBuf> = Vec::new();
         // Dev cartridges resolved via this code path always live under
-        // the dev tree, so the expected slug is the dev sentinel.
+        // the dev tree, so the folder they are held to is `dev`.
         // Registry-installed cartridges go through CartridgeManager's
         // download path, not here.
-        let dev_slug = crate::bifaci::cartridge_slug::DEV_SLUG;
+        let dev_folder = crate::bifaci::charter::RegistryFolder::Dev;
         for p in dev_binaries {
             if p.is_file() {
                 resolved.push(p);
             } else if p.is_dir() {
-                match CartridgeJson::read_from_dir(&p, dev_slug) {
+                match CartridgeJson::read_from_dir(&p, &dev_folder) {
                     Ok(cj) => {
                         let entry_point = cj.resolve_entry_point(&p);
                         resolved.push(entry_point);
@@ -784,7 +787,7 @@ impl CartridgeManager {
         }
 
         Self {
-            cartridge_repo: CartridgeRepo::new(3600, fabric_registry_url),
+            cartridge_repo: CartridgeRepo::new(3600, fabric_registry_url, charter_trust),
             cartridge_dir,
             registry_url,
             trust,
@@ -807,6 +810,14 @@ impl CartridgeManager {
                 })
                 .collect(),
         }
+    }
+
+    /// The same manager, fetching its registry with `client` — one that
+    /// trusts the certificate authorities a deployment serves its registries
+    /// under.
+    pub fn with_http_client(mut self, client: reqwest::Client) -> Self {
+        self.cartridge_repo = self.cartridge_repo.with_http_client(client);
+        self
     }
 
     pub async fn init(&mut self) -> Result<(), ExecutionError> {
@@ -859,6 +870,24 @@ impl CartridgeManager {
 
     /// The configured registry URL, or the hard error every registry
     /// operation raises in a registry-less (dev) build.
+    /// This manager's registry, and the folder its cartridges live in —
+    /// opened through the registry's charter, which the last sync verified.
+    /// A registry whose charter was never verified has no folder: nothing is
+    /// installed from it or run out of it.
+    async fn registry_charter(
+        &self,
+        context: &str,
+    ) -> Result<(String, crate::bifaci::charter::VerifiedCharter), ExecutionError> {
+        let registry_url = self.registry_url_required(context)?.to_string();
+        let charter = self.cartridge_repo.charter(&registry_url).await.ok_or_else(|| {
+            ExecutionError::CartridgeDownloadFailed(format!(
+                "{context}: the registry {registry_url} has no verified charter — it has not \
+                 been synced, or its charter was refused (its verdict says why)"
+            ))
+        })?;
+        Ok((registry_url, charter))
+    }
+
     fn registry_url_required(&self, context: &str) -> Result<&str, ExecutionError> {
         self.registry_url.as_deref().ok_or_else(|| {
             ExecutionError::CartridgeDownloadFailed(format!(
@@ -1085,21 +1114,21 @@ impl CartridgeManager {
 
         // Look for an existing installed cartridge in the registry-partitioned,
         // version-partitioned, channel-partitioned versioned layout:
-        // `{cartridge_dir}/{registry_slug}/v{cartridge_registry_version}/{channel}/{cartridge_id}/{version}/cartridge.json`.
+        // `{cartridge_dir}/{slug}/v{cartridge_registry_version}/{channel}/{cartridge_id}/{version}/cartridge.json`.
         // The orchestrator's manager is bound to a single registry — that's
-        // the registry it just fetched the manifest from, so the slug it
-        // walks is fixed.
-        let registry_url = self.registry_url_required(cartridge_id)?.to_string();
-        let registry_slug = crate::bifaci::cartridge_slug::slug_for(Some(registry_url.as_str()));
+        // the registry it just fetched the manifest from, so the folder it
+        // walks is that registry's charter slug.
+        let (registry_url, charter) = self.registry_charter(cartridge_id).await?;
+        let folder = crate::bifaci::charter::RegistryFolder::Chartered(charter);
         let name_dir = self
             .cartridge_dir
-            .join(&registry_slug)
+            .join(folder.slug())
             .join(format!("v{}", crate::CARTRIDGE_REGISTRY_VERSION))
             .join(self.channel.as_str())
             .join(cartridge_id);
         if name_dir.is_dir() {
             if let Some(entry_point) =
-                self.find_latest_installed_entry_point(&name_dir, &registry_slug, &registry_url)
+                self.find_latest_installed_entry_point(&name_dir, &folder, &registry_url)
             {
                 // Re-verify the installed binary against the registry's
                 // signed manifest on every use — a post-install tamper of
@@ -1148,14 +1177,13 @@ impl CartridgeManager {
     }
 
     /// Find the entry point of the latest installed version in a cartridge name directory.
-    /// `expected_slug` is the on-disk registry slug the caller reached
-    /// through (the slug for `self.registry_url`); the per-version
-    /// cartridge.json is validated against it via the three-place
-    /// rule.
+    /// `folder` is the registry folder the caller reached through (the one
+    /// `self.registry_url`'s charter names); the per-version cartridge.json is
+    /// validated against it via the charter rule.
     fn find_latest_installed_entry_point(
         &self,
         name_dir: &Path,
-        expected_slug: &str,
+        folder: &crate::bifaci::charter::RegistryFolder,
         registry_url: &str,
     ) -> Option<PathBuf> {
         let mut versions: Vec<(String, PathBuf)> = Vec::new();
@@ -1166,10 +1194,7 @@ impl CartridgeManager {
             if !version_dir.is_dir() {
                 continue;
             }
-            match crate::bifaci::cartridge_json::CartridgeJson::read_from_dir(
-                &version_dir,
-                expected_slug,
-            ) {
+            match crate::bifaci::cartridge_json::CartridgeJson::read_from_dir(&version_dir, folder) {
                 Ok(cj) => {
                     // Hard mismatch — never run a cartridge from a different
                     // channel even if it landed under our channel's tree.
@@ -1442,11 +1467,19 @@ impl CartridgeManager {
 
         // Registry-partitioned, version-partitioned, channel-partitioned
         // layout. The orchestrator only ever installs from its own configured
-        // registry, so the slug is fixed for the lifetime of this manager.
-        let registry_slug = crate::bifaci::cartridge_slug::slug_for(Some(registry_url.as_str()));
-        let version_dir = self
-            .cartridge_dir
-            .join(&registry_slug)
+        // registry, into the folder its charter names — and stores the charter
+        // there, so the folder proves itself to every host that scans it.
+        let (_, charter) = self.registry_charter(cartridge_id).await?;
+        let registry_root = self.cartridge_dir.join(&charter.charter.slug);
+        crate::bifaci::charter::store(&charter, &registry_root).map_err(|e| {
+            ExecutionError::CartridgeDownloadFailed(format!(
+                "Failed to store the charter of {} in {}: {}",
+                registry_url,
+                registry_root.display(),
+                e
+            ))
+        })?;
+        let version_dir = registry_root
             .join(format!("v{}", crate::CARTRIDGE_REGISTRY_VERSION))
             .join(self.channel.as_str())
             .join(cartridge_id)
@@ -1467,8 +1500,8 @@ impl CartridgeManager {
         }
 
         // Write cartridge.json. `registry_url` is verbatim the manager's
-        // registry; the cartridge was downloaded from there, so the
-        // three-place rule (folder ⇔ provenance ⇔ HELLO) is satisfied by
+        // registry's anchor; the cartridge was downloaded from there, so the
+        // charter rule (folder ⇔ provenance ⇔ HELLO) is satisfied by
         // construction. sha/size describe the BINARY artifact.
         let cj = crate::CartridgeJson {
             name: cartridge_id.to_string(),
@@ -1679,10 +1712,11 @@ impl ExecutionContext {
         // Identity comes from one of two sources:
         //
         //   1. Installed cartridges live at
-        //      `.../{registry_slug}/{channel}/{name}/{version}/{entry}`.
-        //      The binary's parent dir holds cartridge.json; we read
-        //      it and verify the three-place rule (folder slug ⇔
-        //      provenance registry_url).
+        //      `.../{slug}/v{registry_version}/{channel}/{name}/{version}/{entry}`.
+        //      The binary's parent dir holds cartridge.json; we open
+        //      the registry folder through its stored charter and
+        //      verify the charter rule (folder anchor ⇔ provenance
+        //      registry_url).
         //
         //   2. Dev binaries live wherever cargo dropped them (a
         //      target directory's `release/<name>`) and have no
@@ -1706,26 +1740,34 @@ impl ExecutionContext {
             let cartridge_json_path = version_dir.join("cartridge.json");
             if cartridge_json_path.exists() {
                 // Installed-cartridge path. Walk up: version → name →
-                // channel → v{registry_version} → slug. The slug folder is
-                // FOUR levels up from the version dir (the registry-version
-                // level sits between slug and channel); pass it through so the
-                // three-place rule is enforced inside read_from_dir.
-                let expected_slug_owned = version_dir
-                    .ancestors()
-                    .nth(4)
-                    .and_then(|p| p.file_name())
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| {
-                        ExecutionError::HostError(format!(
-                            "cartridge path {} is not under a valid \
-                             {{slug}}/v{{registry_version}}/{{channel}}/{{name}}/{{version}}/ tree",
-                            path.display()
-                        ))
-                    })?;
+                // channel → v{registry_version} → registry folder. The folder
+                // is FOUR levels up from the version dir (the registry-version
+                // level sits between it and the channel); it is opened through
+                // its stored charter so the charter rule is enforced inside
+                // read_from_dir.
+                let folder_path = version_dir.ancestors().nth(4).ok_or_else(|| {
+                    ExecutionError::HostError(format!(
+                        "cartridge path {} is not under a valid \
+                         {{slug}}/v{{registry_version}}/{{channel}}/{{name}}/{{version}}/ tree",
+                        path.display()
+                    ))
+                })?;
+                let folder = crate::bifaci::charter::RegistryFolder::open(
+                    folder_path,
+                    &crate::bifaci::charter::CharterTrust::from_build_constants(),
+                    crate::SIGNING_ENVIRONMENT,
+                    crate::bifaci::release_cert::unix_now(),
+                )
+                .map_err(|e| {
+                    ExecutionError::HostError(format!(
+                        "the registry folder of {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
                 let provenance = crate::bifaci::cartridge_json::CartridgeJson::read_from_dir(
                     version_dir,
-                    &expected_slug_owned,
+                    &folder,
                 )
                 .map_err(|e| {
                     ExecutionError::HostError(format!(
@@ -3977,6 +4019,9 @@ pub(crate) async fn discover_bundled_cartridges(
         registry_url: registry_url.map(str::to_string),
         fabric_manifest_version,
         cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
+        signing_environment: crate::SIGNING_ENVIRONMENT.map(str::to_string),
+        charter_trust: crate::bifaci::charter::CharterTrust::from_build_constants(),
+        now_unix: crate::bifaci::release_cert::unix_now(),
         bundle: crate::bifaci::bundle_manifest::BundleProof::load(
             bundled_cartridges_dir,
             trust.as_ref(),

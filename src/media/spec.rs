@@ -21,34 +21,10 @@ use std::fmt;
 // PROFILE URLS (canonical /schema/ path)
 // =============================================================================
 
-/// Base URL for capdag schemas (default, use `get_schema_base()` for configurable version)
+/// The namespace every profile URL is in. A profile URL is an identity a
+/// media definition carries, the same in every environment — it is not where
+/// a registry is, so nothing configures it.
 pub const SCHEMA_BASE: &str = "https://capdag.com/schema";
-
-/// Get the schema base URL from environment variables or default
-///
-/// Checks in order:
-/// 1. `CDG_SCHEMA_BASE_URL` environment variable
-/// 2. `CDG_FABRIC_REGISTRY_URL` environment variable + "/schema"
-/// 3. Default: "https://capdag.com/schema"
-pub fn get_schema_base() -> String {
-    if let Ok(schema_url) = std::env::var("CDG_SCHEMA_BASE_URL") {
-        return schema_url;
-    }
-    if let Ok(registry_url) = std::env::var("CDG_FABRIC_REGISTRY_URL") {
-        return format!("{}/schema", registry_url);
-    }
-    SCHEMA_BASE.to_string()
-}
-
-/// Get a profile URL for the given profile name
-///
-/// # Example
-/// ```ignore
-/// let url = get_profile_url("str"); // Returns "{schema_base}/str"
-/// ```
-pub fn get_profile_url(profile_name: &str) -> String {
-    format!("{}/{}", get_schema_base(), profile_name)
-}
 
 /// Profile URL for string type
 pub const PROFILE_STR: &str = "https://capdag.com/schema/str";

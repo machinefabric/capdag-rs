@@ -13,7 +13,7 @@
 //! ```
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::bifaci::cartridge_slug::{slug_for, DEV_SLUG};
+use crate::bifaci::charter::RegistryFolder;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -113,12 +113,12 @@ pub struct CartridgeJson {
     /// no default; reading a cartridge.json without `channel` is a
     /// publish-pipeline bug we want to surface.
     pub channel: CartridgeChannel,
-    /// Registry the cartridge was published from, recorded as the
-    /// exact URL byte-string the operator/installer used. `None` ⇔
-    /// dev install (the cartridge was built locally and installed
-    /// without `--registry`). The on-disk top-level folder is
-    /// `cartridge_slug::slug_for(registry_url.as_deref())`; the host
-    /// validates the folder name against the slug at scan time.
+    /// The anchor of the registry the cartridge was published from,
+    /// byte-for-byte as its charter states it. `None` ⇔ dev install (the
+    /// cartridge was built locally and installed without a registry). The
+    /// top-level folder it lives under is `dev` or the registry's charter
+    /// slug; the host holds this field to the charter stored in that folder
+    /// at scan time.
     ///
     /// The field is required-but-nullable: missing `registry_url` in
     /// the JSON is a parse error so an old-schema cartridge.json
@@ -288,66 +288,6 @@ impl<'de> Deserialize<'de> for CartridgeJson {
     }
 }
 
-/// Verdict from `validate_registry_url_scheme`. Distinguishes "OK"
-/// from each rejection reason so callers can render an actionable
-/// message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RegistryUrlSchemeResult {
-    /// URL is acceptable (either dev-mode allows it, or scheme is
-    /// `https`). Carries the original URL string so the caller can
-    /// keep using it without re-borrowing.
-    Ok,
-    /// URL string didn't parse as a valid URL.
-    NotAUrl(String),
-    /// URL parsed but scheme is not `https` and dev-mode is off.
-    /// Carries the offending scheme so the caller can include it in
-    /// the operator-facing message.
-    NonHttps { scheme: String },
-}
-
-/// Validate that a non-null `registry_url` uses the `https` scheme
-/// — UNLESS `dev_mode` is set, in which case any well-formed URL is
-/// accepted (so developers can point at `http://localhost:port` and
-/// similar during integration testing).
-///
-/// The rule lives at the deepest layer (this crate, used by every
-/// consumer that loads a `cartridge.json` or a HELLO manifest) so a
-/// caller can never bypass it by parsing the URL out of band. Each
-/// loader in the engine and the XPC service threads its own
-/// `dev_mode` value through — typically derived from
-/// `option_env!("MFR_DEV_MODE")` at the binary's build time, so
-/// release / nightly engines reject non-https URLs unconditionally.
-///
-/// Dev cartridges (`registry_url == None`) never go through this
-/// validator — they have no URL to check.
-pub fn validate_registry_url_scheme(url: &str, dev_mode: bool) -> RegistryUrlSchemeResult {
-    // Cheap parse: split once on `://`. We don't pull in a URL
-    // crate just for this check; the rule is "scheme must be the
-    // literal bytes `https`", and full URL validation is the
-    // caller's job (the registry fetcher will fail loudly on a
-    // syntactically-invalid URL).
-    let (scheme, rest) = match url.split_once("://") {
-        Some(parts) => parts,
-        None => return RegistryUrlSchemeResult::NotAUrl(url.to_string()),
-    };
-    if rest.is_empty() {
-        return RegistryUrlSchemeResult::NotAUrl(url.to_string());
-    }
-    if dev_mode {
-        // Dev mode: accept any well-formed scheme. We still require
-        // SOME scheme to be present (caught above) — an empty
-        // scheme is malformed regardless of mode.
-        return RegistryUrlSchemeResult::Ok;
-    }
-    if scheme.eq_ignore_ascii_case("https") {
-        RegistryUrlSchemeResult::Ok
-    } else {
-        RegistryUrlSchemeResult::NonHttps {
-            scheme: scheme.to_string(),
-        }
-    }
-}
-
 /// Errors when reading or validating a `cartridge.json`.
 #[derive(Debug, thiserror::Error)]
 pub enum CartridgeJsonError {
@@ -374,48 +314,45 @@ pub enum CartridgeJsonError {
         path: PathBuf,
         source: std::io::Error,
     },
-    /// The folder the cartridge.json was loaded from doesn't match the
-    /// slug derived from its declared `registry_url`. This is the
-    /// three-place consistency check: the top-level folder, the
-    /// provenance's `registry_url`, and the cartridge's own HELLO
-    /// manifest must all agree. A failure here means the cartridge
-    /// was either copied between registries by hand or the installer
-    /// is buggy — either way the engine refuses to attach it.
+    /// The cartridge's `registry_url` is not the anchor of the folder it
+    /// sits in. This is the charter rule: the top-level folder's charter (or
+    /// `dev`), the provenance's `registry_url`, and the cartridge's own HELLO
+    /// manifest must all name one registry. A failure here means the
+    /// cartridge was copied between registries by hand or the installer is
+    /// buggy — either way the engine refuses to attach it.
     #[error(
-        "cartridge.json at {path}: registry slug mismatch — registry_url={registry_url:?} \
-         hashes to slug='{expected_slug}' but the directory tree placed it under '{actual_slug}'"
+        "cartridge.json at {path}: registry_url={registry_url:?}, but it sits in the folder \
+         '{folder}', which holds {folder_registry}"
     )]
-    RegistrySlugMismatch {
+    RegistryFolderMismatch {
         path: PathBuf,
         registry_url: Option<String>,
-        expected_slug: String,
-        actual_slug: String,
+        folder: String,
+        /// What the folder holds, in words: the anchor its charter states, or
+        /// that it is the dev folder.
+        folder_registry: String,
     },
 }
 
 impl CartridgeJson {
     /// Read and validate a `cartridge.json` from a version directory.
     ///
-    /// `expected_slug` is the registry slug the host reached the
-    /// version directory through — i.e. the second-to-top-level
-    /// folder name in the canonical layout
-    /// `{root}/{slug}/{channel}/{name}/{version}/`. The host knows
-    /// the slug because it walked there; passing it in lets us
-    /// enforce the three-place rule (folder slug ⇔ provenance
-    /// `registry_url` ⇔ cartridge HELLO manifest's `registry_url`)
-    /// inside the parser instead of leaving it to every caller to
-    /// remember.
+    /// `folder` is the top-level folder the host reached the version
+    /// directory through, already opened — `dev`, or a registry whose stored
+    /// charter verified. Passing it in enforces the charter rule (folder ⇔
+    /// provenance `registry_url` ⇔ cartridge HELLO manifest's `registry_url`)
+    /// inside the parser instead of leaving it to every caller to remember.
     ///
     /// Validates:
     /// - File exists and is valid JSON
     /// - Entry point path does not escape the version directory
     /// - Entry point binary exists and is executable
-    /// - `slug_for(registry_url) == expected_slug` (third place — HELLO
-    ///   manifest comparison — is checked by the host once the
-    ///   cartridge process responds, since that data isn't on disk).
+    /// - `registry_url` is the folder's anchor, or null in `dev` (the HELLO
+    ///   manifest comparison is checked by the host once the cartridge
+    ///   process responds, since that data isn't on disk).
     pub fn read_from_dir(
         version_dir: &Path,
-        expected_slug: &str,
+        folder: &RegistryFolder,
     ) -> Result<Self, CartridgeJsonError> {
         let json_path = version_dir.join("cartridge.json");
 
@@ -435,20 +372,20 @@ impl CartridgeJson {
                 source: e,
             })?;
 
-        // Three-place consistency rule (places 1 + 2): the folder slug
-        // must match the slug derived from the provenance's
-        // registry_url. None+`dev` and Some(url)+slug(url) are the
-        // only valid pairings; any other combination — including a
-        // null registry_url under a non-dev folder, or a non-null
-        // registry_url under the dev folder — is an installer bug or
-        // a tampered tree.
-        let derived_slug = slug_for(cartridge_json.registry_url.as_deref());
-        if derived_slug != expected_slug {
-            return Err(CartridgeJsonError::RegistrySlugMismatch {
+        // The charter rule (places 1 + 2): the cartridge records exactly the
+        // anchor its folder's charter states, or no registry in `dev`. Any
+        // other pairing — a null registry_url in a registry's folder, a URL
+        // in `dev`, or another registry's anchor — is an installer bug or a
+        // tampered tree.
+        if cartridge_json.registry_url.as_deref() != folder.anchor() {
+            return Err(CartridgeJsonError::RegistryFolderMismatch {
                 path: json_path,
                 registry_url: cartridge_json.registry_url.clone(),
-                expected_slug: derived_slug,
-                actual_slug: expected_slug.to_string(),
+                folder: folder.slug().to_string(),
+                folder_registry: match folder.anchor() {
+                    Some(anchor) => format!("the registry chartered for {anchor}"),
+                    None => "the cartridges built with no registry".to_string(),
+                },
             });
         }
 
@@ -498,17 +435,11 @@ impl CartridgeJson {
 
     /// Returns true when this cartridge was installed as a dev build
     /// (no registry URL). Convenience for hosts that need to gate
-    /// dev-only behavior — callers must still verify the on-disk
-    /// folder name is `cartridge_slug::DEV_SLUG`; this method only
-    /// reports the provenance side.
+    /// dev-only behavior — the folder it sits in is held to it by
+    /// [`read_from_dir`](Self::read_from_dir); this method only reports the
+    /// provenance side.
     pub fn is_dev_install(&self) -> bool {
         self.registry_url.is_none()
-    }
-
-    /// Compute the on-disk slug this provenance must live under.
-    /// Equivalent to `slug_for(self.registry_url.as_deref())`.
-    pub fn registry_slug(&self) -> String {
-        slug_for(self.registry_url.as_deref())
     }
 
     /// Resolve the absolute path to the entry point binary.
@@ -590,14 +521,39 @@ fn collect_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bifaci::cartridge_slug::{slug_for, DEV_SLUG};
+    use crate::bifaci::charter::{Charter, RegistryKind, VerifiedCharter, CHARTER_FORMAT};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
-    const TEST_REGISTRY: &str = "https://cartridges.machinefabric.com/manifest";
+    const TEST_REGISTRY: &str = "https://cartridges.machinefabric.com";
 
-    fn registry_slug() -> String {
-        slug_for(Some(TEST_REGISTRY))
+    /// A registry folder as discovery hands it over: opened through a charter.
+    /// `read_from_dir` reads only the anchor and the slug from it — the
+    /// charter's signature is the opener's business, verified before this
+    /// point — so an unsigned one stands in here.
+    fn chartered_folder(anchor: &str, slug: &str) -> RegistryFolder {
+        RegistryFolder::Chartered(VerifiedCharter {
+            charter: Charter {
+                format: CHARTER_FORMAT.to_string(),
+                anchor: anchor.to_string(),
+                kind: RegistryKind::Cartridges,
+                slug: slug.to_string(),
+                environment: "prod".to_string(),
+                experiment: None,
+                locations: [("manifest".to_string(), format!("{anchor}/v{{registry_version}}/manifest"))]
+                    .into_iter()
+                    .collect(),
+                fabric: Some("https://fabric.capdag.com".to_string()),
+                issued_at: 0,
+                not_after: None,
+            },
+            body: Vec::new(),
+            envelope: String::new(),
+        })
+    }
+
+    fn registry_folder() -> RegistryFolder {
+        chartered_folder(TEST_REGISTRY, "cartridges.machinefabric.com")
     }
 
     // TEST1243: Cartridge JSON round-trips through serde without losing required fields.
@@ -867,7 +823,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&cj).unwrap();
         std::fs::write(dir.path().join("cartridge.json"), &json).unwrap();
 
-        let err = CartridgeJson::read_from_dir(dir.path(), DEV_SLUG).unwrap_err();
+        let err = CartridgeJson::read_from_dir(dir.path(), &RegistryFolder::Dev).unwrap_err();
         assert!(matches!(err, CartridgeJsonError::EntryPointMissing { .. }));
     }
 
@@ -898,7 +854,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&cj).unwrap();
         std::fs::write(dir.path().join("cartridge.json"), &json).unwrap();
 
-        let err = CartridgeJson::read_from_dir(dir.path(), DEV_SLUG).unwrap_err();
+        let err = CartridgeJson::read_from_dir(dir.path(), &RegistryFolder::Dev).unwrap_err();
         assert!(matches!(err, CartridgeJsonError::EntryPathEscape { .. }));
 
         // Cleanup
@@ -929,18 +885,18 @@ mod tests {
         };
         cj.write_to_dir(dir.path()).unwrap();
 
-        let loaded = CartridgeJson::read_from_dir(dir.path(), &registry_slug()).unwrap();
+        let loaded = CartridgeJson::read_from_dir(dir.path(), &registry_folder()).unwrap();
         assert_eq!(loaded.name, "mycartridge");
         assert_eq!(loaded.version, "1.0.0");
         assert_eq!(loaded.resolve_entry_point(dir.path()), binary_path);
     }
 
-    // TEST1509: Three-place rule — a registry cartridge whose folder
-    // slug doesn't match `slug_for(registry_url)` is rejected. This
-    // catches the case where a cartridge tree was hand-copied
-    // between registry roots, or a buggy installer wrote the wrong
-    // slug. The error names both slugs so the operator can tell at
-    // a glance which side is wrong.
+    // TEST1509: Charter rule — a registry cartridge sitting in the folder
+    // of another registry is rejected: its `registry_url` is not the
+    // folder charter's anchor. This catches a cartridge tree hand-copied
+    // between registry folders, or a buggy installer writing into the
+    // wrong one. The error names the folder and what it holds, so the
+    // operator can tell at a glance which side is wrong.
     #[test]
     #[cfg(unix)]
     fn test1509_read_from_dir_rejects_slug_mismatch() {
@@ -964,25 +920,27 @@ mod tests {
         };
         cj.write_to_dir(dir.path()).unwrap();
 
-        // Pretend the host walked through a folder whose name does
-        // not match the cartridge's registry_url. This mimics
-        // "someone copied the registry tree into the dev folder" or
-        // "installer wrote into the wrong slug".
-        let err = CartridgeJson::read_from_dir(dir.path(), "dead00beefcafe00").unwrap_err();
+        // The host walked through the folder of ANOTHER registry. This
+        // mimics "someone copied a registry tree into another registry's
+        // folder" or "installer wrote into the wrong folder".
+        let elsewhere = chartered_folder("https://other.example/cartridges", "other-cartridges");
+        let err = CartridgeJson::read_from_dir(dir.path(), &elsewhere).unwrap_err();
         match err {
-            CartridgeJsonError::RegistrySlugMismatch {
-                expected_slug,
-                actual_slug,
+            CartridgeJsonError::RegistryFolderMismatch {
+                registry_url,
+                folder,
+                folder_registry,
                 ..
             } => {
-                assert_eq!(expected_slug, registry_slug());
-                assert_eq!(actual_slug, "dead00beefcafe00");
+                assert_eq!(registry_url.as_deref(), Some(TEST_REGISTRY));
+                assert_eq!(folder, "other-cartridges");
+                assert!(folder_registry.contains("https://other.example/cartridges"), "{folder_registry}");
             }
-            other => panic!("expected RegistrySlugMismatch, got: {:?}", other),
+            other => panic!("expected RegistryFolderMismatch, got: {:?}", other),
         }
     }
 
-    // TEST1510: Three-place rule — a dev cartridge.json under a
+    // TEST1510: Charter rule — a dev cartridge.json under a
     // non-dev folder is rejected. Equivalent to a dev-built
     // cartridge being moved into a registry's folder; the host
     // refuses because the binary was never built/signed for that
@@ -1010,15 +968,15 @@ mod tests {
         };
         cj.write_to_dir(dir.path()).unwrap();
 
-        let err = CartridgeJson::read_from_dir(dir.path(), &registry_slug()).unwrap_err();
+        let err = CartridgeJson::read_from_dir(dir.path(), &registry_folder()).unwrap_err();
         assert!(
-            matches!(err, CartridgeJsonError::RegistrySlugMismatch { .. }),
-            "expected RegistrySlugMismatch for dev provenance under registry folder, got: {:?}",
+            matches!(err, CartridgeJsonError::RegistryFolderMismatch { .. }),
+            "expected RegistryFolderMismatch for dev provenance under registry folder, got: {:?}",
             err
         );
     }
 
-    // TEST1511: Three-place rule — a registry cartridge.json under
+    // TEST1511: Charter rule — a registry cartridge.json under
     // the dev folder is rejected. Equivalent to a published
     // cartridge being dropped into the dev tree; the dev tree is
     // explicitly the only place a null `registry_url` is allowed,
@@ -1046,10 +1004,10 @@ mod tests {
         };
         cj.write_to_dir(dir.path()).unwrap();
 
-        let err = CartridgeJson::read_from_dir(dir.path(), DEV_SLUG).unwrap_err();
+        let err = CartridgeJson::read_from_dir(dir.path(), &RegistryFolder::Dev).unwrap_err();
         assert!(
-            matches!(err, CartridgeJsonError::RegistrySlugMismatch { .. }),
-            "expected RegistrySlugMismatch for registry provenance under dev folder, got: {:?}",
+            matches!(err, CartridgeJsonError::RegistryFolderMismatch { .. }),
+            "expected RegistryFolderMismatch for registry provenance under dev folder, got: {:?}",
             err
         );
     }
@@ -1081,9 +1039,8 @@ mod tests {
         };
         cj.write_to_dir(dir.path()).unwrap();
 
-        let loaded = CartridgeJson::read_from_dir(dir.path(), DEV_SLUG).unwrap();
+        let loaded = CartridgeJson::read_from_dir(dir.path(), &RegistryFolder::Dev).unwrap();
         assert!(loaded.is_dev_install());
-        assert_eq!(loaded.registry_slug(), DEV_SLUG);
     }
 
     // TEST1248: Cartridge directory hashes stay stable across metadata changes and change on content edits.

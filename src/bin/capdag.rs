@@ -28,17 +28,15 @@ const BUILD_CHANNEL: CartridgeChannel =
 const BAKED_REGISTRY_URL: Option<&str> =
     capdag::registry_url_from_build_env(option_env!("MFR_CARTRIDGE_REGISTRY_URL"));
 
-/// Fabric registry origin (caps / media / aliases — the layer aliases like `disbind-pdf`
-/// live in), baked at build time from the environment the workspace bundle
-/// step exports when it selects a fabric target (`https://fabric.capdag.com` for prod,
-/// `https://fabric-staging.capdag.com` for staging). A shipped binary has no such env at
-/// runtime, so `main` seeds the process env from these before any fabric-registry
-/// construction — otherwise every fabric/schema reader would fall back to the prod default
-/// and a staging build would resolve caps/aliases against prod fabric. The cartridge and
-/// fabric registries move together (build.rs fails a product build that bakes one without
-/// the other). `None` only for a bare `cargo run` dev build.
+/// The anchor of the fabric registry (caps / media / aliases — the layer aliases like
+/// `disbind-pdf` live in) this build resolves against, baked from the selected
+/// environment's `CDG_FABRIC_REGISTRY_URL`. Where its objects are is read from its
+/// charter. A shipped binary has no such env at runtime, so `main` seeds the process env
+/// from this before any fabric-registry construction — otherwise a staging build would
+/// resolve caps/aliases against the prod fabric. The cartridge and fabric registries
+/// move together (build.rs fails a product build that bakes one without the other).
+/// `None` only for a bare `cargo run` dev build.
 const BAKED_FABRIC_REGISTRY_URL: Option<&str> = option_env!("CDG_FABRIC_REGISTRY_URL");
-const BAKED_FABRIC_SCHEMA_URL: Option<&str> = option_env!("CDG_SCHEMA_BASE_URL");
 
 /// The per-user cartridge install root: `~/.capdag/cartridges`, in the same
 /// `{registry_slug}/{channel}/{name}/{version}/` tree every host uses.
@@ -402,11 +400,10 @@ fn print_usage(program: &str) {
 async fn main() {
     let mut args: Vec<String> = env::args().collect();
 
-    // `--fabric <url>` — point this invocation at a different fabric registry
-    // origin, the CLI's equivalent of the registry base URL the desktop apps
-    // hand their engine via `CDG_FABRIC_REGISTRY_URL`. Staging, a self-hosted
-    // fabric, or a local one under development are all reachable without
-    // rebuilding: a fabric is an origin, not a build identity.
+    // `--fabric <anchor>` — point this invocation at a different fabric
+    // registry, the CLI's equivalent of the anchor the desktop apps hand their
+    // engine via `CDG_FABRIC_REGISTRY_URL`. Any chartered fabric is reachable
+    // without rebuilding: a fabric is a registry, not a build identity.
     //
     // It is stripped from argv before dispatch so it works in front of ANY
     // subcommand and never reaches a cap's own argument parsing. Precedence is
@@ -420,28 +417,17 @@ async fn main() {
         }
     };
     if let Some(url) = fabric_override {
-        // A caller-chosen origin invalidates the baked schema base: pairing a
-        // runtime fabric with a build-time schema URL would validate one
-        // origin's definitions against another's schemas.
-        std::env::remove_var("CDG_SCHEMA_BASE_URL");
         std::env::set_var("CDG_FABRIC_REGISTRY_URL", url);
     }
 
-    // Bind the CLI to the fabric registry origin (caps/media/aliases) it was built for.
-    // A shipped binary has no runtime env, so seed the process env from the build-baked
-    // value BEFORE any fabric-registry construction, unless the user has explicitly
+    // Bind the CLI to the fabric registry (caps/media/aliases) it was built for. A
+    // shipped binary has no runtime env, so seed the process env from the build-baked
+    // anchor BEFORE any fabric-registry construction, unless the user has explicitly
     // overridden it (the flag above, or a runtime env var, always wins). Without this a
-    // `--staging` build resolves aliases like `disbind-pdf` against the prod fabric
-    // default. Schema base is only seeded alongside the fabric URL — never pair a runtime
-    // fabric URL with a baked schema URL.
+    // `--staging` build resolves aliases like `disbind-pdf` against the prod fabric.
     if std::env::var_os("CDG_FABRIC_REGISTRY_URL").is_none() {
         if let Some(url) = BAKED_FABRIC_REGISTRY_URL {
             std::env::set_var("CDG_FABRIC_REGISTRY_URL", url);
-            if std::env::var_os("CDG_SCHEMA_BASE_URL").is_none() {
-                if let Some(schema) = BAKED_FABRIC_SCHEMA_URL {
-                    std::env::set_var("CDG_SCHEMA_BASE_URL", schema);
-                }
-            }
         }
     }
 
@@ -2489,10 +2475,11 @@ async fn registry_manager_or_exit(
         // the environment, then the baked value — so this is the fabric THIS
         // invocation resolves caps against. Passing it here is what extends the
         // "every cartridge registry must declare the same fabric" invariant
-        // (enforced in CartridgeRepoServer::new) to an overridden fabric: point
-        // --fabric at one origin and a cartridge registry built against another
-        // is rejected rather than silently mixed.
-        capdag::RegistryConfig::default().registry_base_url,
+        // (each cartridge registry's charter, and its manifest) to an overridden
+        // fabric: point --fabric at one anchor and a cartridge registry chartered
+        // for another is rejected rather than silently mixed.
+        capdag::RegistryConfig::default().anchor,
+        capdag::CharterTrust::from_build_constants(),
     );
     if let Err(e) = manager.init().await {
         eprintln!("{e}");
