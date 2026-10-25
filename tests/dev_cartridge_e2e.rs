@@ -2,10 +2,12 @@
 //! `new` → `dev-install` → run → edit → `dev-install` (update) → run.
 //!
 //! This drives the REAL `capdag` binary and the REAL scaffolded Python cartridge
-//! through the full bifaci host. It is hermetic (no network): a local mock fabric
-//! serves an empty manifest, so `capdag <alias>` misses the fabric and falls back
-//! to the locally dev-installed cartridge's own manifest (the local-manifest dev
-//! path).
+//! through the full bifaci host, against the real fabric the run selected
+//! (`CDG_FABRIC_REGISTRY_URL`, else the one the build baked). A fabric exists
+//! only through its charter, verified against the MachineFabric roots the
+//! binary carries, so no local stand-in can be one. The custom cap is in no
+//! fabric, so `capdag <alias>` misses it and falls back to the locally
+//! dev-installed cartridge's own manifest (the local-manifest dev path).
 //!
 //! The scaffolded cartridge does no inference itself — it PEER-CALLS
 //! `classify-en`. In a real install that call is answered by a BUNDLED model
@@ -26,8 +28,7 @@
 //! env provides all three; the test fails loudly (never silently skips) if they
 //! are missing.
 
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -45,43 +46,6 @@ fn capdag_root() -> PathBuf {
         .parent()
         .expect("capdag-rs has a parent (the capdag superrepo)")
         .to_path_buf()
-}
-
-/// Spawn a mock fabric HTTP server on an ephemeral port that returns an empty
-/// manifest for every request. Returns the base URL. The listener thread is
-/// detached and lives for the rest of the process.
-fn spawn_mock_fabric() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock fabric");
-    let addr = listener.local_addr().expect("mock fabric addr");
-    // The manifest's `version` is the version the CLIENT asked for: the
-    // registry fetches `manifest-v{N}.json` and refuses a body that reports a
-    // different N — a stale mirror serving an old manifest under a new name is
-    // exactly the failure that guard exists to catch. So the mock reports the
-    // version this build is pinned to rather than a literal, and bumping
-    // `fabric/manifest-version.txt` can never leave this test behind.
-    //
-    // Every map a manifest carries, empty. `dims` is required since manifest
-    // 11, and a manifest without it is refused ("missing field `dims`"), which
-    // stopped the capdag release of 23 Oct here.
-    let body = format!(
-        r#"{{"version":{},"previous":0,"caps":{{}},"media":{{}},"aliases":{{}},"dims":{{}}}}"#,
-        capdag::FABRIC_MANIFEST_VERSION
-    );
-    std::thread::spawn(move || {
-        let body = body;
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut buf = [0u8; 2048];
-            let _ = stream.read(&mut buf); // drain the request; we answer every path the same
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-        }
-    });
-    format!("http://{addr}")
 }
 
 /// True if the interpreter the runtime starts a cartridge with can import the
@@ -112,17 +76,11 @@ fn python_runtime_available() -> bool {
 /// Run the capdag binary with `args` (and optional piped stdin), returning
 /// `(trimmed stdout, success, stderr)`. PATH is inherited so the cartridge's
 /// launcher resolves the same interpreter the runtime check used.
-fn run_capdag(
-    home: &Path,
-    fabric: &str,
-    args: &[&str],
-    stdin: Option<&str>,
-) -> (String, bool, String) {
+fn run_capdag(home: &Path, args: &[&str], stdin: Option<&str>) -> (String, bool, String) {
     let mut cmd = Command::new(CAPDAG_BIN);
     cmd.args(args)
         .env("HOME", home)
         .env_remove("PYTHONPATH")
-        .env("CDG_FABRIC_REGISTRY_URL", fabric)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     cmd.stdin(if stdin.is_some() {
@@ -159,8 +117,6 @@ fn test8110_dev_cartridge_create_install_run_update() {
          capdag, tagged-urn, cbor2 and ops installed: install the workspace's \
          requirements.txt with it (`python -m pip install -r requirements.txt`)"
     );
-    let fabric = spawn_mock_fabric();
-
     let tmp = std::env::temp_dir().join(format!("capdag-dev-e2e-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let home = tmp.join("home");
@@ -186,7 +142,6 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // 1. Scaffold a new Python cartridge.
     let (proj_out, ok, err) = run_capdag(
         &home,
-        &fabric,
         &["new", name, "--python", "-o", projects.to_str().unwrap()],
         None,
     );
@@ -200,7 +155,6 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // 2. Install it under the local `dev` slug.
     let (_, ok, err) = run_capdag(
         &home,
-        &fabric,
         &["dev-install", proj.to_str().unwrap()],
         None,
     );
@@ -209,19 +163,18 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // 3. Run the custom cap through the capdag host — it is NOT in the fabric,
     //    so this exercises the local-manifest dev path end to end, including the
     //    peer call out to the classifier.
-    let (out, ok, err) = run_capdag(&home, &fabric, &run_tagger, Some("I love this good great"));
+    let (out, ok, err) = run_capdag(&home, &run_tagger, Some("I love this good great"));
     assert!(ok, "run failed: {err}");
     assert_eq!(out, "positive", "positive input; stderr:\n{err}");
 
     let (out, _, err) = run_capdag(
         &home,
-        &fabric,
         &run_tagger,
         Some("awful terrible bad hate"),
     );
     assert_eq!(out, "negative", "negative input; stderr:\n{err}");
 
-    let (out, _, _) = run_capdag(&home, &fabric, &run_tagger, Some("the sky is blue"));
+    let (out, _, _) = run_capdag(&home, &run_tagger, Some("the sky is blue"));
     assert_eq!(out, "neutral", "neutral input before the edit");
 
     // 4. Edit the cartridge — shout the label instead of returning it plain —
@@ -242,14 +195,13 @@ fn test8110_dev_cartridge_create_install_run_update() {
 
     let (_, ok, err) = run_capdag(
         &home,
-        &fabric,
         &["dev-install", proj.to_str().unwrap()],
         None,
     );
     assert!(ok, "update `dev-install` failed: {err}");
 
     // 5. The same input now renders differently — the update took effect.
-    let (out, _, err) = run_capdag(&home, &fabric, &run_tagger, Some("the sky is blue"));
+    let (out, _, err) = run_capdag(&home, &run_tagger, Some("the sky is blue"));
     assert_eq!(
         out, "NEUTRAL",
         "update did not take effect; stderr:\n{err}"
