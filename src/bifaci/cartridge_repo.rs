@@ -244,11 +244,12 @@ const fn const_eq(a: &str, b: &str) -> bool {
     true
 }
 
-/// The schema revision of the cartridge registry this build reads and writes
-/// (`schemas/cartridge-registry/v8.json`): its cap groups carry each
-/// cartridge's cap definitions exactly as its manifest declares them,
-/// including the dims each was built from.
-pub const CARTRIDGE_REGISTRY_SCHEMA_VERSION: &str = "7.0";
+/// The schema revision of the cartridge registry this build reads and writes:
+/// its cap groups carry each cartridge's cap definitions exactly as its
+/// manifest declares them, including the dims each was built from. Baked from
+/// `schemas/cartridge-registry/schema-version.txt`, which the schema's own
+/// `schemaVersion` must equal.
+pub use crate::cartridge_registry_version::CARTRIDGE_REGISTRY_SCHEMA_VERSION;
 
 /// A cartridge entry as returned by /api/cartridges.
 ///
@@ -2539,8 +2540,8 @@ mod tests {
         assert!(message.contains("nightly") && message.contains("RULE21"), "{message}");
     }
 
-    // TEST323: CartridgeRepoServer requires the schema this build reads
-    // (7.0) and rejects older.
+    // TEST323: CartridgeRepoServer requires the schema revision this build
+    // bakes and rejects older.
     #[test]
     fn test323_cartridge_repo_server_validate_registry() {
         let server = CartridgeRepoServer::new(
@@ -2555,7 +2556,7 @@ mod tests {
         let result =
             CartridgeRepoServer::new(bad, "https://test.example/manifest", TEST_FABRIC_URL);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("7.0"));
+        assert!(result.unwrap_err().to_string().contains(CARTRIDGE_REGISTRY_SCHEMA_VERSION));
 
         // A registry from a different regime version (e.g. a v0 legacy manifest
         // that somehow reached this v>=1 build) must be rejected, not silently

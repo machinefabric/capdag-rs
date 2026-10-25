@@ -47,6 +47,7 @@ fn main() {
         "Cartridge registry version this build is pinned to. Sourced from",
         "schemas/cartridge-registry/registry-version.txt",
     );
+    bake_registry_schema_revision(&out_dir);
 
     bake_capdag_version();
     enforce_charter_roots();
@@ -165,6 +166,39 @@ fn bake_registry_version(
     );
     std::fs::write(&dest, body)
         .unwrap_or_else(|e| panic!("failed to write {}: {}", dest.display(), e));
+}
+
+/// The schema revision a cartridge registry manifest is written in,
+/// `<major>.<minor>`: a manifest stating another is refused. Baked, like the
+/// registry version, from the one file that declares it, so this build, the
+/// mirrors and the publisher cannot each hold their own.
+fn bake_registry_schema_revision(out_dir: &str) {
+    const ENV_VAR: &str = "MFR_CARTRIDGE_REGISTRY_SCHEMA_VERSION";
+    const SOURCE_FILE: &str = "schemas/cartridge-registry/schema-version.txt";
+    println!("cargo:rerun-if-env-changed={ENV_VAR}");
+    let raw = env::var(ENV_VAR).unwrap_or_else(|_| {
+        panic!(
+            "{ENV_VAR} is not set. Every cargo invocation against the MachineFabric \
+             workspace must export this variable, sourced from {SOURCE_FILE}. Run builds and \
+             tests through the workspace build tool (which exports it for you) instead of \
+             invoking cargo directly."
+        )
+    });
+    let revision = raw.trim();
+    let digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
+    let well_formed = revision
+        .split_once('.')
+        .is_some_and(|(major, minor)| digits(major) && !major.starts_with('0') && digits(minor));
+    if !well_formed {
+        panic!("{ENV_VAR} must be a schema revision `<major>.<minor>` (got {revision:?})");
+    }
+    let dest = Path::new(out_dir).join("cartridge_registry_schema_version.rs");
+    let body = format!(
+        "/// The schema revision of the cartridge registry this build reads and writes.\n\
+         /// `{SOURCE_FILE}` at build time via `{ENV_VAR}`.\n\
+         pub const CARTRIDGE_REGISTRY_SCHEMA_VERSION: &str = \"{revision}\";\n"
+    );
+    std::fs::write(&dest, body).unwrap_or_else(|e| panic!("failed to write {}: {}", dest.display(), e));
 }
 
 /// A build that bakes a cartridge registry identity

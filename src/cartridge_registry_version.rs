@@ -7,3 +7,8 @@
 //! versioned path and rejects any manifest whose `registryVersion` differs.
 
 include!(concat!(env!("OUT_DIR"), "/cartridge_registry_version.rs"));
+
+// And the schema revision its manifests are written in, baked the same way
+// from `MFR_CARTRIDGE_REGISTRY_SCHEMA_VERSION`
+// (`schemas/cartridge-registry/schema-version.txt`).
+include!(concat!(env!("OUT_DIR"), "/cartridge_registry_schema_version.rs"));
