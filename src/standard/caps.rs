@@ -365,7 +365,7 @@ pub fn embeddings_dimensions_urn() -> CapUrn {
 
 /// Build URN for text embeddings-generation capability
 /// Input: media:enc=utf-8 (text)
-/// Output: media:embedding-vector;enc=utf-8;record
+/// Output: media:embedding-vector;fmt=json;record
 pub fn embeddings_generation_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("generate-embeddings")
@@ -377,7 +377,7 @@ pub fn embeddings_generation_urn() -> CapUrn {
 
 /// Build URN for image embeddings-generation capability
 /// Input: media:ext=png;image
-/// Output: media:embedding-vector;enc=utf-8;record
+/// Output: media:embedding-vector;fmt=json;record
 pub fn image_embeddings_generation_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("generate-image-embeddings")
@@ -404,7 +404,7 @@ pub fn model_download_urn() -> CapUrn {
 }
 
 /// Build URN for model-list capability
-/// Input uses MEDIA_MODEL_REPO per CATALOG: media:enc=utf-8;model-repo;record
+/// Input uses MEDIA_MODEL_REPO per CATALOG: media:fmt=json;model-repo;record
 pub fn model_list_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("list-models")

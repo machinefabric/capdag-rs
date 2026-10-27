@@ -20,7 +20,7 @@
 //!
 //! ```text
 //! [extract cap:in="media:document;ext=pdf";extract-text;out="media:enc=utf-8;ext=txt"]
-//! [embed cap:in="media:enc=utf-8";generate-embeddings;out="media:embedding-vector;enc=utf-8;record"]
+//! [embed cap:in="media:enc=utf-8";generate-embeddings;out="media:embedding-vector;fmt=json;record"]
 //! [doc -> extract -> text]
 //! [text -> embed -> vectors]
 //! ```

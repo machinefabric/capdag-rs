@@ -42,7 +42,7 @@ const PLAIN_TEXT: &str = "media:enc=utf-8;ext=txt;plain-text";
 const DIGITIZED_TEXT: &str = "media:digitized-text;enc=utf-8;ext=txt;plain-text";
 const IMAGE_DESCRIPTION: &str = "media:enc=utf-8;ext=txt;image-description;plain-text";
 const DISBIND_PAGE: &str = "media:enc=utf-8;ext=txt;page;plain-text";
-const TRANSCRIPTION: &str = "media:enc=utf-8;record;transcription";
+const TRANSCRIPTION: &str = "media:fmt=json;record;transcript";
 const BARE_TEXTABLE: &str = "media:enc=utf-8";
 
 /// `media:enc=utf-8;ext=txt;plain-text` conforms to itself — basic
