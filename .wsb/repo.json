@@ -1,0 +1,10 @@
+{
+  "name": "capdag-rs",
+  "alias": "capdag_rs",
+  "templates_root": "../..",
+  "version": {
+    "major": 1,
+    "file": "version.txt",
+    "detect_manifests": true
+  }
+}
