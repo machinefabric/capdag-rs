@@ -38,7 +38,6 @@ pub use crate::urn::media_urn::{
     MEDIA_AUDIO,
     MEDIA_DOCUMENT,
     MEDIA_IMAGE,
-    MEDIA_AUDIO_SPEECH,
     MEDIA_BMP,
     MEDIA_BOOLEAN,
     MEDIA_BOOLEAN_LIST,

@@ -42,8 +42,8 @@ pub const MEDIA_STRING: &str = "media:enc=utf-8";
 pub const MEDIA_INTEGER: &str = "media:integer;numeric";
 /// Media URN for number type — numeric, scalar by default
 pub const MEDIA_NUMBER: &str = "media:numeric";
-/// Media URN for boolean type - uses "bool" not "boolean" per base.toml
-pub const MEDIA_BOOLEAN: &str = "media:bool;enc=utf-8";
+/// Media URN for boolean type — its own kind: neither text nor a number
+pub const MEDIA_BOOLEAN: &str = "media:bool";
 /// Media URN for a generic record/object type — has internal key-value structure,
 /// no content-format claim. Use MEDIA_JSON for JSON-serialized objects.
 pub const MEDIA_OBJECT: &str = "media:record";
@@ -59,8 +59,8 @@ pub const MEDIA_STRING_LIST: &str = "media:enc=utf-8;list";
 pub const MEDIA_INTEGER_LIST: &str = "media:integer;list;numeric";
 /// Media URN for number list type - text file with one number per line
 pub const MEDIA_NUMBER_LIST: &str = "media:list;numeric";
-/// Media URN for boolean list type - text file with one boolean per line
-pub const MEDIA_BOOLEAN_LIST: &str = "media:bool;enc=utf-8;list";
+/// Media URN for boolean list type
+pub const MEDIA_BOOLEAN_LIST: &str = "media:bool;list";
 /// Media URN for object array type — list of records (no content-format claim).
 /// Use a specific format like JSON array for serialized object arrays.
 pub const MEDIA_OBJECT_LIST: &str = "media:list;record";
@@ -108,8 +108,6 @@ pub const MEDIA_WEBM: &str = "media:ext=webm;video";
 pub const MEDIA_MKV: &str = "media:ext=mkv;video";
 
 // Semantic AI input types - distinguished by their purpose/context
-/// Media URN for audio input containing speech for transcription (Whisper)
-pub const MEDIA_AUDIO_SPEECH: &str = "media:audio;ext=wav;speech";
 /// Media URN for extracted page text
 /// Media URN for a single page of finalised plain text extracted from a
 /// multi-page document (e.g. `cap:disbind-pdf`'s output, one item per page).
@@ -271,8 +269,8 @@ pub const MEDIA_MODEL_SPEC_CANDLE_LLM: &str =
 /// requirements as the LLM/vision/embeddings variants.
 pub const MEDIA_MODEL_SPEC_CANDLE_TRANSCRIPTION: &str =
     "media:candle;enc=utf-8;model-spec;repo-safetensors;tokenizer-unified;transcription";
-/// Media URN for model repository (input for list-models) - has record marker
-pub const MEDIA_MODEL_REPO: &str = "media:enc=utf-8;model-repo;record";
+/// Media URN for model repository (input for list-models) — a JSON record
+pub const MEDIA_MODEL_REPO: &str = "media:fmt=json;model-repo;record";
 
 /// HuggingFace bearer token, passed as an optional argument to caps that
 /// hit the HuggingFace API. Carries a `secret` tag so UIs and logs can mask
@@ -322,20 +320,20 @@ pub fn audio_media_urn_for_ext(ext: &str) -> String {
 // CAPDAG output types - record marker for structured JSON objects, list marker for arrays
 /// Media URN for model dimension output - scalar by default (no list marker)
 pub const MEDIA_MODEL_DIM: &str = "media:integer;model-dim;numeric";
-/// Media URN for model download output - has record marker
-pub const MEDIA_DOWNLOAD_OUTPUT: &str = "media:download-result;enc=utf-8;record";
-/// Media URN for model list output - has record marker
-pub const MEDIA_LIST_OUTPUT: &str = "media:enc=utf-8;model-list;record";
-/// Media URN for model status output - has record marker
-pub const MEDIA_STATUS_OUTPUT: &str = "media:enc=utf-8;model-status;record";
-/// Media URN for model contents output - has record marker
-pub const MEDIA_CONTENTS_OUTPUT: &str = "media:enc=utf-8;model-contents;record";
-/// Media URN for model availability output - has record marker
-pub const MEDIA_AVAILABILITY_OUTPUT: &str = "media:enc=utf-8;model-availability;record";
-/// Media URN for model path output - has record marker
-pub const MEDIA_PATH_OUTPUT: &str = "media:enc=utf-8;model-path;record";
-/// Media URN for embedding vector output - has record marker
-pub const MEDIA_EMBEDDING_VECTOR: &str = "media:embedding-vector;enc=utf-8;record";
+/// Media URN for model download output — a JSON record
+pub const MEDIA_DOWNLOAD_OUTPUT: &str = "media:download-result;fmt=json;record";
+/// Media URN for model list output — a JSON record
+pub const MEDIA_LIST_OUTPUT: &str = "media:fmt=json;model-list;record";
+/// Media URN for model status output — a JSON record
+pub const MEDIA_STATUS_OUTPUT: &str = "media:fmt=json;model-status;record";
+/// Media URN for model contents output — a JSON record
+pub const MEDIA_CONTENTS_OUTPUT: &str = "media:fmt=json;model-contents;record";
+/// Media URN for model availability output — a JSON record
+pub const MEDIA_AVAILABILITY_OUTPUT: &str = "media:fmt=json;model-availability;record";
+/// Media URN for model path output — a JSON record
+pub const MEDIA_PATH_OUTPUT: &str = "media:fmt=json;model-path;record";
+/// Media URN for embedding vector output — a JSON record
+pub const MEDIA_EMBEDDING_VECTOR: &str = "media:embedding-vector;fmt=json;record";
 /// Media URN for vision inference output — a concrete UTF-8 text terminal.
 ///
 /// The composite URN carries `image-description` (the vision-specific marker
@@ -357,8 +355,8 @@ pub const MEDIA_DIGITIZED_TEXT: &str = "media:digitized-text;enc=utf-8;ext=txt;p
 /// summarisation) declare this URN as their `out` so the planner restricts the
 /// `.txt` persistence path to those caps. See `fabric/media/plain-text.toml`.
 pub const MEDIA_PLAIN_TEXT: &str = "media:enc=utf-8;ext=txt;plain-text";
-/// Media URN for transcription output - has record marker
-pub const MEDIA_TRANSCRIPTION_OUTPUT: &str = "media:enc=utf-8;record;transcription";
+/// Media URN for a transcript — the JSON record a transcription produces
+pub const MEDIA_TRANSCRIPT_OUTPUT: &str = "media:fmt=json;record;transcript";
 /// Media URN for decision output — JSON object with identifier and boolean value
 pub const MEDIA_DECISION: &str = "media:decision;fmt=json;record";
 
@@ -1037,11 +1035,11 @@ mod tests {
             .unwrap()
             .get_tag("enc")
             .is_some()); // "media:enc=utf-8"
+                         // No enc= → not text-representable
         assert!(MediaUrn::from_string(MEDIA_BOOLEAN)
             .unwrap()
             .get_tag("enc")
-            .is_some()); // "media:bool;enc=utf-8"
-                         // No enc= → not text-representable
+            .is_none()); // "media:bool" — a boolean is its own kind
         assert!(MediaUrn::from_string(MEDIA_INTEGER)
             .unwrap()
             .get_tag("enc")
@@ -1254,10 +1252,8 @@ mod debug_tests {
     #[test]
     fn test304_media_availability_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_AVAILABILITY_OUTPUT).expect("must parse");
-        assert!(
-            urn.get_tag("enc").is_some(),
-            "model-availability must be text-representable (enc=)"
-        );
+        assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-availability is a JSON record");
+        assert!(urn.get_tag("enc").is_none(), "a JSON record is not also text (no enc=)");
         assert!(
             urn.is_record(),
             "model-availability must have record marker"
@@ -1274,10 +1270,8 @@ mod debug_tests {
     #[test]
     fn test305_media_path_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_PATH_OUTPUT).expect("must parse");
-        assert!(
-            urn.get_tag("enc").is_some(),
-            "model-path must be text-representable (enc=)"
-        );
+        assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-path is a JSON record");
+        assert!(urn.get_tag("enc").is_none(), "a JSON record is not also text (no enc=)");
         assert!(urn.is_record(), "model-path must have record marker");
         let reparsed = MediaUrn::from_string(&urn.to_string()).expect("roundtrip must parse");
         assert!(
@@ -1337,7 +1331,7 @@ mod debug_tests {
     #[test]
     fn test547_is_audio() {
         assert!(MediaUrn::from_string(MEDIA_AUDIO).unwrap().is_audio());
-        assert!(MediaUrn::from_string(MEDIA_AUDIO_SPEECH)
+        assert!(MediaUrn::from_string(MEDIA_WAV)
             .unwrap()
             .is_audio());
         assert!(MediaUrn::from_string("media:audio;ext=mp3")
@@ -1485,10 +1479,10 @@ mod debug_tests {
         assert!(!int.is_image());
         assert!(!int.is_list());
 
-        // MEDIA_BOOLEAN must be bool, text-encoded (enc=utf-8), scalar, NOT numeric
+        // MEDIA_BOOLEAN must be bool, its own kind (no enc), scalar, NOT numeric
         let bool_urn = MediaUrn::from_string(MEDIA_BOOLEAN).unwrap();
         assert!(bool_urn.is_bool());
-        assert!(bool_urn.get_tag("enc").is_some());
+        assert!(bool_urn.get_tag("enc").is_none());
         assert!(bool_urn.is_scalar());
         assert!(!bool_urn.is_numeric());
 

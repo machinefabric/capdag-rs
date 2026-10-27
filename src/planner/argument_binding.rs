@@ -999,7 +999,7 @@ mod tests {
     // This is the core disambiguation scenario that step-index keying was designed to solve.
     #[test]
     fn test1105_two_steps_same_cap_urn_different_slot_values() {
-        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
         let slot_name = "media:enc=utf-8;list;question";
         let files = vec![];
         let prev_outputs = HashMap::new();
@@ -1048,8 +1048,8 @@ mod tests {
     // cap_settings are keyed by cap_urn (shared across steps), so both steps get the same value.
     #[test]
     fn test1106_slot_falls_through_to_cap_settings_shared() {
-        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
-        let slot_name = "media:enc=utf-8;language";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
+        let slot_name = "media:enc=utf-8;language-code";
         let files = vec![];
         let prev_outputs = HashMap::new();
         let mut cap_settings: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
@@ -1087,8 +1087,8 @@ mod tests {
     // Proves per-step override works while shared settings remain as fallback.
     #[test]
     fn test1107_slot_value_overrides_cap_settings_per_step() {
-        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool;enc=utf-8\"";
-        let slot_name = "media:enc=utf-8;language";
+        let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
+        let slot_name = "media:enc=utf-8;language-code";
         let files = vec![];
         let prev_outputs = HashMap::new();
 

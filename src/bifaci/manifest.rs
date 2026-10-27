@@ -519,7 +519,7 @@ mod tests {
             }],
         ));
         cap.add_arg(CapArg::with_full_definition(
-            "media:chunk-size;numeric", "chunk-size", None,
+            "media:chunk-size;integer;numeric", "chunk-size", None,
             false,
             false,
             false,
@@ -531,7 +531,7 @@ mod tests {
             Some(serde_json::json!({"unit": "words"})),
         ));
         cap.add_arg(CapArg::with_full_definition(
-            "media:bool;enc=utf-8;timestamps", "timestamps", None,
+            "media:bool;timestamps", "timestamps", None,
             false,
             false,
             false,
