@@ -1,11 +1,10 @@
 //! Diagram rendering for execution plans.
 //!
-//! Unlike the orchestrator's `ResolvedGraph::to_mermaid` (a FLAT cap-to-cap
-//! view that cannot express fan-out/fan-in), this renders the full
-//! [`MachinePlan`] the planner produces — so every construct machine notation
-//! can model appears: `Cap` steps and the outputs they are taken by, `ForEach`
-//! maps and their items, `Collect` gathers, `InputSlot`s and `Output`s, plus
-//! every typed edge (`Direct`, `Arg`, `Iteration`, `Collection`).
+//! This renders the full [`MachinePlan`] the planner produces, so every
+//! construct machine notation can model appears: `Cap` steps and the outputs
+//! they are taken by, `ForEach` maps and their items, `Collect` gathers,
+//! `InputSlot`s and `Output`s, plus every typed edge (`Direct`, `Arg`,
+//! `Iteration`, `Collection`).
 //! A machine can compile to several strands, so a list of plans renders as one
 //! diagram with one labelled subgraph per plan.
 
