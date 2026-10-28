@@ -213,7 +213,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.227.2400",
+        version="1.228.2414",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.227.2400"
+version = "1.228.2414"
 edition = "2021"
 
 [dependencies]
@@ -531,7 +531,7 @@ tokio = { version = "1.0", features = ["full"] }
 # They pin which fabric manifest and which cartridge registry regime this
 # cartridge is compiled against, and they must match the capdag version above.
 [env]
-MFR_FABRIC_MANIFEST_VERSION = "11"
+MFR_FABRIC_MANIFEST_VERSION = "12"
 MFR_CARTRIDGE_REGISTRY_VERSION = "4"
 "#,
                 executable: false,
@@ -791,7 +791,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.227.2400",
+		"1.228.2414",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -1055,7 +1055,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.227.2400",
+        version: "1.228.2414",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
