@@ -125,8 +125,8 @@ impl Line {
     }
 
     /// The release registry's charter at [`REGISTRY`], for `environment`, with
-    /// its manifests at `manifest_template`, and its signature file — as
-    /// `sdx charter issue` writes them.
+    /// its manifests at `manifest_template`, and its signature file — as a
+    /// charter is issued.
     fn charter(&self, environment: &str, manifest_template: &str) -> (Vec<u8>, Vec<u8>) {
         let body = json!({
             "format": "machinefabric-registry-charter/1",

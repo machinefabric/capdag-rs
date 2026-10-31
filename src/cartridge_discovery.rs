@@ -497,7 +497,8 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    // Real charters, signed by sdx (`capdag-signing-fixtures`): a registry
+    // Real charters, signed by the workspace's test preparation
+    // (`capdag-signing-fixtures`): a registry
     // folder is only what its stored charter proves, so these tests store
     // real ones rather than naming folders.
     const ROOT_A: &str = include_str!("../tests/fixtures/nocommit/signing/root_a.pubkey");

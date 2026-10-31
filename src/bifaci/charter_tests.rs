@@ -1,6 +1,7 @@
 //! Charters, verified as a client does, against real signed fixtures.
 //!
-//! The fixtures are produced by sdx (`capdag-signing-fixtures`): charters of
+//! The fixtures are produced by the workspace's test preparation
+//! (`capdag-signing-fixtures`): charters of
 //! each kind signed by a release key that roots A and B certified for `prod`,
 //! a lab charter with an expiry of its own, and the cartridges charter signed
 //! again under a `staging` certificate from the same roots. Every refusal

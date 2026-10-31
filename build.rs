@@ -69,8 +69,8 @@ fn enforce_charter_roots() {
         .unwrap_or_else(|| {
             panic!(
                 "MFR_CHARTER_ROOT_PUBKEYS is not set. Every build bakes MachineFabric's root \
-                 public keys (workspace.json `signing_roots`), which every registry's charter \
-                 chains to. The workspace build tool exports it; build through it."
+                 public keys, which every registry's charter chains to. The workspace build \
+                 exports them; build through it."
             )
         });
     let count = validate_root_list("MFR_CHARTER_ROOT_PUBKEYS", &keys);
