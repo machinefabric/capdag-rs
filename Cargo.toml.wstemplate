@@ -67,7 +67,7 @@ version = "={{ projects.lungo_rs.latest_remote_version }}"
 # The chain from baked roots to a signed manifest, charter or binary. The
 # formats and charter rules are MachineFabric's, declared in bifaci::trust.
 [dependencies.mg-srel]
-version = "0.1"
+version = "0.5"
 
 [dependencies.tokio]
 features = ["full"]
