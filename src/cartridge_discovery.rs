@@ -20,7 +20,8 @@
 
 use crate::bifaci::cartridge_json::CartridgeJson;
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::bifaci::charter::{CharterTrust, RegistryFolder};
+use crate::bifaci::charter::RegistryFolder;
+use signed_release::CharterTrust;
 use crate::bifaci::manifest::CapManifest;
 use crate::bifaci::relay_switch::{CartridgeAttachmentError, CartridgeAttachmentErrorKind};
 use crate::CapGroup;
@@ -504,16 +505,14 @@ mod tests {
     const ROOT_C: &str = include_str!("../tests/fixtures/nocommit/signing/root_c.pubkey");
     const META: &str = include_str!("../tests/fixtures/nocommit/signing/meta.json");
     const CHARTER: &[u8] = include_bytes!("../tests/fixtures/nocommit/signing/charter-cartridges.json");
-    const CHARTER_SIG: &str =
-        include_str!("../tests/fixtures/nocommit/signing/charter-cartridges.json.sig");
+    const CHARTER_SIG: &[u8] =
+        include_bytes!("../tests/fixtures/nocommit/signing/charter-cartridges.json.sig");
     /// The anchor and slug the fixture charter states.
     const ANCHOR: &str = "https://registry.example/cartridges";
     const SLUG: &str = "example-cartridges";
 
     fn fixture_trust() -> CharterTrust {
-        CharterTrust {
-            root_pubkeys: [ROOT_A, ROOT_B, ROOT_C].iter().map(|k| k.trim().to_string()).collect(),
-        }
+        crate::bifaci::trust::charter_trust_from(&[ROOT_A, ROOT_B, ROOT_C]).expect("the fixture roots are keys")
     }
 
     /// A moment inside the fixtures' validity.
@@ -528,15 +527,15 @@ mod tests {
             CHARTER,
             CHARTER_SIG,
             &fixture_trust(),
-            &crate::bifaci::charter::CharterExpectation {
+            &signed_release::CharterExpectation {
                 anchor: Some(ANCHOR),
-                kind: crate::bifaci::charter::RegistryKind::Cartridges,
+                kind: crate::bifaci::trust::RegistryKind::Cartridges.wire_name(),
                 environment: Some("prod"),
             },
             fixture_now(),
         )
         .expect("the fixture charter verifies");
-        crate::bifaci::charter::store(&verified, &root.join(folder)).unwrap();
+        signed_release::store(&verified, &root.join(folder)).unwrap();
     }
 
     fn nightly_dev_identity() -> DiscoveryIdentity {

@@ -259,9 +259,9 @@ impl CliHost {
                 rt.channel,
                 rt.fabric_manifest_version,
                 rt.dev_binaries.clone(),
-                crate::bifaci::release_cert::RegistryTrust::from_build_constants(),
+                crate::bifaci::trust::content_trust(),
                 rt.fabric_registry.config().anchor.clone(),
-                crate::bifaci::charter::CharterTrust::from_build_constants(),
+                crate::bifaci::trust::charter_trust(),
             );
             manager.init().await?;
             self.manager = Some(manager);

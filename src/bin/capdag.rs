@@ -2470,7 +2470,7 @@ async fn registry_manager_or_exit(
         BUILD_CHANNEL,
         capdag::FABRIC_MANIFEST_VERSION,
         dev_binaries,
-        capdag::RegistryTrust::from_build_constants(),
+        capdag::content_trust(),
         // The CLI resolves CDG_FABRIC_REGISTRY_URL at startup — `--fabric`, then
         // the environment, then the baked value — so this is the fabric THIS
         // invocation resolves caps against. Passing it here is what extends the
@@ -2479,7 +2479,7 @@ async fn registry_manager_or_exit(
         // fabric: point --fabric at one anchor and a cartridge registry chartered
         // for another is rejected rather than silently mixed.
         capdag::RegistryConfig::default().anchor,
-        capdag::CharterTrust::from_build_constants(),
+        capdag::charter_trust(),
     );
     if let Err(e) = manager.init().await {
         eprintln!("{e}");

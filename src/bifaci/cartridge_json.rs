@@ -521,7 +521,8 @@ fn collect_files(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bifaci::charter::{Charter, RegistryKind, VerifiedCharter, CHARTER_FORMAT};
+    use crate::bifaci::trust::{RegistryKind, CHARTER_FORMAT, FABRIC_FIELD};
+    use signed_release::{Charter, VerifiedCharter};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
@@ -536,19 +537,21 @@ mod tests {
             charter: Charter {
                 format: CHARTER_FORMAT.to_string(),
                 anchor: anchor.to_string(),
-                kind: RegistryKind::Cartridges,
+                kind: RegistryKind::Cartridges.wire_name().to_string(),
                 slug: slug.to_string(),
                 environment: "prod".to_string(),
                 experiment: None,
                 locations: [("manifest".to_string(), format!("{anchor}/v{{registry_version}}/manifest"))]
                     .into_iter()
                     .collect(),
-                fabric: Some("https://fabric.capdag.com".to_string()),
+                fields: [(FABRIC_FIELD.to_string(), Some("https://fabric.capdag.com".to_string()))]
+                    .into_iter()
+                    .collect(),
                 issued_at: 0,
                 not_after: None,
             },
             body: Vec::new(),
-            envelope: String::new(),
+            envelope: Vec::new(),
         })
     }
 

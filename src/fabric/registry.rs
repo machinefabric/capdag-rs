@@ -26,7 +26,8 @@
 //! names. So a reader holding a cached definition can always read the
 //! documentation of the dims it was built from (`get_cached_dim`).
 
-use crate::bifaci::charter::{Charter, CharterTrust, RegistryKind, VerifiedCharter};
+use crate::bifaci::trust::RegistryKind;
+use signed_release::{Charter, CharterTrust, VerifiedCharter};
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
 use crate::fabric::dim::{is_dim_name, DimRef, StoredDim};
 use crate::media::spec::MediaDef;
@@ -124,11 +125,10 @@ pub struct FabricLocations {
 
 impl FabricLocations {
     pub fn from_charter(charter: &Charter) -> Result<Self, FabricRegistryError> {
-        if charter.kind != RegistryKind::Fabric {
+        if charter.kind != RegistryKind::Fabric.wire_name() {
             return Err(FabricRegistryError::Charter(format!(
                 "{} is chartered as a {} registry, not a fabric",
-                charter.anchor,
-                charter.kind.wire_name()
+                charter.anchor, charter.kind
             )));
         }
         let take = |name: &str| {
@@ -567,8 +567,8 @@ impl FabricRegistry {
             &capdag_cache,
             &config.anchor,
             config.bypass_cache,
-            &CharterTrust::from_build_constants(),
-            crate::bifaci::release_cert::unix_now(),
+            &crate::bifaci::trust::charter_trust(),
+            signed_release::unix_now(),
         )
         .await?;
         let locations = FabricLocations::from_charter(&charter.charter)?;
@@ -2597,7 +2597,7 @@ impl FabricRegistry {
         let charter = VerifiedCharter {
             charter: publisher_layout_charter(&config.anchor),
             body: Vec::new(),
-            envelope: String::new(),
+            envelope: Vec::new(),
         };
         let locations = FabricLocations::from_charter(&charter.charter)
             .expect("the test charter is a fabric charter with both locations");
@@ -3472,9 +3472,9 @@ async fn load_or_fetch_manifest(
 /// the test constructors, and tests of where things are.
 pub(crate) fn publisher_layout_charter(anchor: &str) -> Charter {
     Charter {
-        format: crate::bifaci::charter::CHARTER_FORMAT.to_string(),
+        format: crate::bifaci::trust::CHARTER_FORMAT.to_string(),
         anchor: anchor.to_string(),
-        kind: RegistryKind::Fabric,
+        kind: RegistryKind::Fabric.wire_name().to_string(),
         slug: "test-fabric".to_string(),
         environment: "prod".to_string(),
         experiment: None,
@@ -3486,7 +3486,7 @@ pub(crate) fn publisher_layout_charter(anchor: &str) -> Charter {
         .into_iter()
         .map(|(name, url)| (name.to_string(), url))
         .collect(),
-        fabric: None,
+        fields: [(crate::bifaci::trust::FABRIC_FIELD.to_string(), None)].into_iter().collect(),
         issued_at: 0,
         not_after: None,
     }
@@ -3523,7 +3523,7 @@ async fn resolve_charter(
         if let Ok(entries) = fs::read_dir(capdag_cache) {
             for entry in entries.flatten() {
                 let folder = entry.path();
-                if !folder.join(crate::bifaci::charter::CHARTER_FILE).is_file() {
+                if !folder.join(signed_release::CHARTER_FILE).is_file() {
                     continue;
                 }
                 match crate::bifaci::charter::verify_stored(
@@ -3555,7 +3555,7 @@ async fn resolve_charter(
     .await
     .map_err(|e| FabricRegistryError::Charter(e.to_string()))?;
     let folder = capdag_cache.join(&verified.charter.slug);
-    crate::bifaci::charter::store(&verified, &folder).map_err(|e| {
+    signed_release::store(&verified, &folder).map_err(|e| {
         FabricRegistryError::CacheError(format!(
             "Failed to store the charter of {} in {:?}: {}",
             anchor, folder, e
@@ -4641,10 +4641,8 @@ mod parity_port_tests {
         const ROOT_C: &str = include_str!("../../tests/fixtures/nocommit/signing/root_c.pubkey");
         const META: &str = include_str!("../../tests/fixtures/nocommit/signing/meta.json");
         const FABRIC: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-fabric.json");
-        const FABRIC_SIG: &str = include_str!("../../tests/fixtures/nocommit/signing/charter-fabric.json.sig");
-        let trust = CharterTrust {
-            root_pubkeys: [ROOT_A, ROOT_B, ROOT_C].iter().map(|k| k.trim().to_string()).collect(),
-        };
+        const FABRIC_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-fabric.json.sig");
+        let trust = crate::bifaci::trust::charter_trust_from(&[ROOT_A, ROOT_B, ROOT_C]).unwrap();
         let meta: serde_json::Value = serde_json::from_str(META).unwrap();
         let now = meta["issued_at"].as_u64().unwrap() + 86_400;
         let anchor = "https://registry.example/fabric";
@@ -4652,7 +4650,7 @@ mod parity_port_tests {
             FABRIC,
             FABRIC_SIG,
             &trust,
-            &crate::bifaci::charter::CharterExpectation { anchor: Some(anchor), kind: RegistryKind::Fabric, environment: None },
+            &signed_release::CharterExpectation { anchor: Some(anchor), kind: RegistryKind::Fabric.wire_name(), environment: None },
             now,
         )
         .expect("the fixture fabric charter verifies");
@@ -4660,7 +4658,7 @@ mod parity_port_tests {
         let cache = tempfile::tempdir().unwrap();
         // Another registry's folder is beside it, and is not taken for it.
         std::fs::create_dir_all(cache.path().join("fabric.capdag.com")).unwrap();
-        crate::bifaci::charter::store(&verified, &cache.path().join("example-fabric")).unwrap();
+        signed_release::store(&verified, &cache.path().join("example-fabric")).unwrap();
 
         let client = reqwest::Client::new();
         let found = resolve_charter(&client, cache.path(), anchor, false, &trust, now)

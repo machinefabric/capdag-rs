@@ -15,13 +15,6 @@ pest = "2.8"
 pest_derive = "2.8"
 jsonschema = "0.17"
 libc = "0.2"
-# Zero-dependency, pure-Rust minisign signature verification — the runtime
-# integrity check for registry-downloaded cartridge binaries.
-minisign-verify = "0.2"
-# Raw ed25519 verification for the release-key-certificate / manifest-signature
-# layer (signatures over exact bytes). Keys are minisign public keys, parsed in
-# binary_signing.rs.
-ed25519-dalek = "2"
 regex = "1.0"
 # float_roundtrip: a number written in a machine is read as the nearest float,
 # as every other implementation reads it; without it a number of seventeen or
@@ -58,6 +51,11 @@ version = "=1.160.11"
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
 version = "=1.117.0"
+
+# The chain from baked roots to a signed manifest, charter or binary. The
+# formats and charter rules are MachineFabric's, declared in bifaci::trust.
+[dependencies.signed-release]
+version = "0.1"
 
 [dependencies.tokio]
 features = ["full"]
@@ -97,6 +95,8 @@ name = "dev_cartridge_e2e"
 required-features = ["capture"]
 
 [dev-dependencies]
+# Signing the self-update tests' fixture releases.
+ed25519-dalek = "2"
 serial_test = "3.0"
 tempfile = "3.10"
 # A clock the tests move themselves: what a request waits out during an outage

@@ -63,7 +63,7 @@ impl From<crate::bifaci::charter::CharterFetchError> for CartridgeRepoError {
             CharterFetchError::Unchartered { .. } => Self::Unchartered(detail),
             CharterFetchError::Http { status, .. } => Self::StatusError(status),
             CharterFetchError::Refused { error, .. } => {
-                Self::CharterRefused { reason: error.reason(), detail }
+                Self::CharterRefused { reason: error.reason().into(), detail }
             }
         }
     }
@@ -692,7 +692,7 @@ pub struct CartridgeRepo {
     /// before the manifest is trusted — a missing or invalid signature
     /// rejects the whole manifest. `None` = no verification (dev builds, and
     /// server-side uses that only serve manifests they don't consume).
-    trust: Arc<RwLock<Option<crate::bifaci::release_cert::RegistryTrust>>>,
+    trust: Arc<RwLock<Option<signed_release::Trust>>>,
     /// Per-repo release keys extracted from the verified manifest sidecar:
     /// repo_url → [(key_id, release_pubkey_b64)]. Binary artifact signatures
     /// must verify under one of these. Only populated when `trust` is set.
@@ -713,10 +713,10 @@ pub struct CartridgeRepo {
     /// The verified charter of every registry synced, by anchor. Where a
     /// registry's manifest is, and the folder its cartridges install into,
     /// are read from here and nowhere else.
-    charters: Arc<RwLock<HashMap<String, crate::bifaci::charter::VerifiedCharter>>>,
+    charters: Arc<RwLock<HashMap<String, signed_release::VerifiedCharter>>>,
     /// The roots every registry's charter is verified against —
     /// MachineFabric's, which a build bakes.
-    charter_trust: crate::bifaci::charter::CharterTrust,
+    charter_trust: signed_release::CharterTrust,
 }
 
 impl CartridgeInfo {
@@ -759,11 +759,11 @@ impl CartridgeRepo {
     /// this client resolves caps against (its baked `CDG_FABRIC_REGISTRY_URL`);
     /// every fetched cartridge registry must declare the same fabric.
     /// `charter_trust` is the roots every registry's charter must chain to: a
-    /// build's own (`CharterTrust::from_build_constants`).
+    /// build's own (`trust::charter_trust`).
     pub fn new(
         cache_ttl_seconds: u64,
         expected_fabric_url: impl Into<String>,
-        charter_trust: crate::bifaci::charter::CharterTrust,
+        charter_trust: signed_release::CharterTrust,
     ) -> Self {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -793,7 +793,7 @@ impl CartridgeRepo {
     }
 
     /// The verified charter of a registry this repo has synced, by anchor.
-    pub async fn charter(&self, anchor: &str) -> Option<crate::bifaci::charter::VerifiedCharter> {
+    pub async fn charter(&self, anchor: &str) -> Option<signed_release::VerifiedCharter> {
         self.charters.read().await.get(anchor).cloned()
     }
 
@@ -806,7 +806,7 @@ impl CartridgeRepo {
     async fn admit_charter(
         &self,
         anchor: &str,
-        verified: crate::bifaci::charter::VerifiedCharter,
+        verified: signed_release::VerifiedCharter,
     ) -> Result<()> {
         let mut charters = self.charters.write().await;
         if let Some(holder) = charters
@@ -837,7 +837,7 @@ impl CartridgeRepo {
     /// Configure the signing trust anchors. With trust set, every manifest
     /// fetch requires a chain-valid `<repo-url>.sig` sidecar (see the field
     /// doc); without, manifests are consumed unverified (dev builds only).
-    pub async fn set_trust(&self, trust: Option<crate::bifaci::release_cert::RegistryTrust>) {
+    pub async fn set_trust(&self, trust: Option<signed_release::Trust>) {
         *self.trust.write().await = trust;
     }
 
@@ -886,7 +886,7 @@ impl CartridgeRepo {
         manifest_url: &str,
         cache_bust: u64,
         manifest_bytes: &[u8],
-        trust: &crate::bifaci::release_cert::RegistryTrust,
+        trust: &signed_release::Trust,
     ) -> Result<Vec<(String, String)>> {
         // Same cache-bust token as the manifest fetch: signature verification
         // only holds over a COHERENT (manifest, sidecar) pair, and two
@@ -910,24 +910,17 @@ impl CartridgeRepo {
                 response.status().as_u16()
             )));
         }
-        let envelope_json = response.text().await.map_err(|e| {
+        let envelope = response.bytes().await.map_err(|e| {
             CartridgeRepoError::HttpError(format!(
                 "Failed to read manifest signature sidecar {sidecar_url}: {e}"
             ))
         })?;
-        let roots: Vec<&str> = trust.root_pubkeys.iter().map(String::as_str).collect();
-        let chain = crate::bifaci::release_cert::verify_manifest_envelope(
-            &envelope_json,
-            manifest_bytes,
-            &roots,
-            &trust.environment,
-            crate::bifaci::release_cert::unix_now(),
-        )
-        .map_err(|e| CartridgeRepoError::ManifestChainFailed {
-            reason: e.reason(),
-            detail: format!("manifest signature chain verification FAILED for {repo_url}: {e}"),
-        })?;
-        Ok(chain.trusted_release_keys)
+        let chain = signed_release::verify_manifest(&envelope, manifest_bytes, trust, signed_release::unix_now())
+            .map_err(|e| CartridgeRepoError::ManifestChainFailed {
+                reason: e.reason().into(),
+                detail: format!("manifest signature chain verification FAILED for {repo_url}: {e}"),
+            })?;
+        Ok(chain.release_keys.into_iter().map(|key| (key.key_id, key.text)).collect())
     }
 
     /// Fetch a registry's charter from its anchor, then the channel-
@@ -952,23 +945,24 @@ impl CartridgeRepo {
                 repo_url
             )));
         }
-        let content_label = self.trust.read().await.as_ref().map(|t| t.environment.clone());
+        let content_label = self.trust.read().await.as_ref().map(|t| t.label.clone());
         let charter = crate::bifaci::charter::fetch(
             &self.http_client,
             repo_url,
             &self.charter_trust,
-            crate::bifaci::charter::RegistryKind::Cartridges,
+            crate::bifaci::trust::RegistryKind::Cartridges,
             content_label.as_deref(),
-            crate::bifaci::release_cert::unix_now(),
+            signed_release::unix_now(),
         )
         .await?;
-        if charter.charter.fabric.as_deref() != Some(self.expected_fabric_url.as_str()) {
+        let fabric = crate::bifaci::charter::fabric_of(&charter.charter);
+        if fabric != Some(self.expected_fabric_url.as_str()) {
             return Err(CartridgeRepoError::CharterRefused {
                 reason: ChainFailureReason::CharterFabricMismatch,
                 detail: format!(
                     "the charter of {repo_url} names the fabric {:?}, and this client resolves \
                      caps against {}",
-                    charter.charter.fabric, self.expected_fabric_url
+                    fabric, self.expected_fabric_url
                 ),
             });
         }
@@ -1162,7 +1156,7 @@ impl CartridgeRepo {
     /// visible — there is no silent swallowing.
     pub async fn sync_repos(&self, repo_urls: &[String]) {
         for repo_url in repo_urls {
-            let now = crate::bifaci::release_cert::unix_now() as i64;
+            let now = signed_release::unix_now() as i64;
             // EVERY SYNC ENDS IN A VERDICT — success included. A registry with
             // no entry at all means "not checked yet"; leaving a stale failure
             // behind, or recording nothing on success, would make those two
@@ -1732,8 +1726,13 @@ mod tests {
     const TEST_FABRIC_URL: &str = "https://fabric.test";
 
     /// Charter roots for a repo these tests never sync against the network.
-    fn test_charter_trust() -> crate::bifaci::charter::CharterTrust {
-        crate::bifaci::charter::CharterTrust { root_pubkeys: Vec::new() }
+    fn test_charter_trust() -> signed_release::CharterTrust {
+        crate::bifaci::trust::charter_trust_from(&[
+            include_str!("../../tests/fixtures/nocommit/signing/root_a.pubkey"),
+            include_str!("../../tests/fixtures/nocommit/signing/root_b.pubkey"),
+            include_str!("../../tests/fixtures/nocommit/signing/root_c.pubkey"),
+        ])
+        .expect("the fixture roots are keys")
     }
 
     // ----------------------------------------------------------------------
@@ -3196,12 +3195,12 @@ mod tests {
     }
 
     /// A cartridges charter for `anchor` naming `slug`, as one that verified.
-    fn verified_charter(anchor: &str, slug: &str) -> crate::bifaci::charter::VerifiedCharter {
-        crate::bifaci::charter::VerifiedCharter {
-            charter: crate::bifaci::charter::Charter {
-                format: crate::bifaci::charter::CHARTER_FORMAT.to_string(),
+    fn verified_charter(anchor: &str, slug: &str) -> signed_release::VerifiedCharter {
+        signed_release::VerifiedCharter {
+            charter: signed_release::Charter {
+                format: crate::bifaci::trust::CHARTER_FORMAT.to_string(),
                 anchor: anchor.to_string(),
-                kind: crate::bifaci::charter::RegistryKind::Cartridges,
+                kind: crate::bifaci::trust::RegistryKind::Cartridges.wire_name().to_string(),
                 slug: slug.to_string(),
                 environment: "prod".to_string(),
                 experiment: None,
@@ -3211,12 +3210,17 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
-                fabric: Some("https://fabric.example".to_string()),
+                fields: [(
+                    crate::bifaci::trust::FABRIC_FIELD.to_string(),
+                    Some("https://fabric.example".to_string()),
+                )]
+                .into_iter()
+                .collect(),
                 issued_at: 1_700_000_000,
                 not_after: None,
             },
             body: Vec::new(),
-            envelope: String::new(),
+            envelope: Vec::new(),
         }
     }
 

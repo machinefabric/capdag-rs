@@ -14,7 +14,7 @@
 //!    signed by two of the roots this build was given, for this build's
 //!    signing environment and inside its validity, and the manifest signed by
 //!    that release key over the exact bytes fetched
-//!    ([`crate::bifaci::release_cert`]);
+//!    ([`crate::bifaci::trust`]);
 //! 2. the archive, only as the file the manifest describes: its size and its
 //!    SHA-256 digest;
 //! 3. the command in it, only once it runs and says it is the version it was
@@ -33,8 +33,8 @@
 //! manager's, and says so with a file named `installed-by` beside the
 //! executable.
 
-use crate::bifaci::charter::{CharterExpectation, CharterTrust, RegistryKind};
-use crate::bifaci::release_cert::{verify_manifest_envelope, RegistryTrust};
+use crate::bifaci::trust::RegistryKind;
+use signed_release::{verify_manifest, CharterExpectation, CharterTrust, Trust};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -184,16 +184,13 @@ fn archive_type(platform: &str) -> &'static str {
 pub fn latest(
     manifest: &[u8],
     envelope: &[u8],
-    trust: &RegistryTrust,
+    trust: &Trust,
     channel: &str,
     platform: &str,
     now: u64,
 ) -> Result<Option<Release>, UpdateError> {
     let untrusted = UpdateError::Untrusted;
-    let envelope = std::str::from_utf8(envelope)
-        .map_err(|e| untrusted(format!("the manifest's signature file is not text: {e}")))?;
-    let roots: Vec<&str> = trust.root_pubkeys.iter().map(String::as_str).collect();
-    verify_manifest_envelope(envelope, manifest, &roots, &trust.environment, now).map_err(|e| {
+    verify_manifest(envelope, manifest, trust, now).map_err(|e| {
         untrusted(format!(
             "the release manifest is not one this capdag trusts: {e}"
         ))
@@ -315,7 +312,7 @@ pub struct Installation<'a> {
     /// The release registry's anchor.
     pub registry: &'a str,
     pub channel: &'a str,
-    pub trust: &'a RegistryTrust,
+    pub trust: &'a Trust,
     /// The roots the registry's charter is verified against.
     pub charter_trust: &'a CharterTrust,
     /// Seconds since 1970.
@@ -348,7 +345,7 @@ pub async fn update(current: &str) -> Result<Updated, UpdateError> {
     })?;
     // A build with a release line has its roots: build.rs refuses the one
     // without the other.
-    let trust = RegistryTrust::from_build_constants().ok_or_else(|| {
+    let trust = crate::bifaci::trust::content_trust().ok_or_else(|| {
         UpdateError::Unavailable(
             "this capdag has a release line and no root keys to verify a release with".to_string(),
         )
@@ -371,8 +368,8 @@ pub async fn update(current: &str) -> Result<Updated, UpdateError> {
             registry: &line.registry,
             channel: &line.channel,
             trust: &trust,
-            charter_trust: &CharterTrust::from_build_constants(),
-            now: crate::bifaci::release_cert::unix_now(),
+            charter_trust: &crate::bifaci::trust::charter_trust(),
+            now: signed_release::unix_now(),
             installed: &installed,
             current,
             platform,
@@ -429,7 +426,7 @@ where
 
     // The registry first: nothing at an anchor MachineFabric did not charter
     // is read, and where the manifest is comes from the charter.
-    let charter_url = format!("{}/{}", at.registry, crate::bifaci::charter::CHARTER_FILE);
+    let charter_url = format!("{}/{}", at.registry, signed_release::CHARTER_FILE);
     let Some(charter_body) = get(charter_url.clone()).await? else {
         return Err(UpdateError::Untrusted(format!(
             "{} has no charter ({charter_url} is missing), so it is not a release registry \
@@ -437,24 +434,21 @@ where
             at.registry
         )));
     };
-    let charter_sig_url = format!("{}/{}", at.registry, crate::bifaci::charter::CHARTER_SIG_FILE);
+    let charter_sig_url = format!("{}/{}", at.registry, signed_release::CHARTER_SIG_FILE);
     let Some(charter_sig) = get(charter_sig_url.clone()).await? else {
         return Err(UpdateError::Untrusted(format!(
             "{} has a charter and no signature for it ({charter_sig_url} is missing)",
             at.registry
         )));
     };
-    let charter_sig = String::from_utf8(charter_sig).map_err(|e| {
-        UpdateError::Untrusted(format!("the charter's signature file is not text: {e}"))
-    })?;
     let charter = crate::bifaci::charter::verify(
         &charter_body,
         &charter_sig,
         at.charter_trust,
         &CharterExpectation {
             anchor: Some(at.registry),
-            kind: RegistryKind::Releases,
-            environment: Some(&at.trust.environment),
+            kind: RegistryKind::Releases.wire_name(),
+            environment: Some(&at.trust.label),
         },
         at.now,
     )

@@ -103,20 +103,19 @@ pub use bifaci::bundle_manifest::{
     BundleManifest, BundleProof, BundledCartridge, BUNDLE_MANIFEST_FILE, BUNDLE_MANIFEST_FORMAT,
     BUNDLE_MANIFEST_SIG_FILE,
 };
-pub use bifaci::binary_signing::{
-    parse_minisign_public_key, raw_verify, root_pubkeys_from_build_env,
-    signing_environment_from_build_env, split_root_pubkeys, verify_binary_signature,
-    ParsedPublicKey, SignatureError,
-};
 pub use bifaci::registry_verdict::{
     ChainFailureReason, RegistryRemedy, RegistryVerdict, RegistryVerdictError,
     RegistryVerdictState,
 };
-pub use bifaci::release_cert::{
-    unix_now, verify_manifest_envelope, CertificateEntry, ChainError, ManifestSigEnvelope,
-    ManifestSignature, RegistryTrust, ReleaseKeyCertificate, RootSignature, VerifiedChain,
-    MANIFEST_SIG_FORMAT, RELEASE_KEY_CERT_FORMAT, REQUIRED_ROOT_SIGNATURES,
+// The chain from baked roots to what is signed, and MachineFabric's declaration
+// of it: its formats, charter rules, and this build's two trusts.
+pub use bifaci::trust::{
+    charter_rules, charter_trust, charter_trust_from, content_formats, content_trust,
+    root_pubkeys_from_build_env, signing_environment_from_build_env, RegistryKind,
+    CERTIFICATE_FORMAT, CHARTER_ENVELOPE_FORMAT, CHARTER_FORMAT, CHARTER_LABEL, DEV_SLUG,
+    FABRIC_FIELD, MANIFEST_ENVELOPE_FORMAT,
 };
+pub use signed_release;
 
 /// The comma-separated base64 minisign ROOT public keys this build trusts
 /// (Root A, Root B, …), baked at compile time from
@@ -226,13 +225,8 @@ pub use bifaci::cartridge_json::{
     hash_cartridge_directory, CartridgeInstallSource, CartridgeJson, CartridgeJsonError,
 };
 
-// Registry charters — what makes a URL a registry, and everything about it.
-pub use bifaci::charter::{
-    is_experiment_id, is_slug, Charter, CharterError, CharterExpectation, CharterFetchError,
-    CharterSigEnvelope, CharterSignature, CharterTrust, RegistryKind, StoredCharterError,
-    VerifiedCharter, CHARTER_FILE, CHARTER_FORMAT, CHARTER_SIGNING_ENVIRONMENT, CHARTER_SIG_FILE,
-    CHARTER_SIG_FORMAT, DEV_SLUG,
-};
+// Registry charters — what makes a URL a registry, and capdag's use of them.
+pub use bifaci::charter::{fabric_of, find_registry_folder, CharterFetchError, RegistryFolder};
 
 // Shared cartridge discovery (engine + unifloom-daemon)
 pub use cartridge_discovery::{

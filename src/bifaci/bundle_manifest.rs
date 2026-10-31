@@ -26,7 +26,7 @@
 //!
 //! It is produced at the END of a build, after every platform signing step, so
 //! there is no ordering problem left to have. It is verified by
-//! [`super::release_cert::verify_manifest_envelope`] — the same function that
+//! [`signed_release::verify_manifest`] — the same function that
 //! verifies a cartridge registry's manifest — against the roots baked into the
 //! build. Bundled and registry cartridges are therefore proven by one chain,
 //! one verifier and one set of errors.
@@ -155,7 +155,7 @@ pub enum BundleError {
     )]
     WrongEnvironment { manifest: String, build: String },
     #[error("the bundle manifest's signature does not verify: {0}")]
-    Signature(#[from] super::release_cert::ChainError),
+    Signature(#[from] signed_release::ChainError),
     #[error(
         "the bundle manifest does not list {name} {version}; this build ships a cartridge it \
          did not record"
@@ -220,7 +220,7 @@ impl BundleProof {
     /// more useful than refusing to start.
     pub fn load(
         bundled_root: &Path,
-        trust: Option<&super::release_cert::RegistryTrust>,
+        trust: Option<&signed_release::Trust>,
         now_unix: u64,
     ) -> Self {
         match load_verified(bundled_root, trust, now_unix) {
@@ -257,7 +257,7 @@ impl BundleProof {
 /// rather than a silent pass.
 pub fn load_verified(
     bundled_root: &Path,
-    trust: Option<&super::release_cert::RegistryTrust>,
+    trust: Option<&signed_release::Trust>,
     now_unix: u64,
 ) -> Result<BundleManifest, BundleError> {
     let Some(trust) = trust else {
@@ -277,7 +277,7 @@ pub fn load_verified(
             path: manifest_path.clone(),
             source,
         })?;
-    let envelope = std::fs::read_to_string(&sig_path).map_err(|source| BundleError::Unreadable {
+    let envelope = std::fs::read(&sig_path).map_err(|source| BundleError::Unreadable {
         path: sig_path.clone(),
         source,
     })?;
@@ -286,14 +286,7 @@ pub fn load_verified(
     // in them is believed — including the format and the environment. Parsing
     // first and verifying second would mean acting on an attacker's document
     // for as long as it took to decide not to.
-    let roots: Vec<&str> = trust.root_pubkeys.iter().map(String::as_str).collect();
-    super::release_cert::verify_manifest_envelope(
-        &envelope,
-        &manifest_bytes,
-        &roots,
-        &trust.environment,
-        now_unix,
-    )?;
+    signed_release::verify_manifest(&envelope, &manifest_bytes, trust, now_unix)?;
 
     let manifest: BundleManifest =
         serde_json::from_slice(&manifest_bytes).map_err(|e| BundleError::Malformed {
@@ -308,10 +301,10 @@ pub fn load_verified(
     // The certificate chain already pinned the environment; this pins what the
     // manifest SAYS to the same value, so a manifest signed for one
     // environment cannot claim to describe another.
-    if manifest.environment != trust.environment {
+    if manifest.environment != trust.label {
         return Err(BundleError::WrongEnvironment {
             manifest: manifest.environment,
-            build: trust.environment.clone(),
+            build: trust.label.clone(),
         });
     }
     Ok(manifest)

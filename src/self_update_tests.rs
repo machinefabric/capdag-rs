@@ -75,17 +75,22 @@ impl Line {
         }
     }
 
-    fn trust(&self) -> RegistryTrust {
-        RegistryTrust {
-            root_pubkeys: self.roots.iter().map(Key::public).collect(),
-            environment: "prod".to_string(),
-        }
+    fn roots(&self) -> Vec<String> {
+        self.roots.iter().map(Key::public).collect()
+    }
+
+    fn trust(&self) -> Trust {
+        let roots = self.roots();
+        let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+        Trust::new(&roots, "prod", crate::bifaci::trust::content_formats()).expect("three distinct roots")
     }
 
     /// The same roots, as the charter trust — MachineFabric's roots sign both
     /// a prod line's certificates and every charter's.
     fn charter_trust(&self) -> CharterTrust {
-        CharterTrust { root_pubkeys: self.roots.iter().map(Key::public).collect() }
+        let roots = self.roots();
+        let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+        crate::bifaci::trust::charter_trust_from(&roots).expect("three distinct roots")
     }
 
     /// The prod certificate of this line's release key, with two root

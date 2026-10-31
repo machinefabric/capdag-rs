@@ -41,15 +41,9 @@ fn mid_validity() -> u64 {
     (m.issued_at + m.not_after) / 2
 }
 
-fn trust(environment: &str) -> crate::bifaci::release_cert::RegistryTrust {
-    crate::bifaci::release_cert::RegistryTrust {
-        root_pubkeys: vec![
-            ROOT_A.to_string(),
-            ROOT_B.to_string(),
-            ROOT_C.to_string(),
-        ],
-        environment: environment.to_string(),
-    }
+fn trust(environment: &str) -> signed_release::Trust {
+    signed_release::Trust::new(&[ROOT_A, ROOT_B, ROOT_C], environment, crate::bifaci::trust::content_formats())
+        .expect("the fixture roots are keys")
 }
 
 /// A bundled-cartridges root holding the committed manifest and its signature.
@@ -102,14 +96,14 @@ fn test1922_a_bundle_manifest_is_only_believed_under_a_real_chain() {
         "a tampered manifest was accepted"
     );
 
-    // Roots that did not sign it. Two of the three are needed and none of
-    // these is one of them.
-    let stranger = crate::bifaci::release_cert::RegistryTrust {
-        root_pubkeys: vec![
-            include_str!("../../tests/fixtures/nocommit/signing/wrong.pubkey").to_string(),
-        ],
-        environment: environment.clone(),
-    };
+    // Roots that did not sign it. Two are needed, and neither of these did:
+    // root C is a root, and was not one of the two that signed.
+    let stranger = signed_release::Trust::new(
+        &[ROOT_C, include_str!("../../tests/fixtures/nocommit/signing/wrong.pubkey")],
+        &environment,
+        crate::bifaci::trust::content_formats(),
+    )
+    .expect("two distinct keys");
     assert!(
         matches!(
             load_verified(dir.path(), Some(&stranger), mid_validity()),

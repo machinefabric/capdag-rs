@@ -251,9 +251,9 @@ impl RegistryVerdictState {
 
 /// Why a signature chain failed, as a closed vocabulary.
 ///
-/// Every implementation that verifies a manifest — this crate's
-/// [`verify_manifest_envelope`](super::release_cert::verify_manifest_envelope),
-/// the desktop clients' in-process verifiers — reports one of these, and
+/// Every implementation that verifies a manifest — `signed_release`, which
+/// this crate verifies through, and the desktop clients' in-process verifiers —
+/// reports one of these, and
 /// [`RegistryVerdictState::for_chain_failure`] turns it into a verdict. That is
 /// what keeps "unsupported format" from being classified as a network problem
 /// in one implementation and a trust problem in another.
@@ -316,6 +316,37 @@ pub enum ChainFailureReason {
     /// with one slug is an invalid state, and neither is given the other's
     /// folder.
     CharterSlugTaken,
+}
+
+/// A refusal `signed_release` reported, in the vocabulary verdicts are made
+/// from. Every one of its reasons is one of these, by the same wire name.
+impl From<signed_release::Reason> for ChainFailureReason {
+    fn from(reason: signed_release::Reason) -> Self {
+        use signed_release::Reason;
+        match reason {
+            Reason::MalformedEnvelope => Self::MalformedEnvelope,
+            Reason::UnsupportedEnvelopeFormat => Self::UnsupportedEnvelopeFormat,
+            Reason::MalformedCertificate => Self::MalformedCertificate,
+            Reason::UnsupportedCertificateFormat => Self::UnsupportedCertificateFormat,
+            Reason::EmptyCertificateList => Self::EmptyCertificateList,
+            Reason::InsufficientRootSignatures => Self::InsufficientRootSignatures,
+            Reason::ExpiredCertificate => Self::ExpiredCertificate,
+            Reason::NotYetValidCertificate => Self::NotYetValidCertificate,
+            Reason::EnvironmentMismatch => Self::EnvironmentMismatch,
+            Reason::KeyIdMismatch => Self::KeyIdMismatch,
+            Reason::NoAuthorizingCertificate => Self::NoAuthorizingCertificate,
+            Reason::ManifestSignatureInvalid => Self::ManifestSignatureInvalid,
+            Reason::CharterMalformed => Self::CharterMalformed,
+            Reason::CharterUnsupportedFormat => Self::CharterUnsupportedFormat,
+            Reason::CharterSignatureInvalid => Self::CharterSignatureInvalid,
+            Reason::CharterAnchorMismatch => Self::CharterAnchorMismatch,
+            Reason::CharterKindMismatch => Self::CharterKindMismatch,
+            Reason::CharterEnvironmentMismatch => Self::CharterEnvironmentMismatch,
+            Reason::CharterNotYetValid => Self::CharterNotYetValid,
+            Reason::CharterExpired => Self::CharterExpired,
+            Reason::CharterFolderMismatch => Self::CharterFolderMismatch,
+        }
+    }
 }
 
 impl ChainFailureReason {

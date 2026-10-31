@@ -166,7 +166,7 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
         vec![support::testcartridge_bin(TAG)],
         None,
         capdag::RegistryConfig::default().anchor,
-        capdag::CharterTrust::from_build_constants(),
+        capdag::charter_trust(),
     );
     manager.init().await.expect("CartridgeManager init failed");
     let cartridges = manager

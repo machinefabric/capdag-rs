@@ -83,8 +83,10 @@ fn enforce_charter_roots() {
 }
 
 /// Validate a comma-separated list of root public keys, returning how many.
+/// Each must be a different key: one listed twice would count twice towards
+/// two of three.
 fn validate_root_list(variable: &str, keys: &str) -> usize {
-    let mut count = 0usize;
+    let mut seen: Vec<&str> = Vec::new();
     for key in keys.split(',') {
         let key = key.trim();
         if key.is_empty() {
@@ -94,9 +96,12 @@ fn validate_root_list(variable: &str, keys: &str) -> usize {
             );
         }
         validate_minisign_pubkey(variable, key);
-        count += 1;
+        if seen.contains(&key) {
+            panic!("{variable} lists the key {key} twice; each root must be a different key.");
+        }
+        seen.push(key);
     }
-    count
+    seen.len()
 }
 
 /// Bake `capdag/version.txt` as the `CAPDAG_VERSION` compile-time env so

@@ -8,22 +8,23 @@
 //! that the one thing is what is refused.
 
 use super::*;
+use crate::bifaci::registry_verdict::ChainFailureReason;
+use crate::bifaci::trust::{charter_rules, charter_trust_from, CHARTER_ENVELOPE_FORMAT, CHARTER_LABEL};
+use signed_release::{store, ChainError, Charter, CharterError};
 
 const ROOT_A: &str = include_str!("../../tests/fixtures/nocommit/signing/root_a.pubkey");
 const ROOT_B: &str = include_str!("../../tests/fixtures/nocommit/signing/root_b.pubkey");
 const ROOT_C: &str = include_str!("../../tests/fixtures/nocommit/signing/root_c.pubkey");
 const META: &str = include_str!("../../tests/fixtures/nocommit/signing/meta.json");
 const CARTRIDGES: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-cartridges.json");
-const CARTRIDGES_SIG: &str =
-    include_str!("../../tests/fixtures/nocommit/signing/charter-cartridges.json.sig");
-const CARTRIDGES_STAGING_SIG: &str =
-    include_str!("../../tests/fixtures/nocommit/signing/charter-cartridges.staging-cert.json.sig");
+const CARTRIDGES_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-cartridges.json.sig");
+const CARTRIDGES_STAGING_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-cartridges.staging-cert.json.sig");
 const FABRIC: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-fabric.json");
-const FABRIC_SIG: &str = include_str!("../../tests/fixtures/nocommit/signing/charter-fabric.json.sig");
+const FABRIC_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-fabric.json.sig");
 const LAB: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-lab.json");
-const LAB_SIG: &str = include_str!("../../tests/fixtures/nocommit/signing/charter-lab.json.sig");
+const LAB_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/charter-lab.json.sig");
 const MANIFEST: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/manifest.json");
-const MANIFEST_SIG: &str = include_str!("../../tests/fixtures/nocommit/signing/manifest.json.sig");
+const MANIFEST_SIG: &[u8] = include_bytes!("../../tests/fixtures/nocommit/signing/manifest.json.sig");
 
 const CARTRIDGES_ANCHOR: &str = "https://registry.example/cartridges";
 const LAB_ANCHOR: &str = "https://lab.example/exp/t1/cartridges";
@@ -46,13 +47,11 @@ fn now() -> u64 {
 }
 
 fn trust() -> CharterTrust {
-    CharterTrust {
-        root_pubkeys: [ROOT_A, ROOT_B, ROOT_C].iter().map(|k| k.trim().to_string()).collect(),
-    }
+    charter_trust_from(&[ROOT_A, ROOT_B, ROOT_C]).expect("the fixture roots are keys")
 }
 
 fn expect<'a>(anchor: &'a str, kind: RegistryKind, environment: Option<&'a str>) -> CharterExpectation<'a> {
-    CharterExpectation { anchor: Some(anchor), kind, environment }
+    CharterExpectation { anchor: Some(anchor), kind: kind.wire_name(), environment }
 }
 
 /// TEST12910: a charter signed by the prod key verifies, and everything a
@@ -70,7 +69,7 @@ fn test12910_a_prod_signed_charter_verifies_and_states_the_registry() {
     .expect("the cartridges charter verifies");
     let charter = &verified.charter;
     assert_eq!(charter.slug, "example-cartridges");
-    assert_eq!(charter.fabric.as_deref(), Some("https://registry.example/fabric"));
+    assert_eq!(fabric_of(charter), Some("https://registry.example/fabric"));
     assert_eq!(
         charter.location("manifest", &[("registry_version", "4")]).unwrap(),
         "https://registry.example/cartridges/v4/manifest"
@@ -95,7 +94,7 @@ fn test12911_a_tampered_charter_is_refused_at_its_signature() {
     )
     .unwrap_err();
     assert!(matches!(err, CharterError::SignatureInvalid(_)), "{err}");
-    assert_eq!(err.reason(), ChainFailureReason::CharterSignatureInvalid);
+    assert_eq!(ChainFailureReason::from(err.reason()), ChainFailureReason::CharterSignatureInvalid);
 }
 
 /// TEST12912: a valid charter served under another anchor is refused — a
@@ -140,9 +139,9 @@ fn test12914_only_a_prod_certificate_can_sign_a_charter() {
     )
     .unwrap_err();
     match err {
-        CharterError::Chain(ChainError::EnvironmentMismatch { cert_env, build_env, .. }) => {
-            assert_eq!(cert_env, "staging");
-            assert_eq!(build_env, CHARTER_SIGNING_ENVIRONMENT);
+        CharterError::Chain(ChainError::LabelMismatch { certificate, trusted, .. }) => {
+            assert_eq!(certificate, "staging");
+            assert_eq!(trusted, CHARTER_LABEL);
         }
         other => panic!("expected the certificate's label to be refused, got {other}"),
     }
@@ -185,7 +184,7 @@ fn test12917_a_registry_of_another_environment_is_refused_at_its_charter() {
     let err = verify(LAB, LAB_SIG, &trust(), &expect(LAB_ANCHOR, RegistryKind::Cartridges, Some("prod")), now())
         .unwrap_err();
     assert!(matches!(err, CharterError::EnvironmentMismatch { .. }), "{err}");
-    assert_eq!(err.reason(), ChainFailureReason::CharterEnvironmentMismatch);
+    assert_eq!(ChainFailureReason::from(err.reason()), ChainFailureReason::CharterEnvironmentMismatch);
 }
 
 /// TEST12918: a prod-signed MANIFEST cannot be passed off as a charter: its
@@ -195,16 +194,16 @@ fn test12917_a_registry_of_another_environment_is_refused_at_its_charter() {
 fn test12918_a_signed_manifest_is_not_a_charter() {
     let expectation = expect(CARTRIDGES_ANCHOR, RegistryKind::Cartridges, Some("prod"));
     let err = verify(MANIFEST, MANIFEST_SIG, &trust(), &expectation, now()).unwrap_err();
-    assert!(matches!(err, CharterError::UnsupportedEnvelopeFormat(_)), "{err}");
+    assert!(matches!(err, CharterError::Chain(ChainError::UnsupportedEnvelopeFormat { .. })), "{err}");
 
-    let mut relabelled: serde_json::Value = serde_json::from_str(MANIFEST_SIG).unwrap();
+    let mut relabelled: serde_json::Value = serde_json::from_slice(MANIFEST_SIG).unwrap();
     let object = relabelled.as_object_mut().unwrap();
-    object.insert("format".into(), CHARTER_SIG_FORMAT.into());
+    object.insert("format".into(), CHARTER_ENVELOPE_FORMAT.into());
     let signature = object.remove("manifest_signature").unwrap();
     object.insert("charter_signature".into(), signature);
-    let err = verify(MANIFEST, &relabelled.to_string(), &trust(), &expectation, now()).unwrap_err();
+    let err = verify(MANIFEST, relabelled.to_string().as_bytes(), &trust(), &expectation, now()).unwrap_err();
     assert!(
-        matches!(err, CharterError::UnsupportedFormat(_) | CharterError::Malformed(_)),
+        matches!(err, CharterError::UnsupportedFormat { .. } | CharterError::Malformed(_)),
         "the signature holds over the manifest's bytes, so the body itself must refuse: {err}"
     );
 }
@@ -236,12 +235,12 @@ fn test12919_a_location_takes_exactly_its_placeholders() {
 /// about the one change.
 #[test]
 fn test12920_a_charter_out_of_shape_is_malformed() {
-    let base: Charter = serde_json::from_slice(CARTRIDGES).unwrap();
-    base.validate().expect("the fixture is in shape");
+    let base = Charter::parse(CARTRIDGES, charter_rules()).unwrap();
+    base.validate(charter_rules()).expect("the fixture is in shape");
     let refused = |change: &dyn Fn(&mut Charter), why: &str| {
         let mut c = base.clone();
         change(&mut c);
-        assert!(c.validate().is_err(), "{why} was accepted");
+        assert!(c.validate(charter_rules()).is_err(), "{why} was accepted");
     };
     refused(&|c| c.anchor = "http://registry.example/cartridges".into(), "an http anchor");
     refused(&|c| c.anchor.push('/'), "an anchor ending in /");
@@ -257,7 +256,7 @@ fn test12920_a_charter_out_of_shape_is_malformed() {
         "a placeholder the location does not take",
     );
     refused(&|c| { c.locations.insert("latest".into(), "https://r.example/latest".into()); }, "a location of another kind");
-    refused(&|c| c.fabric = None, "a cartridges registry with no fabric");
+    refused(&|c| { c.fields.insert("fabric".into(), None); }, "a cartridges registry with no fabric");
     refused(&|c| c.experiment = Some("Not An Id".into()), "an experiment that is not an id");
     refused(&|c| c.not_after = Some(c.issued_at), "a not_after that is not after issue");
 }

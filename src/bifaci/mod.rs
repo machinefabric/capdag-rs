@@ -5,7 +5,6 @@
 //! - **Host × N** (`host_runtime`, `relay`): (RelaySlave + CartridgeHostRuntime)
 //! - **Cartridge × N** (`cartridge_runtime`): (CartridgeRuntime + handler × N)
 
-pub mod binary_signing;
 pub mod bundle_manifest;
 pub mod cartridge_json;
 pub mod cartridge_repo;
@@ -26,7 +25,7 @@ pub mod protocol_trace;
 pub mod relay;
 pub mod relay_switch;
 pub mod registry_verdict;
-pub mod release_cert;
+pub mod trust;
 pub mod request_state;
 pub mod router;
 pub mod stats;
