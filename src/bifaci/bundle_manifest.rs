@@ -26,7 +26,7 @@
 //!
 //! It is produced at the END of a build, after every platform signing step, so
 //! there is no ordering problem left to have. It is verified by
-//! [`signed_release::verify_manifest`] — the same function that
+//! [`mg_srel::verify_manifest`] — the same function that
 //! verifies a cartridge registry's manifest — against the roots baked into the
 //! build. Bundled and registry cartridges are therefore proven by one chain,
 //! one verifier and one set of errors.
@@ -155,7 +155,7 @@ pub enum BundleError {
     )]
     WrongEnvironment { manifest: String, build: String },
     #[error("the bundle manifest's signature does not verify: {0}")]
-    Signature(#[from] signed_release::ChainError),
+    Signature(#[from] mg_srel::ChainError),
     #[error(
         "the bundle manifest does not list {name} {version}; this build ships a cartridge it \
          did not record"
@@ -220,7 +220,7 @@ impl BundleProof {
     /// more useful than refusing to start.
     pub fn load(
         bundled_root: &Path,
-        trust: Option<&signed_release::Trust>,
+        trust: Option<&mg_srel::Trust>,
         now_unix: u64,
     ) -> Self {
         match load_verified(bundled_root, trust, now_unix) {
@@ -257,7 +257,7 @@ impl BundleProof {
 /// rather than a silent pass.
 pub fn load_verified(
     bundled_root: &Path,
-    trust: Option<&signed_release::Trust>,
+    trust: Option<&mg_srel::Trust>,
     now_unix: u64,
 ) -> Result<BundleManifest, BundleError> {
     let Some(trust) = trust else {
@@ -286,7 +286,7 @@ pub fn load_verified(
     // in them is believed — including the format and the environment. Parsing
     // first and verifying second would mean acting on an attacker's document
     // for as long as it took to decide not to.
-    signed_release::verify_manifest(&envelope, &manifest_bytes, trust, now_unix)?;
+    mg_srel::verify_manifest(&envelope, &manifest_bytes, trust, now_unix)?;
 
     let manifest: BundleManifest =
         serde_json::from_slice(&manifest_bytes).map_err(|e| BundleError::Malformed {

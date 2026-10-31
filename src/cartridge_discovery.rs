@@ -21,7 +21,7 @@
 use crate::bifaci::cartridge_json::CartridgeJson;
 use crate::bifaci::cartridge_repo::CartridgeChannel;
 use crate::bifaci::charter::RegistryFolder;
-use signed_release::CharterTrust;
+use mg_srel::CharterTrust;
 use crate::bifaci::manifest::CapManifest;
 use crate::bifaci::relay_switch::{CartridgeAttachmentError, CartridgeAttachmentErrorKind};
 use crate::CapGroup;
@@ -527,7 +527,7 @@ mod tests {
             CHARTER,
             CHARTER_SIG,
             &fixture_trust(),
-            &signed_release::CharterExpectation {
+            &mg_srel::CharterExpectation {
                 anchor: Some(ANCHOR),
                 kind: crate::bifaci::trust::RegistryKind::Cartridges.wire_name(),
                 environment: Some("prod"),
@@ -535,7 +535,7 @@ mod tests {
             fixture_now(),
         )
         .expect("the fixture charter verifies");
-        signed_release::store(&verified, &root.join(folder)).unwrap();
+        mg_srel::store(&verified, &root.join(folder)).unwrap();
     }
 
     fn nightly_dev_identity() -> DiscoveryIdentity {

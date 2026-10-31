@@ -41,8 +41,8 @@ fn mid_validity() -> u64 {
     (m.issued_at + m.not_after) / 2
 }
 
-fn trust(environment: &str) -> signed_release::Trust {
-    signed_release::Trust::new(&[ROOT_A, ROOT_B, ROOT_C], environment, crate::bifaci::trust::content_formats())
+fn trust(environment: &str) -> mg_srel::Trust {
+    mg_srel::Trust::new(&[ROOT_A, ROOT_B, ROOT_C], environment, crate::bifaci::trust::content_formats())
         .expect("the fixture roots are keys")
 }
 
@@ -98,7 +98,7 @@ fn test1922_a_bundle_manifest_is_only_believed_under_a_real_chain() {
 
     // Roots that did not sign it. Two are needed, and neither of these did:
     // root C is a root, and was not one of the two that signed.
-    let stranger = signed_release::Trust::new(
+    let stranger = mg_srel::Trust::new(
         &[ROOT_C, include_str!("../../tests/fixtures/nocommit/signing/wrong.pubkey")],
         &environment,
         crate::bifaci::trust::content_formats(),

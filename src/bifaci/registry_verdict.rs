@@ -251,7 +251,7 @@ impl RegistryVerdictState {
 
 /// Why a signature chain failed, as a closed vocabulary.
 ///
-/// Every implementation that verifies a manifest — `signed_release`, which
+/// Every implementation that verifies a manifest — `mg_srel`, which
 /// this crate verifies through, and the desktop clients' in-process verifiers —
 /// reports one of these, and
 /// [`RegistryVerdictState::for_chain_failure`] turns it into a verdict. That is
@@ -318,11 +318,11 @@ pub enum ChainFailureReason {
     CharterSlugTaken,
 }
 
-/// A refusal `signed_release` reported, in the vocabulary verdicts are made
+/// A refusal `mg_srel` reported, in the vocabulary verdicts are made
 /// from. Every one of its reasons is one of these, by the same wire name.
-impl From<signed_release::Reason> for ChainFailureReason {
-    fn from(reason: signed_release::Reason) -> Self {
-        use signed_release::Reason;
+impl From<mg_srel::Reason> for ChainFailureReason {
+    fn from(reason: mg_srel::Reason) -> Self {
+        use mg_srel::Reason;
         match reason {
             Reason::MalformedEnvelope => Self::MalformedEnvelope,
             Reason::UnsupportedEnvelopeFormat => Self::UnsupportedEnvelopeFormat,

@@ -10,7 +10,7 @@
 use super::*;
 use crate::bifaci::registry_verdict::ChainFailureReason;
 use crate::bifaci::trust::{charter_rules, charter_trust_from, CHARTER_ENVELOPE_FORMAT, CHARTER_LABEL};
-use signed_release::{store, ChainError, Charter, CharterError};
+use mg_srel::{store, ChainError, Charter, CharterError};
 
 const ROOT_A: &str = include_str!("../../tests/fixtures/nocommit/signing/root_a.pubkey");
 const ROOT_B: &str = include_str!("../../tests/fixtures/nocommit/signing/root_b.pubkey");

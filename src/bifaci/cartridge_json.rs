@@ -522,7 +522,7 @@ fn collect_files(
 mod tests {
     use super::*;
     use crate::bifaci::trust::{RegistryKind, CHARTER_FORMAT, FABRIC_FIELD};
-    use signed_release::{Charter, VerifiedCharter};
+    use mg_srel::{Charter, VerifiedCharter};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 

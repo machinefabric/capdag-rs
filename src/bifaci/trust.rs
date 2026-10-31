@@ -1,7 +1,7 @@
 //! MachineFabric's signing, as its clients verify it.
 //!
 //! The chain itself — 2-of-3 roots, release-key certificates bound to a label,
-//! signatures over exact bytes, charters — is `signed_release`'s. What is
+//! signatures over exact bytes, charters — is `mg_srel`'s. What is
 //! MachineFabric's is declared here: the words its documents are written in,
 //! the label its charters are signed under, the kinds of registry it charters,
 //! and the roots and label this build was baked with.
@@ -14,7 +14,7 @@
 
 use std::sync::OnceLock;
 
-use signed_release::{CharterRules, CharterTrust, Formats, KindRule, LocationRule, Trust};
+use mg_srel::{CharterRules, CharterTrust, Formats, KindRule, LocationRule, Trust};
 
 /// The `format` of a release-key certificate.
 pub const CERTIFICATE_FORMAT: &str = "machinefabric-release-key-cert/1";
@@ -127,7 +127,7 @@ pub fn charter_rules() -> &'static CharterRules {
 pub fn content_trust() -> Option<Trust> {
     let (roots, label) = (crate::CARTRIDGE_ROOT_PUBKEYS?, crate::SIGNING_ENVIRONMENT?);
     Some(
-        Trust::new(&signed_release::split_roots(roots), label, content_formats())
+        Trust::new(&mg_srel::split_roots(roots), label, content_formats())
             .expect("build.rs admits only valid, distinct root keys"),
     )
 }
@@ -135,13 +135,13 @@ pub fn content_trust() -> Option<Trust> {
 /// The charter trust every build bakes (`MFR_CHARTER_ROOT_PUBKEYS`), under
 /// [`CHARTER_LABEL`].
 pub fn charter_trust() -> CharterTrust {
-    charter_trust_from(&signed_release::split_roots(crate::CHARTER_ROOT_PUBKEYS))
+    charter_trust_from(&mg_srel::split_roots(crate::CHARTER_ROOT_PUBKEYS))
         .expect("build.rs admits only valid, distinct charter root keys")
 }
 
 /// A charter trust over `roots`, as a test or a tool that is not this build
 /// gives them.
-pub fn charter_trust_from(roots: &[&str]) -> Result<CharterTrust, signed_release::SignatureError> {
+pub fn charter_trust_from(roots: &[&str]) -> Result<CharterTrust, mg_srel::SignatureError> {
     let formats =
         Formats { certificate: CERTIFICATE_FORMAT.to_string(), envelope: CHARTER_ENVELOPE_FORMAT.to_string() };
     Ok(CharterTrust { trust: Trust::new(roots, CHARTER_LABEL, formats)? })
@@ -150,7 +150,7 @@ pub fn charter_trust_from(roots: &[&str]) -> Result<CharterTrust, signed_release
 #[cfg(test)]
 mod tests {
     use super::*;
-    use signed_release::{verify_manifest, ChainError};
+    use mg_srel::{verify_manifest, ChainError};
 
     // Committed real-crypto fixtures: a 2-of-3 certificate authorizing a
     // release key that signed the manifest, in MachineFabric's formats.
@@ -267,7 +267,7 @@ mod tests {
     // artifact bytes with the release public key.
     #[test]
     fn test8029_valid_binary_signature_verifies() {
-        signed_release::verify_minisign(RELEASE_PUBKEY, ARTIFACT_SIG, ARTIFACT)
+        mg_srel::verify_minisign(RELEASE_PUBKEY, ARTIFACT_SIG, ARTIFACT)
             .expect("the committed signature verifies over the committed artifact");
     }
 
@@ -277,8 +277,8 @@ mod tests {
         let mut tampered = ARTIFACT.to_vec();
         tampered[0] ^= 0x01;
         assert!(matches!(
-            signed_release::verify_minisign(RELEASE_PUBKEY, ARTIFACT_SIG, &tampered),
-            Err(signed_release::SignatureError::VerificationFailed(_))
+            mg_srel::verify_minisign(RELEASE_PUBKEY, ARTIFACT_SIG, &tampered),
+            Err(mg_srel::SignatureError::VerificationFailed(_))
         ));
     }
 
@@ -287,8 +287,8 @@ mod tests {
     #[test]
     fn test8031_wrong_key_rejected() {
         assert!(matches!(
-            signed_release::verify_minisign(WRONG, ARTIFACT_SIG, ARTIFACT),
-            Err(signed_release::SignatureError::VerificationFailed(_))
+            mg_srel::verify_minisign(WRONG, ARTIFACT_SIG, ARTIFACT),
+            Err(mg_srel::SignatureError::VerificationFailed(_))
         ));
     }
 }

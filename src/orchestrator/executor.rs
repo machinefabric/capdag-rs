@@ -707,7 +707,7 @@ pub struct CartridgeManager {
     /// release key. `Some(registry) + None(trust)` cannot happen in a
     /// product build (capdag's build.rs enforces the triple); the runtime
     /// guard below covers library/test misuse.
-    trust: Option<signed_release::Trust>,
+    trust: Option<mg_srel::Trust>,
     /// Channel this manager is operating in. The orchestrator can only
     /// install/run cartridges that match its channel — release builds
     /// never touch nightly artefacts and vice versa.
@@ -727,14 +727,14 @@ impl CartridgeManager {
         channel: crate::bifaci::cartridge_repo::CartridgeChannel,
         fabric_manifest_version: u32,
         dev_binaries: Vec<PathBuf>,
-        trust: Option<signed_release::Trust>,
+        trust: Option<mg_srel::Trust>,
         // The fabric registry this client resolves caps against. Every cartridge
         // registry fetched must declare this same fabric (enforced in
         // `CartridgeRepoServer::new`) so all registries share one fabric.
         fabric_registry_url: String,
         // The roots every registry's charter must chain to: the build's own
         // (`trust::charter_trust`).
-        charter_trust: signed_release::CharterTrust,
+        charter_trust: mg_srel::CharterTrust,
     ) -> Self {
         use crate::bifaci::cartridge_json::CartridgeJson;
 
@@ -877,7 +877,7 @@ impl CartridgeManager {
     async fn registry_charter(
         &self,
         context: &str,
-    ) -> Result<(String, signed_release::VerifiedCharter), ExecutionError> {
+    ) -> Result<(String, mg_srel::VerifiedCharter), ExecutionError> {
         let registry_url = self.registry_url_required(context)?.to_string();
         let charter = self.cartridge_repo.charter(&registry_url).await.ok_or_else(|| {
             ExecutionError::CartridgeDownloadFailed(format!(
@@ -902,7 +902,7 @@ impl CartridgeManager {
     fn trust_required(
         &self,
         context: &str,
-    ) -> Result<&signed_release::Trust, ExecutionError> {
+    ) -> Result<&mg_srel::Trust, ExecutionError> {
         self.trust.as_ref().ok_or_else(|| {
             ExecutionError::CartridgeDownloadFailed(format!(
                 "{context}: this build bakes no cartridge signing root keys — registry \
@@ -1354,9 +1354,9 @@ impl CartridgeManager {
                 registry_url, cartridge_id
             )));
         }
-        let mut last_error: Option<signed_release::SignatureError> = None;
+        let mut last_error: Option<mg_srel::SignatureError> = None;
         for (_key_id, pubkey) in &release_keys {
-            match signed_release::verify_minisign(pubkey, &binary.signature, bytes) {
+            match mg_srel::verify_minisign(pubkey, &binary.signature, bytes) {
                 Ok(()) => return Ok(()),
                 Err(e) => last_error = Some(e),
             }
@@ -1471,7 +1471,7 @@ impl CartridgeManager {
         // there, so the folder proves itself to every host that scans it.
         let (_, charter) = self.registry_charter(cartridge_id).await?;
         let registry_root = self.cartridge_dir.join(&charter.charter.slug);
-        signed_release::store(&charter, &registry_root).map_err(|e| {
+        mg_srel::store(&charter, &registry_root).map_err(|e| {
             ExecutionError::CartridgeDownloadFailed(format!(
                 "Failed to store the charter of {} in {}: {}",
                 registry_url,
@@ -1756,7 +1756,7 @@ impl ExecutionContext {
                     folder_path,
                     &crate::bifaci::trust::charter_trust(),
                     crate::SIGNING_ENVIRONMENT,
-                    signed_release::unix_now(),
+                    mg_srel::unix_now(),
                 )
                 .map_err(|e| {
                     ExecutionError::HostError(format!(
@@ -4021,11 +4021,11 @@ pub(crate) async fn discover_bundled_cartridges(
         cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
         signing_environment: crate::SIGNING_ENVIRONMENT.map(str::to_string),
         charter_trust: crate::bifaci::trust::charter_trust(),
-        now_unix: signed_release::unix_now(),
+        now_unix: mg_srel::unix_now(),
         bundle: crate::bifaci::bundle_manifest::BundleProof::load(
             bundled_cartridges_dir,
             trust.as_ref(),
-            signed_release::unix_now(),
+            mg_srel::unix_now(),
         ),
     };
     let mut out = Vec::new();

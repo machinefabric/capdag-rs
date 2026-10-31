@@ -7,14 +7,14 @@
 //! locations of its manifests, and for a cartridges registry the fabric its caps
 //! resolve against.
 //!
-//! The charter itself, and its verification, are `signed_release`'s; the rules
+//! The charter itself, and its verification, are `mg_srel`'s; the rules
 //! it is held to are MachineFabric's ([`super::trust::charter_rules`]). What is
 //! here is capdag's own use of charters: fetching one from its anchor, and the
 //! folders of a cartridge tree, each of which a charter stored in it proves.
 
 use std::path::Path;
 
-use signed_release::{CharterExpectation, CharterTrust, StoredCharterError, VerifiedCharter, CHARTER_FILE, CHARTER_SIG_FILE};
+use mg_srel::{CharterExpectation, CharterTrust, StoredCharterError, VerifiedCharter, CHARTER_FILE, CHARTER_SIG_FILE};
 
 use super::trust::{charter_rules, RegistryKind, DEV_SLUG, FABRIC_FIELD};
 
@@ -26,8 +26,8 @@ pub fn verify(
     trust: &CharterTrust,
     expect: &CharterExpectation<'_>,
     now_unix: u64,
-) -> Result<VerifiedCharter, signed_release::CharterError> {
-    signed_release::verify_charter(body, envelope, trust, charter_rules(), expect, now_unix)
+) -> Result<VerifiedCharter, mg_srel::CharterError> {
+    mg_srel::verify_charter(body, envelope, trust, charter_rules(), expect, now_unix)
 }
 
 /// Read and verify the charter stored in a registry's folder, and require the
@@ -39,12 +39,12 @@ pub fn verify_stored(
     environment: Option<&str>,
     now_unix: u64,
 ) -> Result<VerifiedCharter, StoredCharterError> {
-    signed_release::verify_stored(folder, trust, charter_rules(), kind.wire_name(), environment, now_unix)
+    mg_srel::verify_stored(folder, trust, charter_rules(), kind.wire_name(), environment, now_unix)
 }
 
 /// The anchor of the fabric a cartridges registry's caps resolve against, as
 /// its charter names it. `None` for every other kind.
-pub fn fabric_of(charter: &signed_release::Charter) -> Option<&str> {
+pub fn fabric_of(charter: &mg_srel::Charter) -> Option<&str> {
     charter.field(FABRIC_FIELD)
 }
 
@@ -130,7 +130,7 @@ pub enum CharterFetchError {
     #[error("{url} answered HTTP {status}")]
     Http { url: String, status: u16 },
     #[error("the charter of {anchor} was refused: {error}")]
-    Refused { anchor: String, error: signed_release::CharterError },
+    Refused { anchor: String, error: mg_srel::CharterError },
 }
 
 /// Fetch `<anchor>/charter.json` and its signature, and verify them.

@@ -34,7 +34,7 @@
 //! executable.
 
 use crate::bifaci::trust::RegistryKind;
-use signed_release::{verify_manifest, CharterExpectation, CharterTrust, Trust};
+use mg_srel::{verify_manifest, CharterExpectation, CharterTrust, Trust};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -369,7 +369,7 @@ pub async fn update(current: &str) -> Result<Updated, UpdateError> {
             channel: &line.channel,
             trust: &trust,
             charter_trust: &crate::bifaci::trust::charter_trust(),
-            now: signed_release::unix_now(),
+            now: mg_srel::unix_now(),
             installed: &installed,
             current,
             platform,
@@ -426,7 +426,7 @@ where
 
     // The registry first: nothing at an anchor MachineFabric did not charter
     // is read, and where the manifest is comes from the charter.
-    let charter_url = format!("{}/{}", at.registry, signed_release::CHARTER_FILE);
+    let charter_url = format!("{}/{}", at.registry, mg_srel::CHARTER_FILE);
     let Some(charter_body) = get(charter_url.clone()).await? else {
         return Err(UpdateError::Untrusted(format!(
             "{} has no charter ({charter_url} is missing), so it is not a release registry \
@@ -434,7 +434,7 @@ where
             at.registry
         )));
     };
-    let charter_sig_url = format!("{}/{}", at.registry, signed_release::CHARTER_SIG_FILE);
+    let charter_sig_url = format!("{}/{}", at.registry, mg_srel::CHARTER_SIG_FILE);
     let Some(charter_sig) = get(charter_sig_url.clone()).await? else {
         return Err(UpdateError::Untrusted(format!(
             "{} has a charter and no signature for it ({charter_sig_url} is missing)",

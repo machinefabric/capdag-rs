@@ -692,7 +692,7 @@ pub struct CartridgeRepo {
     /// before the manifest is trusted — a missing or invalid signature
     /// rejects the whole manifest. `None` = no verification (dev builds, and
     /// server-side uses that only serve manifests they don't consume).
-    trust: Arc<RwLock<Option<signed_release::Trust>>>,
+    trust: Arc<RwLock<Option<mg_srel::Trust>>>,
     /// Per-repo release keys extracted from the verified manifest sidecar:
     /// repo_url → [(key_id, release_pubkey_b64)]. Binary artifact signatures
     /// must verify under one of these. Only populated when `trust` is set.
@@ -713,10 +713,10 @@ pub struct CartridgeRepo {
     /// The verified charter of every registry synced, by anchor. Where a
     /// registry's manifest is, and the folder its cartridges install into,
     /// are read from here and nowhere else.
-    charters: Arc<RwLock<HashMap<String, signed_release::VerifiedCharter>>>,
+    charters: Arc<RwLock<HashMap<String, mg_srel::VerifiedCharter>>>,
     /// The roots every registry's charter is verified against —
     /// MachineFabric's, which a build bakes.
-    charter_trust: signed_release::CharterTrust,
+    charter_trust: mg_srel::CharterTrust,
 }
 
 impl CartridgeInfo {
@@ -763,7 +763,7 @@ impl CartridgeRepo {
     pub fn new(
         cache_ttl_seconds: u64,
         expected_fabric_url: impl Into<String>,
-        charter_trust: signed_release::CharterTrust,
+        charter_trust: mg_srel::CharterTrust,
     ) -> Self {
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -793,7 +793,7 @@ impl CartridgeRepo {
     }
 
     /// The verified charter of a registry this repo has synced, by anchor.
-    pub async fn charter(&self, anchor: &str) -> Option<signed_release::VerifiedCharter> {
+    pub async fn charter(&self, anchor: &str) -> Option<mg_srel::VerifiedCharter> {
         self.charters.read().await.get(anchor).cloned()
     }
 
@@ -806,7 +806,7 @@ impl CartridgeRepo {
     async fn admit_charter(
         &self,
         anchor: &str,
-        verified: signed_release::VerifiedCharter,
+        verified: mg_srel::VerifiedCharter,
     ) -> Result<()> {
         let mut charters = self.charters.write().await;
         if let Some(holder) = charters
@@ -837,7 +837,7 @@ impl CartridgeRepo {
     /// Configure the signing trust anchors. With trust set, every manifest
     /// fetch requires a chain-valid `<repo-url>.sig` sidecar (see the field
     /// doc); without, manifests are consumed unverified (dev builds only).
-    pub async fn set_trust(&self, trust: Option<signed_release::Trust>) {
+    pub async fn set_trust(&self, trust: Option<mg_srel::Trust>) {
         *self.trust.write().await = trust;
     }
 
@@ -886,7 +886,7 @@ impl CartridgeRepo {
         manifest_url: &str,
         cache_bust: u64,
         manifest_bytes: &[u8],
-        trust: &signed_release::Trust,
+        trust: &mg_srel::Trust,
     ) -> Result<Vec<(String, String)>> {
         // Same cache-bust token as the manifest fetch: signature verification
         // only holds over a COHERENT (manifest, sidecar) pair, and two
@@ -915,7 +915,7 @@ impl CartridgeRepo {
                 "Failed to read manifest signature sidecar {sidecar_url}: {e}"
             ))
         })?;
-        let chain = signed_release::verify_manifest(&envelope, manifest_bytes, trust, signed_release::unix_now())
+        let chain = mg_srel::verify_manifest(&envelope, manifest_bytes, trust, mg_srel::unix_now())
             .map_err(|e| CartridgeRepoError::ManifestChainFailed {
                 reason: e.reason().into(),
                 detail: format!("manifest signature chain verification FAILED for {repo_url}: {e}"),
@@ -952,7 +952,7 @@ impl CartridgeRepo {
             &self.charter_trust,
             crate::bifaci::trust::RegistryKind::Cartridges,
             content_label.as_deref(),
-            signed_release::unix_now(),
+            mg_srel::unix_now(),
         )
         .await?;
         let fabric = crate::bifaci::charter::fabric_of(&charter.charter);
@@ -1156,7 +1156,7 @@ impl CartridgeRepo {
     /// visible — there is no silent swallowing.
     pub async fn sync_repos(&self, repo_urls: &[String]) {
         for repo_url in repo_urls {
-            let now = signed_release::unix_now() as i64;
+            let now = mg_srel::unix_now() as i64;
             // EVERY SYNC ENDS IN A VERDICT — success included. A registry with
             // no entry at all means "not checked yet"; leaving a stale failure
             // behind, or recording nothing on success, would make those two
@@ -1726,7 +1726,7 @@ mod tests {
     const TEST_FABRIC_URL: &str = "https://fabric.test";
 
     /// Charter roots for a repo these tests never sync against the network.
-    fn test_charter_trust() -> signed_release::CharterTrust {
+    fn test_charter_trust() -> mg_srel::CharterTrust {
         crate::bifaci::trust::charter_trust_from(&[
             include_str!("../../tests/fixtures/nocommit/signing/root_a.pubkey"),
             include_str!("../../tests/fixtures/nocommit/signing/root_b.pubkey"),
@@ -3195,9 +3195,9 @@ mod tests {
     }
 
     /// A cartridges charter for `anchor` naming `slug`, as one that verified.
-    fn verified_charter(anchor: &str, slug: &str) -> signed_release::VerifiedCharter {
-        signed_release::VerifiedCharter {
-            charter: signed_release::Charter {
+    fn verified_charter(anchor: &str, slug: &str) -> mg_srel::VerifiedCharter {
+        mg_srel::VerifiedCharter {
+            charter: mg_srel::Charter {
                 format: crate::bifaci::trust::CHARTER_FORMAT.to_string(),
                 anchor: anchor.to_string(),
                 kind: crate::bifaci::trust::RegistryKind::Cartridges.wire_name().to_string(),

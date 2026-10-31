@@ -115,7 +115,7 @@ pub use bifaci::trust::{
     CERTIFICATE_FORMAT, CHARTER_ENVELOPE_FORMAT, CHARTER_FORMAT, CHARTER_LABEL, DEV_SLUG,
     FABRIC_FIELD, MANIFEST_ENVELOPE_FORMAT,
 };
-pub use signed_release;
+pub use mg_srel;
 
 /// The comma-separated base64 minisign ROOT public keys this build trusts
 /// (Root A, Root B, …), baked at compile time from

@@ -27,7 +27,7 @@
 //! documentation of the dims it was built from (`get_cached_dim`).
 
 use crate::bifaci::trust::RegistryKind;
-use signed_release::{Charter, CharterTrust, VerifiedCharter};
+use mg_srel::{Charter, CharterTrust, VerifiedCharter};
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
 use crate::fabric::dim::{is_dim_name, DimRef, StoredDim};
 use crate::media::spec::MediaDef;
@@ -568,7 +568,7 @@ impl FabricRegistry {
             &config.anchor,
             config.bypass_cache,
             &crate::bifaci::trust::charter_trust(),
-            signed_release::unix_now(),
+            mg_srel::unix_now(),
         )
         .await?;
         let locations = FabricLocations::from_charter(&charter.charter)?;
@@ -3523,7 +3523,7 @@ async fn resolve_charter(
         if let Ok(entries) = fs::read_dir(capdag_cache) {
             for entry in entries.flatten() {
                 let folder = entry.path();
-                if !folder.join(signed_release::CHARTER_FILE).is_file() {
+                if !folder.join(mg_srel::CHARTER_FILE).is_file() {
                     continue;
                 }
                 match crate::bifaci::charter::verify_stored(
@@ -3555,7 +3555,7 @@ async fn resolve_charter(
     .await
     .map_err(|e| FabricRegistryError::Charter(e.to_string()))?;
     let folder = capdag_cache.join(&verified.charter.slug);
-    signed_release::store(&verified, &folder).map_err(|e| {
+    mg_srel::store(&verified, &folder).map_err(|e| {
         FabricRegistryError::CacheError(format!(
             "Failed to store the charter of {} in {:?}: {}",
             anchor, folder, e
@@ -4650,7 +4650,7 @@ mod parity_port_tests {
             FABRIC,
             FABRIC_SIG,
             &trust,
-            &signed_release::CharterExpectation { anchor: Some(anchor), kind: RegistryKind::Fabric.wire_name(), environment: None },
+            &mg_srel::CharterExpectation { anchor: Some(anchor), kind: RegistryKind::Fabric.wire_name(), environment: None },
             now,
         )
         .expect("the fixture fabric charter verifies");
@@ -4658,7 +4658,7 @@ mod parity_port_tests {
         let cache = tempfile::tempdir().unwrap();
         // Another registry's folder is beside it, and is not taken for it.
         std::fs::create_dir_all(cache.path().join("fabric.capdag.com")).unwrap();
-        signed_release::store(&verified, &cache.path().join("example-fabric")).unwrap();
+        mg_srel::store(&verified, &cache.path().join("example-fabric")).unwrap();
 
         let client = reqwest::Client::new();
         let found = resolve_charter(&client, cache.path(), anchor, false, &trust, now)

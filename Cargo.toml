@@ -54,7 +54,7 @@ version = "=1.117.0"
 
 # The chain from baked roots to a signed manifest, charter or binary. The
 # formats and charter rules are MachineFabric's, declared in bifaci::trust.
-[dependencies.signed-release]
+[dependencies.mg-srel]
 version = "0.1"
 
 [dependencies.tokio]
