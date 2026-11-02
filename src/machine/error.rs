@@ -602,7 +602,7 @@ mod tests {
     fn test1149_machine_parse_error_from_resolution_preserves_variant() {
         let undecided = |node: Option<&str>| UndecidedMember {
             node: node.map(str::to_string),
-            source_urn: "media:enc=utf-8".to_string(),
+            source_urn: "media:enc=utf8".to_string(),
             could_be: vec!["left".to_string(), "right".to_string()],
         };
         let parse_error: MachineParseError = MachineAbstractionError::AmbiguousMachineNotation {
@@ -615,8 +615,8 @@ mod tests {
         let said = parse_error.to_string();
         assert!(
             said.ends_with(
-                "name them: 'a' (media:enc=utf-8) could be left or right; \
-                 a member of type 'media:enc=utf-8' could be left or right"
+                "name them: 'a' (media:enc=utf8) could be left or right; \
+                 a member of type 'media:enc=utf8' could be left or right"
             ),
             "{said}"
         );

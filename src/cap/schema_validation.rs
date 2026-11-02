@@ -247,7 +247,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:fmt=json;record;user-data".to_string(),
+            urn: "media:enc=utf8;fmt=json;record;user-data".to_string(),
             media_type: "application/json".to_string(),
             title: "User Data".to_string(),
             profile_uri: Some("https://example.com/schema/user-data".to_string()),
@@ -260,7 +260,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:fmt=json;record;user-data", "arg0",
+            "media:enc=utf8;fmt=json;record;user-data", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -291,7 +291,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:fmt=json;record;user-data".to_string(),
+            urn: "media:enc=utf8;fmt=json;record;user-data".to_string(),
             media_type: "application/json".to_string(),
             title: "User Data".to_string(),
             profile_uri: Some("https://example.com/schema/user-data".to_string()),
@@ -304,7 +304,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:fmt=json;record;user-data", "arg0",
+            "media:enc=utf8;fmt=json;record;user-data", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -336,7 +336,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:fmt=json;query-result;record".to_string(),
+            urn: "media:enc=utf8;fmt=json;query-result;record".to_string(),
             media_type: "application/json".to_string(),
             title: "Query Result".to_string(),
             profile_uri: Some("https://example.com/schema/query-result".to_string()),
@@ -348,7 +348,7 @@ mod tests {
             extensions: Vec::new(),
         });
 
-        let output = CapOutput::new("media:fmt=json;query-result;record", "output", "Query result");
+        let output = CapOutput::new("media:enc=utf8;fmt=json;query-result;record", "output", "Query result");
 
         let valid_value = json!({"result": "success", "timestamp": "2023-01-01T00:00:00Z"});
         assert!(validator
@@ -463,7 +463,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:user-data;enc=utf-8;record".to_string(),
+            urn: "media:user-data;enc=utf8;record".to_string(),
             media_type: "application/json".to_string(),
             title: "User Data".to_string(),
             profile_uri: None,
@@ -476,7 +476,7 @@ mod tests {
         });
 
         let arg = CapArg::new(
-            "media:user-data;enc=utf-8;record", "arg0",
+            "media:user-data;enc=utf8;record", "arg0",
             true,
             vec![ArgSource::Position { position: 0 }],
         );
@@ -511,9 +511,9 @@ mod tests {
         use crate::media::spec::resolve_media_urn;
         let registry = FabricRegistry::new_for_test();
         for (urn, mt) in [
-            ("media:enc=utf-8", "text/plain"),
+            ("media:enc=utf8", "text/plain"),
             ("media:integer;numeric", "text/plain"),
-            ("media:fmt=json;record", "application/json"),
+            ("media:enc=utf8;fmt=json;record", "application/json"),
         ] {
             registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
                 dims: Vec::new(),
@@ -530,11 +530,11 @@ mod tests {
                 extensions: Vec::new(),
             });
         }
-        let resolved = resolve_media_urn("media:enc=utf-8", &registry)
+        let resolved = resolve_media_urn("media:enc=utf8", &registry)
             .await
             .unwrap();
         assert_eq!(resolved.media_type, "text/plain");
-        let json_resolved = resolve_media_urn("media:fmt=json;record", &registry)
+        let json_resolved = resolve_media_urn("media:enc=utf8;fmt=json;record", &registry)
             .await
             .unwrap();
         assert_eq!(json_resolved.media_type, "application/json");

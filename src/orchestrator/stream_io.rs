@@ -2599,7 +2599,7 @@ mod tests {
         Frame::stream_start(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         )
     }
@@ -2616,11 +2616,11 @@ mod tests {
         )
     }
 
-    const SERIES: &str = "media:enc=utf-8;series";
-    const FIT: &str = "media:fmt=json;record;regression";
-    const RESIDUALS: &str = "media:fmt=json;list;record;residual";
-    const NOTE: &str = "media:enc=utf-8;note";
-    const REJECTED: &str = "media:enc=utf-8;rejected";
+    const SERIES: &str = "media:enc=utf8;series";
+    const FIT: &str = "media:enc=utf8;fmt=json;record;regression";
+    const RESIDUALS: &str = "media:enc=utf8;fmt=json;list;record;residual";
+    const NOTE: &str = "media:enc=utf8;note";
+    const REJECTED: &str = "media:enc=utf8;rejected";
 
     fn regress_urn() -> String {
         format!(r#"cap:in="{SERIES}";regress;out="{FIT}""#)
@@ -2699,7 +2699,7 @@ mod tests {
         assert_eq!(one.main_shape(), STREAMING_SEQUENCE_CONTRACT);
         assert!(one.outputs()[0].urn.is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
 
-        let none = ResponseContract::main_only(r#"cap:in="media:enc=utf-8";sink;out=media:void"#, SCALAR_CONTRACT).unwrap();
+        let none = ResponseContract::main_only(r#"cap:in="media:enc=utf8";sink;out=media:void"#, SCALAR_CONTRACT).unwrap();
         assert!(none.outputs().is_empty() && none.main().is_none());
         assert_eq!(none.main_shape(), SCALAR_CONTRACT);
     }
@@ -2717,11 +2717,11 @@ mod tests {
         // A whole, valid response: every stream is told apart by the output it names.
         let mut ok = audit();
         assert!(ok.audit_frame(&response_start(&rid, "a", FIT, FIT, false)).unwrap().main);
-        assert_eq!(ok.audit_frame(&response_start(&rid, "b", "media:residual;record;list;fmt=json", RESIDUALS, true)).unwrap().name, "residuals");
+        assert_eq!(ok.audit_frame(&response_start(&rid, "b", "media:residual;record;list;fmt=json;enc=utf8", RESIDUALS, true)).unwrap().name, "residuals");
         // An output that carries the input is labelled with the input's type.
         assert_eq!(ok.audit_frame(&response_start(&rid, "c", REJECTED, SERIES, false)).unwrap().name, "rejected");
         // What an output carries may be more specific than the output's URN.
-        assert_eq!(ok.audit_frame(&response_start(&rid, "d", NOTE, "media:enc=utf-8;note;warning", false)).unwrap().name, "note");
+        assert_eq!(ok.audit_frame(&response_start(&rid, "d", NOTE, "media:enc=utf8;note;warning", false)).unwrap().name, "note");
         assert!(ok.is_main_stream(Some("a")) && !ok.is_main_stream(Some("b")));
         assert_eq!(ok.output_of(Some("c")).map(|o| o.name.as_str()), Some("rejected"));
         assert!(ok.output_of(Some("never-started")).is_none() && !ok.is_main_stream(Some("never-started")));
@@ -2736,14 +2736,14 @@ mod tests {
         ));
         // The main output's stream is not named: naming it is a breach, in
         // whatever order its tags are written.
-        for named_main in [FIT, "media:regression;record;fmt=json"] {
+        for named_main in [FIT, "media:regression;record;fmt=json;enc=utf8"] {
             let named = Frame::stream_start(rid.clone(), "a".to_string(), FIT.to_string(), Some(false))
                 .for_output(named_main);
             let detail = breach_detail(audit().audit_frame(&named));
             assert!(detail.contains("names the main output"), "{detail}");
         }
         // A cap with no output sends no main stream.
-        let void_urn = r#"cap:in="media:enc=utf-8";sink;out=media:void"#;
+        let void_urn = r#"cap:in="media:enc=utf8";sink;out=media:void"#;
         let mut void = ResponseAudit::new(void_urn, ResponseContract::main_only(void_urn, SCALAR_CONTRACT).unwrap()).unwrap();
         match void.audit_frame(&Frame::stream_start(rid.clone(), "a".to_string(), "media:void".to_string(), Some(false))) {
             Err(StreamIoError::OutputContract { detail, .. }) => assert!(detail.contains("declares none"), "{detail}"),
@@ -2751,7 +2751,7 @@ mod tests {
         }
         void.audit_end().expect("a cap with no output owes no stream");
         // It names something the cap does not declare — close is not declared.
-        for undeclared in ["media:fmt=json;record", "media:enc=utf-8", "not a urn"] {
+        for undeclared in ["media:enc=utf8;fmt=json;record", "media:enc=utf8", "not a urn"] {
             let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", undeclared, FIT, false)));
             assert!(detail.contains(undeclared), "{detail}");
             // Refused for what it names — not taken for some declared output
@@ -2772,18 +2772,18 @@ mod tests {
         assert!(twice.output_of(Some("b")).is_none());
 
         // Another output carrying a type that is not its own.
-        let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", NOTE, "media:enc=utf-8", false)));
-        assert!(detail.contains(NOTE) && detail.contains("media:enc=utf-8"), "{detail}");
+        let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", NOTE, "media:enc=utf8", false)));
+        assert!(detail.contains(NOTE) && detail.contains("media:enc=utf8"), "{detail}");
         // An output that carries the input, carrying its own URN instead, or
         // something more specific than the input: the type is unchanged, exactly.
-        for carried in [REJECTED, "media:enc=utf-8;series;sorted"] {
+        for carried in [REJECTED, "media:enc=utf8;series;sorted"] {
             let detail = breach_detail(audit().audit_frame(&response_start(&rid, "a", REJECTED, carried, false)));
             assert!(detail.contains("input"), "{detail}");
         }
         // The main output is held to the cap's effect, as before.
-        match audit().audit_frame(&response_start(&rid, "a", FIT, "media:fmt=json;record", false)) {
+        match audit().audit_frame(&response_start(&rid, "a", FIT, "media:enc=utf8;fmt=json;record", false)) {
             Err(StreamIoError::EffectContract { expected, actual, .. }) => {
-                assert_eq!(actual, "media:fmt=json;record");
+                assert_eq!(actual, "media:enc=utf8;fmt=json;record");
                 assert!(crate::MediaUrn::from_string(&expected).unwrap().is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
             }
             other => panic!("expected EffectContract, got {:?}", other.map(|o| o.name.clone())),
@@ -2908,7 +2908,7 @@ mod tests {
         // STREAM_START, before anything is collected.
         let (result, _) = collect_regress(vec![
             response_start(&rid, "fit", FIT, FIT, false),
-            response_start(&rid, "x", "media:enc=utf-8;extra", "media:enc=utf-8;extra", false),
+            response_start(&rid, "x", "media:enc=utf8;extra", "media:enc=utf8;extra", false),
             chunk_of(&rid, "fit", b"FIT"),
             Frame::end_ok(rid.clone(), None),
         ])
@@ -3270,11 +3270,11 @@ mod tests {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
         // cap:echo;effect=none declares in=media: — its emission must be
-        // tag-equivalent to media:, and media:enc=utf-8 is not.
+        // tag-equivalent to media:, and media:enc=utf8 is not.
         tx.send(Frame::stream_start(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         ))
         .unwrap();
@@ -3310,7 +3310,7 @@ mod tests {
                 assert_eq!(effect, "none");
                 assert_eq!(runtime_input, "media:");
                 assert_eq!(expected, "media:");
-                assert_eq!(actual, "media:enc=utf-8");
+                assert_eq!(actual, "media:enc=utf8");
             }
             other => panic!("expected EffectContract, got: {other}"),
         }
@@ -3415,7 +3415,7 @@ mod tests {
         tx.send(Frame::stream_start(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         ))
         .unwrap();
@@ -3450,7 +3450,7 @@ mod tests {
         tx.send(Frame::stream_start_unbounded(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(true),
         ))
         .unwrap();
@@ -3574,7 +3574,7 @@ mod tests {
         tx.send(Frame::stream_start_unbounded(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8;record".to_string(),
+            "media:enc=utf8;record".to_string(),
             Some(true),
         ))
         .unwrap();
@@ -3772,7 +3772,7 @@ mod tests {
         let ss = Frame::stream_start_unbounded(
             rid.clone(),
             "out".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(true),
         );
         tx.send(ss).unwrap();

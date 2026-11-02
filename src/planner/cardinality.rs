@@ -9,16 +9,16 @@
 //!
 //! ## 2. Structure (internal shape of each item)
 //! Detected from the `record` marker tag:
-//! - `media:enc=utf-8` → Opaque (no internal fields, no record marker)
-//! - `media:fmt=json;record` → Record (has key-value fields, record marker)
+//! - `media:enc=utf8` → Opaque (no internal fields, no record marker)
+//! - `media:enc=utf8;fmt=json;record` → Record (has key-value fields, record marker)
 //!
 //! ## The Four Combinations
 //! | Cardinality | Structure | Example |
 //! |-------------|-----------|---------|
-//! | scalar | opaque | `media:enc=utf-8` - one string |
-//! | scalar | record | `media:fmt=json;record` - one JSON object |
+//! | scalar | opaque | `media:enc=utf8` - one string |
+//! | scalar | record | `media:enc=utf8;fmt=json;record` - one JSON object |
 //! | list | opaque | `media:file-path;list` - array of paths |
-//! | list | record | `media:fmt=json;list;record` - array of objects |
+//! | list | record | `media:enc=utf8;fmt=json;list;record` - array of objects |
 //!
 //! Design principle: URN handling uses proper parsing via MediaUrn, never string comparison.
 
@@ -764,7 +764,7 @@ mod tests {
             InputStructure::Opaque
         );
         assert_eq!(
-            InputStructure::from_media_urn("media:enc=utf-8"),
+            InputStructure::from_media_urn("media:enc=utf8"),
             InputStructure::Opaque
         );
         assert_eq!(
@@ -783,20 +783,20 @@ mod tests {
     #[test]
     fn test721_from_media_urn_record() {
         assert_eq!(
-            InputStructure::from_media_urn("media:fmt=json;record"),
+            InputStructure::from_media_urn("media:enc=utf8;fmt=json;record"),
             InputStructure::Record
         );
         assert_eq!(
-            InputStructure::from_media_urn("media:enc=utf-8;record"),
+            InputStructure::from_media_urn("media:enc=utf8;record"),
             InputStructure::Record
         );
         assert_eq!(
-            InputStructure::from_media_urn("media:enc=utf-8;file-metadata;record"),
+            InputStructure::from_media_urn("media:enc=utf8;file-metadata;record"),
             InputStructure::Record
         );
         // List of records
         assert_eq!(
-            InputStructure::from_media_urn("media:fmt=json;list;record"),
+            InputStructure::from_media_urn("media:enc=utf8;fmt=json;list;record"),
             InputStructure::Record
         );
     }
@@ -838,14 +838,14 @@ mod tests {
     // TEST726: Tests applying Record structure adds record marker to URN
     #[test]
     fn test726_apply_structure_add_record() {
-        let result = InputStructure::Record.apply_to_urn("media:fmt=json");
+        let result = InputStructure::Record.apply_to_urn("media:enc=utf8;fmt=json");
         assert!(result.contains("record"));
     }
 
     // TEST727: Tests applying Opaque structure removes record marker from URN
     #[test]
     fn test727_apply_structure_remove_record() {
-        let result = InputStructure::Opaque.apply_to_urn("media:fmt=json;record");
+        let result = InputStructure::Opaque.apply_to_urn("media:enc=utf8;fmt=json;record");
         assert!(!result.contains("record"));
     }
 
@@ -855,12 +855,12 @@ mod tests {
     #[test]
     fn test730_media_shape_from_urn_all_combinations() {
         // Scalar opaque (default)
-        let shape = MediaShape::from_media_urn("media:enc=utf-8");
+        let shape = MediaShape::from_media_urn("media:enc=utf8");
         assert_eq!(shape.cardinality, InputCardinality::Single);
         assert_eq!(shape.structure, InputStructure::Opaque);
 
         // Scalar record
-        let shape = MediaShape::from_media_urn("media:fmt=json;record");
+        let shape = MediaShape::from_media_urn("media:enc=utf8;fmt=json;record");
         assert_eq!(shape.cardinality, InputCardinality::Single);
         assert_eq!(shape.structure, InputStructure::Record);
 
@@ -870,7 +870,7 @@ mod tests {
         assert_eq!(shape.structure, InputStructure::Opaque);
 
         // List record — cardinality is always Single from URN (shape comes from context)
-        let shape = MediaShape::from_media_urn("media:fmt=json;list;record");
+        let shape = MediaShape::from_media_urn("media:enc=utf8;fmt=json;list;record");
         assert_eq!(shape.cardinality, InputCardinality::Single);
         assert_eq!(shape.structure, InputStructure::Record);
     }
@@ -956,7 +956,7 @@ mod tests {
     #[test]
     fn test740_cap_shape_info_from_specs() {
         let info =
-            CapShapeInfo::from_cap_specs("cap:test", "media:enc=utf-8", "media:fmt=json;record");
+            CapShapeInfo::from_cap_specs("cap:test", "media:enc=utf8", "media:enc=utf8;fmt=json;record");
         assert_eq!(info.input.cardinality, InputCardinality::Single);
         assert_eq!(info.input.structure, InputStructure::Opaque);
         assert_eq!(info.output.cardinality, InputCardinality::Single);
@@ -969,7 +969,7 @@ mod tests {
         let one_to_many = CapShapeInfo::from_cap_specs_with_sequence(
             "cap:disbind",
             "media:document;ext=pdf",
-            "media:disbound-page;enc=utf-8",
+            "media:disbound-page;enc=utf8",
             false,
             true,
         );
@@ -1005,9 +1005,9 @@ mod tests {
     #[test]
     fn test751_strand_shape_structure_mismatch() {
         let infos = vec![
-            CapShapeInfo::from_cap_specs("cap:extract", "media:document;ext=pdf", "media:enc=utf-8"),
+            CapShapeInfo::from_cap_specs("cap:extract", "media:document;ext=pdf", "media:enc=utf8"),
             // This cap expects record but gets opaque - should fail
-            CapShapeInfo::from_cap_specs("cap:parse", "media:fmt=json;record", "media:data;record"),
+            CapShapeInfo::from_cap_specs("cap:parse", "media:enc=utf8;fmt=json;record", "media:data;record"),
         ];
         let analysis = StrandShapeAnalysis::analyze(infos);
         assert!(!analysis.is_valid);
@@ -1023,14 +1023,14 @@ mod tests {
             CapShapeInfo::from_cap_specs_with_sequence(
                 "cap:disbind",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;page",
+                "media:enc=utf8;page",
                 false,
                 true,
             ),
             CapShapeInfo::from_cap_specs(
                 "cap:process",
-                "media:enc=utf-8",
-                "media:enc=utf-8;result",
+                "media:enc=utf8",
+                "media:enc=utf8;result",
             ),
         ];
         let analysis = StrandShapeAnalysis::analyze(infos);
@@ -1045,12 +1045,12 @@ mod tests {
         let infos = vec![
             CapShapeInfo::from_cap_specs(
                 "cap:parse_csv",
-                "media:fmt=csv",
-                "media:fmt=json;list;record",
+                "media:enc=utf8;fmt=csv",
+                "media:enc=utf8;fmt=json;list;record",
             ),
             CapShapeInfo::from_cap_specs(
                 "cap:transform",
-                "media:fmt=json;list;record",
+                "media:enc=utf8;fmt=json;list;record",
                 "media:result;list;record",
             ),
         ];

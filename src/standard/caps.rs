@@ -82,14 +82,14 @@ pub const CAP_DISCARD: &str = "cap:out=media:void";
 /// returns empty END (no match). Cartridges that inspect file content override
 /// this with a handler that returns `{"media_urns": [...]}`.
 pub const CAP_ADAPTER_SELECTION: &str =
-    "cap:in=\"media:\";out=\"media:adapter-selection;fmt=json;record\"";
+    "cap:in=\"media:\";out=\"media:adapter-selection;enc=utf8;fmt=json;record\"";
 
 /// Cap that resolves a canonical cap URN to its full flattened cap definition
 /// by fetching the registry-published entry. Implemented by the engine-bundled
 /// `fetchcartridge`. Sandboxed cartridges peer-invoke this when they need
 /// to read a cap's `default_value` or any other registry-only field.
 pub const CAP_LOOKUP_CAP_FABRIC: &str =
-    "cap:in=\"media:cap-urn;enc=utf-8\";fabric;lookup-cap;out=\"media:cap-definition;fmt=json;record\"";
+    "cap:in=\"media:cap-urn;enc=utf8\";fabric;lookup-cap;out=\"media:cap-definition;enc=utf8;fmt=json;record\"";
 
 /// Cap that resolves a canonical media URN to its full media definition
 /// by fetching the registry-published entry. Implemented by the engine-bundled
@@ -97,7 +97,7 @@ pub const CAP_LOOKUP_CAP_FABRIC: &str =
 /// to read a media def's title, MIME type, profile URI, or any other
 /// registry-only field.
 pub const CAP_LOOKUP_MEDIA_DEF_FABRIC: &str =
-    "cap:in=\"media:enc=utf-8;media-urn\";fabric;lookup-media-def;out=\"media:fmt=json;media-definition;record\"";
+    "cap:in=\"media:enc=utf8;media-urn\";fabric;lookup-media-def;out=\"media:enc=utf8;fmt=json;media-definition;record\"";
 
 /// Parse and return the canonical `cap:lookup-cap;fabric` `CapUrn`.
 pub fn lookup_cap_fabric_urn() -> CapUrn {
@@ -288,7 +288,7 @@ pub fn discard_cap() -> Cap {
 ///
 /// The adapter selection cap declares a wildcard input arg
 /// (`media:`) so it can accept any file content for inspection.
-/// The output is `media:adapter-selection;fmt=json;record` — a JSON
+/// The output is `media:adapter-selection;enc=utf8;fmt=json;record` — a JSON
 /// object with `media_urns` listing the media URNs the adapter
 /// is confident match the inspected file content.
 ///
@@ -342,8 +342,8 @@ pub fn llm_generate_text_urn() -> CapUrn {
         .marker("generate-text")
         .marker("llm")
         .marker("ml-model")
-        .in_spec(MEDIA_STRING)
-        .out_spec(MEDIA_PLAIN_TEXT)
+        .in_spec(MEDIA_PLAIN_TEXT)
+        .out_spec(MEDIA_TXT)
         .build()
         .expect("Failed to build generate_text cap URN")
 }
@@ -364,12 +364,12 @@ pub fn embeddings_dimensions_urn() -> CapUrn {
 }
 
 /// Build URN for text embeddings-generation capability
-/// Input: media:enc=utf-8 (text)
-/// Output: media:embedding-vector;fmt=json;record
+/// Input: media:enc=utf8 (text)
+/// Output: media:embedding-vector;enc=utf8;fmt=json;record
 pub fn embeddings_generation_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("generate-embeddings")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(MEDIA_EMBEDDING_VECTOR)
         .build()
         .expect("Failed to build embeddings-generation cap URN")
@@ -377,7 +377,7 @@ pub fn embeddings_generation_urn() -> CapUrn {
 
 /// Build URN for image embeddings-generation capability
 /// Input: media:ext=png;image
-/// Output: media:embedding-vector;fmt=json;record
+/// Output: media:embedding-vector;enc=utf8;fmt=json;record
 pub fn image_embeddings_generation_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("generate-image-embeddings")
@@ -404,7 +404,7 @@ pub fn model_download_urn() -> CapUrn {
 }
 
 /// Build URN for model-list capability
-/// Input uses MEDIA_MODEL_REPO per CATALOG: media:fmt=json;model-repo;record
+/// Input uses MEDIA_MODEL_REPO per CATALOG: media:enc=utf8;fmt=json;model-repo;record
 pub fn model_list_urn() -> CapUrn {
     CapUrnBuilder::new()
         .marker("list-models")
@@ -498,7 +498,7 @@ pub fn generate_json_urn(lang_code: &str) -> CapUrn {
         .marker("generate-json")
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(MEDIA_JSON)
         .build()
         .expect("Failed to build generate-json cap URN")
@@ -513,7 +513,7 @@ pub fn same_urn(lang_code: &str) -> CapUrn {
         .marker("same")
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(crate::urn::media_urn::MEDIA_SEMANTIC_JUDGMENT)
         .build()
         .expect("Failed to build same cap URN")
@@ -527,7 +527,7 @@ fn semantic_judgment_urn(marker: &str, lang_code: &str) -> CapUrn {
         .marker(marker)
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(crate::urn::media_urn::MEDIA_SEMANTIC_JUDGMENT)
         .build()
         .unwrap_or_else(|e| panic!("Failed to build {} cap URN: {}", marker, e))
@@ -582,20 +582,20 @@ pub fn summarize_urn(lang_code: &str) -> CapUrn {
         .marker("summarize")
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
-        .out_spec(crate::urn::media_urn::MEDIA_PLAIN_TEXT)
+        .in_spec(MEDIA_PLAIN_TEXT)
+        .out_spec(MEDIA_TXT)
         .build()
         .expect("Failed to build summarize cap URN")
 }
 
 /// Build URN for make-decision capability
-/// Output is MEDIA_DECISION: media:decision;fmt=json;record
+/// Output is MEDIA_DECISION: media:decision;enc=utf8;fmt=json;record
 pub fn make_decision_urn(lang_code: &str) -> CapUrn {
     CapUrnBuilder::new()
         .marker("make-decision")
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(MEDIA_DECISION)
         .build()
         .expect("Failed to build make-decision cap URN")
@@ -608,7 +608,7 @@ pub fn make_multiple_decisions_urn(lang_code: &str) -> CapUrn {
         .marker("make-multiple-decisions")
         .tag("language", lang_code)
         .marker("constrained")
-        .in_spec(MEDIA_STRING)
+        .in_spec(MEDIA_PLAIN_TEXT)
         .out_spec(MEDIA_DECISION)
         .build()
         .expect("Failed to build make-multiple-decisions cap URN")
@@ -1141,7 +1141,7 @@ mod tests {
     }
 
     // TEST310: llm_generate_text_urn() produces a valid cap URN with a
-    // UTF-8 text input and plain-text terminal output.
+    // plain-text input and a `.txt` plain-text output.
     #[test]
     fn test310_llm_generate_text_urn_shape() {
         use crate::urn::media_urn::MediaUrn;
@@ -1149,9 +1149,9 @@ mod tests {
 
         let in_spec = MediaUrn::from_string(urn.in_spec()).expect("in_spec must parse");
         let out_spec = MediaUrn::from_string(urn.out_spec()).expect("out_spec must parse");
-        let expected_in = MediaUrn::from_string(MEDIA_STRING).expect("MEDIA_STRING must parse");
-        let expected_out =
+        let expected_in =
             MediaUrn::from_string(MEDIA_PLAIN_TEXT).expect("MEDIA_PLAIN_TEXT must parse");
+        let expected_out = MediaUrn::from_string(MEDIA_TXT).expect("MEDIA_TXT must parse");
 
         assert!(
             urn.has_marker_tag("generate-text"),
@@ -1160,16 +1160,16 @@ mod tests {
         assert!(urn.has_marker_tag("llm"), "must have llm tag");
         assert!(urn.has_marker_tag("ml-model"), "must have ml-model tag");
         assert!(
-            in_spec.conforms_to(&expected_in).unwrap(),
-            "in_spec '{}' must match MEDIA_STRING '{}'",
+            in_spec.is_equivalent(&expected_in).unwrap(),
+            "in_spec '{}' must be MEDIA_PLAIN_TEXT '{}'",
             urn.in_spec(),
-            MEDIA_STRING
+            MEDIA_PLAIN_TEXT
         );
         assert!(
-            out_spec.conforms_to(&expected_out).unwrap(),
-            "out_spec '{}' must match MEDIA_PLAIN_TEXT '{}'",
+            out_spec.is_equivalent(&expected_out).unwrap(),
+            "out_spec '{}' must be MEDIA_TXT '{}'",
             urn.out_spec(),
-            MEDIA_PLAIN_TEXT
+            MEDIA_TXT
         );
     }
 

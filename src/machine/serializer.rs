@@ -453,7 +453,7 @@ impl Machine {
     ///           ],
     ///           "outputs": [
     ///             {
-    ///               "output_media_urn": "media:enc=utf-8;ext=txt",
+    ///               "output_media_urn": "media:enc=utf8;ext=txt;plain-text",
     ///               "output_name": "output",
     ///               "is_main_output": true,
     ///               "node": "n1"
@@ -743,18 +743,18 @@ mod tests {
 
     fn extract_cap_def() -> crate::cap::definition::Cap {
         build_cap(
-            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         )
     }
 
     fn embed_cap_def() -> crate::cap::definition::Cap {
         build_cap(
-            "cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"",
+            "cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"",
             "embed",
-            &["media:enc=utf-8"],
+            &["media:enc=utf8"],
             "media:vec;record",
         )
     }
@@ -763,15 +763,15 @@ mod tests {
         strand_from_steps(
             vec![
                 cap_step(
-                    "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+                    "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
                     "extract",
                     "media:document;ext=pdf",
-                    "media:enc=utf-8;ext=txt",
+                    "media:enc=utf8;ext=txt;plain-text",
                 ),
                 cap_step(
-                    "cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"",
+                    "cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"",
                     "embed",
-                    "media:enc=utf-8;ext=txt",
+                    "media:enc=utf8;ext=txt;plain-text",
                     "media:vec;record",
                 ),
             ],
@@ -905,12 +905,12 @@ mod tests {
         // Two aliases on the extract cap; "ex" is shorter than "extract-pdf".
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "extract-pdf".to_string(),
-            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
+            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"".to_string(),
             version: 1,
         });
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "ex".to_string(),
-            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"".to_string(),
+            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"".to_string(),
             version: 1,
         });
         // No alias for the embed cap → it must stay a raw URN.
@@ -964,7 +964,7 @@ mod tests {
             &registry,
             &[
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
                 "media:vec;record",
             ],
         );
@@ -1003,28 +1003,28 @@ mod tests {
     #[test]
     fn test1137_two_strand_machine_serializes_to_notation_containing_both_ops() {
         let caption_cap = build_cap(
-            "cap:in=media:image;caption;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=media:image;caption;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "caption",
             &["media:image"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![extract_cap_def(), caption_cap]);
 
         let extract_strand = strand_from_steps(
             vec![cap_step(
-                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "extract",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "extract strand",
         );
         let caption_strand = strand_from_steps(
             vec![cap_step(
-                "cap:in=media:image;caption;out=\"media:enc=utf-8;ext=txt\"",
+                "cap:in=media:image;caption;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "caption",
                 "media:image",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "caption strand",
         );

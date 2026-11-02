@@ -278,7 +278,7 @@ impl MediaValidation {
 /// ## Example
 /// ```json
 /// {
-///   "urn": "media:fmt=json;my-output;record",
+///   "urn": "media:enc=utf8;fmt=json;my-output;record",
 ///   "media_type": "application/json",
 ///   "title": "My Output",
 ///   "profile_uri": "https://example.com/schema/my-output",
@@ -561,7 +561,7 @@ impl ResolvedMediaDef {
 /// 4. If none resolve → Error
 ///
 /// # Arguments
-/// * `media_urn` - The media URN to resolve (e.g., "media:enc=utf-8")
+/// * `media_urn` - The media URN to resolve (e.g., "media:enc=utf8")
 /// * `registry` - The FabricRegistry for cache and remote lookups
 ///
 /// # Errors
@@ -672,7 +672,7 @@ mod tests {
         let registry = test_registry().await;
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             version: 0,
-            urn: "media:enc=utf-8".to_string(),
+            urn: "media:enc=utf8".to_string(),
             media_type: "text/plain".to_string(),
             title: "UTF-8 text".to_string(),
             profile_uri: None,
@@ -684,7 +684,7 @@ mod tests {
             metadata: None,
             extensions: Vec::new(),
         });
-        let resolved = resolve_media_urn("media:enc=utf-8", &registry)
+        let resolved = resolve_media_urn("media:enc=utf8", &registry)
             .await
             .unwrap();
         assert_eq!(resolved.media_type, "text/plain");
@@ -703,7 +703,7 @@ mod tests {
         });
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             version: 0,
-            urn: "media:fmt=json;output-spec;record".to_string(),
+            urn: "media:enc=utf8;fmt=json;output-spec;record".to_string(),
             media_type: "application/json".to_string(),
             title: "Output Spec".to_string(),
             profile_uri: Some("https://example.com/schema/output".to_string()),
@@ -715,7 +715,7 @@ mod tests {
             metadata: None,
             extensions: Vec::new(),
         });
-        let resolved = resolve_media_urn("media:fmt=json;output-spec;record", &registry)
+        let resolved = resolve_media_urn("media:enc=utf8;fmt=json;output-spec;record", &registry)
             .await
             .unwrap();
         assert_eq!(resolved.media_type, "application/json");
@@ -756,7 +756,7 @@ mod tests {
     #[test]
     fn test095_media_def_def_serialize() {
         let def = MediaDef {
-            urn: "media:fmt=json;test".to_string(),
+            urn: "media:enc=utf8;fmt=json;test".to_string(),
             media_type: "application/json".to_string(),
             title: "Test Media".to_string(),
             profile_uri: Some("https://example.com/profile".to_string()),
@@ -769,7 +769,7 @@ mod tests {
             extensions: Vec::new(),
         };
         let json = serde_json::to_string(&def).unwrap();
-        assert!(json.contains("\"urn\":\"media:fmt=json;test\""));
+        assert!(json.contains("\"urn\":\"media:enc=utf8;fmt=json;test\""));
         assert!(json.contains("\"media_type\":\"application/json\""));
         assert!(json.contains("\"profile_uri\":\"https://example.com/profile\""));
         assert!(json.contains("\"title\":\"Test Media\""));
@@ -783,9 +783,9 @@ mod tests {
     #[test]
     fn test096_media_def_def_deserialize() {
         let json =
-            r#"{"urn":"media:fmt=json;test","media_type":"application/json","title":"Test"}"#;
+            r#"{"urn":"media:enc=utf8;fmt=json;test","media_type":"application/json","title":"Test"}"#;
         let def: MediaDef = serde_json::from_str(json).unwrap();
-        assert_eq!(def.urn, "media:fmt=json;test");
+        assert_eq!(def.urn, "media:enc=utf8;fmt=json;test");
         assert_eq!(def.media_type, "application/json");
         assert_eq!(def.title, "Test");
         assert!(def.profile_uri.is_none());
@@ -799,13 +799,13 @@ mod tests {
     #[test]
     fn test097_validate_no_duplicate_urns_catches_duplicates() {
         let media_defs = vec![
-            MediaDef::new("media:dup;fmt=json", "application/json", "First"),
-            MediaDef::new("media:dup;fmt=json", "application/json", "Second"), // duplicate
+            MediaDef::new("media:dup;enc=utf8;fmt=json", "application/json", "First"),
+            MediaDef::new("media:dup;enc=utf8;fmt=json", "application/json", "Second"), // duplicate
         ];
         let result = validate_media_defs_no_duplicates(&media_defs);
         assert!(result.is_err());
         if let Err(MediaDefError::DuplicateMediaUrn(urn)) = result {
-            assert_eq!(urn, "media:dup;fmt=json");
+            assert_eq!(urn, "media:dup;enc=utf8;fmt=json");
         } else {
             panic!("Expected DuplicateMediaUrn error");
         }
@@ -815,8 +815,8 @@ mod tests {
     #[test]
     fn test098_validate_no_duplicate_urns_passes_for_unique() {
         let media_defs = vec![
-            MediaDef::new("media:first;fmt=json", "application/json", "First"),
-            MediaDef::new("media:fmt=json;second", "application/json", "Second"),
+            MediaDef::new("media:enc=utf8;first;fmt=json", "application/json", "First"),
+            MediaDef::new("media:enc=utf8;fmt=json;second", "application/json", "Second"),
         ];
         let result = validate_media_defs_no_duplicates(&media_defs);
         assert!(result.is_ok());
@@ -853,7 +853,7 @@ mod tests {
     #[test]
     fn test100_resolved_is_record() {
         let resolved = ResolvedMediaDef {
-            media_urn: "media:enc=utf-8;record".to_string(),
+            media_urn: "media:enc=utf8;record".to_string(),
             media_type: "application/json".to_string(),
             profile_uri: None,
             schema: None,
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn test101_resolved_is_scalar() {
         let resolved = ResolvedMediaDef {
-            media_urn: "media:enc=utf-8".to_string(),
+            media_urn: "media:enc=utf8".to_string(),
             media_type: "text/plain".to_string(),
             profile_uri: None,
             schema: None,
@@ -895,7 +895,7 @@ mod tests {
     #[test]
     fn test102_resolved_is_list() {
         let resolved = ResolvedMediaDef {
-            media_urn: "media:enc=utf-8;list".to_string(),
+            media_urn: "media:enc=utf8;list".to_string(),
             media_type: "application/json".to_string(),
             profile_uri: None,
             schema: None,
@@ -916,7 +916,7 @@ mod tests {
     #[test]
     fn test103_resolved_is_json() {
         let resolved = ResolvedMediaDef {
-            media_urn: "media:fmt=json;record".to_string(),
+            media_urn: "media:enc=utf8;fmt=json;record".to_string(),
             media_type: "application/json".to_string(),
             profile_uri: None,
             schema: None,
@@ -934,12 +934,12 @@ mod tests {
 
     // TEST104: Text-representability is now carried by the orthogonal `enc=` tag.
     // The old is_text()/is_binary() delegates on ResolvedMediaDef are gone; a media
-    // is text iff its URN declares an encoding. `media:enc=utf-8` is plain UTF-8
+    // is text iff its URN declares an encoding. `media:enc=utf8` is plain UTF-8
     // text — has enc, is not JSON.
     #[test]
     fn test104_resolved_is_text() {
         let resolved = ResolvedMediaDef {
-            media_urn: "media:enc=utf-8".to_string(),
+            media_urn: "media:enc=utf8".to_string(),
             media_type: "text/plain".to_string(),
             profile_uri: None,
             schema: None,
@@ -1095,7 +1095,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:custom-output;fmt=json".to_string(),
+            urn: "media:custom-output;enc=utf8;fmt=json".to_string(),
             media_type: "application/json".to_string(),
             title: "Custom Output".to_string(),
             profile_uri: Some("https://example.com/schema".to_string()),
@@ -1116,7 +1116,7 @@ mod tests {
             extensions: vec!["json".to_string()],
         });
 
-        let resolved = resolve_media_urn("media:custom-output;fmt=json", &registry)
+        let resolved = resolve_media_urn("media:custom-output;enc=utf8;fmt=json", &registry)
             .await
             .unwrap();
 
@@ -1168,7 +1168,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(crate::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:doc-test;enc=utf-8".to_string(),
+            urn: "media:doc-test;enc=utf8".to_string(),
             media_type: "text/plain".to_string(),
             title: "Documented".to_string(),
             profile_uri: None,
@@ -1180,7 +1180,7 @@ mod tests {
             extensions: Vec::new(),
         });
 
-        let resolved = resolve_media_urn("media:doc-test;enc=utf-8", &registry)
+        let resolved = resolve_media_urn("media:doc-test;enc=utf8", &registry)
             .await
             .unwrap();
         assert_eq!(

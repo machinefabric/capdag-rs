@@ -1026,7 +1026,7 @@ impl InputPackage {
 /// exact match — never a subsumption/pattern match.
 ///
 /// The `media_urn` parameter must be the FULL media URN from the cap arg
-/// definition (e.g., `"media:enc=utf-8;model-spec"`).
+/// definition (e.g., `"media:enc=utf8;model-spec"`).
 pub fn find_stream<'a>(
     streams: &'a [(String, Vec<u8>, Option<StreamMeta>)],
     media_urn: &str,
@@ -6192,7 +6192,7 @@ impl CartridgeRuntime {
         // Try default value.
         //
         // The wire contract for an arg stream is "bytes of the typed
-        // media URN". For a `media:enc=utf-8`-shaped arg that's plain
+        // media URN". For a `media:enc=utf8`-shaped arg that's plain
         // UTF-8 text — NOT a JSON-encoded form. A naive
         // `serde_json::to_vec(default)` would corrupt every string
         // default by wrapping it in `"…"`: a `default_value =
@@ -7847,7 +7847,7 @@ mod tests {
         let output = OutputStream::new(
             Arc::clone(&sender),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             rid.clone(),
             None,
             4,
@@ -8143,7 +8143,7 @@ mod tests {
         let output = OutputStream::new(
             Arc::clone(&sender),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             rid.clone(),
             None,
             4, // max_chunk: 4 bytes per chunk
@@ -8218,7 +8218,7 @@ mod tests {
             OutputStream::new(
                 Arc::clone(&sender),
                 "s1".to_string(),
-                "media:enc=utf-8".to_string(),
+                "media:enc=utf8".to_string(),
                 MessageId::new_uuid(),
                 None,
                 4,
@@ -8344,7 +8344,7 @@ mod tests {
             .send(Frame::stream_start_unbounded(
                 rid.clone(),
                 "live".to_string(),
-                "media:enc=utf-8".to_string(),
+                "media:enc=utf8".to_string(),
                 Some(true),
             ))
             .unwrap();
@@ -8612,7 +8612,7 @@ mod tests {
             // Producer stays open — an unbounded collect would hang forever;
             // the guard must reject BEFORE consuming.
             let stream = InputStream {
-                media_urn: "media:enc=utf-8".to_string(),
+                media_urn: "media:enc=utf8".to_string(),
                 stream_meta: None,
                 rx: InputRx::Unbounded(rx),
                 unbounded: true,
@@ -8640,7 +8640,7 @@ mod tests {
     /// with the SYNTHETIC reference URN, is_sequence (a feed is a sequence
     /// of items), and a stdin source carrying the CONTENT urn — the exact
     /// file-path reference shape, unbounded.
-    const LIVE_FEED_MANIFEST: &str = r#"{"name":"FeedCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Live feed test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases":["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:drain;in=\"media:feed-frames\";out=\"media:fmt=json;record\"","title":"Drain","aliases":["drain"],"args":[{"media_urn":"media:live;synthetic","name":"input","required":true,"is_sequence":true,"sources":[{"stdin":"media:feed-frames"}]}],"outputs":[{"media_urn":"media:fmt=json;record","name":"output","output_description":"The output"}]}]}]}"#;
+    const LIVE_FEED_MANIFEST: &str = r#"{"name":"FeedCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Live feed test cartridge","cap_groups":[{"name":"default","caps":[{"urn":"cap:effect=none","title":"Identity","aliases":["identity"],"args":[{"media_urn":"media:","name":"input","required":true,"sources":[{"stdin":"media:"}]}],"outputs":[{"media_urn":"media:","name":"output","output_description":"The output"}]},{"urn":"cap:drain;in=\"media:feed-frames\";out=\"media:enc=utf8;fmt=json;record\"","title":"Drain","aliases":["drain"],"args":[{"media_urn":"media:live;synthetic","name":"input","required":true,"is_sequence":true,"sources":[{"stdin":"media:feed-frames"}]}],"outputs":[{"media_urn":"media:enc=utf8;fmt=json;record","name":"output","output_description":"The output"}]}]}]}"#;
 
     fn live_feed_ctx(
         selector_arg_is_sequence: bool,
@@ -8660,7 +8660,7 @@ mod tests {
         let handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>> =
             Arc::new(Mutex::new(Vec::new()));
         let ctx = LiveFeedContext::new(
-            "cap:drain;in=\"media:feed-frames\";out=\"media:fmt=json;record\"",
+            "cap:drain;in=\"media:feed-frames\";out=\"media:enc=utf8;fmt=json;record\"",
             Some(manifest),
             Arc::clone(&overruns),
             Arc::clone(&handles),
@@ -8751,7 +8751,7 @@ mod tests {
         Arc<std::sync::atomic::AtomicU64>,
         Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>,
     ) {
-        let cap_urn = format!("cap:consume;in=\"{main_in}\";out=\"media:fmt=json;record\"");
+        let cap_urn = format!("cap:consume;in=\"{main_in}\";out=\"media:enc=utf8;fmt=json;record\"");
         let manifest_json = format!(
             r#"{{"name":"BlindCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Transport-blind live consumer","cap_groups":[{{"name":"default","caps":[{{"urn":"{}","title":"Consume","aliases":["consume"],"args":[{{"media_urn":"{main_in}","name":"input","required":true,"is_sequence":true,"sources":[{{"stdin":"{main_in}"}}]}}]}}]}}]}}"#,
             cap_urn.replace('"', "\\\"")
@@ -9073,7 +9073,7 @@ mod tests {
         let ss = Frame::stream_start(
             rid.clone(),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         );
         raw_tx.send(ss).unwrap();
@@ -9158,7 +9158,7 @@ mod tests {
             .send(Frame::stream_start(
                 rid.clone(),
                 "s1".to_string(),
-                "media:enc=utf-8".to_string(),
+                "media:enc=utf8".to_string(),
                 Some(false),
             ))
             .unwrap();
@@ -9246,7 +9246,7 @@ mod tests {
         let ss = Frame::stream_start(
             rid.clone(),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         );
         raw_tx.send(ss).unwrap();
@@ -9628,7 +9628,7 @@ mod tests {
             ));
 
             registry.add_cap(create_test_cap(
-                r#"cap:in="media:enc=utf-8;string";test;out=media:"#,
+                r#"cap:in="media:enc=utf8;string";test;out=media:"#,
                 "Test String",
                 "test",
                 vec![],
@@ -9642,7 +9642,7 @@ mod tests {
             ));
 
             registry.add_cap(create_test_cap(
-                r#"cap:in="media:enc=utf-8;model-spec";infer;out=media:"#,
+                r#"cap:in="media:enc=utf8;model-spec";infer;out=media:"#,
                 "Infer",
                 "infer",
                 vec![],
@@ -10107,11 +10107,11 @@ mod tests {
     // TEST261: Test extract_effective_payload with CBOR content extracts matching argument value
     #[test]
     fn test261_extract_effective_payload_cbor_match() {
-        // Build CBOR arguments: [{media_urn: "media:enc=utf-8;string", value: bytes("hello")}]
+        // Build CBOR arguments: [{media_urn: "media:enc=utf8;string", value: bytes("hello")}]
         let args = ciborium::Value::Array(vec![ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;string".to_string()),
+                ciborium::Value::Text("media:enc=utf8;string".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -10121,10 +10121,10 @@ mod tests {
         let mut payload = Vec::new();
         ciborium::into_writer(&args, &mut payload).unwrap();
 
-        // The cap URN has in=media:enc=utf-8;string
+        // The cap URN has in=media:enc=utf8;string
         let registry = MockRegistry::with_test_caps();
         let cap = registry
-            .get(r#"cap:in="media:enc=utf-8;string";test;out=media:"#)
+            .get(r#"cap:in="media:enc=utf8;string";test;out=media:"#)
             .unwrap();
         let result = extract_effective_payload(
             &payload,
@@ -10181,7 +10181,7 @@ mod tests {
 
         let registry = MockRegistry::with_test_caps();
         let cap = registry
-            .get(r#"cap:in="media:enc=utf-8;string";test;out=media:"#)
+            .get(r#"cap:in="media:enc=utf8;string";test;out=media:"#)
             .unwrap();
         let result = extract_effective_payload(
             &payload,
@@ -10375,7 +10375,7 @@ mod tests {
             ciborium::Value::Map(vec![
                 (
                     ciborium::Value::Text("media_urn".to_string()),
-                    ciborium::Value::Text("media:enc=utf-8;other-type".to_string()),
+                    ciborium::Value::Text("media:enc=utf8;other-type".to_string()),
                 ),
                 (
                     ciborium::Value::Text("value".to_string()),
@@ -10385,7 +10385,7 @@ mod tests {
             ciborium::Value::Map(vec![
                 (
                     ciborium::Value::Text("media_urn".to_string()),
-                    ciborium::Value::Text("media:enc=utf-8;model-spec".to_string()),
+                    ciborium::Value::Text("media:enc=utf8;model-spec".to_string()),
                 ),
                 (
                     ciborium::Value::Text("value".to_string()),
@@ -10398,7 +10398,7 @@ mod tests {
 
         let registry = MockRegistry::with_test_caps();
         let cap = registry
-            .get(r#"cap:in="media:enc=utf-8;model-spec";infer;out=media:"#)
+            .get(r#"cap:in="media:enc=utf8;model-spec";infer;out=media:"#)
             .unwrap();
         let result = extract_effective_payload(
             &payload,
@@ -10423,7 +10423,7 @@ mod tests {
         );
 
         // Find the argument matching in_spec (media:model-spec)
-        let in_spec = MediaUrn::from_string("media:enc=utf-8;model-spec").unwrap();
+        let in_spec = MediaUrn::from_string("media:enc=utf8;model-spec").unwrap();
         let mut found_value = None;
         for arg in result_array {
             if let ciborium::Value::Map(map) = arg {
@@ -10536,7 +10536,7 @@ mod tests {
             "Process PDF",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10610,7 +10610,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "arg0",
+                "media:enc=utf8;file-path", "arg0",
                 true,
                 vec![ArgSource::Position { position: 0 }], // NO stdin source!
             )],
@@ -10650,7 +10650,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10697,7 +10697,7 @@ mod tests {
         std::fs::write(&file2, b"content2").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -10739,7 +10739,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10762,7 +10762,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -10806,7 +10806,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10855,7 +10855,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10883,15 +10883,15 @@ mod tests {
     fn test343_non_file_path_args_unaffected() {
         // Arg with different media type should NOT trigger file reading
         let cap = create_test_cap(
-            "cap:in=\"media:enc=utf-8;model-spec\";test;out=media:void",
+            "cap:in=\"media:enc=utf8;model-spec\";test;out=media:void",
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;model-spec", "input", // NOT file-path
+                "media:enc=utf8;model-spec", "input", // NOT file-path
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:enc=utf-8;model-spec".to_string(),
+                        stdin: "media:enc=utf8;model-spec".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -10921,7 +10921,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -10945,7 +10945,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -10984,7 +10984,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11008,7 +11008,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11054,7 +11054,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11092,7 +11092,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11130,7 +11130,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Position { position: 0 }, // First
@@ -11176,7 +11176,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::CliFlag {
@@ -11234,11 +11234,11 @@ mod tests {
         std::fs::write(&test_file, test_content).unwrap();
 
         let cap = create_test_cap(
-            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf-8;result\"",
+            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf8;result\"",
             "Process PDF",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11257,7 +11257,7 @@ mod tests {
         let received_clone = Arc::clone(&received_payload);
 
         runtime.register_op(
-            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf-8;result\"",
+            "cap:in=\"media:document;ext=pdf\";process;out=\"media:enc=utf8;result\"",
             move || {
                 Box::new(ExtractValueOp {
                     received: Arc::clone(&received_clone),
@@ -11302,7 +11302,7 @@ mod tests {
     #[test]
     fn test6588_file_path_array_empty_array() {
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             false, // Not required
             vec![ArgSource::Stdin {
                 stdin: "media:".to_string(),
@@ -11320,7 +11320,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11393,7 +11393,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11417,7 +11417,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11448,15 +11448,15 @@ mod tests {
     #[test]
     fn test353_cbor_payload_format_consistency() {
         let cap = create_test_cap(
-            "cap:in=\"media:enc=utf-8;text\";test;out=\"media:void\"",
+            "cap:in=\"media:enc=utf8;text\";test;out=\"media:void\"",
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;text", "input",
+                "media:enc=utf8;text", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
-                        stdin: "media:enc=utf-8;text".to_string(),
+                        stdin: "media:enc=utf8;text".to_string(),
                     },
                     ArgSource::Position { position: 0 },
                 ],
@@ -11495,7 +11495,7 @@ mod tests {
             .expect("Should have media_urn key");
 
         match media_urn_val {
-            ciborium::Value::Text(s) => assert_eq!(s, "media:enc=utf-8;text"),
+            ciborium::Value::Text(s) => assert_eq!(s, "media:enc=utf8;text"),
             _ => panic!("media_urn should be text"),
         }
 
@@ -11525,7 +11525,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11550,7 +11550,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11588,7 +11588,7 @@ mod tests {
         std::fs::write(&file1, b"content1").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -11641,7 +11641,7 @@ mod tests {
         std::fs::write(&file2, b"json").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![
                 ArgSource::Stdin {
@@ -11670,7 +11670,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11751,7 +11751,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11797,7 +11797,7 @@ mod tests {
             "Test",
             "test",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11827,7 +11827,7 @@ mod tests {
             "Test",
             "batch",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -11848,7 +11848,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -11888,7 +11888,7 @@ mod tests {
             "Process",
             "process",
             vec![CapArg::new(
-                "media:enc=utf-8;file-path", "input",
+                "media:enc=utf8;file-path", "input",
                 true,
                 vec![
                     ArgSource::Stdin {
@@ -12263,7 +12263,7 @@ mod tests {
         std::fs::write(&file3, b"content3").unwrap();
 
         let mut batch_arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:".to_string(),
@@ -12282,7 +12282,7 @@ mod tests {
         let arg = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Text("media_urn".to_string()),
-                ciborium::Value::Text("media:enc=utf-8;file-path".to_string()),
+                ciborium::Value::Text("media:enc=utf8;file-path".to_string()),
             ),
             (
                 ciborium::Value::Text("value".to_string()),
@@ -12952,11 +12952,11 @@ mod tests {
         }
     }
 
-    const SERIES: &str = "media:enc=utf-8;series";
-    const FIT: &str = "media:fmt=json;record;regression";
-    const RESIDUALS: &str = "media:fmt=json;list;record;residual";
-    const NOTE: &str = "media:enc=utf-8;note";
-    const REJECTED: &str = "media:enc=utf-8;rejected";
+    const SERIES: &str = "media:enc=utf8;series";
+    const FIT: &str = "media:enc=utf8;fmt=json;record;regression";
+    const RESIDUALS: &str = "media:enc=utf8;fmt=json;list;record;residual";
+    const NOTE: &str = "media:enc=utf8;note";
+    const REJECTED: &str = "media:enc=utf8;rejected";
 
     /// A cap with four outputs: the main one, a required sequence, an optional
     /// one, and an optional one that carries the input's type unchanged.
@@ -13043,10 +13043,10 @@ mod tests {
 
         // The main output is the one whose URN is `out=`, wherever it is declared.
         assert!(std::ptr::eq(req.output(), req.output_for(FIT).unwrap()));
-        assert!(std::ptr::eq(req.output(), req.output_for("media:regression;record;fmt=json").unwrap()));
+        assert!(std::ptr::eq(req.output(), req.output_for("media:regression;record;fmt=json;enc=utf8").unwrap()));
         // Another output, with its tags in another order, is the same stream.
         let residuals = req.output_for(RESIDUALS).unwrap();
-        assert!(std::ptr::eq(residuals, req.output_for("media:residual;record;list;fmt=json").unwrap()));
+        assert!(std::ptr::eq(residuals, req.output_for("media:residual;record;list;fmt=json;enc=utf8").unwrap()));
         assert!(!std::ptr::eq(residuals, req.output()));
 
         for (urn, sequence) in [(FIT, false), (RESIDUALS, true), (NOTE, false), (REJECTED, false)] {
@@ -13079,7 +13079,7 @@ mod tests {
 
         // What the cap does not declare is not an output of it — a tag short
         // or a tag more is another URN.
-        for unknown in ["media:enc=utf-8", "media:fmt=json;record", "media:enc=utf-8;note;extra", "not a urn"] {
+        for unknown in ["media:enc=utf8", "media:enc=utf8;fmt=json;record", "media:enc=utf8;note;extra", "not a urn"] {
             match req.output_for(unknown) {
                 Err(RuntimeError::UnknownOutput { cap_urn, output }) => {
                     assert_eq!(cap_urn, cap.urn_string());
@@ -13212,24 +13212,24 @@ mod tests {
         assert!(frames.lock().unwrap().iter().all(|f| f.frame_type != FrameType::StreamEnd));
 
         // A cap whose `out=` is void has no output: nothing is opened for it.
-        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";sink;out=media:void"#, None);
+        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf8";sink;out=media:void"#, None);
         dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         assert!(frames.lock().unwrap().is_empty());
 
         // The main output's label follows the cap's effect, and is not its
         // name: a cap that passes its input through labels the stream with the
         // input's type and names the output its `out=`.
-        let pass = r#"cap:effect=none;in="media:enc=utf-8;line";out="media:enc=utf-8";pass"#;
+        let pass = r#"cap:effect=none;in="media:enc=utf8;line";out="media:enc=utf8";pass"#;
         let (outputs, frames) = recorded_outputs(pass, None);
         dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, None, "the main output's stream names no output");
         assert_eq!(sent[0].1, derive_response_media(pass).unwrap());
-        assert_ne!(sent[0].1, "media:enc=utf-8", "the label is the input's type: {}", sent[0].1);
+        assert_ne!(sent[0].1, "media:enc=utf8", "the label is the input's type: {}", sent[0].1);
 
         // A cap served without a definition answers on the one output its URN states.
-        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf-8";count;out="media:integer""#, None);
+        let (outputs, frames) = recorded_outputs(r#"cap:in="media:enc=utf8";count;out="media:integer""#, None);
         dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
@@ -13241,9 +13241,9 @@ mod tests {
             let out = urn.out_spec().to_string();
             let mut cap = Cap::new(urn, name.to_string(), vec![name.to_string()]);
             cap.add_arg(CapArg::new(
-                "media:enc=utf-8", "input",
+                "media:enc=utf8", "input",
                 true,
-                vec![ArgSource::Stdin { stdin: "media:enc=utf-8".to_string() }],
+                vec![ArgSource::Stdin { stdin: "media:enc=utf8".to_string() }],
             ));
             cap.add_output(declare(crate::cap::definition::CapOutput::new(&out, "made", "What it makes")));
             crate::cap::validation::validate_cap_definition(&cap).expect("the fixture is a valid definition");
@@ -13252,7 +13252,7 @@ mod tests {
         };
         // A main output declared a sequence, that nobody wrote to, is an
         // empty sequence.
-        let (listing, manifest) = one_output(r#"cap:in="media:enc=utf-8";list;out="media:enc=utf-8;line""#, "list", &|mut output| {
+        let (listing, manifest) = one_output(r#"cap:in="media:enc=utf8";list;out="media:enc=utf8;line""#, "list", &|mut output| {
             output.is_sequence = true;
             output
         });
@@ -13263,7 +13263,7 @@ mod tests {
         assert_eq!((sent[0].0.as_deref(), sent[0].2), (None, Some(true)));
         // A main output its definition declares optional is not sent when
         // nobody wrote to it.
-        let (maybe, manifest) = one_output(r#"cap:in="media:enc=utf-8";maybe;out="media:integer""#, "maybe", &|output| output.optional(true));
+        let (maybe, manifest) = one_output(r#"cap:in="media:enc=utf8";maybe;out="media:integer""#, "maybe", &|output| output.optional(true));
         let (outputs, frames) = recorded_outputs(&maybe.urn_string(), Some(&manifest));
         dispatch_op(Box::new(Silent), empty_input(), outputs, peer(), full_network()).await.unwrap();
         assert!(frames.lock().unwrap().is_empty());
@@ -13297,13 +13297,13 @@ mod tests {
             credit_router: None,
             initial_credit: 0,
         };
-        let arg = call.arg("media:enc=utf-8;prompt");
+        let arg = call.arg("media:enc=utf8;prompt");
         assert_eq!(arg.output_urn(), None);
         arg.start(false, None).unwrap();
         let sent = starts(&frames);
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, None, "an argument stream does not carry key 21");
-        assert_eq!(sent[0].1, "media:enc=utf-8;prompt");
+        assert_eq!(sent[0].1, "media:enc=utf8;prompt");
     }
 
     // TEST12731: a request stream names no output: an argument is identified
@@ -13320,7 +13320,7 @@ mod tests {
         };
         let feed = |named: Option<&str>| {
             let (tx, rx) = crossbeam_channel::unbounded();
-            let mut start = Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None);
+            let mut start = Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf8".into(), None);
             if let Some(output) = named {
                 start = start.for_output(output);
             }
@@ -13340,10 +13340,10 @@ mod tests {
 
         // The same stream naming an output: a response stream where an
         // argument belongs.
-        let mut named = feed(Some("media:enc=utf-8;kept"));
+        let mut named = feed(Some("media:enc=utf8;kept"));
         match named.recv().await {
             Some(Err(StreamError::Protocol(message))) => {
-                assert!(message.contains("names an output") && message.contains("media:enc=utf-8;kept"), "{message}");
+                assert!(message.contains("names an output") && message.contains("media:enc=utf8;kept"), "{message}");
             }
             other => panic!("expected a protocol error, got {:?}", other.map(|r| r.map(|_| ()))),
         }
@@ -13357,9 +13357,9 @@ mod tests {
     #[test]
     fn test12722_standard_output_carries_the_main_output() {
         let rid = MessageId::new_uuid();
-        let main = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf-8".to_string(), Some(false));
-        let other = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf-8".to_string(), Some(false))
-            .for_output("media:enc=utf-8;dropped");
+        let main = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf8".to_string(), Some(false));
+        let other = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf8".to_string(), Some(false))
+            .for_output("media:enc=utf8;dropped");
         let sender = CliFrameSender::with_emitter(CliStreamEmitter::without_ndjson());
         assert!(!sender.is_unprinted_start(&main));
         assert!(sender.is_unprinted_start(&other));
@@ -13403,10 +13403,10 @@ mod tests {
             vec![
                 // The other output starts first, ends first, and carries the
                 // same type as the main one.
-                Frame::stream_start(rid.clone(), "rest".into(), "media:enc=utf-8".into(), Some(false))
-                    .for_output("media:enc=utf-8;split-rest"),
+                Frame::stream_start(rid.clone(), "rest".into(), "media:enc=utf8".into(), Some(false))
+                    .for_output("media:enc=utf8;split-rest"),
                 value_chunk(&rid, "rest", 0, text("R1")),
-                Frame::stream_start(rid.clone(), "head".into(), "media:enc=utf-8".into(), Some(false)),
+                Frame::stream_start(rid.clone(), "head".into(), "media:enc=utf8".into(), Some(false)),
                 value_chunk(&rid, "head", 0, text("H1")),
                 value_chunk(&rid, "rest", 1, text("R2")),
                 Frame::stream_end(rid.clone(), "rest".into(), 2),
@@ -13438,7 +13438,7 @@ mod tests {
                 other => panic!("unexpected item: {:?}", std::mem::discriminant(&other)),
             }
         }
-        let rest = "media:enc=utf-8;split-rest".to_string();
+        let rest = "media:enc=utf8;split-rest".to_string();
         assert_eq!(
             seen,
             vec![
@@ -13483,7 +13483,7 @@ mod tests {
             demux_peer_response(rx, None)
         };
         let start = |stream: &str, sequence: bool| {
-            Frame::stream_start(rid.clone(), stream.into(), "media:enc=utf-8".into(), Some(sequence))
+            Frame::stream_start(rid.clone(), stream.into(), "media:enc=utf8".into(), Some(sequence))
         };
 
         // A chunk for a stream that was never started is not data of any
@@ -13551,7 +13551,7 @@ mod tests {
         };
         mismatch(feed_frames(broken()).collect_bytes().await.map(|_| ()));
         mismatch(feed_frames(broken()).collect_value().await.map(|_| ()));
-        let (forward_to, _) = recorded_outputs(r#"cap:in="media:enc=utf-8";count;out="media:integer""#, None);
+        let (forward_to, _) = recorded_outputs(r#"cap:in="media:enc=utf8";count;out="media:integer""#, None);
         mismatch(
             feed_frames(broken())
                 .collect_bytes_forwarding(forward_to.main(), 0.0, 1.0)
@@ -14285,12 +14285,12 @@ mod tests {
     #[test]
     fn test678_find_stream_equivalent_urn_different_tag_order() {
         let streams = vec![(
-            "media:fmt=json;llm-generation-request;record".to_string(),
+            "media:enc=utf8;fmt=json;llm-generation-request;record".to_string(),
             b"data".to_vec(),
             None,
         )];
         // Tags in different order — is_equivalent is order-independent
-        let found = super::find_stream(&streams, "media:fmt=json;llm-generation-request;record");
+        let found = super::find_stream(&streams, "media:enc=utf8;fmt=json;llm-generation-request;record");
         assert!(
             found.is_some(),
             "Same tags in different order must match via is_equivalent"
@@ -14301,7 +14301,7 @@ mod tests {
     // TEST679: find_stream with base URN vs full URN fails — is_equivalent is strict
     // This is the root cause of the cartridge_client.rs bug. Sender sent
     // "media:llm-generation-request" but receiver looked for
-    // "media:fmt=json;llm-generation-request;record".
+    // "media:enc=utf8;fmt=json;llm-generation-request;record".
     #[test]
     fn test679_find_stream_base_urn_does_not_match_full_urn() {
         let streams = vec![(
@@ -14309,7 +14309,7 @@ mod tests {
             b"data".to_vec(),
             None,
         )];
-        let found = super::find_stream(&streams, "media:fmt=json;llm-generation-request;record");
+        let found = super::find_stream(&streams, "media:enc=utf8;fmt=json;llm-generation-request;record");
         assert!(
             found.is_none(),
             "Base URN without tags must NOT match full URN with tags"
@@ -14320,16 +14320,16 @@ mod tests {
     #[test]
     fn test680_require_stream_missing_urn_returns_error() {
         let streams = vec![(
-            "media:enc=utf-8;model-spec".to_string(),
+            "media:enc=utf8;model-spec".to_string(),
             b"gpt-4".to_vec(),
             None,
         )];
         let result =
-            super::require_stream(&streams, "media:fmt=json;llm-generation-request;record");
+            super::require_stream(&streams, "media:enc=utf8;fmt=json;llm-generation-request;record");
         assert!(result.is_err(), "Missing stream must fail hard");
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("media:fmt=json;llm-generation-request;record"),
+            err.contains("media:enc=utf8;fmt=json;llm-generation-request;record"),
             "Error must name the missing media URN, got: {}",
             err
         );
@@ -14340,12 +14340,12 @@ mod tests {
     fn test681_find_stream_multiple_streams_returns_correct() {
         let streams = vec![
             (
-                "media:enc=utf-8;model-spec".to_string(),
+                "media:enc=utf8;model-spec".to_string(),
                 b"gpt-4".to_vec(),
                 None,
             ),
             (
-                "media:fmt=json;llm-generation-request;record".to_string(),
+                "media:enc=utf8;fmt=json;llm-generation-request;record".to_string(),
                 b"{\"prompt\":\"test\"}".to_vec(),
                 None,
             ),
@@ -14355,7 +14355,7 @@ mod tests {
                 None,
             ),
         ];
-        let found = super::find_stream(&streams, "media:fmt=json;llm-generation-request;record");
+        let found = super::find_stream(&streams, "media:enc=utf8;fmt=json;llm-generation-request;record");
         assert!(found.is_some());
         assert_eq!(found.unwrap(), b"{\"prompt\":\"test\"}");
     }
@@ -14363,8 +14363,8 @@ mod tests {
     // TEST682: require_stream_str returns UTF-8 string for text data
     #[test]
     fn test682_require_stream_str_returns_utf8() {
-        let streams = vec![("media:enc=utf-8".to_string(), b"hello world".to_vec(), None)];
-        let result = super::require_stream_str(&streams, "media:enc=utf-8");
+        let streams = vec![("media:enc=utf8".to_string(), b"hello world".to_vec(), None)];
+        let result = super::require_stream_str(&streams, "media:enc=utf8");
         assert_eq!(result.unwrap(), "hello world");
     }
 
@@ -14586,7 +14586,7 @@ mod tests {
         let stream = OutputStream::new(
             Arc::new(sender),
             "stream-1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             MessageId::new_uuid(),
             None,
             256_000,
@@ -14629,7 +14629,7 @@ mod tests {
         let stream = OutputStream::new(
             Arc::new(sender),
             "stream-1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             MessageId::new_uuid(),
             None,
             256_000,
@@ -14695,7 +14695,7 @@ mod tests {
         // A request's input, closed mid-stream.
         let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
         raw_tx
-            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None))
+            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf8".into(), None))
             .unwrap();
         raw_tx.send(chunk.clone()).unwrap();
         let mut package = demux_multi_stream(raw_rx, None, None, None);
@@ -14715,7 +14715,7 @@ mod tests {
         // The same input with its END is a stream that finished.
         let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
         raw_tx
-            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf-8".into(), None))
+            .send(Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf8".into(), None))
             .unwrap();
         raw_tx.send(chunk.clone()).unwrap();
         raw_tx.send(Frame::stream_end(rid.clone(), "arg0".into(), 1)).unwrap();
@@ -14729,7 +14729,7 @@ mod tests {
 
         // A peer response, closed before its END.
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tx.send(Frame::stream_start(rid.clone(), "r".into(), "media:enc=utf-8".into(), None)).unwrap();
+        tx.send(Frame::stream_start(rid.clone(), "r".into(), "media:enc=utf8".into(), None)).unwrap();
         tx.send(Frame::chunk(rid.clone(), "r".into(), 0, payload.clone(), 0, Frame::compute_checksum(&payload)))
             .unwrap();
         drop(tx);
@@ -14763,7 +14763,7 @@ mod tests {
             crate::CapUrnBuilder::new()
                 .marker("drain-feed")
                 .in_spec("media:feed-frames")
-                .out_spec("media:feed-summary;fmt=json;record")
+                .out_spec("media:enc=utf8;feed-summary;fmt=json;record")
                 .build()
                 .unwrap(),
             "Drain Live Feed".to_string(),

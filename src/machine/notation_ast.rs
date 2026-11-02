@@ -1744,7 +1744,7 @@ mod tests {
     // TEST8000: Parsing a simple header and wiring produces a valid AST with both statements.
     #[test]
     fn test8000_parse_simple_header_and_wiring() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
 
@@ -1791,7 +1791,7 @@ mod tests {
     #[test]
     fn test8003_loop_keyword_is_not_grammar() {
         let input = concat!(
-            r#"[p2t cap:in="media:page";page-to-text;out="media:ext=txt"]"#,
+            r#"[p2t cap:in="media:page";page-to-text;out="media:ext=txt;plain-text"]"#,
             "\n[pages -> LOOP p2t -> texts]"
         );
         let ast = parse_notation_ast(input);
@@ -1807,7 +1807,7 @@ mod tests {
     #[test]
     fn test8004_parse_fan_in_group() {
         let input = concat!(
-            r#"[describe cap:in="media:ext=png;image";describe;out="media:ext=txt"]"#,
+            r#"[describe cap:in="media:ext=png;image";describe;out="media:ext=txt;plain-text"]"#,
             "\n[(thumbnail, model_spec) -> describe -> description]"
         );
         let ast = parse_notation_ast(input);
@@ -1879,7 +1879,7 @@ mod tests {
     // TEST8010: Semantic token generation marks the expected token kinds for simple notation.
     #[test]
     fn test8010_semantic_tokens_simple() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
         let tokens = emit_semantic_tokens(&ast, input);
@@ -1950,7 +1950,7 @@ mod tests {
     // TEST8011: Editor model hover metadata resolves correctly for an alias definition.
     #[test]
     fn test8011_editor_model_entity_hover_for_alias_definition() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
         let (entities, _) =
@@ -1972,7 +1972,7 @@ mod tests {
     // TEST8012: Editor model hover metadata resolves correctly for a wiring source node reference.
     #[test]
     fn test8012_editor_model_entity_hover_for_wiring_source_node() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
         let (entities, _) =
@@ -1997,7 +1997,7 @@ mod tests {
         let input = concat!(
             r#"[disbind cap:in="media:document;ext=pdf";disbind;out="media:page"]"#,
             "\n",
-            r#"[p2t cap:in="media:page";page-to-text;out="media:ext=txt"]"#,
+            r#"[p2t cap:in="media:page";page-to-text;out="media:ext=txt;plain-text"]"#,
             "\n[doc -> disbind -> pages]\n[pages -> p2t -> texts]"
         );
         let ast = parse_notation_ast(input);
@@ -2007,7 +2007,7 @@ mod tests {
         // keys `build_editor_model` looks up.
         let definitions = definitions_of(&ast, &[
             ("disbind", "media:document;ext=pdf", false, "media:page", true),
-            ("p2t", "media:page", false, "media:ext=txt", false),
+            ("p2t", "media:page", false, "media:ext=txt;plain-text", false),
         ]);
 
         let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &definitions);
@@ -2068,7 +2068,7 @@ mod tests {
     #[test]
     fn test12880_named_members_and_targets_are_typed_from_the_definitions() {
         let input = concat!(
-            r#"[render cap:in="media:enc=utf-8;ext=txt";out="media:ext=png;image";render]"#,
+            r#"[render cap:in="media:enc=utf8;ext=txt;plain-text";out="media:ext=png;image";render]"#,
             "\n",
             r#"[jpeg cap:in="media:ext=png;image";out="media:ext=jpeg;image";to-jpeg]"#,
             "\n[(input=n0) -> render -> (output=n1)]\n[(input=n1) -> jpeg -> (output=n2)]"
@@ -2076,7 +2076,7 @@ mod tests {
         let ast = parse_notation_ast(input);
         assert!(ast.error.is_none(), "got: {:?}", ast.error);
         let definitions = definitions_of(&ast, &[
-            ("render", "media:enc=utf-8;ext=txt", false, "media:ext=png;image", true),
+            ("render", "media:enc=utf8;ext=txt;plain-text", false, "media:ext=png;image", true),
             ("jpeg", "media:ext=png;image", false, "media:ext=jpeg;image", false),
         ]);
 
@@ -2089,7 +2089,7 @@ mod tests {
         };
         let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &definitions);
         let urn = |name: &str| node(&graph, name).linked_media_urn.map(|u| MediaUrn::from_string(&u).unwrap());
-        assert!(urn("n0").unwrap().is_equivalent(&MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap()).unwrap());
+        assert!(urn("n0").unwrap().is_equivalent(&MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap()).unwrap());
         assert!(urn("n1").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=png;image").unwrap()).unwrap());
         assert!(urn("n2").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap()).unwrap());
         assert_eq!(node(&graph, "n1").is_sequence, Some(true), "a named target takes its output's cardinality");
@@ -2107,7 +2107,7 @@ mod tests {
     // TEST8014: The editor model graph includes the expected nodes and edges from parsed notation.
     #[test]
     fn test8014_editor_model_graph_contains_nodes_and_edges() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
         let (_, graph) =
@@ -2137,7 +2137,7 @@ mod tests {
     // TEST8015: Cap alias tokens and arrow tokens share the same graph token identity for the cap.
     #[test]
     fn test8015_editor_model_cap_alias_and_arrows_share_token_id_with_graph_cap() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:ext=txt;plain-text"]
 [doc -> extract -> text]"#;
         let ast = parse_notation_ast(input);
         let (entities, graph) =
@@ -2234,7 +2234,7 @@ mod tests {
     // TEST8017: Parsing line-based headers and wirings produces the expected AST.
     #[test]
     fn test8017_parse_line_based_header_and_wiring() {
-        let input = r#"extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"
+        let input = r#"extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text"
 doc -> extract -> text"#;
         let ast = parse_notation_ast(input);
 
@@ -2252,7 +2252,7 @@ doc -> extract -> text"#;
     // TEST8018: Parsing mixed bracketed and line-based notation works within the same document.
     #[test]
     fn test8018_parse_mixed_bracketed_and_line_based() {
-        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
+        let input = r#"[extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text"]
 doc -> extract -> text"#;
         let ast = parse_notation_ast(input);
 
@@ -2306,7 +2306,7 @@ doc -> extract -> text"#;
     // TEST8026: Semantic tokens are produced correctly for line-based notation without brackets.
     #[test]
     fn test8026_line_based_semantic_tokens_no_brackets() {
-        let input = r#"extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"
+        let input = r#"extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text"
 doc -> extract -> text"#;
         let ast = parse_notation_ast(input);
         let tokens = emit_semantic_tokens(&ast, input);

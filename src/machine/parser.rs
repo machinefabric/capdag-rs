@@ -1318,15 +1318,15 @@ mod tests {
 
     fn pdf_extract_embed_registry() -> FabricRegistry {
         let extract = build_cap(
-            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let embed = build_cap(
-            "cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"",
+            "cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"",
             "embed",
-            &["media:enc=utf-8"],
+            &["media:enc=utf8"],
             "media:vec;record",
         );
         registry_with(vec![extract, embed])
@@ -1337,8 +1337,8 @@ mod tests {
     fn test1163_parse_single_strand_two_caps_connected_via_shared_node() {
         let registry = pdf_extract_embed_registry();
         let notation = "\
-[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
-[embed cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"]\
+[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
+[embed cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"]\
 [doc -> extract -> txt]\
 [txt -> embed -> vec]";
         let machine = parse_machine(notation, &registry).expect("must parse");
@@ -1361,21 +1361,21 @@ mod tests {
         // partition them into two `MachineStrand`s and order
         // them by first appearance in the textual input.
         let convert_a = build_cap(
-            "cap:convert-a;in=\"media:fmt=json\";out=\"media:fmt=csv\"",
+            "cap:convert-a;in=\"media:enc=utf8;fmt=json\";out=\"media:enc=utf8;fmt=csv\"",
             "convert_a",
-            &["media:fmt=json"],
-            "media:fmt=csv",
+            &["media:enc=utf8;fmt=json"],
+            "media:enc=utf8;fmt=csv",
         );
         let convert_b = build_cap(
-            "cap:convert-b;in=\"media:ext=html\";out=\"media:ext=txt\"",
+            "cap:convert-b;in=\"media:ext=html\";out=\"media:ext=txt;plain-text\"",
             "convert_b",
             &["media:ext=html"],
-            "media:ext=txt",
+            "media:ext=txt;plain-text",
         );
         let registry = registry_with(vec![convert_a, convert_b]);
         let notation = "\
-[ca cap:convert-a;in=\"media:fmt=json\";out=\"media:fmt=csv\"]\
-[cb cap:convert-b;in=\"media:ext=html\";out=\"media:ext=txt\"]\
+[ca cap:convert-a;in=\"media:enc=utf8;fmt=json\";out=\"media:enc=utf8;fmt=csv\"]\
+[cb cap:convert-b;in=\"media:ext=html\";out=\"media:ext=txt;plain-text\"]\
 [input_a -> ca -> output_a]\
 [input_b -> cb -> output_b]";
         let machine = parse_machine(notation, &registry).expect("must parse");
@@ -1408,7 +1408,7 @@ mod tests {
     fn test1165_parse_unknown_cap_in_registry_fails_hard() {
         let registry = registry_with(vec![]);
         let notation = "\
-[ghost cap:ghost;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
+[ghost cap:ghost;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
 [a -> ghost -> b]";
         let err = parse_machine(notation, &registry).unwrap_err();
         match err {
@@ -1424,8 +1424,8 @@ mod tests {
     fn test1166_parse_duplicate_alias_is_syntax_error() {
         let registry = pdf_extract_embed_registry();
         let notation = "\
-[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
-[extract cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"]\
+[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
+[extract cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"]\
 [a -> extract -> b]";
         let err = parse_machine(notation, &registry).unwrap_err();
         assert!(matches!(
@@ -1439,7 +1439,7 @@ mod tests {
     fn test1167_parse_undefined_alias_is_syntax_error() {
         let registry = pdf_extract_embed_registry();
         let notation = "\
-[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
+[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
 [a -> notDefined -> b]";
         let err = parse_machine(notation, &registry).unwrap_err();
         assert!(matches!(
@@ -1457,7 +1457,7 @@ mod tests {
         // node? The parser must reject it.
         let registry = pdf_extract_embed_registry();
         let notation = "\
-[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
+[extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
 [extract -> extract -> b]";
         let err = parse_machine(notation, &registry).unwrap_err();
         assert!(matches!(
@@ -1474,23 +1474,23 @@ mod tests {
     fn test1169_sequence_into_scalar_cap_derives_is_loop() {
         // Producer: scalar text → SEQUENCE of items.
         let mut splitter = build_cap(
-            "cap:in=\"media:enc=utf-8\";split;out=\"media:enc=utf-8;item\"",
+            "cap:in=\"media:enc=utf8\";split;out=\"media:enc=utf8;item\"",
             "split",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;item",
+            &["media:enc=utf8"],
+            "media:enc=utf8;item",
         );
         splitter.outputs[0].is_sequence = true;
         // Consumer: scalar item → scalar text.
         let texter = build_cap(
-            "cap:in=\"media:enc=utf-8;item\";t;out=\"media:enc=utf-8\"",
+            "cap:in=\"media:enc=utf8;item\";t;out=\"media:enc=utf8\"",
             "t",
-            &["media:enc=utf-8;item"],
-            "media:enc=utf-8",
+            &["media:enc=utf8;item"],
+            "media:enc=utf8",
         );
         let registry = registry_with(vec![splitter, texter]);
         let notation = "\
-[split cap:in=\"media:enc=utf-8\";split;out=\"media:enc=utf-8;item\"]\
-[t cap:in=\"media:enc=utf-8;item\";t;out=\"media:enc=utf-8\"]\
+[split cap:in=\"media:enc=utf8\";split;out=\"media:enc=utf8;item\"]\
+[t cap:in=\"media:enc=utf8;item\";t;out=\"media:enc=utf8\"]\
 [a -> split -> items]\
 [items -> t -> b]";
         let machine = parse_machine(notation, &registry).expect("must parse");
@@ -1527,8 +1527,8 @@ mod tests {
         // serialize is a fixed point.
         let registry = pdf_extract_embed_registry();
         let user_input = "\
-[user_extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"]\
-[user_embed cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"]\
+[user_extract cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"]\
+[user_embed cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"]\
 [doc -> user_extract -> txt]\
 [txt -> user_embed -> vec]";
         let m1 = parse_machine(user_input, &registry).expect("must parse");
@@ -1579,12 +1579,12 @@ mod tests {
     // pointing at that cap's URN, so the alias can be used in a wiring
     // without a local header.
     fn extract_with_alias_registry() -> (FabricRegistry, String) {
-        let extract_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"";
+        let extract_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"";
         let extract = build_cap(
             extract_urn,
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let canonical = extract.urn_string();
         let registry = registry_with(vec![extract]);
@@ -1621,12 +1621,12 @@ mod tests {
     fn test1884_local_header_shadows_cap_alias() {
         let (registry, _alias_target) = extract_with_alias_registry();
         // Add a DIFFERENT cap that the header binds `pdf2text` to.
-        let other_urn = "cap:other;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"";
+        let other_urn = "cap:other;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"";
         let other = build_cap(
             other_urn,
             "other",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let other_canonical = other.urn_string();
         registry.add_caps_to_cache(vec![other]);
@@ -1645,16 +1645,16 @@ mod tests {
     #[test]
     fn test1885_cap_position_alias_to_media_is_error() {
         let extract = build_cap(
-            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![extract]);
         // `jsondoc` resolves to a media URN, not a cap.
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "jsondoc".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         let notation = "[doc -> jsondoc -> out]";

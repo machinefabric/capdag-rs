@@ -975,7 +975,7 @@ impl LiveCapFab {
                 )
                 .into_iter()
                 // SOUNDNESS: a wildcard join (`media:ext`) *conforms to* a
-                // value-exact cap input (`media:ext=md` — deferred narrowing),
+                // value-exact cap input (`media:ext=md;plain-text` — deferred narrowing),
                 // so path-finding from the join walks into caps that only some
                 // sources satisfy. A generalize machine must accept EVERY
                 // source at its entry cap: keep only tails whose entry cap's
@@ -1838,30 +1838,30 @@ mod tests {
     /// Bookends: pdf, md, txt (page is an internal type, never a bookend).
     fn fabric() -> (LiveCapFab, crate::cap::registry::FabricRegistry) {
         let pdf2text = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
             "pdf2text",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         let md2text = build_cap(
-            "cap:in=\"media:ext=md\";extract;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:ext=md;plain-text\";extract;out=\"media:enc=utf8;page\"",
             "md2text",
-            &["media:ext=md"],
-            "media:enc=utf-8;page",
+            &["media:ext=md;plain-text"],
+            "media:enc=utf8;page",
         );
         // The generic denominator consumer: accepts anything WITH an ext.
         let any2text = build_cap(
-            "cap:in=\"media:ext\";textize;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:ext\";textize;out=\"media:enc=utf8;page\"",
             "any2text",
             &["media:ext"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         // The fold: consumes a SEQUENCE of utf-8 items, emits one txt.
         let mut concat = build_cap(
-            "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "concat",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         concat.args[0].is_sequence = true;
 
@@ -1869,8 +1869,8 @@ mod tests {
         let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
-            media("media:ext=md"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:ext=md;plain-text"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ]
         .into_iter()
         .collect();
@@ -1880,7 +1880,7 @@ mod tests {
     }
 
     fn txt() -> MediaUrn {
-        media("media:enc=utf-8;ext=txt")
+        media("media:enc=utf8;ext=txt;plain-text")
     }
 
     // TEST1410 (region 1, the property): |S|=1 with the single-source preset is
@@ -1933,7 +1933,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -1998,7 +1998,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2080,7 +2080,7 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2098,7 +2098,7 @@ mod tests {
             } => {
                 assert_eq!(
                     conflicting_sources,
-                    &vec!["media:document;ext=pdf".to_string(), "media:ext=md".to_string()],
+                    &vec!["media:document;ext=pdf".to_string(), "media:ext=md;plain-text".to_string()],
                     "both agreeing-but-constrained sources are named"
                 );
                 assert!(
@@ -2127,7 +2127,7 @@ mod tests {
             .discover_convergent_targets(
                 &[
                     SourceSpec::single(media("media:document;ext=pdf")),
-                    SourceSpec::single(media("media:ext=md")),
+                    SourceSpec::single(media("media:ext=md;plain-text")),
                 ],
                 PlanRequest::DEFAULT_MAX_DEPTH,
             )
@@ -2149,7 +2149,7 @@ mod tests {
         assert!(
             !targets.iter().any(|t| t
                 .media_def
-                .is_equivalent(&media("media:enc=utf-8;page"))
+                .is_equivalent(&media("media:enc=utf8;page"))
                 .unwrap()),
             "non-bookend media must not be discovered as targets"
         );
@@ -2162,23 +2162,23 @@ mod tests {
     fn test1415_independent_when_no_convergence() {
         // A fabric with two disjoint pipelines and NO fold cap.
         let a = build_cap(
-            "cap:in=\"media:document;ext=pdf\";to-txt-a;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:document;ext=pdf\";to-txt-a;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "a",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let b = build_cap(
-            "cap:in=\"media:ext=md\";to-txt-b;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:ext=md;plain-text\";to-txt-b;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "b",
-            &["media:ext=md"],
-            "media:enc=utf-8;ext=txt",
+            &["media:ext=md;plain-text"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let caps = vec![a, b];
         let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
-            media("media:ext=md"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:ext=md;plain-text"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ]
         .into_iter()
         .collect();
@@ -2188,7 +2188,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2218,7 +2218,7 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2242,7 +2242,7 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2272,23 +2272,23 @@ mod tests {
     #[test]
     fn test1419_merge_product_assembly() {
         let pdf2text = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
             "pdf2text",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         let compose = build_cap(
-            "cap:in=\"media:ext=png;image\";compose;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:ext=png;image\";compose;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "compose",
-            &["media:ext=png;image", "media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:ext=png;image", "media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let caps = vec![pdf2text, compose];
         let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
             media("media:ext=png;image"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ]
         .into_iter()
         .collect();
@@ -2300,7 +2300,7 @@ mod tests {
                 SourceSpec::single(media("media:ext=png;image")),
                 SourceSpec::single(media("media:document;ext=pdf")),
             ],
-            TargetSpec::Exact(vec![media("media:enc=utf-8;ext=txt")]),
+            TargetSpec::Exact(vec![media("media:enc=utf8;ext=txt;plain-text")]),
         );
         request.mode = PlanMode::Configured;
         request.convergence.presence = ConvergencePresence::Converged;
@@ -2332,30 +2332,30 @@ mod tests {
     #[test]
     fn test1420_single_source_multi_target_diverges() {
         let pdf2text = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
             "pdf2text",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         let mut concat = build_cap(
-            "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "concat",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         concat.args[0].is_sequence = true;
         let page2html = build_cap(
-            "cap:in=\"media:enc=utf-8;page\";render;out=\"media:enc=utf-8;ext=html\"",
+            "cap:in=\"media:enc=utf8;page\";render;out=\"media:enc=utf8;ext=html\"",
             "page2html",
-            &["media:enc=utf-8;page"],
-            "media:enc=utf-8;ext=html",
+            &["media:enc=utf8;page"],
+            "media:enc=utf8;ext=html",
         );
         let caps = vec![pdf2text, concat, page2html];
         let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
-            media("media:enc=utf-8;ext=txt"),
-            media("media:enc=utf-8;ext=html"),
+            media("media:enc=utf8;ext=txt;plain-text"),
+            media("media:enc=utf8;ext=html"),
         ]
         .into_iter()
         .collect();
@@ -2365,8 +2365,8 @@ mod tests {
         let request = PlanRequest::auto(
             vec![SourceSpec::single(media("media:document;ext=pdf"))],
             TargetSpec::Exact(vec![
-                media("media:enc=utf-8;ext=txt"),
-                media("media:enc=utf-8;ext=html"),
+                media("media:enc=utf8;ext=txt;plain-text"),
+                media("media:enc=utf8;ext=html"),
             ]),
         );
         let candidates = fab
@@ -2392,7 +2392,7 @@ mod tests {
         let (fab, registry) = fabric();
         let sources = vec![
             SourceSpec::single(media("media:document;ext=pdf")),
-            SourceSpec::single(media("media:ext=md")),
+            SourceSpec::single(media("media:ext=md;plain-text")),
         ];
 
         let mut at_source = PlanRequest::auto(sources.clone(), TargetSpec::Exact(vec![txt()]));
@@ -2437,7 +2437,7 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2464,7 +2464,7 @@ mod tests {
         let (fab, registry) = fabric();
         let sources = vec![
             SourceSpec::single(media("media:document;ext=pdf")),
-            SourceSpec::single(media("media:ext=md")),
+            SourceSpec::single(media("media:ext=md;plain-text")),
         ];
         let policies: [(RankPolicy, fn(&PlanCandidate) -> usize); 2] = [
             (RankPolicy::Shortest, |c: &PlanCandidate| c.cost.cap_steps),
@@ -2507,7 +2507,7 @@ mod tests {
         assert!(
             !targets.iter().any(|t| t
                 .media_def
-                .is_equivalent(&media("media:enc=utf-8;page"))
+                .is_equivalent(&media("media:enc=utf8;page"))
                 .unwrap()),
             "internal (non-bookend) media must not be discovered"
         );
@@ -2567,7 +2567,7 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2582,30 +2582,30 @@ mod tests {
     #[test]
     fn test1432_divergence_at_source_duplicates_prefix() {
         let pdf2text = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
             "pdf2text",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         let mut concat = build_cap(
-            "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "concat",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         concat.args[0].is_sequence = true;
         let page2html = build_cap(
-            "cap:in=\"media:enc=utf-8;page\";render;out=\"media:enc=utf-8;ext=html\"",
+            "cap:in=\"media:enc=utf8;page\";render;out=\"media:enc=utf8;ext=html\"",
             "page2html",
-            &["media:enc=utf-8;page"],
-            "media:enc=utf-8;ext=html",
+            &["media:enc=utf8;page"],
+            "media:enc=utf8;ext=html",
         );
         let caps = vec![pdf2text, concat, page2html];
         let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
-            media("media:enc=utf-8;ext=txt"),
-            media("media:enc=utf-8;ext=html"),
+            media("media:enc=utf8;ext=txt;plain-text"),
+            media("media:enc=utf8;ext=html"),
         ]
         .into_iter()
         .collect();
@@ -2615,8 +2615,8 @@ mod tests {
         let mut request = PlanRequest::auto(
             vec![SourceSpec::single(media("media:document;ext=pdf"))],
             TargetSpec::Exact(vec![
-                media("media:enc=utf-8;ext=txt"),
-                media("media:enc=utf-8;ext=html"),
+                media("media:enc=utf8;ext=txt;plain-text"),
+                media("media:enc=utf8;ext=html"),
             ]),
         );
         request.divergence.location = DivergenceLocation::AtSource;
@@ -2660,7 +2660,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
                 SourceSpec::single(media("media:audio")),
             ],
             TargetSpec::Exact(vec![txt()]),
@@ -2685,7 +2685,7 @@ mod tests {
             );
             assert_eq!(
                 candidate.profile.source_media,
-                vec![media("media:document;ext=pdf"), media("media:ext=md")],
+                vec![media("media:document;ext=pdf"), media("media:ext=md;plain-text")],
                 "candidate profiles cover exactly the routable sources"
             );
         }
@@ -2718,7 +2718,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2736,7 +2736,7 @@ mod tests {
         let request = PlanRequest::auto(
             vec![
                 SourceSpec::single(media("media:document;ext=pdf")),
-                SourceSpec::single(media("media:ext=md")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
             ],
             TargetSpec::Exact(vec![txt()]),
         );
@@ -2795,7 +2795,7 @@ mod tests {
     fn test1431_candidate_sink_dedups_by_notation() {
         let make = |label: &str| PlanCandidate {
             notation:
-                "[a cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;page\"][n0 -> a -> n1]"
+                "[a cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"][n0 -> a -> n1]"
                     .to_string(),
             profile: PlanProfile {
                 source_media: vec![media("media:document;ext=pdf")],

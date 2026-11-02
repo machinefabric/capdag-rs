@@ -34,13 +34,13 @@ from ops import DryContext, Op, OpMetadata, WetContext
 # stub's ever diverge, the peer call stops routing and this fixture is the place
 # that says so.
 CLASSIFY_CAP = (
-    'cap:classify;constrained;in="media:enc=utf-8";language=en;'
-    'out="media:fmt=json;record;semantic-judgment"'
+    'cap:classify;constrained;in="media:enc=utf8";language=en;'
+    'out="media:enc=utf8;fmt=json;record;semantic-judgment"'
 )
 
-ITEM_MEDIA = "media:enc=utf-8"
-LABELS_MEDIA = "media:enc=utf-8;label-set"
-JUDGMENT_MEDIA = "media:fmt=json;record;semantic-judgment"
+ITEM_MEDIA = "media:enc=utf8"
+LABELS_MEDIA = "media:enc=utf8;label-set"
+JUDGMENT_MEDIA = "media:enc=utf8;fmt=json;record;semantic-judgment"
 
 # The keyword rule standing in for the model. Deterministic, so the e2e can
 # assert an exact label rather than "some label".

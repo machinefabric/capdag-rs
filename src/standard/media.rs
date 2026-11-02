@@ -85,6 +85,8 @@ pub use crate::urn::media_urn::{
     MEDIA_OBJECT_LIST,
     MEDIA_OGG,
     MEDIA_OPUS,
+    // Text written to be read: what the caps that read text as language take
+    MEDIA_PLAIN_TEXT,
     // Semantic AI input types
     MEDIA_PNG,
     MEDIA_RST,

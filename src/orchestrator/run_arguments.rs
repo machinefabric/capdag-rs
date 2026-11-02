@@ -485,7 +485,7 @@ mod tests {
             ArgumentBinding::Literal { value: serde_json::json!(20) },
         );
         bindings.add(
-            "media:enc=utf-8;label".to_string(),
+            "media:enc=utf8;label".to_string(),
             ArgumentBinding::Literal { value: serde_json::json!("thumb") },
         );
         plan.add_node(MachineNode::cap_with_bindings("tok_a", cap, bindings));
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(
             a,
             vec![
-                value("media:enc=utf-8;label", b"thumb"),
+                value("media:enc=utf8;label", b"thumb"),
                 value("media:numeric;height", b"9"),
                 value("media:numeric;width", b"20"),
             ]
@@ -651,25 +651,25 @@ mod tests {
         let mut initial = HashMap::new();
         initial.insert(
             "tok_body".to_string(),
-            vec![value("media:enc=utf-8;question", b"old")],
+            vec![value("media:enc=utf8;question", b"old")],
         );
         let ledger = RunArgumentLedger::new(&plan, initial).unwrap();
 
         // Bodies 0 and 1 dispatch with the old value.
         assert_eq!(
             ledger.dispatch_steps_in_map(&["tok_body"])["tok_body"],
-            vec![value("media:enc=utf-8;question", b"old")]
+            vec![value("media:enc=utf8;question", b"old")]
         );
         let second = ledger.dispatch_steps_in_map(&["tok_body"]);
         assert_eq!(
             second["tok_body"],
-            vec![value("media:enc=utf-8;question", b"old")]
+            vec![value("media:enc=utf8;question", b"old")]
         );
 
         let applied = ledger
             .apply(&[ArgumentUpdate {
                 token_id: "tok_body".to_string(),
-                media_urn: "media:enc=utf-8;question".to_string(),
+                media_urn: "media:enc=utf8;question".to_string(),
                 value: b"new".to_vec(),
             }])
             .unwrap();
@@ -683,7 +683,7 @@ mod tests {
         // Body 2 reads the new value.
         assert_eq!(
             ledger.dispatch_steps_in_map(&["tok_body"])["tok_body"],
-            vec![value("media:enc=utf-8;question", b"new")]
+            vec![value("media:enc=utf8;question", b"new")]
         );
 
         // The map has ended: no more runs — later updates are honest about it.
@@ -691,7 +691,7 @@ mod tests {
         let late = ledger
             .apply(&[ArgumentUpdate {
                 token_id: "tok_body".to_string(),
-                media_urn: "media:enc=utf-8;question".to_string(),
+                media_urn: "media:enc=utf8;question".to_string(),
                 value: b"too-late".to_vec(),
             }])
             .unwrap();

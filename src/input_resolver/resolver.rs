@@ -30,7 +30,7 @@ use crate::urn::media_urn::MediaUrn;
 /// (no rules = no basis for elimination).
 ///
 /// Returns the surviving candidate URN strings in their original order.
-/// The baseline URN is the adapter's structural detection result (e.g., "media:fmt=json;record"
+/// The baseline URN is the adapter's structural detection result (e.g., "media:enc=utf8;fmt=json;record"
 /// for a JSON object). Candidates more specific than the baseline must have validation rules
 /// that positively match the content — otherwise they're eliminated (they overclaim without proof).
 /// Candidates equivalent to or less specific than the baseline survive without validation.
@@ -683,7 +683,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:fmt=json;record".to_string(),
+            urn: "media:enc=utf8;fmt=json;record".to_string(),
             media_type: "application/json".to_string(),
             title: "JSON".to_string(),
             profile_uri: None,
@@ -699,7 +699,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:enc=utf-8;ext=txt;list".to_string(),
+            urn: "media:enc=utf8;ext=txt;list;plain-text".to_string(),
             media_type: "text/plain".to_string(),
             title: "Text".to_string(),
             profile_uri: None,
@@ -712,14 +712,14 @@ mod tests {
         });
 
         // Model-spec is a value-type URN with no file extension. The
-        // discrimination tests pass the bare `media:enc=utf-8;model-spec`
+        // discrimination tests pass the bare `media:enc=utf8;model-spec`
         // URN explicitly as a candidate; the validation pattern
         // matches the canonical `family:model:variant` shape so plain
         // prose is filtered out.
         registry.insert_cached_media_def_for_test(StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:enc=utf-8;model-spec".to_string(),
+            urn: "media:enc=utf8;model-spec".to_string(),
             media_type: "text/plain".to_string(),
             title: "Model spec".to_string(),
             profile_uri: None,
@@ -859,17 +859,17 @@ mod tests {
     #[test]
     fn test1236_disc_2_model_spec_validation_pattern_filters_content() {
         let (registry, _temp) = create_test_fabric_registry();
-        let candidates = vec!["media:enc=utf-8;model-spec".to_string()];
+        let candidates = vec!["media:enc=utf8;model-spec".to_string()];
 
         // Spec-shaped content survives the regex filter.
         let survivors = discriminate_candidates_by_validation(
             b"hf:MaziyarPanahi/Mistral-7B-Instruct-v0.3-GGUF",
             &candidates,
             &registry,
-            "media:enc=utf-8",
+            "media:enc=utf8",
         );
         assert!(
-            survivors.iter().any(|u| u == "media:enc=utf-8;model-spec"),
+            survivors.iter().any(|u| u == "media:enc=utf8;model-spec"),
             "spec-shaped content must survive, got: {:?}",
             survivors
         );
@@ -879,12 +879,12 @@ mod tests {
             b"this is not a model spec",
             &candidates,
             &registry,
-            "media:enc=utf-8",
+            "media:enc=utf8",
         );
         assert!(
             !survivors_prose
                 .iter()
-                .any(|u| u == "media:enc=utf-8;model-spec"),
+                .any(|u| u == "media:enc=utf8;model-spec"),
             "prose must NOT survive, got: {:?}",
             survivors_prose
         );
@@ -921,19 +921,19 @@ mod tests {
             ContentStructure::ScalarOpaque
         );
 
-        let scalar_record = MediaUrn::from_string("media:fmt=json;record").unwrap();
+        let scalar_record = MediaUrn::from_string("media:enc=utf8;fmt=json;record").unwrap();
         assert_eq!(
             structure_from_marker_tags(&scalar_record),
             ContentStructure::ScalarRecord
         );
 
-        let list_opaque = MediaUrn::from_string("media:enc=utf-8;list").unwrap();
+        let list_opaque = MediaUrn::from_string("media:enc=utf8;list").unwrap();
         assert_eq!(
             structure_from_marker_tags(&list_opaque),
             ContentStructure::ListOpaque
         );
 
-        let list_record = MediaUrn::from_string("media:fmt=json;list;record").unwrap();
+        let list_record = MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
         assert_eq!(
             structure_from_marker_tags(&list_record),
             ContentStructure::ListRecord
@@ -973,13 +973,13 @@ mod tests {
         adapter_registry
             .register_cap_group(
                 "test-group",
-                &["media:fmt=json".to_string()],
+                &["media:enc=utf8;fmt=json".to_string()],
                 "test-cartridge",
             )
             .unwrap();
 
         let invoker = MockInvoker {
-            response: Some(vec!["media:fmt=json;record".to_string()]),
+            response: Some(vec!["media:enc=utf8;fmt=json;record".to_string()]),
         };
 
         let result =
@@ -989,7 +989,7 @@ mod tests {
 
         assert_eq!(result.files.len(), 1);
         assert_eq!(
-            result.files[0].media_urn, "media:fmt=json;record",
+            result.files[0].media_urn, "media:enc=utf8;fmt=json;record",
             "resolved URN must match what the adapter returned"
         );
     }
@@ -1026,17 +1026,17 @@ mod tests {
         let (fabric_registry, _temp) = create_test_fabric_registry();
         let mut adapter_registry = MediaAdapterRegistry::new(fabric_registry);
 
-        // Register an adapter for media:fmt=json
+        // Register an adapter for media:enc=utf8;fmt=json
         adapter_registry
             .register_cap_group(
                 "test-group",
-                &["media:fmt=json".to_string()],
+                &["media:enc=utf8;fmt=json".to_string()],
                 "test-cartridge",
             )
             .unwrap();
 
         let invoker = MockInvoker {
-            response: Some(vec!["media:fmt=json;record".to_string()]),
+            response: Some(vec!["media:enc=utf8;fmt=json;record".to_string()]),
         };
 
         let result = detect_file_confirmed(&path, &adapter_registry, &invoker).await;
@@ -1067,7 +1067,7 @@ mod tests {
         adapter_registry
             .register_cap_group(
                 "test-group",
-                &["media:fmt=json".to_string()],
+                &["media:enc=utf8;fmt=json".to_string()],
                 "test-cartridge",
             )
             .unwrap();

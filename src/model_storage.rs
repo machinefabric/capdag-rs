@@ -20,7 +20,7 @@ pub enum ModelLoading {
 /// takes (`--model-loading`), declared in the fabric as
 /// `inference-model-loading`.
 pub const MEDIA_MODEL_LOADING: &str =
-    "media:enc=utf-8;inference;model;model-loading;operator;policy";
+    "media:enc=utf8;inference;model;model-loading;operator;policy";
 
 impl ModelLoading {
     /// The setting's value, as the fabric declares it: `auto`, `map` or

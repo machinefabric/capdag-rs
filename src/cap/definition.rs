@@ -14,11 +14,11 @@
 //!
 //! ```json
 //! {
-//!   "urn": "cap:in=\"media:string\";conversation;out=\"media:fmt=json;my-output;record\"",
+//!   "urn": "cap:in=\"media:string\";conversation;out=\"media:enc=utf8;fmt=json;my-output;record\"",
 //!   "args": [
 //!     { "media_urn": "media:string", "required": true, "sources": [{"cli_flag": "--input"}] }
 //!   ],
-//!   "output": { "media_urn": "media:fmt=json;my-output;record", ... }
+//!   "output": { "media_urn": "media:enc=utf8;fmt=json;my-output;record", ... }
 //! }
 //! ```
 
@@ -117,7 +117,7 @@ pub struct CapArg {
     /// or a single item (is_sequence=false, the default).
     /// When true, the argument data is a sequence of values of the media type,
     /// not a single value. This is independent of the media type — e.g.,
-    /// media:enc=utf-8;question with is_sequence=true means "multiple questions".
+    /// media:enc=utf8;question with is_sequence=true means "multiple questions".
     #[serde(default)]
     pub is_sequence: bool,
 
@@ -1296,14 +1296,14 @@ mod tests {
 
         // Enable stdin support by adding an arg with a stdin source
         let stdin_arg = CapArg {
-            media_urn: "media:enc=utf-8".to_string(),
+            media_urn: "media:enc=utf8".to_string(),
             name: "input".to_string(),
             accepts: None,
             required: true,
             is_sequence: false,
             streaming: false,
             sources: vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8".to_string(),
+                stdin: "media:enc=utf8".to_string(),
             }],
             arg_description: Some("Input text".to_string()),
             default_value: None,
@@ -1312,7 +1312,7 @@ mod tests {
         cap.add_arg(stdin_arg);
 
         assert!(cap.accepts_stdin());
-        assert_eq!(cap.get_stdin_media_urn(), Some("media:enc=utf-8"));
+        assert_eq!(cap.get_stdin_media_urn(), Some("media:enc=utf8"));
 
         // Test serialization/deserialization preserves the args
         let serialized = serde_json::to_string(&cap).unwrap();
@@ -1320,7 +1320,7 @@ mod tests {
         assert!(serialized.contains("\"stdin\""));
         let deserialized: Cap = serde_json::from_str(&serialized).unwrap();
         assert!(deserialized.accepts_stdin());
-        assert_eq!(deserialized.get_stdin_media_urn(), Some("media:enc=utf-8"));
+        assert_eq!(deserialized.get_stdin_media_urn(), Some("media:enc=utf8"));
     }
 
     // TEST114: Test ArgSource type variants stdin, position, and cli_flag with their accessors
@@ -1624,7 +1624,7 @@ mod tests {
     #[test]
     fn test598_cap_output_lifecycle() {
         let urn = CapUrn::from_string(
-            r#"cap:in="media:enc=utf-8";regress;out="media:fmt=json;record;regression""#,
+            r#"cap:in="media:enc=utf8";regress;out="media:enc=utf8;fmt=json;record;regression""#,
         )
         .unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
@@ -1634,7 +1634,7 @@ mod tests {
         assert!(cap.main_output().is_none());
 
         // An output that is not the cap's `out=` is an output, and not the main one.
-        let mut residuals = CapOutput::new("media:fmt=json;list;record;residual", "residuals", "Residuals");
+        let mut residuals = CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "residuals", "Residuals");
         residuals.set_metadata(serde_json::json!({"format": "plain"}));
         cap.add_output(residuals);
         assert_eq!(cap.get_outputs().len(), 1);
@@ -1642,30 +1642,30 @@ mod tests {
 
         // The main output is found by URN equivalence with `out=`, wherever it
         // stands in the list and whatever order its tags are written in.
-        cap.add_output(CapOutput::new("media:regression;record;fmt=json", "fit", "The fit"));
+        cap.add_output(CapOutput::new("media:regression;record;fmt=json;enc=utf8", "fit", "The fit"));
         let main = cap.main_output().expect("the output whose URN is out=");
         assert_eq!(main.get_name(), "fit");
 
         // By the URN that identifies it, and by the name a machine uses.
         let got = cap
-            .output_by_urn("media:record;residual;list;fmt=json")
+            .output_by_urn("media:record;residual;list;fmt=json;enc=utf8")
             .expect("an output is identified by its media URN");
         assert_eq!(got.get_name(), "residuals");
         assert_eq!(got.output_description, "Residuals");
         assert!(got.get_metadata().is_some());
-        assert_eq!(cap.output_named("residuals").map(|o| o.get_media_urn()), Some("media:fmt=json;list;record;residual"));
+        assert_eq!(cap.output_named("residuals").map(|o| o.get_media_urn()), Some("media:enc=utf8;fmt=json;list;record;residual"));
         assert!(cap.output_named("fmt").is_none(), "a name is not read out of a URN");
-        assert!(cap.output_by_urn("media:enc=utf-8").is_none());
+        assert!(cap.output_by_urn("media:enc=utf8").is_none());
 
         // CapOutput with_full_definition
         let output2 = CapOutput::with_full_definition(
-            "media:fmt=json", "output",
+            "media:enc=utf8;fmt=json", "output",
             "JSON output",
             false,
             false,
             Some(serde_json::json!({"v": 2})),
         );
-        assert_eq!(output2.get_media_urn(), "media:fmt=json");
+        assert_eq!(output2.get_media_urn(), "media:enc=utf8;fmt=json");
         assert!(output2.get_metadata().is_some());
 
         // Clear metadata on output
@@ -1717,7 +1717,7 @@ mod tests {
         // Absent → false; serialize omits it. (The URN's media-spec quotes are
         // JSON-escaped as \" so the wire body is valid JSON.)
         let concrete: Cap = serde_json::from_str(
-            r#"{"urn":"cap:disbind;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"","title":"Disbind PDF","aliases":["disbind-pdf"]}"#,
+            r#"{"urn":"cap:disbind;in=\"media:document;ext=pdf\";out=\"media:enc=utf8\"","title":"Disbind PDF","aliases":["disbind-pdf"]}"#,
         )
         .expect("concrete cap must deserialize");
         assert!(!concrete.is_abstract());
@@ -1729,7 +1729,7 @@ mod tests {
 
         // Present true → is_abstract, and serialize emits it.
         let abstract_cap: Cap = serde_json::from_str(
-            r#"{"urn":"cap:disbind;in=\"media:\";out=\"media:enc=utf-8\"","title":"Disbind","aliases":["disbind"],"abstract":true}"#,
+            r#"{"urn":"cap:disbind;in=\"media:\";out=\"media:enc=utf8\"","title":"Disbind","aliases":["disbind"],"abstract":true}"#,
         )
         .expect("abstract cap must deserialize");
         assert!(abstract_cap.is_abstract());
@@ -1826,7 +1826,7 @@ mod tests {
         // string escaping rules — the URN value contains both backslashes
         // and embedded double quotes.
         let json = serde_json::json!({
-            "urn": "cap:in=\"media:enc=utf-8\";docparse;out=\"media:enc=utf-8\"",
+            "urn": "cap:in=\"media:enc=utf8\";docparse;out=\"media:enc=utf8\"",
             "title": "Doc Parse",
             "aliases": ["docparse"],
             "cap_description": "short",
@@ -1878,7 +1878,7 @@ mod tests {
     #[test]
     fn test7100_stream_urn_prefers_stdin_source_over_slot_urn() {
         let arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: "media:document;ext=pdf".to_string(),
@@ -1898,7 +1898,7 @@ mod tests {
     #[test]
     fn test7101_stream_urn_falls_back_to_declared_urn_without_stdin() {
         let arg = CapArg::new(
-            "media:enc=utf-8;model-spec", "model-spec",
+            "media:enc=utf8;model-spec", "model-spec",
             true,
             vec![
                 ArgSource::CliFlag {
@@ -1907,7 +1907,7 @@ mod tests {
                 ArgSource::Position { position: 0 },
             ],
         );
-        assert_eq!(arg.stream_urn(), "media:enc=utf-8;model-spec");
+        assert_eq!(arg.stream_urn(), "media:enc=utf8;model-spec");
     }
 
     /// TEST7102: is_main_input() is true when the Stdin source URN is
@@ -1924,7 +1924,7 @@ mod tests {
             "precondition: the raw strings must differ so string comparison would fail"
         );
         let arg = CapArg::new(
-            "media:enc=utf-8;file-path", "input",
+            "media:enc=utf8;file-path", "input",
             true,
             vec![ArgSource::Stdin {
                 stdin: stdin_urn.to_string(),
@@ -1982,20 +1982,20 @@ mod tests {
     /// secondary stdin-capable argument appears first in declaration order.
     #[test]
     fn test8065_sequence_shape_uses_main_input_identity_not_arg_order() {
-        let urn = CapUrn::from_string(r#"cap:in="media:enc=utf-8";ordered;out="media:enc=utf-8""#)
+        let urn = CapUrn::from_string(r#"cap:in="media:enc=utf8";ordered;out="media:enc=utf8""#)
             .unwrap();
         let secondary = CapArg::new(
-            "media:enc=utf-8;context", "input",
+            "media:enc=utf8;context", "input",
             false,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8;context".to_string(),
+                stdin: "media:enc=utf8;context".to_string(),
             }],
         );
         let mut main = CapArg::new(
-            "media:enc=utf-8", "input-2",
+            "media:enc=utf8", "input-2",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8".to_string(),
+                stdin: "media:enc=utf8".to_string(),
             }],
         );
         main.is_sequence = true;
@@ -2029,13 +2029,13 @@ mod tests {
     // older capdag once advertised a `streaming` input as bounded.
     #[test]
     fn test1964_unknown_definition_field_is_refused() {
-        let arg = r#"{"media_urn":"media:enc=utf-8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"chunking":"adaptive"}"#;
+        let arg = r#"{"media_urn":"media:enc=utf8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf8"}],"chunking":"adaptive"}"#;
         let err = serde_json::from_str::<CapArg>(arg).expect_err("unknown arg field must be refused");
         assert!(err.to_string().contains("chunking"), "{err}");
-        let known = r#"{"media_urn":"media:enc=utf-8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf-8"}],"streaming":true}"#;
+        let known = r#"{"media_urn":"media:enc=utf8","name":"input","required":true,"sources":[{"stdin":"media:enc=utf8"}],"streaming":true}"#;
         assert!(serde_json::from_str::<CapArg>(known).unwrap().streaming);
 
-        let out = r#"{"media_urn":"media:enc=utf-8","name":"output","output_description":"x","windowed":true}"#;
+        let out = r#"{"media_urn":"media:enc=utf8","name":"output","output_description":"x","windowed":true}"#;
         let err = serde_json::from_str::<CapOutput>(out).expect_err("unknown output field must be refused");
         assert!(err.to_string().contains("windowed"), "{err}");
     }
@@ -2048,7 +2048,7 @@ mod tests {
     // declares, so a dropped `dims` would leave its copy without them.
     #[test]
     fn test1969_cap_dims_round_trip_in_order_and_refuse_what_they_cannot_hold() {
-        let json = r#"{"urn":"cap:ask;constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8\"","version":3,"title":"Ask","aliases":["ask-en"],"documentation":"Only about asking.","dims":[{"dim":"constrained","value":"constrained"},{"dim":"language","value":"en"}]}"#;
+        let json = r#"{"urn":"cap:ask;constrained;in=\"media:enc=utf8\";language=en;out=\"media:enc=utf8\"","version":3,"title":"Ask","aliases":["ask-en"],"documentation":"Only about asking.","dims":[{"dim":"constrained","value":"constrained"},{"dim":"language","value":"en"}]}"#;
         let cap: Cap = serde_json::from_str(json).expect("a cap with dims parses");
         assert_eq!(
             cap.dims,
@@ -2086,13 +2086,13 @@ mod tests {
     #[test]
     fn test7150_cap_output_survives_serialization_roundtrip() {
         let mut cap = Cap::new(
-            CapUrn::from_string(r#"cap:in="media:enc=utf-8;in";out="media:enc=utf-8;tag";tag"#)
+            CapUrn::from_string(r#"cap:in="media:enc=utf8;in";out="media:enc=utf8;tag";tag"#)
                 .expect("valid urn"),
             "tag".to_string(),
             vec!["tag".to_string()],
         );
         cap.add_output(CapOutput {
-            media_urn: "media:enc=utf-8;tag".to_string(),
+            media_urn: "media:enc=utf8;tag".to_string(),
             name: "output".to_string(),
             optional: false,
             carries: None,
@@ -2118,7 +2118,7 @@ mod tests {
         );
         assert_eq!(
             output.get("media_urn").and_then(|v| v.as_str()),
-            Some("media:enc=utf-8;tag")
+            Some("media:enc=utf8;tag")
         );
         assert_eq!(
             output.get("output_description").and_then(|v| v.as_str()),
@@ -2127,7 +2127,7 @@ mod tests {
 
         let back: Cap = serde_json::from_value(json).expect("cap deserializes");
         let back_output = back.main_output().expect("output survives the round-trip");
-        assert_eq!(back_output.media_urn, "media:enc=utf-8;tag");
+        assert_eq!(back_output.media_urn, "media:enc=utf8;tag");
         assert_eq!(back_output.is_sequence, false);
 
         // A cap with no output must not carry the key at all.
@@ -2153,10 +2153,10 @@ mod tests {
     #[test]
     fn test7151_is_sequence_is_serialized_even_when_false() {
         let arg = CapArg::new(
-            "media:enc=utf-8;in", "input",
+            "media:enc=utf8;in", "input",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8;in".to_string(),
+                stdin: "media:enc=utf8;in".to_string(),
             }],
         );
         let arg_json = serde_json::to_value(&arg).expect("arg serializes");
@@ -2167,7 +2167,7 @@ mod tests {
         );
 
         let output = CapOutput {
-            media_urn: "media:enc=utf-8;tag".to_string(),
+            media_urn: "media:enc=utf8;tag".to_string(),
             name: "output".to_string(),
             optional: false,
             carries: None,

@@ -12,7 +12,7 @@
 //! use capdag::orchestrator::{build_plans_from_notation, execute_plan};
 //!
 //! let notation = r#"
-//!     [extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt"]
+//!     [extract cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text"]
 //!     [doc -> extract -> text]
 //! "#;
 //! let plans = build_plans_from_notation(notation, registry.clone()).await?;

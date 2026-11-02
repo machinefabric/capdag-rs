@@ -296,7 +296,7 @@ mod tests {
     fn test1145_resolved_input_set_uses_equivalent_media_and_file_count_cardinality() {
         let single_list_file = ResolvedInputSet::new(vec![ResolvedFile {
             path: PathBuf::from("/tmp/items.json"),
-            media_urn: "media:application;fmt=json;list;record".to_string(),
+            media_urn: "media:application;enc=utf8;fmt=json;list;record".to_string(),
             size_bytes: 42,
             content_structure: ContentStructure::ListRecord,
         }]);
@@ -304,19 +304,19 @@ mod tests {
         assert!(single_list_file.is_homogeneous());
         assert_eq!(
             single_list_file.common_media.as_deref(),
-            Some("media:application;fmt=json;list;record")
+            Some("media:application;enc=utf8;fmt=json;list;record")
         );
 
         let equivalent_ordering = ResolvedInputSet::new(vec![
             ResolvedFile {
                 path: PathBuf::from("/tmp/a.json"),
-                media_urn: "media:application;fmt=json;record".to_string(),
+                media_urn: "media:application;enc=utf8;fmt=json;record".to_string(),
                 size_bytes: 10,
                 content_structure: ContentStructure::ScalarRecord,
             },
             ResolvedFile {
                 path: PathBuf::from("/tmp/b.json"),
-                media_urn: "media:application;fmt=json;record".to_string(),
+                media_urn: "media:application;enc=utf8;fmt=json;record".to_string(),
                 size_bytes: 11,
                 content_structure: ContentStructure::ScalarRecord,
             },
@@ -325,7 +325,7 @@ mod tests {
         assert!(equivalent_ordering.is_homogeneous());
         assert_eq!(
             equivalent_ordering.common_media.as_deref(),
-            Some("media:application;fmt=json;record")
+            Some("media:application;enc=utf8;fmt=json;record")
         );
     }
 

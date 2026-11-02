@@ -226,13 +226,13 @@ mod tests {
     use crate::planner::{ForEachSource, InputCardinality, MachineNode, MachinePlanEdge};
     use crate::urn::cap_urn::CapUrn;
 
-    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#;
-    const SUMMARIZE: &str = r#"cap:in="media:enc=utf-8;ext=txt";summarize;out="media:enc=utf-8;summary""#;
-    const CONCAT: &str = r#"cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;joined""#;
-    const SPLIT: &str = r#"cap:in="media:enc=utf-8;ext=txt";split;out="media:enc=utf-8;head""#;
+    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text""#;
+    const SUMMARIZE: &str = r#"cap:in="media:enc=utf8;ext=txt;plain-text";summarize;out="media:enc=utf8;summary""#;
+    const CONCAT: &str = r#"cap:in="media:enc=utf8";concat;out="media:enc=utf8;joined""#;
+    const SPLIT: &str = r#"cap:in="media:enc=utf8;ext=txt;plain-text";split;out="media:enc=utf8;head""#;
     const NOW: &str = r#"cap:in="media:void";now;out="media:stamp""#;
-    const CONTEXT: &str = "media:context;enc=utf-8";
-    const REST: &str = "media:enc=utf-8;rest";
+    const CONTEXT: &str = "media:context;enc=utf8";
+    const REST: &str = "media:enc=utf8;rest";
 
     fn cap(urn: &str) -> Cap {
         let cap_urn = CapUrn::from_string(urn).unwrap();
@@ -285,7 +285,7 @@ mod tests {
         plan.add_node(MachineNode::collect(
             "both",
             vec!["summarize".to_string(), "split.rest".to_string()],
-            "media:enc=utf-8",
+            "media:enc=utf8",
         ));
         plan.add_node(MachineNode::cap("concat", CONCAT));
         plan.add_node(MachineNode::output("out", "result", "concat"));
@@ -330,14 +330,14 @@ mod tests {
             }]
         );
         assert!(extract.outputs.is_empty());
-        assert_eq!(extract.out_media, "media:enc=utf-8;ext=txt");
+        assert_eq!(extract.out_media, "media:enc=utf8;ext=txt;plain-text");
 
         let summarize = step(&graph, "summarize");
         assert_eq!(
             summarize.inputs,
             vec![
                 StepInput {
-                    stream_urn: "media:enc=utf-8;ext=txt".to_string(),
+                    stream_urn: "media:enc=utf8;ext=txt;plain-text".to_string(),
                     source: StepSource::Node("extract".to_string()),
                 },
                 StepInput {
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(
             concat.inputs,
             vec![StepInput {
-                stream_urn: "media:enc=utf-8".to_string(),
+                stream_urn: "media:enc=utf8".to_string(),
                 source: StepSource::Gather(vec!["summarize".to_string(), "split.rest".to_string()]),
             }]
         );
@@ -379,7 +379,7 @@ mod tests {
         // input is there as what the graph is given.
         assert_eq!(graph.nodes["doc"], "media:document;ext=pdf");
         assert_eq!(graph.nodes["split.rest"], REST);
-        assert_eq!(graph.nodes["concat"], "media:enc=utf-8;joined");
+        assert_eq!(graph.nodes["concat"], "media:enc=utf8;joined");
         assert!(!graph.nodes.contains_key("both"), "a gather is an input, not a node of the graph");
         assert!(!graph.nodes.contains_key("out"));
 
@@ -392,9 +392,9 @@ mod tests {
         assert_eq!(
             alone.nodes,
             media(&[
-                ("split", "media:enc=utf-8;head"),
+                ("split", "media:enc=utf8;head"),
                 ("split.rest", REST),
-                ("extract", "media:enc=utf-8;ext=txt"),
+                ("extract", "media:enc=utf8;ext=txt;plain-text"),
             ])
         );
         // And a step that reads a step's other output from outside the graph
@@ -403,8 +403,8 @@ mod tests {
         assert_eq!(
             gathering.nodes,
             media(&[
-                ("concat", "media:enc=utf-8;joined"),
-                ("summarize", "media:enc=utf-8;summary"),
+                ("concat", "media:enc=utf8;joined"),
+                ("summarize", "media:enc=utf8;summary"),
                 ("split.rest", REST),
             ])
         );
@@ -478,11 +478,11 @@ mod tests {
         };
         refused(
             &|plan| plan.add_edge(MachinePlanEdge::direct("now", "summarize")),
-            "step 'summarize' is wired twice on input stream 'media:enc=utf-8;ext=txt'",
+            "step 'summarize' is wired twice on input stream 'media:enc=utf8;ext=txt;plain-text'",
         );
         refused(
             // The same arg, its tags in another order.
-            &|plan| plan.add_edge(MachinePlanEdge::arg("doc", "summarize", "media:enc=utf-8;context")),
+            &|plan| plan.add_edge(MachinePlanEdge::arg("doc", "summarize", "media:enc=utf8;context")),
             "step 'summarize' is wired twice on input stream",
         );
         refused(

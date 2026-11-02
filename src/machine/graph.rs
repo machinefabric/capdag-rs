@@ -731,18 +731,18 @@ mod tests {
 
     fn extract_cap_def() -> crate::cap::definition::Cap {
         build_cap(
-            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+            "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         )
     }
 
     fn embed_cap_def() -> crate::cap::definition::Cap {
         build_cap(
-            "cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"",
+            "cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"",
             "embed",
-            &["media:enc=utf-8"],
+            &["media:enc=utf8"],
             "media:vec;record",
         )
     }
@@ -750,10 +750,10 @@ mod tests {
     fn pdf_to_txt_strand() -> crate::planner::Strand {
         strand_from_steps(
             vec![cap_step(
-                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;ext=txt\"",
+                "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "extract",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "pdf to txt",
         )
@@ -762,9 +762,9 @@ mod tests {
     fn txt_to_vec_strand() -> crate::planner::Strand {
         strand_from_steps(
             vec![cap_step(
-                "cap:embed;in=\"media:enc=utf-8\";out=\"media:vec;record\"",
+                "cap:embed;in=\"media:enc=utf8\";out=\"media:vec;record\"",
                 "embed",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
                 "media:vec;record",
             )],
             "txt to vec",
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn test1156_from_strands_keeps_strands_disjoint() {
         // Two strands, each with one cap. Even though both
-        // touch `media:enc=utf-8;ext=txt` (one as input, one as
+        // touch `media:enc=utf8;ext=txt;plain-text` (one as input, one as
         // output), `from_strands` does NOT join them — that's
         // the contract: programmatic construction never
         // creates crossings.
@@ -889,7 +889,7 @@ mod tests {
         // Three nodes of one type on each side: what is refused is refused
         // by the correspondence, not by a difference of type.
         let strand = MachineStrand::from_resolved(
-            vec![media("media:enc=utf-8"); 3],
+            vec![media("media:enc=utf8"); 3],
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -907,7 +907,7 @@ mod tests {
 
         // Nodes that stand for each other hold one type.
         let other = MachineStrand::from_resolved(
-            vec![media("media:enc=utf-8"), media("media:integer")],
+            vec![media("media:enc=utf8"), media("media:integer")],
             Vec::new(),
             Vec::new(),
             Vec::new(),

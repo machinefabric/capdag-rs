@@ -1534,7 +1534,7 @@ mod tests {
         let ss = Frame::stream_start(
             rid,
             "s".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         );
         table.record_frame(&k, FrameDirection::Inbound, &ss);
@@ -1729,7 +1729,7 @@ mod tests {
         let ss = Frame::stream_start_unbounded(
             rid.clone(),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             None,
         );
         table.record_frame(&k, FrameDirection::Inbound, &ss);

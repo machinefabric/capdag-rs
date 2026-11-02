@@ -5,10 +5,10 @@
 //! serialize/deserialize against them.
 //!
 //! Media defs:
-//! - media:fmt=json;llm-generation-request;record
-//! - media:fmt=ndjson;llm-text-stream
-//! - media:fmt=json;llm-vocab-response;record
-//! - media:fmt=json;llm-model-info;record
+//! - media:enc=utf8;fmt=json;llm-generation-request;record
+//! - media:enc=utf8;fmt=ndjson;llm-text-stream
+//! - media:enc=utf8;fmt=json;llm-vocab-response;record
+//! - media:enc=utf8;fmt=json;llm-model-info;record
 //!
 //! Caps:
 //! - cap:op=llm_inference               — text generation
@@ -41,12 +41,12 @@ impl Default for RequestType {
 }
 
 // =============================================================================
-// media:fmt=json;llm-generation-request;record
+// media:enc=utf8;fmt=json;llm-generation-request;record
 // =============================================================================
 
 /// LLM Generation Request — input for all LLM caps.
 ///
-/// Matches: media:fmt=json;llm-generation-request;record
+/// Matches: media:enc=utf8;fmt=json;llm-generation-request;record
 ///
 /// Read strictly: a field this record does not have is refused, never
 /// dropped. It carried top-level `json_schema` and `grammar` fields that no
@@ -195,12 +195,12 @@ pub struct ToolDefinition {
 }
 
 // =============================================================================
-// media:fmt=ndjson;llm-text-stream
+// media:enc=utf8;fmt=ndjson;llm-text-stream
 // =============================================================================
 
 /// LLM Text Stream Message — NDJSON streaming output.
 ///
-/// Matches: media:fmt=ndjson;llm-text-stream. Each line is one of these message types,
+/// Matches: media:enc=utf8;fmt=ndjson;llm-text-stream. Each line is one of these message types,
 /// serialized as JSON. All variants are wire-protocol mandated by the media def.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -281,12 +281,12 @@ pub mod finish_reason {
 }
 
 // =============================================================================
-// media:fmt=json;llm-vocab-response;record
+// media:enc=utf8;fmt=json;llm-vocab-response;record
 // =============================================================================
 
 /// LLM Vocabulary Response.
 ///
-/// Matches: media:fmt=json;llm-vocab-response;record
+/// Matches: media:enc=utf8;fmt=json;llm-vocab-response;record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmVocabResponse {
     pub vocab: Vec<String>,
@@ -310,12 +310,12 @@ impl LlmVocabResponse {
 }
 
 // =============================================================================
-// media:fmt=json;llm-model-info;record
+// media:enc=utf8;fmt=json;llm-model-info;record
 // =============================================================================
 
 /// LLM Model Info Response.
 ///
-/// Matches: media:fmt=json;llm-model-info;record
+/// Matches: media:enc=utf8;fmt=json;llm-model-info;record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmModelInfo {
     pub model_spec: String,
@@ -353,24 +353,24 @@ impl LlmModelInfo {
 // Media URNs — canonical definitions (single source of truth)
 // =============================================================================
 
-pub const MEDIA_LLM_GENERATION_REQUEST: &str = "media:fmt=json;llm-generation-request;record";
-pub const MEDIA_LLM_TEXT_STREAM: &str = "media:fmt=ndjson;llm-text-stream";
-pub const MEDIA_LLM_VOCAB_RESPONSE: &str = "media:fmt=json;llm-vocab-response;record";
-pub const MEDIA_LLM_MODEL_INFO_RESPONSE: &str = "media:fmt=json;llm-model-info;record";
+pub const MEDIA_LLM_GENERATION_REQUEST: &str = "media:enc=utf8;fmt=json;llm-generation-request;record";
+pub const MEDIA_LLM_TEXT_STREAM: &str = "media:enc=utf8;fmt=ndjson;llm-text-stream";
+pub const MEDIA_LLM_VOCAB_RESPONSE: &str = "media:enc=utf8;fmt=json;llm-vocab-response;record";
+pub const MEDIA_LLM_MODEL_INFO_RESPONSE: &str = "media:enc=utf8;fmt=json;llm-model-info;record";
 
 // =============================================================================
 // Cap URNs — canonical definitions
 // =============================================================================
 
-pub const CAP_LLM_INFERENCE_GGUF: &str = "cap:gguf;in=\"media:fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference;out=\"media:fmt=ndjson;llm-text-stream\"";
-pub const CAP_LLM_INFERENCE_MLX: &str = "cap:in=\"media:fmt=json;llm-generation-request;record\";llm;ml-model;mlx;llm-inference;out=\"media:fmt=ndjson;llm-text-stream\"";
-pub const CAP_LLM_INFERENCE_CANDLE: &str = "cap:candle;in=\"media:fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference;out=\"media:fmt=ndjson;llm-text-stream\"";
-pub const CAP_LLM_INFERENCE_CONSTRAINED: &str = "cap:constrained;gguf;in=\"media:fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference-constrained;out=\"media:fmt=ndjson;llm-text-stream\"";
-pub const CAP_LLM_VOCAB: &str = "cap:llm-vocab;llm;ml-model;gguf;in=\"media:fmt=json;llm-generation-request;record\";out=\"media:fmt=json;llm-vocab-response;record\"";
-pub const CAP_LLM_MODEL_INFO: &str = "cap:llm-model-info;llm;ml-model;gguf;in=\"media:fmt=json;llm-generation-request;record\";out=\"media:fmt=json;llm-model-info;record\"";
-pub const CAP_GENERATE_EMBEDDINGS: &str = "cap:generate-embeddings;ml-model;gguf;in=\"media:enc=utf-8\";out=\"media:embedding-vector;fmt=json;record\"";
-pub const CAP_EMBEDDINGS_DIMENSIONS: &str = "cap:gguf;in=\"media:embeddings;enc=utf-8;gguf;model-spec;tokenizer-embedded-gguf\";ml-model;embeddings-dimensions;out=\"media:integer;model-dim;numeric\"";
-pub const CAP_DESCRIBE_IMAGE: &str = "cap:gguf;in=\"media:ext=png;image\";ml-model;describe-image;out=\"media:enc=utf-8;ext=txt;image-description;plain-text\";vision";
+pub const CAP_LLM_INFERENCE_GGUF: &str = "cap:gguf;in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference;out=\"media:enc=utf8;fmt=ndjson;llm-text-stream\"";
+pub const CAP_LLM_INFERENCE_MLX: &str = "cap:in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";llm;ml-model;mlx;llm-inference;out=\"media:enc=utf8;fmt=ndjson;llm-text-stream\"";
+pub const CAP_LLM_INFERENCE_CANDLE: &str = "cap:candle;in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference;out=\"media:enc=utf8;fmt=ndjson;llm-text-stream\"";
+pub const CAP_LLM_INFERENCE_CONSTRAINED: &str = "cap:constrained;gguf;in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";llm;ml-model;llm-inference-constrained;out=\"media:enc=utf8;fmt=ndjson;llm-text-stream\"";
+pub const CAP_LLM_VOCAB: &str = "cap:llm-vocab;llm;ml-model;gguf;in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";out=\"media:enc=utf8;fmt=json;llm-vocab-response;record\"";
+pub const CAP_LLM_MODEL_INFO: &str = "cap:llm-model-info;llm;ml-model;gguf;in=\"media:enc=utf8;fmt=json;llm-generation-request;record\";out=\"media:enc=utf8;fmt=json;llm-model-info;record\"";
+pub const CAP_GENERATE_EMBEDDINGS: &str = "cap:generate-embeddings;ml-model;gguf;in=\"media:enc=utf8\";out=\"media:embedding-vector;enc=utf8;fmt=json;record\"";
+pub const CAP_EMBEDDINGS_DIMENSIONS: &str = "cap:gguf;in=\"media:embeddings;enc=utf8;gguf;model-spec;tokenizer-embedded-gguf\";ml-model;embeddings-dimensions;out=\"media:integer;model-dim;numeric\"";
+pub const CAP_DESCRIBE_IMAGE: &str = "cap:gguf;in=\"media:ext=png;image\";ml-model;describe-image;out=\"media:enc=utf8;ext=txt;image-description;plain-text\";vision";
 
 // =============================================================================
 // Model spec → backend classification

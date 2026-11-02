@@ -99,14 +99,14 @@ from ops import DryContext, Op, OpMetadata, WetContext
 # always one of them: a hallucinated label is impossible by construction, and
 # this cartridge does not have to defend against one.
 CLASSIFY_CAP = (
-    'cap:classify;constrained;in="media:enc=utf-8";language=en;'
-    'out="media:fmt=json;record;semantic-judgment"'
+    'cap:classify;constrained;in="media:enc=utf8";language=en;'
+    'out="media:enc=utf8;fmt=json;record;semantic-judgment"'
 )
 
 # The item being classified, and the allowed labels — both addressed by MEDIA
 # URN, which is how a peer call names its arguments.
-CLASSIFY_ITEM_MEDIA = "media:enc=utf-8"
-CLASSIFY_LABELS_MEDIA = "media:enc=utf-8;label-set"
+CLASSIFY_ITEM_MEDIA = "media:enc=utf8"
+CLASSIFY_LABELS_MEDIA = "media:enc=utf8;label-set"
 
 LABELS = "positive,neutral,negative"
 
@@ -167,8 +167,8 @@ class TagOp(Op):
 # --- URN + manifest. Media/cap URNs are seeded from the project name so they -
 #     are unique per project and never collide with the published fabric. -----
 
-IN_MEDIA = "media:enc=utf-8;__CARTRIDGE_NAME__-input"
-OUT_MEDIA = "media:enc=utf-8;__CARTRIDGE_NAME__-tag"
+IN_MEDIA = "media:enc=utf8;__CARTRIDGE_NAME__-input"
+OUT_MEDIA = "media:enc=utf8;__CARTRIDGE_NAME__-tag"
 
 
 def _cap_urn() -> CapUrn:
@@ -213,7 +213,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.228.2414",
+        version="1.229.2426",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -336,12 +336,12 @@ use std::sync::Arc;
 /// always one of them: a hallucinated label is impossible by construction, and
 /// this cartridge does not have to defend against one.
 const CLASSIFY_CAP: &str =
-    r#"cap:classify;constrained;in="media:enc=utf-8";language=en;out="media:fmt=json;record;semantic-judgment""#;
+    r#"cap:classify;constrained;in="media:enc=utf8";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment""#;
 
 /// The item being classified, and the allowed labels — both addressed by MEDIA
 /// URN, which is how a peer call names its arguments.
-const CLASSIFY_ITEM_MEDIA: &str = "media:enc=utf-8";
-const CLASSIFY_LABELS_MEDIA: &str = "media:enc=utf-8;label-set";
+const CLASSIFY_ITEM_MEDIA: &str = "media:enc=utf8";
+const CLASSIFY_LABELS_MEDIA: &str = "media:enc=utf8;label-set";
 
 const LABELS: &str = "positive,neutral,negative";
 
@@ -430,8 +430,8 @@ impl Op<()> for TagOp {
 // --- URN + manifest. Media/cap URNs are seeded from the project name so they -
 //     are unique per project and never collide with the published fabric. -----
 
-const IN_MEDIA: &str = "media:enc=utf-8;__CARTRIDGE_NAME__-input";
-const OUT_MEDIA: &str = "media:enc=utf-8;__CARTRIDGE_NAME__-tag";
+const IN_MEDIA: &str = "media:enc=utf8;__CARTRIDGE_NAME__-input";
+const OUT_MEDIA: &str = "media:enc=utf8;__CARTRIDGE_NAME__-tag";
 
 /// Build the cap URN ONCE via the builder, so the string we register with
 /// matches the runtime's canonical (alphabetically-sorted) byte form.
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.228.2414"
+version = "1.229.2426"
 edition = "2021"
 
 [dependencies]
@@ -655,13 +655,13 @@ import (
 // The labels are token-level constrained to the set we pass, so the answer is
 // always one of them: a hallucinated label is impossible by construction, and
 // this cartridge does not have to defend against one.
-const classifyCap = `cap:classify;constrained;in="media:enc=utf-8";language=en;out="media:fmt=json;record;semantic-judgment"`
+const classifyCap = `cap:classify;constrained;in="media:enc=utf8";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment"`
 
 // The item being classified, and the allowed labels — both addressed by MEDIA
 // URN, which is how a peer call names its arguments.
 const (
-	classifyItemMedia   = "media:enc=utf-8"
-	classifyLabelsMedia = "media:enc=utf-8;label-set"
+	classifyItemMedia   = "media:enc=utf8"
+	classifyLabelsMedia = "media:enc=utf8;label-set"
 	labels              = "positive,neutral,negative"
 )
 
@@ -745,8 +745,8 @@ func collectText(frames <-chan bifaci.Frame) (string, error) {
 //     are unique per project and never collide with the published fabric. -----
 
 const (
-	inMedia  = "media:enc=utf-8;__CARTRIDGE_NAME__-input"
-	outMedia = "media:enc=utf-8;__CARTRIDGE_NAME__-tag"
+	inMedia  = "media:enc=utf8;__CARTRIDGE_NAME__-input"
+	outMedia = "media:enc=utf8;__CARTRIDGE_NAME__-tag"
 )
 
 // capURN builds the cap URN ONCE via the builder, so the string we register
@@ -791,7 +791,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.228.2414",
+		"1.229.2426",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -932,13 +932,13 @@ import Ops
 /// always one of them: a hallucinated label is impossible by construction, and
 /// this cartridge does not have to defend against one.
 let classifyCap =
-    "cap:classify;constrained;in=\"media:enc=utf-8\";language=en;"
-    + "out=\"media:fmt=json;record;semantic-judgment\""
+    "cap:classify;constrained;in=\"media:enc=utf8\";language=en;"
+    + "out=\"media:enc=utf8;fmt=json;record;semantic-judgment\""
 
 /// The item being classified, and the allowed labels — both addressed by MEDIA
 /// URN, which is how a peer call names its arguments.
-let classifyItemMedia = "media:enc=utf-8"
-let classifyLabelsMedia = "media:enc=utf-8;label-set"
+let classifyItemMedia = "media:enc=utf8"
+let classifyLabelsMedia = "media:enc=utf8;label-set"
 
 let labels = "positive,neutral,negative"
 
@@ -1003,8 +1003,8 @@ struct TagOp: Op, Sendable {
 // --- URN + manifest. Media/cap URNs are seeded from the project name so they -
 //     are unique per project and never collide with the published fabric. -----
 
-let inMedia = "media:enc=utf-8;__CARTRIDGE_NAME__-input"
-let outMedia = "media:enc=utf-8;__CARTRIDGE_NAME__-tag"
+let inMedia = "media:enc=utf8;__CARTRIDGE_NAME__-input"
+let outMedia = "media:enc=utf8;__CARTRIDGE_NAME__-tag"
 
 /// Build the cap URN ONCE via the builder, so the string we register with
 /// matches the runtime's canonical (alphabetically-sorted) byte form.
@@ -1055,7 +1055,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.228.2414",
+        version: "1.229.2426",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",

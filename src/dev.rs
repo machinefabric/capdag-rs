@@ -739,7 +739,7 @@ mod tests {
                 .map(|f| render(f.contents, &name))
                 .collect();
             assert!(
-                sources.contains(&format!("media:enc=utf-8;{name}-input")),
+                sources.contains(&format!("media:enc=utf8;{name}-input")),
                 "{}: input media URN is not seeded from the project name",
                 language.id
             );
@@ -881,7 +881,7 @@ mod tests {
         let root = temp_root("install");
         let project = root.join("proj");
         fs::create_dir_all(&project).unwrap();
-        let urn = "cap:greet;in=\"media:enc=utf-8\";out=\"media:enc=utf-8;greeting\"";
+        let urn = "cap:greet;in=\"media:enc=utf8\";out=\"media:enc=utf8;greeting\"";
         write_stub_entry(&project, "greeter", "greet", urn);
 
         let user_dir = root.join("cartridges");
@@ -922,7 +922,7 @@ mod tests {
         let project = root.join("proj");
         fs::create_dir_all(&project).unwrap();
         // `out=` states a greeting and the definition declares no output.
-        let urn = CapUrn::from_string("cap:greet;in=\"media:void\";out=\"media:enc=utf-8;greeting\"")
+        let urn = CapUrn::from_string("cap:greet;in=\"media:void\";out=\"media:enc=utf8;greeting\"")
             .unwrap();
         let bare = Cap::new(urn, "Greeter".to_string(), vec!["greet".to_string()]);
         write_stub_entry_with(&project, "greeter", bare);
@@ -968,7 +968,7 @@ mod tests {
         // Seed the fabric with a cap `alpha` at a known URN, and publish its
         // alias into the warm alias cache (as the real publisher would).
         let alpha = Cap::new(
-            CapUrn::from_string("cap:alpha;in=\"media:enc=utf-8\";out=\"media:enc=utf-8;alpha\"")
+            CapUrn::from_string("cap:alpha;in=\"media:enc=utf8\";out=\"media:enc=utf8;alpha\"")
                 .unwrap(),
             "Alpha".to_string(),
             vec!["alpha".to_string()],
@@ -983,7 +983,7 @@ mod tests {
 
         // A dev cap claiming `alpha` but with a DIFFERENT URN => conflict.
         let clashing = Cap::new(
-            CapUrn::from_string("cap:beta;in=\"media:enc=utf-8\";out=\"media:enc=utf-8;beta\"")
+            CapUrn::from_string("cap:beta;in=\"media:enc=utf8\";out=\"media:enc=utf8;beta\"")
                 .unwrap(),
             "Clash".to_string(),
             vec!["alpha".to_string()],
@@ -995,7 +995,7 @@ mod tests {
 
         // A brand-new alias the fabric never heard of => fine.
         let fresh = Cap::new(
-            CapUrn::from_string("cap:gamma;in=\"media:enc=utf-8\";out=\"media:enc=utf-8;gamma\"")
+            CapUrn::from_string("cap:gamma;in=\"media:enc=utf8\";out=\"media:enc=utf8;gamma\"")
                 .unwrap(),
             "Fresh".to_string(),
             vec!["gamma".to_string()],

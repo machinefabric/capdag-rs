@@ -4227,7 +4227,7 @@ mod tests {
             })
             .to_string()
         };
-        let urn = r#"cap:in="media:enc=utf-8";compare;out="media:record""#;
+        let urn = r#"cap:in="media:enc=utf8";compare;out="media:record""#;
         let arg = |media: &str, name: &str, source: serde_json::Value| {
             serde_json::json!({"media_urn": media, "name": name, "required": true, "sources": [source]})
         };
@@ -4235,7 +4235,7 @@ mod tests {
 
         let good = serde_json::json!({
             "urn": urn, "title": "Compare", "aliases": ["compare"],
-            "args": [arg("media:enc=utf-8", "left", serde_json::json!({"stdin": "media:enc=utf-8"}))],
+            "args": [arg("media:enc=utf8", "left", serde_json::json!({"stdin": "media:enc=utf8"}))],
             "outputs": [output.clone()],
         });
         let groups = parse_cap_groups_from_manifest(manifest_with(good).as_bytes())
@@ -4255,8 +4255,8 @@ mod tests {
         let text = refused(serde_json::json!({
             "urn": urn, "title": "Compare", "aliases": ["compare"],
             "args": [
-                arg("media:enc=utf-8", "left", serde_json::json!({"stdin": "media:enc=utf-8"})),
-                arg("media:enc=utf-8;other", "right", serde_json::json!({"stdin": "media:enc=utf-8"})),
+                arg("media:enc=utf8", "left", serde_json::json!({"stdin": "media:enc=utf8"})),
+                arg("media:enc=utf8;other", "right", serde_json::json!({"stdin": "media:enc=utf8"})),
             ],
             "outputs": [output.clone()],
         }));
@@ -4264,7 +4264,7 @@ mod tests {
         // The output the cap URN states is not declared.
         let text = refused(serde_json::json!({
             "urn": urn, "title": "Compare", "aliases": ["compare"],
-            "args": [arg("media:enc=utf-8", "left", serde_json::json!({"stdin": "media:enc=utf-8"}))],
+            "args": [arg("media:enc=utf8", "left", serde_json::json!({"stdin": "media:enc=utf8"}))],
         }));
         assert!(text.contains("RULE21"), "{text}");
     }

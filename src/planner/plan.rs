@@ -1821,15 +1821,15 @@ mod tests {
         ));
         plan.add_node(MachineNode::cap(
             "body_cap_0",
-            "cap:in=media:pdf-page;out=\"media:enc=utf-8;text\"",
+            "cap:in=media:pdf-page;out=\"media:enc=utf8;text\"",
         ));
         plan.add_node(MachineNode::cap(
             "body_cap_1",
-            "cap:in=\"media:enc=utf-8;text\";out=\"media:decision;fmt=json;record\"",
+            "cap:in=\"media:enc=utf8;text\";out=\"media:decision;enc=utf8;fmt=json;record\"",
         ));
         plan.add_node(MachineNode::cap(
             "cap_post",
-            "cap:in=\"media:decision;fmt=json;record\";out=\"media:fmt=json\"",
+            "cap:in=\"media:decision;enc=utf8;fmt=json;record\";out=\"media:enc=utf8;fmt=json\"",
         ));
         plan.add_node(MachineNode::output("output", "result", "cap_post"));
 
@@ -1862,12 +1862,12 @@ mod tests {
         gather_plan.add_node(MachineNode::input_slot(
             "input",
             "input",
-            "media:enc=utf-8",
+            "media:enc=utf8",
             crate::planner::cardinality::InputCardinality::Single,
         ));
         gather_plan.add_node(MachineNode::cap(
             "cap_0",
-            "cap:in=\"media:enc=utf-8\";summarize;out=media:summary",
+            "cap:in=\"media:enc=utf8\";summarize;out=media:summary",
         ));
         gather_plan.add_node(MachineNode::collect(
             "collect_0",
@@ -1906,9 +1906,9 @@ mod tests {
             "foreach_1_item_0",
             "foreach_1",
             "body_cap_0",
-            "media:enc=utf-8;text",
+            "media:enc=utf8;text",
         ));
-        plan.add_node(MachineNode::cap("inner_cap", "cap:in=\"media:enc=utf-8;text\";out=media:word"));
+        plan.add_node(MachineNode::cap("inner_cap", "cap:in=\"media:enc=utf8;text\";out=media:word"));
         if let ExecutionNodeType::ForEach { body, .. } =
             &mut plan.nodes.get_mut("foreach_0").unwrap().node_type
         {
@@ -2100,10 +2100,10 @@ mod tests {
     }
 
     fn one_cap_strand(prefix: Option<&str>) -> Strand {
-        let input = crate::MediaUrn::from_string("media:enc=utf-8;page").unwrap();
-        let output = crate::MediaUrn::from_string("media:enc=utf-8;ext=txt;plain-text").unwrap();
+        let input = crate::MediaUrn::from_string("media:enc=utf8;page").unwrap();
+        let output = crate::MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap();
         let cap = crate::CapUrn::from_string(
-            "cap:constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8;ext=txt;plain-text\";summarize",
+            "cap:constrained;in=\"media:enc=utf8\";language=en;out=\"media:enc=utf8;ext=txt;plain-text\";summarize",
         )
         .unwrap();
         let cap_step = StrandStep {
@@ -2147,7 +2147,7 @@ mod tests {
         plan.add_node(MachineNode::input_slot(
             "input_slot_0",
             "input",
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
             InputCardinality::Sequence,
         ));
         plan.add_node(MachineNode::for_each_token(
@@ -2163,7 +2163,7 @@ mod tests {
             "foreach_0_item_0",
             "foreach_0",
             "input_slot_0",
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         ));
         plan.add_edge(MachinePlanEdge::direct("input_slot_0", "foreach_0"));
         plan.add_edge(MachinePlanEdge::iteration("foreach_0", "foreach_0_item_0"));
@@ -2179,7 +2179,7 @@ mod tests {
         let mut plan = MachinePlan::new("runtime foreach");
         plan.add_node(MachineNode::cap_with_bindings_token(
             "tok-cap",
-            "cap:constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8;ext=txt;plain-text\";summarize",
+            "cap:constrained;in=\"media:enc=utf8\";language=en;out=\"media:enc=utf8;ext=txt;plain-text\";summarize",
             ArgumentBindings::new(),
             "tok-cap".parse().unwrap(),
         ));

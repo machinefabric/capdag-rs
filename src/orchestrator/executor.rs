@@ -4254,10 +4254,10 @@ mod tests {
         }
     }
 
-    const OP_A: &str = "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8\"";
-    const OP_B: &str = "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8\"";
-    const OP_D: &str = "cap:in=\"media:enc=utf-8\";op-d;out=\"media:enc=utf-8;ext=txt\"";
-    const FOLD: &str = "cap:in=\"media:enc=utf-8\";fold;out=\"media:enc=utf-8;ext=txt\"";
+    const OP_A: &str = "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8\"";
+    const OP_B: &str = "cap:in=\"media:ext=md;plain-text\";op-b;out=\"media:enc=utf8\"";
+    const OP_D: &str = "cap:in=\"media:enc=utf8\";op-d;out=\"media:enc=utf8;ext=txt;plain-text\"";
+    const FOLD: &str = "cap:in=\"media:enc=utf8\";fold;out=\"media:enc=utf8;ext=txt;plain-text\"";
 
     fn chains_of(steps: &[ResolvedStep], keep: &[&str]) -> Vec<Vec<String>> {
         let order = topological_sort_steps(steps).expect("acyclic");
@@ -4277,7 +4277,7 @@ mod tests {
         // Gather shape: in→A, in2→B, then (A, B) gathered → C.
         let mut c = step("C", FOLD, None);
         c.inputs.push(crate::orchestrator::types::StepInput {
-            stream_urn: "media:enc=utf-8".to_string(),
+            stream_urn: "media:enc=utf8".to_string(),
             source: StepSource::Gather(vec!["A".to_string(), "B".to_string()]),
         });
         let steps = vec![step("A", OP_A, Some("in")), step("B", OP_B, Some("in2")), c];
@@ -4291,7 +4291,7 @@ mod tests {
         // a one-item sequence, not forwarded as it streams.
         let mut d = step("D", OP_D, None);
         d.inputs.push(crate::orchestrator::types::StepInput {
-            stream_urn: "media:enc=utf-8".to_string(),
+            stream_urn: "media:enc=utf8".to_string(),
             source: StepSource::Gather(vec!["A".to_string()]),
         });
         assert_eq!(
@@ -4353,7 +4353,7 @@ mod tests {
         // D reads A's other output, not its main one: not a hop of A's main stream.
         let mut steps = base();
         steps[0].outputs.push(crate::orchestrator::types::StepOutput {
-            output_media_urn: "media:enc=utf-8;rest".to_string(),
+            output_media_urn: "media:enc=utf8;rest".to_string(),
             node: "A.rest".to_string(),
         });
         steps[1].inputs[0].source = StepSource::Node("A.rest".to_string());
@@ -4389,7 +4389,7 @@ mod tests {
     fn test12759_steps_are_ordered_by_what_they_read() {
         let mut a = step("A", OP_A, Some("in"));
         a.outputs.push(crate::orchestrator::types::StepOutput {
-            output_media_urn: "media:enc=utf-8;rest".to_string(),
+            output_media_urn: "media:enc=utf8;rest".to_string(),
             node: "A.rest".to_string(),
         });
         // E reads A's other output; D reads A's main one; listed consumers first.

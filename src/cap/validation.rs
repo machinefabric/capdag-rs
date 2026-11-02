@@ -1367,9 +1367,9 @@ mod tests {
     }
 
     fn make_test_cap_with_stdin_args(args: Vec<CapArg>) -> Cap {
-        // Uses in=media:enc=utf-8 — for tests where at least one arg has a stdin source.
+        // Uses in=media:enc=utf8 — for tests where at least one arg has a stdin source.
         let urn =
-            CapUrn::from_string(r#"cap:in="media:enc=utf-8";test;out="media:record""#).unwrap();
+            CapUrn::from_string(r#"cap:in="media:enc=utf8";test;out="media:record""#).unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
         for arg in args {
             cap.add_arg(arg);
@@ -1418,7 +1418,7 @@ mod tests {
                 MEDIA_STRING, "input",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8".to_string(),
+                    stdin: "media:enc=utf8".to_string(),
                 }],
             ),
             CapArg::new(
@@ -1447,14 +1447,14 @@ mod tests {
                 MEDIA_STRING, "input",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8".to_string(),
+                    stdin: "media:enc=utf8".to_string(),
                 }],
             ),
             CapArg::new(
                 MEDIA_INTEGER, "other",
                 true,
                 vec![ArgSource::Stdin {
-                    stdin: "media:enc=utf-8".to_string(),
+                    stdin: "media:enc=utf8".to_string(),
                 }],
             ),
         ]);
@@ -1625,7 +1625,7 @@ mod tests {
                 vec![
                     ArgSource::Position { position: 0 },
                     ArgSource::Stdin {
-                        stdin: "media:enc=utf-8".to_string(),
+                        stdin: "media:enc=utf8".to_string(),
                     },
                 ],
             ),
@@ -1650,7 +1650,7 @@ mod tests {
             MEDIA_STRING, "input",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8".to_string(),
+                stdin: "media:enc=utf8".to_string(),
             }],
         )]);
         let result = validate_cap_args(&cap);
@@ -1667,7 +1667,7 @@ mod tests {
     #[test]
     fn test1295_rule15_non_void_input_without_stdin_rejected() {
         let urn =
-            CapUrn::from_string(r#"cap:in="media:enc=utf-8";test;out="media:record""#).unwrap();
+            CapUrn::from_string(r#"cap:in="media:enc=utf8";test;out="media:record""#).unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
         cap.add_arg(CapArg::new(
             MEDIA_STRING, "input",
@@ -1711,7 +1711,7 @@ mod tests {
             MEDIA_STRING, "input",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8".to_string(),
+                stdin: "media:enc=utf8".to_string(),
             }],
         )]);
         let result = validate_cap_args(&cap);
@@ -1733,7 +1733,7 @@ mod tests {
             .unwrap();
             let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
             cap.add_arg(CapArg::new(
-                "media:enc=utf-8;file-path", "document",
+                "media:enc=utf8;file-path", "document",
                 true,
                 vec![ArgSource::Stdin { stdin: stdin.to_string() }],
             ));
@@ -1781,9 +1781,9 @@ mod tests {
     // it accepts is not what it is delivered under.
     #[test]
     fn test12707_rule18_accepts_and_the_two_urns_of_an_argument() {
-        let series = "media:fmt=json;list;record;time-series";
+        let series = "media:enc=utf8;fmt=json;list;record;time-series";
         let benchmark = CapArg::new(
-            "media:benchmark;fmt=json;list;record;time-series", "benchmark",
+            "media:benchmark;enc=utf8;fmt=json;list;record;time-series", "benchmark",
             true,
             vec![ArgSource::CliFlag { cli_flag: "--benchmark".to_string() }],
         )
@@ -1791,11 +1791,11 @@ mod tests {
         // It accepts a plain series, and is delivered under its own URN: two
         // args accepting one type stay distinct on the wire.
         assert_eq!(benchmark.accepted_urn(), series);
-        assert_eq!(benchmark.stream_urn(), "media:benchmark;fmt=json;list;record;time-series");
+        assert_eq!(benchmark.stream_urn(), "media:benchmark;enc=utf8;fmt=json;list;record;time-series");
 
         // The main input accepts, and is delivered under, its stdin URN.
         let main = CapArg::new(
-            "media:enc=utf-8;file-path", "path",
+            "media:enc=utf8;file-path", "path",
             true,
             vec![ArgSource::Stdin { stdin: series.to_string() }],
         );
@@ -1817,11 +1817,11 @@ mod tests {
         let mut twice = Cap::new(urn, "Compare".to_string(), vec!["compare".to_string()]);
         twice.add_arg(main.accepting(series));
         let err = format!("{}", validate_cap_args(&twice).unwrap_err());
-        assert!(err.contains("RULE18") && err.contains("media:enc=utf-8;file-path"), "{}", err);
+        assert!(err.contains("RULE18") && err.contains("media:enc=utf8;file-path"), "{}", err);
     }
 
     fn cap_with_outputs(out_spec: &str, outputs: Vec<CapOutput>) -> Cap {
-        let urn = CapUrn::from_string(&format!(r#"cap:in="media:enc=utf-8";test;out="{out_spec}""#)).unwrap();
+        let urn = CapUrn::from_string(&format!(r#"cap:in="media:enc=utf8";test;out="{out_spec}""#)).unwrap();
         let mut cap = Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
         cap.set_outputs(outputs);
         cap
@@ -1831,24 +1831,24 @@ mod tests {
     // distinct media URNs, compared as URNs.
     #[test]
     fn test12708_rule19_rule20_output_names_and_identities() {
-        let fit = || CapOutput::new("media:fmt=json;record;regression", "fit", "the fit");
+        let fit = || CapOutput::new("media:enc=utf8;fmt=json;record;regression", "fit", "the fit");
         let ok = cap_with_outputs(
-            "media:fmt=json;record;regression",
-            vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "residuals", "")],
+            "media:enc=utf8;fmt=json;record;regression",
+            vec![fit(), CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "residuals", "")],
         );
         assert!(validate_cap_outputs(&ok).is_ok(), "{:?}", validate_cap_outputs(&ok).err());
 
         let refused = |outputs: Vec<CapOutput>| {
-            format!("{}", validate_cap_outputs(&cap_with_outputs("media:fmt=json;record;regression", outputs)).unwrap_err())
+            format!("{}", validate_cap_outputs(&cap_with_outputs("media:enc=utf8;fmt=json;record;regression", outputs)).unwrap_err())
         };
-        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "", "")]);
+        let err = refused(vec![fit(), CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "", "")]);
         assert!(err.contains("RULE19") && err.contains("has no name"), "{}", err);
-        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "null", "")]);
+        let err = refused(vec![fit(), CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "null", "")]);
         assert!(err.contains("RULE19") && err.contains("not a valid name"), "{}", err);
-        let err = refused(vec![fit(), CapOutput::new("media:fmt=json;list;record;residual", "fit", "")]);
+        let err = refused(vec![fit(), CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "fit", "")]);
         assert!(err.contains("RULE19") && err.contains("share the name 'fit'"), "{}", err);
         // The same URN with its tags in another order is the same output.
-        let err = refused(vec![fit(), CapOutput::new("media:regression;record;fmt=json", "again", "")]);
+        let err = refused(vec![fit(), CapOutput::new("media:regression;record;fmt=json;enc=utf8", "again", "")]);
         assert!(err.contains("RULE20"), "{}", err);
     }
 
@@ -1856,21 +1856,21 @@ mod tests {
     // a cap whose `out=` is void declares none.
     #[test]
     fn test12709_rule21_exactly_one_main_output() {
-        let fit = "media:fmt=json;record;regression";
-        let none = cap_with_outputs(fit, vec![CapOutput::new("media:fmt=json;list;record;residual", "residuals", "")]);
+        let fit = "media:enc=utf8;fmt=json;record;regression";
+        let none = cap_with_outputs(fit, vec![CapOutput::new("media:enc=utf8;fmt=json;list;record;residual", "residuals", "")]);
         let err = format!("{}", validate_cap_outputs(&none).unwrap_err());
         assert!(err.contains("RULE21") && err.contains("0 outputs"), "{}", err);
         let bare = cap_with_outputs(fit, vec![]);
         assert!(format!("{}", validate_cap_outputs(&bare).unwrap_err()).contains("RULE21"));
 
-        let one = cap_with_outputs(fit, vec![CapOutput::new("media:regression;fmt=json;record", "fit", "")]);
+        let one = cap_with_outputs(fit, vec![CapOutput::new("media:regression;fmt=json;record;enc=utf8", "fit", "")]);
         assert!(validate_cap_outputs(&one).is_ok(), "the main output is found by URN equivalence");
         assert_eq!(one.main_output().map(|o| o.name.as_str()), Some("fit"));
 
         let void = cap_with_outputs("media:void", vec![]);
         assert!(validate_cap_outputs(&void).is_ok());
         assert!(void.main_output().is_none());
-        let void_with = cap_with_outputs("media:void", vec![CapOutput::new("media:enc=utf-8", "text", "")]);
+        let void_with = cap_with_outputs("media:void", vec![CapOutput::new("media:enc=utf8", "text", "")]);
         let err = format!("{}", validate_cap_outputs(&void_with).unwrap_err());
         assert!(err.contains("RULE21") && err.contains("media:void"), "{}", err);
     }
@@ -1880,26 +1880,26 @@ mod tests {
     #[test]
     fn test12710_rule22_what_an_output_carries() {
         let router = cap_with_outputs(
-            "media:enc=utf-8;kept",
+            "media:enc=utf8;kept",
             vec![
-                CapOutput::new("media:enc=utf-8;kept", "yes", "").optional(true),
-                CapOutput::new("media:enc=utf-8;dropped", "no", "").optional(true).carrying_input(),
+                CapOutput::new("media:enc=utf8;kept", "yes", "").optional(true),
+                CapOutput::new("media:enc=utf8;dropped", "no", "").optional(true).carrying_input(),
             ],
         );
         assert!(validate_cap_outputs(&router).is_ok(), "{:?}", validate_cap_outputs(&router).err());
 
         let main_carries = cap_with_outputs(
-            "media:enc=utf-8;kept",
-            vec![CapOutput::new("media:enc=utf-8;kept", "yes", "").carrying_input()],
+            "media:enc=utf8;kept",
+            vec![CapOutput::new("media:enc=utf8;kept", "yes", "").carrying_input()],
         );
         let err = format!("{}", validate_cap_outputs(&main_carries).unwrap_err());
         assert!(err.contains("RULE22") && err.contains("main output"), "{}", err);
 
-        let urn = CapUrn::from_string(r#"cap:in="media:void";now;out="media:enc=utf-8;stamp""#).unwrap();
+        let urn = CapUrn::from_string(r#"cap:in="media:void";now;out="media:enc=utf8;stamp""#).unwrap();
         let mut source = Cap::new(urn, "Now".to_string(), vec!["now".to_string()]);
         source.set_outputs(vec![
-            CapOutput::new("media:enc=utf-8;stamp", "stamp", ""),
-            CapOutput::new("media:enc=utf-8;echo", "echo", "").carrying_input(),
+            CapOutput::new("media:enc=utf8;stamp", "stamp", ""),
+            CapOutput::new("media:enc=utf8;echo", "echo", "").carrying_input(),
         ]);
         let err = format!("{}", validate_cap_outputs(&source).unwrap_err());
         assert!(err.contains("RULE22") && err.contains("takes none"), "{}", err);
@@ -1912,10 +1912,10 @@ mod tests {
     #[test]
     fn test1953_rule14_streaming_only_on_main_input() {
         let main = CapArg::new(
-            "media:enc=utf-8", "input",
+            "media:enc=utf8", "input",
             true,
             vec![ArgSource::Stdin {
-                stdin: "media:enc=utf-8".to_string(),
+                stdin: "media:enc=utf8".to_string(),
             }],
         )
         .streaming(true);

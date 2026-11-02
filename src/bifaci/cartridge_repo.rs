@@ -1901,13 +1901,13 @@ mod tests {
     #[test]
     fn test633_deserialize_rich_registry_cap() {
         let json = r#"{
-            "urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+            "urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
             "title": "Disbind PDF",
             "aliases": ["disbind"],
             "cap_description": "Extract each PDF page as plain page text.",
             "args": [
                 {
-                    "media_urn": "media:enc=utf-8;file-path",
+                    "media_urn": "media:enc=utf8;file-path",
                     "name": "document",
                     "required": true,
                     "is_sequence": false,
@@ -1917,13 +1917,13 @@ mod tests {
             ],
             "outputs": [
                 {
-                    "media_urn": "media:enc=utf-8;page",
+                    "media_urn": "media:enc=utf8;page",
                     "name": "pages",
                     "is_sequence": true,
                     "output_description": "One page text per PDF page"
                 },
                 {
-                    "media_urn": "media:enc=utf-8;outline",
+                    "media_urn": "media:enc=utf8;outline",
                     "name": "outline",
                     "optional": true,
                     "output_description": "The document's outline, when it has one"
@@ -1937,7 +1937,7 @@ mod tests {
             Some("Extract each PDF page as plain page text.")
         );
         assert_eq!(cap.args.len(), 1);
-        assert_eq!(cap.args[0].media_urn, "media:enc=utf-8;file-path");
+        assert_eq!(cap.args[0].media_urn, "media:enc=utf8;file-path");
         assert_eq!(cap.args[0].name, "document");
         assert_eq!(cap.args[0].sources[1], crate::cap::definition::ArgSource::Position { position: 0 });
         let main = cap.main_output().expect("the main output is the one `out=` names");
@@ -1981,7 +1981,7 @@ mod tests {
                     "name": "pdf-formats",
                     "caps": [
                         {"urn": "cap:effect=none", "title": "Identity", "aliases": ["identity"], "args": [{"media_urn": "media:", "name": "input", "required": true, "sources": [{"stdin": "media:"}]}], "outputs": [{"media_urn": "media:", "name": "output", "output_description": "The input data, unchanged"}]},
-                        {"urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"], "args": [{"media_urn": "media:document;ext=pdf", "name": "document", "required": true, "sources": [{"stdin": "media:document;ext=pdf"}]}], "outputs": [{"media_urn": "media:enc=utf-8;page", "name": "pages", "is_sequence": true, "output_description": "The pages"}]}
+                        {"urn": "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"", "title": "Disbind PDF Into Page Text", "aliases": ["disbind"], "args": [{"media_urn": "media:document;ext=pdf", "name": "document", "required": true, "sources": [{"stdin": "media:document;ext=pdf"}]}], "outputs": [{"media_urn": "media:enc=utf8;page", "name": "pages", "is_sequence": true, "output_description": "The pages"}]}
                     ],
                     "adapter_urns": ["media:document;ext=pdf"]
                 }
@@ -2497,7 +2497,7 @@ mod tests {
     // channel, the cap and the rule; whole definitions are read.
     #[test]
     fn test12849_reading_a_registry_holds_its_definitions_to_the_rules() {
-        let compare = r#"cap:in="media:enc=utf-8";compare;out="media:record""#;
+        let compare = r#"cap:in="media:enc=utf8";compare;out="media:record""#;
         let whole = build_cap(compare, "Compare", "compare");
         let registry = build_registry(vec![(
             "comparer",
@@ -2773,7 +2773,7 @@ mod tests {
             vec![build_cap_group(
                 "pdf",
                 vec![build_cap(
-                    "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
                     "Disbind PDF",
                     "disbind",
                 )],
@@ -2839,11 +2839,11 @@ mod tests {
     #[test]
     fn test329_cartridge_repo_server_get_by_cap() {
         let declared_urn =
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
         // Same cap URN with the in/out spec tags in a different declared
         // order. Tagged-URN normalization treats them as identical.
         let request_urn =
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
 
         let entry = build_registry_entry(
             "PDF Cartridge",
@@ -2926,9 +2926,9 @@ mod tests {
     async fn test331_cartridge_repo_client_get_suggestions() {
         let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
         let declared_urn =
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
         let request_urn =
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
 
         let registry = CartridgeRegistryResponse {
             cartridges: vec![{
@@ -3013,9 +3013,9 @@ mod tests {
     #[tokio::test]
     async fn test333_cartridge_repo_client_get_all_caps() {
         let repo = CartridgeRepo::new(3600, TEST_FABRIC_URL, test_charter_trust());
-        let cap1 = "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+        let cap1 = "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
         let cap2 =
-            "cap:in=\"media:enc=utf-8;ext=txt\";disbind;out=\"media:disbound-page;enc=utf-8;list\"";
+            "cap:in=\"media:enc=utf8;ext=txt;plain-text\";disbind;out=\"media:disbound-page;enc=utf8;list\"";
 
         let registry = CartridgeRegistryResponse {
             cartridges: vec![

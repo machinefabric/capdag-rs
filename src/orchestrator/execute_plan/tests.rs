@@ -16,12 +16,12 @@ use crate::urn::cap_urn::CapUrn;
 // Caps
 // ---------------------------------------------------------------------------
 
-const TEXT: &str = "media:enc=utf-8";
-const OTHER: &str = "media:enc=utf-8;other";
-const HINT: &str = "media:enc=utf-8;hint";
-const SAID: &str = "media:enc=utf-8;said";
-const REST: &str = "media:enc=utf-8;rest";
-const REJECTED: &str = "media:enc=utf-8;rejected";
+const TEXT: &str = "media:enc=utf8";
+const OTHER: &str = "media:enc=utf8;other";
+const HINT: &str = "media:enc=utf8;hint";
+const SAID: &str = "media:enc=utf8;said";
+const REST: &str = "media:enc=utf8;rest";
+const REJECTED: &str = "media:enc=utf8;rejected";
 
 /// The URN of the test cap `op`: text in, text out (its own flavour of it).
 fn urn(op: &str) -> String {
@@ -67,10 +67,10 @@ fn with_output(mut cap: Cap, name: &str, media_urn: &str, optional: bool) -> Cap
 }
 
 /// The arg of `among` that takes every item.
-const ALL: &str = "media:all-of;enc=utf-8";
-const NOW: &str = r#"cap:in="media:void";now;out="media:enc=utf-8;now-out""#;
-const SAY: &str = r#"cap:in="media:void";say;out="media:enc=utf-8;say-out""#;
-const SINK: &str = r#"cap:in="media:enc=utf-8";sink;out="media:void""#;
+const ALL: &str = "media:all-of;enc=utf8";
+const NOW: &str = r#"cap:in="media:void";now;out="media:enc=utf8;now-out""#;
+const SAY: &str = r#"cap:in="media:void";say;out="media:enc=utf8;say-out""#;
+const SINK: &str = r#"cap:in="media:enc=utf8";sink;out="media:void""#;
 
 fn registry() -> Arc<FabricRegistry> {
     let mut split = text_cap("split");
@@ -814,7 +814,7 @@ async fn test12770_a_linear_machine_is_one_chain() {
     // The terminal's media is what the run held there: the declared output.
     assert!(same_media(
         result.terminal(&built.output("out")).unwrap().media_urn(),
-        "media:enc=utf-8;exclaim-out"
+        "media:enc=utf8;exclaim-out"
     ));
 }
 
@@ -1259,7 +1259,7 @@ async fn test12778_an_output_that_does_not_fire_skips_what_needs_it() {
     assert_eq!(produced(&result, &built, "b"), (texts(&["xenon!"]), false));
     match result.terminal(&built.output("a2")).unwrap() {
         PlanTerminal::NotProduced { media_urn, .. } => {
-            assert!(same_media(media_urn, "media:enc=utf-8;exclaim-out"));
+            assert!(same_media(media_urn, "media:enc=utf8;exclaim-out"));
         }
         other => panic!("expected NotProduced, got {other:?}"),
     }

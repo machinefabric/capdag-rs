@@ -3792,7 +3792,7 @@ mod alias_tests {
                 }],
             )],
             outputs: vec![CapOutput::new(
-                "media:enc=utf-8".to_string(), "output",
+                "media:enc=utf8".to_string(), "output",
                 "out".to_string(),
             )],
             metadata_json: None,
@@ -3809,15 +3809,15 @@ mod alias_tests {
     // parse fails the footprint rather than being left out of it.
     #[test]
     fn test12816_a_caps_media_footprint_covers_every_output_and_accepted_type() {
-        let mut cap = cap_with_urn(r#"cap:in="media:document;ext=pdf";footprint;out="media:enc=utf-8""#);
+        let mut cap = cap_with_urn(r#"cap:in="media:document;ext=pdf";footprint;out="media:enc=utf8""#);
         cap.args.push(
             CapArg::new(
-                "media:enc=utf-8;second".to_string(),
+                "media:enc=utf8;second".to_string(),
                 "second",
                 false,
                 vec![ArgSource::CliFlag { cli_flag: "--second".to_string() }],
             )
-            .accepting("media:enc=utf-8;accepted"),
+            .accepting("media:enc=utf8;accepted"),
         );
         cap.args.push(CapArg::new(
             "media:".to_string(),
@@ -3825,14 +3825,14 @@ mod alias_tests {
             false,
             vec![ArgSource::CliFlag { cli_flag: "--anything".to_string() }],
         ));
-        cap.outputs.push(CapOutput::new("media:enc=utf-8;rest".to_string(), "rest", "rest".to_string()));
+        cap.outputs.push(CapOutput::new("media:enc=utf8;rest".to_string(), "rest", "rest".to_string()));
         let normalized = |urn: &str| normalize_media_urn(urn).unwrap();
         let mut expected: Vec<String> = [
             "media:document;ext=pdf",
-            "media:enc=utf-8",
-            "media:enc=utf-8;second",
-            "media:enc=utf-8;accepted",
-            "media:enc=utf-8;rest",
+            "media:enc=utf8",
+            "media:enc=utf8;second",
+            "media:enc=utf8;accepted",
+            "media:enc=utf8;rest",
         ]
         .iter()
         .map(|urn| normalized(urn))
@@ -3886,14 +3886,14 @@ mod alias_tests {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "jsondoc".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         let target = registry.resolve_alias("jsondoc").await.expect("resolves");
-        assert_eq!(target, "media:fmt=json;record");
+        assert_eq!(target, "media:enc=utf8;fmt=json;record");
         // Case-insensitive: the same alias resolves regardless of input case.
         let upper = registry.resolve_alias("JSONDoc").await.expect("resolves");
-        assert_eq!(upper, "media:fmt=json;record");
+        assert_eq!(upper, "media:enc=utf8;fmt=json;record");
         // Malformed name fails hard (not silently None).
         assert!(registry.resolve_alias("bad:name").await.is_err());
     }
@@ -3911,7 +3911,7 @@ mod alias_tests {
         let registry = FabricRegistry::new_for_test();
         let disbind_pdf = Cap::new(
             CapUrn::from_string(
-                r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf-8;ext=txt;page;plain-text""#,
+                r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf8;ext=txt;page;plain-text""#,
             )
             .unwrap(),
             "Disbind PDF".to_string(),
@@ -3938,7 +3938,7 @@ mod alias_tests {
         // disbind has a fixed output → a pdf input narrows uniquely, no --to.
         let disbind_abstract =
             CapUrn::from_string(
-                r#"cap:disbind;in="media:document";out="media:enc=utf-8;ext=txt;page;plain-text""#,
+                r#"cap:disbind;in="media:document";out="media:enc=utf8;ext=txt;page;plain-text""#,
             )
             .unwrap();
         let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
@@ -3983,7 +3983,7 @@ mod alias_tests {
 
         // A file that is not an image: the same rule refuses it, and the
         // message carries what the abstract cap declares and what it was given.
-        let text = MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap();
+        let text = MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap();
         let refused = registry
             .narrow_abstract_cap(&convert_abstract, &text, Some(&png))
             .await
@@ -3991,7 +3991,7 @@ mod alias_tests {
         assert!(matches!(refused, CapNarrowError::NoHandler { .. }));
         let said = refused.to_string();
         assert!(said.contains("in=media:image"), "{said}");
-        assert!(said.contains("media:enc=utf-8;ext=txt"), "{said}");
+        assert!(said.contains("media:enc=utf8;ext=txt;plain-text"), "{said}");
 
         // Nor does an image go to the document umbrella's handler.
         assert!(matches!(
@@ -4010,7 +4010,7 @@ mod alias_tests {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "jsondoc".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         // Correct kind: ok.
@@ -4037,7 +4037,7 @@ mod alias_tests {
     #[tokio::test]
     async fn test1890_get_cap_via_alias_and_type_mismatch() {
         let registry = FabricRegistry::new_for_test();
-        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"";
+        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8\"";
         let cap = cap_with_urn(cap_urn);
         let canonical = cap.urn_string();
         registry.add_caps_to_cache(vec![cap]);
@@ -4056,7 +4056,7 @@ mod alias_tests {
         // Media alias passed to the cap boundary → hard error.
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "jsondoc".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         let err = registry.get_cap("jsondoc").await.unwrap_err();
@@ -4071,20 +4071,20 @@ mod alias_tests {
     #[tokio::test]
     async fn test1891_get_media_def_via_alias_and_type_mismatch() {
         let registry = FabricRegistry::new_for_test();
-        registry.insert_cached_media_def_for_test(media_spec("media:fmt=json;record"));
+        registry.insert_cached_media_def_for_test(media_spec("media:enc=utf8;fmt=json;record"));
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "jsondoc".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         let spec = registry
             .get_media_def("jsondoc")
             .await
             .expect("media alias resolves");
-        assert_eq!(spec.urn, "media:fmt=json;record");
+        assert_eq!(spec.urn, "media:enc=utf8;fmt=json;record");
 
         // A cap alias at the media boundary → hard error.
-        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8\"";
+        let cap_urn = "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8\"";
         let cap = cap_with_urn(cap_urn);
         let canonical = cap.urn_string();
         registry.add_caps_to_cache(vec![cap]);
@@ -4184,18 +4184,18 @@ mod parity_port_tests {
         // Two aliases on the same cap target; "i2s" is shorter than "int2str".
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "int2str".to_string(),
-            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf-8\"".to_string(),
+            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf8\"".to_string(),
             version: 1,
         });
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "i2s".to_string(),
-            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf-8\"".to_string(),
+            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf8\"".to_string(),
             version: 1,
         });
         // A media alias too.
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "json".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
 
@@ -4203,23 +4203,23 @@ mod parity_port_tests {
         assert_eq!(
             registry
                 .display_alias_for_urn(
-                    "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf-8\""
+                    "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf8\""
                 )
                 .as_deref(),
             Some("i2s")
         );
         // NON-canonical query (media tags reordered, cap arg order swapped):
-        // must still resolve via canonicalisation. `media:record;fmt=json`
-        // canonicalises to `media:fmt=json;record`.
+        // must still resolve via canonicalisation. `media:record;fmt=json;enc=utf8`
+        // canonicalises to `media:enc=utf8;fmt=json;record`.
         assert_eq!(
             registry
-                .display_alias_for_urn("media:record;fmt=json")
+                .display_alias_for_urn("media:record;fmt=json;enc=utf8")
                 .as_deref(),
             Some("json")
         );
         // A real URN with no alias → None.
         assert_eq!(
-            registry.display_alias_for_urn("media:document;enc=utf-8;ext=pdf"),
+            registry.display_alias_for_urn("media:document;enc=utf8;ext=pdf"),
             None
         );
         // A non-URN (no cap:/media: prefix) → None, never a panic.
@@ -4236,12 +4236,12 @@ mod parity_port_tests {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "int2str".to_string(),
-            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf-8\"".to_string(),
+            target: "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf8\"".to_string(),
             version: 1,
         });
         registry.insert_cached_alias_for_test(StoredAlias {
             name: "json".to_string(),
-            target: "media:fmt=json;record".to_string(),
+            target: "media:enc=utf8;fmt=json;record".to_string(),
             version: 1,
         });
         let cap_aliases = registry.cached_cap_aliases();
@@ -4250,7 +4250,7 @@ mod parity_port_tests {
         assert_eq!(cap_aliases[0].0, "int2str");
         assert_eq!(
             cap_aliases[0].1,
-            "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf-8\""
+            "cap:coerce;in=\"media:integer;numeric\";out=\"media:enc=utf8\""
         );
     }
 
@@ -4274,7 +4274,7 @@ mod parity_port_tests {
         // 1. Object-path rule: the charter's definition location, at the defver.
         let locations = layout_locations("https://fabric.example.test");
         let cache = std::path::Path::new("/tmp/capdag-test-cache-0144");
-        let urn = "media:enc=utf-8;ext=md";
+        let urn = "media:enc=utf8;ext=md;plain-text";
         let mut hasher = Sha256::new();
         hasher.update(urn.as_bytes());
         let hash = format!("{:x}", hasher.finalize());
@@ -4367,9 +4367,9 @@ mod parity_port_tests {
         assert!(registry
             .get_cached_media_def("media:nonexistent;xyzzy")
             .is_none());
-        registry.insert_cached_media_def_for_test(spec("media:enc=utf-8;test;spec", "Test Spec"));
+        registry.insert_cached_media_def_for_test(spec("media:enc=utf8;test;spec", "Test Spec"));
         let got = registry
-            .get_cached_media_def("media:enc=utf-8;test;spec")
+            .get_cached_media_def("media:enc=utf8;test;spec")
             .unwrap();
         assert_eq!(got.title, "Test Spec");
     }
@@ -4411,7 +4411,7 @@ mod parity_port_tests {
     // "not part of manifest" (a NotFound); this test asserts the truthful error.
     #[tokio::test]
     async fn test6396_malformed_cap_urn_fails_hard() {
-        let malformed = "cap:coerce;in=\"media:integer;numeric\";out=media:enc=utf-8";
+        let malformed = "cap:coerce;in=\"media:integer;numeric\";out=media:enc=utf8";
 
         // Direct normalization path.
         let direct = normalize_cap_urn(malformed);
@@ -4484,7 +4484,7 @@ mod parity_port_tests {
     // TEST138: Test parsing registry JSON with stdin args verifies stdin media URN extraction
     #[test]
     fn test138_parse_registry_json_with_stdin() {
-        let json = r#"{"urn":"cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:document;ext=pdf","name":"input","required":true,"sources":[{"stdin":"media:document;ext=pdf"}]}]}"#;
+        let json = r#"{"urn":"cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"","aliases": ["disbind"],"title":"Disbind PDF","args":[{"media_urn":"media:document;ext=pdf","name":"input","required":true,"sources":[{"stdin":"media:document;ext=pdf"}]}]}"#;
         let cap: Cap = serde_json::from_str(json).expect("cap parses");
         assert_eq!(cap.title, "Disbind PDF");
         assert!(cap.accepts_stdin());
@@ -4497,7 +4497,7 @@ mod parity_port_tests {
     // the cap and the rule.
     #[test]
     fn test12714_a_served_definition_is_held_to_the_definition_rules() {
-        let urn = r#"cap:in="media:document;ext=pdf";disbind;out="media:enc=utf-8;page""#;
+        let urn = r#"cap:in="media:document;ext=pdf";disbind;out="media:enc=utf8;page""#;
         let definition = |args: serde_json::Value, outputs: serde_json::Value| {
             serde_json::json!({
                 "urn": urn, "aliases": ["disbind"], "title": "Disbind PDF",
@@ -4506,10 +4506,10 @@ mod parity_port_tests {
             .to_string()
         };
         let main = serde_json::json!({
-            "media_urn": "media:enc=utf-8;file-path", "name": "document", "required": true,
+            "media_urn": "media:enc=utf8;file-path", "name": "document", "required": true,
             "sources": [{"stdin": "media:document;ext=pdf"}],
         });
-        let page = serde_json::json!({"media_urn": "media:enc=utf-8;page", "name": "pages", "output_description": "Pages"});
+        let page = serde_json::json!({"media_urn": "media:enc=utf8;page", "name": "pages", "output_description": "Pages"});
 
         let good = definition(serde_json::json!([main]), serde_json::json!([page]));
         let cap = checked_cap_definition(good.as_bytes(), urn).expect("a valid definition");
@@ -4603,10 +4603,10 @@ mod parity_port_tests {
     #[test]
     fn test142_normalize_handles_different_tag_orders() {
         let a = cap_registry_url(
-            "cap:test;in=\"media:enc=utf-8\";out=\"media:record\"",
+            "cap:test;in=\"media:enc=utf8\";out=\"media:record\"",
         );
         let b = cap_registry_url(
-            "cap:in=\"media:enc=utf-8\";out=\"media:record\";test",
+            "cap:in=\"media:enc=utf8\";out=\"media:record\";test",
         );
         assert_eq!(a, b, "different tag orders produce the same URL");
     }
@@ -4749,7 +4749,7 @@ mod parity_port_tests {
     #[test]
     fn test6388_per_cap_url_uses_sha256() {
         let url = cap_registry_url(
-            "cap:in=\"media:enc=utf-8\";test;out=\"media:record\"",
+            "cap:in=\"media:enc=utf8\";test;out=\"media:record\"",
         );
         assert!(url.contains("/caps/"));
         assert!(

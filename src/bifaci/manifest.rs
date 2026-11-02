@@ -745,7 +745,7 @@ mod tests {
 
         // Two arguments under one name.
         let mut twins = complete();
-        for (media, flag) in [("media:enc=utf-8", "--a"), ("media:integer", "--b")] {
+        for (media, flag) in [("media:enc=utf8", "--a"), ("media:integer", "--b")] {
             twins.add_arg(crate::cap::definition::CapArg::new(
                 media, "same",
                 false,
@@ -793,7 +793,7 @@ mod tests {
         ));
         // A manifest of the earlier shape (an argument without a name) is not a
         // manifest this capdag reads.
-        let unnamed = br#"{"name":"T","version":"1.0","channel":"release","registry_url":null,"description":"T","cap_groups":[{"name":"default","caps":[{"urn":"cap:in=\"media:enc=utf-8\";t;out=\"media:void\"","title":"T","args":[{"media_urn":"media:enc=utf-8","required":true,"sources":[{"stdin":"media:enc=utf-8"}]}]}]}]}"#;
+        let unnamed = br#"{"name":"T","version":"1.0","channel":"release","registry_url":null,"description":"T","cap_groups":[{"name":"default","caps":[{"urn":"cap:in=\"media:enc=utf8\";t;out=\"media:void\"","title":"T","args":[{"media_urn":"media:enc=utf8","required":true,"sources":[{"stdin":"media:enc=utf8"}]}]}]}]}"#;
         match CapManifest::from_advertised(unnamed) {
             Err(ManifestLoadError::Unparseable(reason)) => assert!(reason.contains("name"), "{reason}"),
             other => panic!("expected Unparseable, got {other:?}"),
@@ -834,7 +834,7 @@ mod tests {
         let group = CapGroup {
             name: "data-formats".to_string(),
             caps: vec![cap],
-            adapter_urns: vec!["media:fmt=json".to_string(), "media:fmt=csv".to_string()],
+            adapter_urns: vec!["media:enc=utf8;fmt=json".to_string(), "media:enc=utf8;fmt=csv".to_string()],
         };
 
         let manifest = CapManifest::new(
@@ -848,8 +848,8 @@ mod tests {
 
         let json = serde_json::to_string(&manifest).unwrap();
         assert!(json.contains("\"adapter_urns\""));
-        assert!(json.contains("media:fmt=json"));
-        assert!(json.contains("media:fmt=csv"));
+        assert!(json.contains("media:enc=utf8;fmt=json"));
+        assert!(json.contains("media:enc=utf8;fmt=csv"));
 
         let deserialized: CapManifest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.cap_groups[0].adapter_urns.len(), 2);

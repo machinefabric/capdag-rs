@@ -165,7 +165,7 @@ mod tests {
     }
 
     fn pages() -> CapUrn {
-        cap(r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf-8;ext=txt;page""#)
+        cap(r#"cap:disbind;in="media:document;ext=pdf";out="media:enc=utf8;ext=txt;page;plain-text""#)
     }
 
     fn to_jpeg() -> CapUrn {

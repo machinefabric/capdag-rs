@@ -356,8 +356,8 @@ mod tests {
     #[test]
     fn test1521_declared_states_materialize_every_pool() {
         let declared_caps = caps(&[
-            "cap:generate;in=\"media:enc=utf-8\";out=\"media:enc=utf-8\"",
-            "cap:embed;in=\"media:enc=utf-8\";out=\"media:embeddings\"",
+            "cap:generate;in=\"media:enc=utf8\";out=\"media:enc=utf8\"",
+            "cap:embed;in=\"media:enc=utf8\";out=\"media:embeddings\"",
         ]);
         let generate = declared_caps[0].to_string();
         let embed = declared_caps[1].to_string();
@@ -404,7 +404,7 @@ mod tests {
     // an unknown capacity key are each refused with the offender named.
     #[test]
     fn test1522_pool_declaration_validation_refuses_illegal_shapes() {
-        let declared_caps = caps(&["cap:generate;in=\"media:enc=utf-8\";out=\"media:enc=utf-8\""]);
+        let declared_caps = caps(&["cap:generate;in=\"media:enc=utf8\";out=\"media:enc=utf8\""]);
         let generate = declared_caps[0].to_string();
 
         let reserved = PoolDeclarations {

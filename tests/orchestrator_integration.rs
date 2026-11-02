@@ -17,24 +17,24 @@ use support::{Given, Machines, Ran};
 
 const TAG: &str = "TestcartridgeTest";
 
-const EDGE1: &str = r#"cap:in="media:enc=utf-8;node1";test-edge1;out="media:enc=utf-8;node2""#;
-const EDGE2: &str = r#"cap:in="media:enc=utf-8;node2";test-edge2;out="media:enc=utf-8;node3""#;
-const EDGE7: &str = r#"cap:in="media:enc=utf-8;node3";test-edge7;out="media:enc=utf-8;node6""#;
-const EDGE8: &str = r#"cap:in="media:enc=utf-8;node6";test-edge8;out="media:enc=utf-8;node7""#;
-const EDGE9: &str = r#"cap:in="media:enc=utf-8;node7";test-edge9;out="media:enc=utf-8;node8""#;
-const EDGE10: &str = r#"cap:in="media:enc=utf-8;node8";test-edge10;out="media:enc=utf-8;node1""#;
-const COMBINE: &str = r#"cap:in="media:enc=utf-8;node2";test-combine;out="media:enc=utf-8;combined""#;
+const EDGE1: &str = r#"cap:in="media:enc=utf8;node1";test-edge1;out="media:enc=utf8;node2""#;
+const EDGE2: &str = r#"cap:in="media:enc=utf8;node2";test-edge2;out="media:enc=utf8;node3""#;
+const EDGE7: &str = r#"cap:in="media:enc=utf8;node3";test-edge7;out="media:enc=utf8;node6""#;
+const EDGE8: &str = r#"cap:in="media:enc=utf8;node6";test-edge8;out="media:enc=utf8;node7""#;
+const EDGE9: &str = r#"cap:in="media:enc=utf8;node7";test-edge9;out="media:enc=utf8;node8""#;
+const EDGE10: &str = r#"cap:in="media:enc=utf8;node8";test-edge10;out="media:enc=utf8;node1""#;
+const COMBINE: &str = r#"cap:in="media:enc=utf8;node2";test-combine;out="media:enc=utf8;combined""#;
 const LARGE: &str = r#"cap:in="media:void";test-large;out="media:""#;
-const PEER: &str = r#"cap:in="media:enc=utf-8;node1";test-peer;out="media:enc=utf-8;node5""#;
-const SPLIT: &str = r#"cap:in="media:enc=utf-8;node1";test-split;out="media:enc=utf-8;node2""#;
+const PEER: &str = r#"cap:in="media:enc=utf8;node1";test-peer;out="media:enc=utf8;node5""#;
+const SPLIT: &str = r#"cap:in="media:enc=utf8;node1";test-split;out="media:enc=utf8;node2""#;
 const SPLIT_PIECES: &str = "media:numeric;split-pieces";
 
-const SAY: &str = r#"cap:in="media:void";test-dag-say;out="media:dag-said;enc=utf-8""#;
-const WORDS: &str = r#"cap:in="media:enc=utf-8";test-dag-words;out="media:dag-word;enc=utf-8""#;
-const SHOUT: &str = r#"cap:in="media:enc=utf-8";test-dag-shout;out="media:dag-shout;enc=utf-8""#;
-const JOIN: &str = r#"cap:in="media:enc=utf-8";test-dag-join;out="media:dag-joined;enc=utf-8""#;
-const PAIR: &str = r#"cap:in="media:enc=utf-8";test-dag-pair;out="media:dag-pair;enc=utf-8""#;
-const FLAKY: &str = r#"cap:in="media:enc=utf-8";test-dag-flaky;out="media:dag-flaky;enc=utf-8""#;
+const SAY: &str = r#"cap:in="media:void";test-dag-say;out="media:dag-said;enc=utf8""#;
+const WORDS: &str = r#"cap:in="media:enc=utf8";test-dag-words;out="media:dag-word;enc=utf8""#;
+const SHOUT: &str = r#"cap:in="media:enc=utf8";test-dag-shout;out="media:dag-shout;enc=utf8""#;
+const JOIN: &str = r#"cap:in="media:enc=utf8";test-dag-join;out="media:dag-joined;enc=utf8""#;
+const PAIR: &str = r#"cap:in="media:enc=utf8";test-dag-pair;out="media:dag-pair;enc=utf8""#;
+const FLAKY: &str = r#"cap:in="media:enc=utf8";test-dag-flaky;out="media:dag-flaky;enc=utf8""#;
 
 /// The headers of every cap the DAG tests wire, each under its short name.
 fn dag_headers() -> String {
@@ -65,11 +65,11 @@ async fn test919_parse_simple_testcartridge_graph() {
     let inputs = resolved.inputs().unwrap();
     assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].name, "A");
-    assert!(same(&inputs[0].media_urn, "media:enc=utf-8;node1"));
+    assert!(same(&inputs[0].media_urn, "media:enc=utf8;node1"));
     let outputs = resolved.outputs().unwrap();
     assert_eq!(outputs.len(), 1);
     assert_eq!(outputs[0].name, "B");
-    assert!(same(&outputs[0].media_urn, "media:enc=utf-8;node2"));
+    assert!(same(&outputs[0].media_urn, "media:enc=utf8;node2"));
 }
 
 // TEST950: Validate that cycles are rejected
@@ -96,21 +96,21 @@ async fn test950_reject_cycles() {
 #[tokio::test]
 async fn test943_same_media_different_names_is_not_a_cycle() {
     use capdag::cap::definition::{ArgSource, CapArg, CapOutput};
-    const SAME: &str = r#"cap:in="media:enc=utf-8;node1";same-type;out="media:enc=utf-8;node1""#;
+    const SAME: &str = r#"cap:in="media:enc=utf8;node1";same-type;out="media:enc=utf8;node1""#;
     let mut same = capdag::Cap::new(
         capdag::CapUrn::from_string(SAME).unwrap(),
         "Same type".to_string(),
         vec!["same-type".to_string()],
     );
     same.args.push(CapArg::new(
-        "media:enc=utf-8;node1",
+        "media:enc=utf8;node1",
         "input",
         true,
         vec![ArgSource::Stdin {
-            stdin: "media:enc=utf-8;node1".to_string(),
+            stdin: "media:enc=utf8;node1".to_string(),
         }],
     ));
-    same.outputs = vec![CapOutput::new("media:enc=utf-8;node1", "output", "the same type")];
+    same.outputs = vec![CapOutput::new("media:enc=utf8;node1", "output", "the same type")];
     let machines = Machines::with_caps(TAG, vec![same]);
     let notation = format!("[same {SAME}][A -> same -> B]");
     let resolved = ResolvedNotation::resolve(&notation, machines.registry.clone())
@@ -294,12 +294,12 @@ async fn test12795_a_constant_starts_a_source_and_is_not_the_runs_to_change() {
         .unwrap();
     let given = std::collections::HashMap::from([(
         say.clone(),
-        vec![("media:dag-say-text;enc=utf-8".to_string(), b"something else".to_vec())],
+        vec![("media:dag-say-text;enc=utf8".to_string(), b"something else".to_vec())],
     )]);
     match capdag::RunArgumentLedger::new(&ran.plan, given) {
         Err(capdag::RunArgumentError::ArgumentBound { token_id, media_urn }) => {
             assert_eq!(token_id, say);
-            assert_eq!(media_urn, "media:dag-say-text;enc=utf-8");
+            assert_eq!(media_urn, "media:dag-say-text;enc=utf8");
         }
         other => panic!("expected the bound arg to be refused, got {:?}", other.map(|_| ())),
     }

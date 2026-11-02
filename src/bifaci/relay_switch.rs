@@ -4754,12 +4754,12 @@ mod tests {
     async fn test0130_registry_cache_revision_rebuilds_live_cap_fab_without_capability_change() {
         let registry = test_fabric_registry();
         registry.insert_cached_media_def_for_test(test_media_def(
-            "media:enc=utf-8;test-source",
+            "media:enc=utf8;test-source",
             "Test Source",
             &[],
         ));
         registry.insert_cached_media_def_for_test(test_media_def(
-            "media:enc=utf-8;ext=txt;test-output",
+            "media:enc=utf8;ext=txt;plain-text;test-output",
             "Test Output",
             &["txt"],
         ));
@@ -4770,14 +4770,14 @@ mod tests {
                 .expect("empty relay switch must construct"),
         );
 
-        let cap_urn = "cap:test-transform;in=\"media:enc=utf-8;test-source\";out=\"media:enc=utf-8;ext=txt;test-output\"";
+        let cap_urn = "cap:test-transform;in=\"media:enc=utf8;test-source\";out=\"media:enc=utf8;ext=txt;plain-text;test-output\"";
         *switch.aggregate_capabilities.write().await =
             serde_json::to_vec(&vec![CAP_IDENTITY.to_string(), cap_urn.to_string()])
                 .expect("aggregate cap URNs must serialize");
 
-        let source = MediaUrn::from_string("media:enc=utf-8;test-source")
+        let source = MediaUrn::from_string("media:enc=utf8;test-source")
             .expect("test source media URN must parse");
-        let target = MediaUrn::from_string("media:enc=utf-8;ext=txt;test-output")
+        let target = MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text;test-output")
             .expect("test target media URN must parse");
         assert!(
             switch
@@ -4798,10 +4798,10 @@ mod tests {
         // A cached cap the planner will traverse must declare its main input —
         // `sequence_shape()` reads that arg to decide cardinality.
         cap.args.push(crate::cap::definition::CapArg::new(
-            "media:enc=utf-8;test-source".to_string(), "input",
+            "media:enc=utf8;test-source".to_string(), "input",
             true,
             vec![crate::cap::definition::ArgSource::Stdin {
-                stdin: "media:enc=utf-8;test-source".to_string(),
+                stdin: "media:enc=utf8;test-source".to_string(),
             }],
         ));
         registry.add_caps_to_cache(vec![cap]);
@@ -6087,7 +6087,7 @@ mod tests {
 
         // Preference for an unrelated cap — no equivalent match, falls back to closest-specificity
         let unrelated =
-            "cap:in=\"media:enc=utf-8;ext=txt\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
+            "cap:in=\"media:enc=utf8;ext=txt;plain-text\";generate-thumbnail;out=\"media:ext=png;image;thumbnail\"";
         assert_eq!(
             switch.find_master_for_cap(request, Some(unrelated)).await,
             Some(0)

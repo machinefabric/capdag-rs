@@ -819,8 +819,8 @@ mod tests {
         plan
     }
 
-    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#;
-    const SUMMARIZE: &str = r#"cap:in="media:enc=utf-8;ext=txt";summarize;out="media:enc=utf-8;summary""#;
+    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text""#;
+    const SUMMARIZE: &str = r#"cap:in="media:enc=utf8;ext=txt;plain-text";summarize;out="media:enc=utf8;summary""#;
     const RENDER: &str = r#"cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image""#;
     const TO_JPEG: &str = r#"cap:in="media:ext=png;image";convert-image;out="media:ext=jpeg;image""#;
 
@@ -899,9 +899,9 @@ mod tests {
         c
     }
 
-    const OP_A: &str = r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page""#;
-    const OP_B: &str = r#"cap:in="media:ext=md";op-b;out="media:enc=utf-8;page""#;
-    const CONCAT: &str = r#"cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt""#;
+    const OP_A: &str = r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf8;page""#;
+    const OP_B: &str = r#"cap:in="media:ext=md;plain-text";op-b;out="media:enc=utf8;page""#;
+    const CONCAT: &str = r#"cap:in="media:enc=utf8";concat;out="media:enc=utf8;ext=txt;plain-text""#;
 
     // TEST1307: Fan-in `(x, y) -> concat` where concat's stdin arg is a SEQUENCE
     // arg gathers both producers through a `Collect` node: the plan carries a
@@ -933,7 +933,7 @@ mod tests {
                 assert!(
                     crate::MediaUrn::from_string(output_media_urn)
                         .unwrap()
-                        .is_equivalent(&crate::MediaUrn::from_string("media:enc=utf-8;page").unwrap())
+                        .is_equivalent(&crate::MediaUrn::from_string("media:enc=utf8;page").unwrap())
                         .unwrap(),
                     "the gathered sequence's element type is the members' join, got {output_media_urn}"
                 );
@@ -983,10 +983,10 @@ mod tests {
     // its own arg; and on a cap whose arg takes a sequence they are a gather.
     #[tokio::test]
     async fn test1306_two_sources_need_an_arg_each_or_a_sequence_arg() {
-        const A: &str = r#"cap:in="media:document;ext=pdf";a;out="media:enc=utf-8""#;
-        const B: &str = r#"cap:in="media:ext=md";b;out="media:enc=utf-8""#;
-        const MERGE: &str = r#"cap:in="media:enc=utf-8";merge;out="media:enc=utf-8;merged""#;
-        const OTHER: &str = "media:enc=utf-8;other";
+        const A: &str = r#"cap:in="media:document;ext=pdf";a;out="media:enc=utf8""#;
+        const B: &str = r#"cap:in="media:ext=md;plain-text";b;out="media:enc=utf8""#;
+        const MERGE: &str = r#"cap:in="media:enc=utf8";merge;out="media:enc=utf8;merged""#;
+        const OTHER: &str = "media:enc=utf8;other";
         let wirings = |merge: &str| {
             format!(
                 "{}{}{}[doc_a -> a -> x][doc_b -> b -> y][{merge} -> merge -> z]",
@@ -1007,7 +1007,7 @@ mod tests {
 
         // An arg for each: the named one is wired as that arg, the other is the input.
         // `other` is its own arg and takes any text.
-        let two_args = || with_arg(cap(MERGE, false), "other", OTHER, Some("media:enc=utf-8"));
+        let two_args = || with_arg(cap(MERGE, false), "other", OTHER, Some("media:enc=utf8"));
         let plan = one_plan(&wirings("(x, other=y)"), caps(two_args())).await;
         let merge = step_of(&plan, MERGE);
         assert_eq!(wired(&plan, &merge, None), step_of(&plan, A));
@@ -1055,7 +1055,7 @@ mod tests {
     // TEST1263: wirings that wait on one another are refused as not a DAG.
     #[tokio::test]
     async fn test1263_cycle_detection() {
-        const STEP: &str = r#"cap:in="media:enc=utf-8";rewrite;out="media:enc=utf-8""#;
+        const STEP: &str = r#"cap:in="media:enc=utf8";rewrite;out="media:enc=utf8""#;
         let reg = registry(vec![cap(STEP, false)]);
         let notation = format!(
             "{}[a -> rewrite -> b][b -> rewrite -> c][c -> rewrite -> a]",
@@ -1070,11 +1070,11 @@ mod tests {
     }
 
     const SPLIT: &str = r#"cap:in="media:document;ext=pdf";split;out="media:page;textable""#;
-    const OCR: &str = r#"cap:in="media:page;textable";ocr;out="media:enc=utf-8;ocr""#;
-    const TITLE: &str = r#"cap:in="media:page;textable";title;out="media:enc=utf-8;title""#;
-    const JOIN: &str = r#"cap:in="media:enc=utf-8;ocr";join;out="media:enc=utf-8;joined""#;
-    const PAIR: &str = r#"cap:in="media:enc=utf-8;ocr";pair;out="media:enc=utf-8;paired""#;
-    const PAIR_TITLE: &str = "media:enc=utf-8;title";
+    const OCR: &str = r#"cap:in="media:page;textable";ocr;out="media:enc=utf8;ocr""#;
+    const TITLE: &str = r#"cap:in="media:page;textable";title;out="media:enc=utf8;title""#;
+    const JOIN: &str = r#"cap:in="media:enc=utf8;ocr";join;out="media:enc=utf8;joined""#;
+    const PAIR: &str = r#"cap:in="media:enc=utf8;ocr";pair;out="media:enc=utf8;paired""#;
+    const PAIR_TITLE: &str = "media:enc=utf8;title";
 
     // TEST12762: two steps that map over the same sequence run in ONE map,
     // and a step given what each produced for an item joins it: it is wired
@@ -1115,8 +1115,8 @@ mod tests {
     // each on the arg it was bound to.
     #[tokio::test]
     async fn test12763_two_sequences_are_zipped_by_one_map() {
-        const PAGES_B: &str = r#"cap:in="media:ext=md";titles;out="media:enc=utf-8;title""#;
-        const TEXTS: &str = r#"cap:in="media:document;ext=pdf";texts;out="media:enc=utf-8;ocr""#;
+        const PAGES_B: &str = r#"cap:in="media:ext=md;plain-text";titles;out="media:enc=utf8;title""#;
+        const TEXTS: &str = r#"cap:in="media:document;ext=pdf";texts;out="media:enc=utf8;ocr""#;
         let reg = registry(vec![
             cap(TEXTS, true),
             cap(PAGES_B, true),
@@ -1156,9 +1156,9 @@ mod tests {
     // itself on the arg that takes them all. The sequence is iterated once.
     #[tokio::test]
     async fn test12813_a_sequence_arg_inside_a_map_is_given_the_whole_sequence() {
-        const TEXTS: &str = r#"cap:in="media:document;ext=pdf";texts;out="media:enc=utf-8;ocr""#;
-        const ALL: &str = "media:all-texts;enc=utf-8";
-        let mut among = with_arg(cap(PAIR, false), "all", ALL, Some("media:enc=utf-8;ocr"));
+        const TEXTS: &str = r#"cap:in="media:document;ext=pdf";texts;out="media:enc=utf8;ocr""#;
+        const ALL: &str = "media:all-texts;enc=utf8";
+        let mut among = with_arg(cap(PAIR, false), "all", ALL, Some("media:enc=utf8;ocr"));
         among.args.last_mut().unwrap().is_sequence = true;
         let reg = registry(vec![cap(TEXTS, true), among]);
         let notation = format!(
@@ -1222,10 +1222,10 @@ mod tests {
         assert!(inside_outer.contains(&ocr) && inside_outer.contains(inner));
     }
 
-    const REGRESS: &str = r#"cap:in="media:enc=utf-8;ext=csv";regress;out="media:fit;record""#;
+    const REGRESS: &str = r#"cap:in="media:enc=utf8;ext=csv";regress;out="media:fit;record""#;
     const RESIDUALS: &str = "media:residuals;record";
     const PLOT: &str = r#"cap:in="media:residuals;record";plot;out="media:ext=png;image""#;
-    const REPORT: &str = r#"cap:in="media:fit;record";report;out="media:enc=utf-8;ext=md""#;
+    const REPORT: &str = r#"cap:in="media:fit;record";report;out="media:enc=utf8;ext=md;plain-text""#;
 
     // TEST12765: every output of a step other than its main one that
     // something takes is a node of its own: what reads it is wired from that
@@ -1321,8 +1321,8 @@ mod tests {
 
     const NOW: &str = r#"cap:in="media:void";now;out="media:stamp""#;
     const PUBLISH: &str = r#"cap:in="media:stamp";publish;out="media:void""#;
-    const FETCH: &str = r#"cap:in="media:void";fetch;out="media:enc=utf-8;series""#;
-    const REFERENCE: &str = "media:enc=utf-8;reference";
+    const FETCH: &str = r#"cap:in="media:void";fetch;out="media:enc=utf8;series""#;
+    const REFERENCE: &str = "media:enc=utf8;reference";
 
     // TEST12767: a machine may begin with a step nothing is wired into and
     // end in a step nothing reads. The plan then has no input slot and no
@@ -1467,7 +1467,7 @@ mod tests {
         assert!(same(&doc_media, "media:document;ext=pdf"));
         let (summary_strand, _, summary_media) = of(&outputs, "summary");
         assert_eq!(summary_strand, doc_strand);
-        assert!(same(&summary_media, "media:enc=utf-8;summary"));
+        assert!(same(&summary_media, "media:enc=utf8;summary"));
         assert_eq!(of(&outputs, "pages").0, scan_strand);
         // `text` is neither: it is produced and consumed inside the machine.
         assert!(!inputs.iter().chain(&outputs).any(|(_, name, _)| name == "text"));
@@ -1627,7 +1627,7 @@ mod tests {
         names
     }
 
-    const COMPARE: &str = r#"cap:in="media:enc=utf-8;ext=txt";compare;out="media:comparison;enc=utf-8""#;
+    const COMPARE: &str = r#"cap:in="media:enc=utf8;ext=txt;plain-text";compare;out="media:comparison;enc=utf8""#;
 
     // TEST994: an arg is wired from an input of the machine or from what a
     // step produced, and the analysis says which; neither is asked of the run.
@@ -1674,7 +1674,7 @@ mod tests {
         let reg = registry(vec![with_arg(
             cap(SUMMARIZE, false),
             "instruction",
-            "media:enc=utf-8;instruction",
+            "media:enc=utf8;instruction",
             None,
         )]);
         let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
@@ -1692,7 +1692,7 @@ mod tests {
     #[tokio::test]
     async fn test1015_an_unbound_optional_arg_without_default_does_not_block_the_run() {
         let mut summarize =
-            with_arg(cap(SUMMARIZE, false), "style", "media:enc=utf-8;style", None);
+            with_arg(cap(SUMMARIZE, false), "style", "media:enc=utf8;style", None);
         summarize.args.last_mut().unwrap().required = false;
         let reg = registry(vec![summarize]);
         let notation = format!("{}[text -> summarize -> summary]", header("summarize", SUMMARIZE));
@@ -1712,7 +1712,7 @@ mod tests {
         let reg = registry(vec![with_arg(
             cap(SUMMARIZE, false),
             "instruction",
-            "media:enc=utf-8;instruction",
+            "media:enc=utf8;instruction",
             None,
         )]);
         // A constant is held to its arg's media definition, which says it is
@@ -1720,7 +1720,7 @@ mod tests {
         reg.insert_cached_media_def_for_test(crate::fabric::registry::StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:enc=utf-8;instruction".to_string(),
+            urn: "media:enc=utf8;instruction".to_string(),
             media_type: "text/plain".to_string(),
             title: "Instruction".to_string(),
             profile_uri: None,
@@ -1752,8 +1752,8 @@ mod tests {
             with_arg(
                 cap(COMPARE, false),
                 "benchmark",
-                "media:benchmark;enc=utf-8",
-                Some("media:enc=utf-8;ext=txt"),
+                "media:benchmark;enc=utf8",
+                Some("media:enc=utf8;ext=txt;plain-text"),
             ),
             "threshold",
             "media:numeric;threshold",
@@ -1821,7 +1821,7 @@ mod tests {
         let text = RunInputs {
             media: HashMap::from([(
                 "img".to_string(),
-                MediaUrn::from_string("media:enc=utf-8;ext=txt").unwrap(),
+                MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap(),
             )]),
             ..RunInputs::default()
         };
@@ -1868,10 +1868,10 @@ mod tests {
     async fn test7104_the_main_input_is_found_by_equivalence_not_spelling() {
         let mut summarize = cap(SUMMARIZE, false);
         summarize.args[0].sources = vec![ArgSource::Stdin {
-            stdin: "media:ext=txt;enc=utf-8".to_string(),
+            stdin: "media:ext=txt;enc=utf8;plain-text".to_string(),
         }];
         let mut summarize =
-            with_arg(summarize, "instruction", "media:enc=utf-8;instruction", None);
+            with_arg(summarize, "instruction", "media:enc=utf8;instruction", None);
         // Where an arg is written says nothing of what it is: the main input
         // is not the first.
         summarize.args.rotate_right(1);
@@ -1896,7 +1896,7 @@ mod tests {
     // steps of one cap carry the two distinct tokens of their cap nodes.
     #[tokio::test]
     async fn test1461_step_requirements_carry_the_plans_own_tokens() {
-        let rewrite = r#"cap:in="media:enc=utf-8;ext=txt";rewrite;out="media:enc=utf-8;ext=txt""#;
+        let rewrite = r#"cap:in="media:enc=utf8;ext=txt;plain-text";rewrite;out="media:enc=utf8;ext=txt;plain-text""#;
         let reg = registry(vec![cap(rewrite, false)]);
         let notation = format!(
             "{}[a -> rewrite -> b][b -> rewrite -> c]",
@@ -2066,25 +2066,25 @@ mod anchor_cardinality_tests {
     #[tokio::test]
     async fn test1446_per_anchor_cardinality_drives_foreach() {
         let mut concat = cap(
-            r#"cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt""#,
+            r#"cap:in="media:enc=utf8";concat;out="media:enc=utf8;ext=txt;plain-text""#,
             false,
         );
         concat.args[0].is_sequence = true;
         let reg = registry(vec![
             cap(
-                r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page""#,
+                r#"cap:in="media:document;ext=pdf";op-a;out="media:enc=utf8;page""#,
                 false,
             ),
             cap(
-                r#"cap:in="media:ext=md";op-b;out="media:enc=utf-8;page""#,
+                r#"cap:in="media:ext=md;plain-text";op-b;out="media:enc=utf8;page""#,
                 false,
             ),
             concat,
         ]);
         let notation = concat!(
-            r#"[a cap:in="media:document;ext=pdf";op-a;out="media:enc=utf-8;page"]"#,
-            r#"[b cap:in="media:ext=md";op-b;out="media:enc=utf-8;page"]"#,
-            r#"[cat cap:in="media:enc=utf-8";concat;out="media:enc=utf-8;ext=txt"]"#,
+            r#"[a cap:in="media:document;ext=pdf";op-a;out="media:enc=utf8;page"]"#,
+            r#"[b cap:in="media:ext=md;plain-text";op-b;out="media:enc=utf8;page"]"#,
+            r#"[cat cap:in="media:enc=utf8";concat;out="media:enc=utf8;ext=txt;plain-text"]"#,
             "[doc_a -> a -> x]",
             "[doc_b -> b -> y]",
             "[(x, y) -> cat -> z]",

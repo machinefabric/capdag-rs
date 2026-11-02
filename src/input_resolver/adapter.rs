@@ -204,22 +204,22 @@ mod tests {
     #[test]
     fn test11004_drops_candidate_whose_owning_handler_declined() {
         // sample.txt is plain prose. modelcartridge owns the
-        // `media:enc=utf-8;model-spec` adapter URN, and its content
+        // `media:enc=utf8;model-spec` adapter URN, and its content
         // predicate rejected the file. Every model-spec candidate
         // (including backend-tagged variants) must be dropped.
         let validation_survivors = candidates(&[
-            "media:enc=utf-8;ext=txt",
-            "media:enc=utf-8;model-spec",
-            "media:candle;enc=utf-8;llm;model-spec",
-            "media:enc=utf-8;gguf;llm;model-spec",
+            "media:enc=utf8;ext=txt;plain-text",
+            "media:enc=utf8;model-spec",
+            "media:candle;enc=utf8;llm;model-spec",
+            "media:enc=utf8;gguf;llm;model-spec",
         ]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
         // No cartridge claimed the file — empty handler_returned.
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &HashSet::new());
         assert_eq!(
             surviving,
-            vec!["media:enc=utf-8;ext=txt".to_string()],
+            vec!["media:enc=utf8;ext=txt;plain-text".to_string()],
             "every model-spec variant must be dropped when its owning cartridge declined"
         );
     }
@@ -229,22 +229,22 @@ mod tests {
     fn test11005_keeps_candidate_when_handler_returned_supertype() {
         // sample.txt's content is `hf:openai/whisper-base` —
         // modelcartridge's content predicate accepts it and returns
-        // the supertype `media:enc=utf-8;model-spec`. The supertype
+        // the supertype `media:enc=utf8;model-spec`. The supertype
         // candidate must survive; backend-tagged variants must NOT
         // (modelcartridge cannot tell which backend from the spec
         // string alone, so it doesn't claim them).
         let validation_survivors = candidates(&[
-            "media:enc=utf-8;model-spec",
-            "media:candle;enc=utf-8;llm;model-spec",
-            "media:enc=utf-8;gguf;llm;model-spec",
+            "media:enc=utf8;model-spec",
+            "media:candle;enc=utf8;llm;model-spec",
+            "media:enc=utf8;gguf;llm;model-spec",
         ]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
-        let returned_urns = returned(&["media:enc=utf-8;model-spec"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
+        let returned_urns = returned(&["media:enc=utf8;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &returned_urns);
         assert_eq!(
             surviving,
-            vec!["media:enc=utf-8;model-spec".to_string()],
+            vec!["media:enc=utf8;model-spec".to_string()],
             "only the supertype the cartridge actually claimed should survive"
         );
     }
@@ -257,13 +257,13 @@ mod tests {
         // adapter URN above it, so it survives on the static
         // validation verdict alone — handler_returned doesn't have
         // to mention it.
-        let validation_survivors = candidates(&["media:enc=utf-8;ext=txt"]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
+        let validation_survivors = candidates(&["media:enc=utf8;ext=txt;plain-text"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &HashSet::new());
         assert_eq!(
             surviving,
-            vec!["media:enc=utf-8;ext=txt".to_string()],
+            vec!["media:enc=utf8;ext=txt;plain-text".to_string()],
             "candidates outside any registered adapter's domain pass through"
         );
     }
@@ -275,9 +275,9 @@ mod tests {
         // `returned.conforms_to(candidate)`, a cartridge returning a
         // generic URN must not silently promote backend-tagged
         // candidates whose extra tags the cartridge cannot infer.
-        let validation_survivors = candidates(&["media:candle;enc=utf-8;llm;model-spec"]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
-        let returned_urns = returned(&["media:enc=utf-8;model-spec"]);
+        let validation_survivors = candidates(&["media:candle;enc=utf8;llm;model-spec"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
+        let returned_urns = returned(&["media:enc=utf8;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &returned_urns);
         assert!(
@@ -293,17 +293,17 @@ mod tests {
         // specific URN (e.g. after inspecting model files on disk)
         // must keep the corresponding tag-specific candidate.
         let validation_survivors = candidates(&[
-            "media:enc=utf-8;model-spec",
-            "media:candle;enc=utf-8;llm;model-spec",
+            "media:enc=utf8;model-spec",
+            "media:candle;enc=utf8;llm;model-spec",
         ]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
-        let returned_urns = returned(&["media:candle;enc=utf-8;llm;model-spec"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
+        let returned_urns = returned(&["media:candle;enc=utf8;llm;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &returned_urns);
         // Both candidates survive: returned conforms_to itself
         // (specific) AND returned conforms_to the supertype.
-        assert!(surviving.contains(&"media:enc=utf-8;model-spec".to_string()));
-        assert!(surviving.contains(&"media:candle;enc=utf-8;llm;model-spec".to_string()));
+        assert!(surviving.contains(&"media:enc=utf8;model-spec".to_string()));
+        assert!(surviving.contains(&"media:candle;enc=utf8;llm;model-spec".to_string()));
     }
 
     // TEST11009: Empty handler returned with owning adapter drops everything in domain
@@ -312,13 +312,13 @@ mod tests {
         // Every adapter that owned the candidate's domain returned
         // empty (declined or errored). The candidate must NOT
         // survive — we have no positive signal for it.
-        let validation_survivors = candidates(&["media:enc=utf-8;model-spec", "media:enc=utf-8;ext=txt"]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
+        let validation_survivors = candidates(&["media:enc=utf8;model-spec", "media:enc=utf8;ext=txt;plain-text"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &HashSet::new());
         assert_eq!(
             surviving,
-            vec!["media:enc=utf-8;ext=txt".to_string()],
+            vec!["media:enc=utf8;ext=txt;plain-text".to_string()],
             "an in-domain candidate without any positive handler verdict must drop"
         );
     }
@@ -331,7 +331,7 @@ mod tests {
         // a parse failure. The validation step is the place to drop
         // garbage URNs.
         let validation_survivors = candidates(&["not-a-valid-urn"]);
-        let registered = urns(&["media:enc=utf-8;model-spec"]);
+        let registered = urns(&["media:enc=utf8;model-spec"]);
         let surviving =
             filter_by_handler_verdict(&validation_survivors, &registered, &HashSet::new());
         assert_eq!(surviving, vec!["not-a-valid-urn".to_string()]);

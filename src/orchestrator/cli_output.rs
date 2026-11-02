@@ -17,7 +17,7 @@
 //!
 //! The extension derives deterministically from the terminal's media URN —
 //! `ext=<v>` wins (the declared file type), else `fmt=<v>` (serialization),
-//! else `enc=utf-8` ⇒ `txt`, else `bin`. This is the defined naming scheme
+//! else `enc=utf8` ⇒ `txt`, else `bin`. This is the defined naming scheme
 //! of the CLI, not a fallback chain: every media URN maps to exactly one
 //! name by these rules.
 
@@ -259,7 +259,7 @@ mod tests {
         // 1. Single scalar → raw stdout bytes, no files.
         let result = result_of(vec![terminal(
             "output",
-            "media:enc=utf-8;summary",
+            "media:enc=utf8;summary",
             false,
             vec![b"the summary text"],
         )]);
@@ -311,7 +311,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = result_of(vec![
             terminal("thumb", "media:ext=png;image", false, vec![b"png"]),
-            terminal("text", "media:enc=utf-8", false, vec![b"txt"]),
+            terminal("text", "media:enc=utf8", false, vec![b"txt"]),
         ]);
         let mut stdout: Vec<u8> = Vec::new();
         let written = emit_terminals(
@@ -359,9 +359,9 @@ mod tests {
 
         // 5. Extension derivation: ext= wins over fmt=; enc= alone ⇒ txt;
         //    no axis ⇒ bin.
-        assert_eq!(extension_for_media("media:document;ext=pdf;fmt=json"), "pdf");
-        assert_eq!(extension_for_media("media:fmt=ndjson;record"), "ndjson");
-        assert_eq!(extension_for_media("media:enc=utf-8;summary"), "txt");
+        assert_eq!(extension_for_media("media:document;enc=utf8;ext=pdf;fmt=json"), "pdf");
+        assert_eq!(extension_for_media("media:enc=utf8;fmt=ndjson;record"), "ndjson");
+        assert_eq!(extension_for_media("media:enc=utf8;summary"), "txt");
         assert_eq!(extension_for_media("media:embedding-vector"), "bin");
     }
 
@@ -396,7 +396,7 @@ mod tests {
     fn test12792_a_file_is_named_for_the_outputs_written_name() {
         let dir = tempfile::tempdir().unwrap();
         let result = result_of(vec![
-            terminal("output_7", "media:enc=utf-8;ext=md", false, vec![b"# summary"]),
+            terminal("output_7", "media:enc=utf8;ext=md;plain-text", false, vec![b"# summary"]),
             terminal("output_3", "media:ext=png;image", true, vec![b"p0", b"p1"]),
         ]);
         let options = |output_names: &[(&str, &str)]| EmitOptions {
@@ -436,7 +436,7 @@ mod tests {
     fn test12761_a_terminal_not_produced_writes_nothing() {
         let absent = || PlanTerminal::NotProduced {
             output_node_id: "rejected".to_string(),
-            media_urn: "media:enc=utf-8".to_string(),
+            media_urn: "media:enc=utf8".to_string(),
         };
         let options = |dir: Option<&Path>| EmitOptions {
             output_dir: dir.map(Path::to_path_buf),
@@ -455,7 +455,7 @@ mod tests {
         // produced one is a file — not the stdout pipe case.
         let dir = tempfile::tempdir().unwrap();
         let result = result_of(vec![
-            terminal("kept", "media:enc=utf-8;ext=txt", false, vec![b"kept text"]),
+            terminal("kept", "media:enc=utf8;ext=txt;plain-text", false, vec![b"kept text"]),
             absent(),
         ]);
         let mut stdout: Vec<u8> = Vec::new();

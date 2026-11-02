@@ -35,7 +35,7 @@ pub(crate) fn build_cap(
 /// `(slot_media_urn, stdin_media_urn)`. The resolver matches
 /// wiring sources against the stdin URN, not the slot identity
 /// — this is the regression-test path for caps like
-/// `disbind-pdf` where the slot is `media:enc=utf-8;file-path`
+/// `disbind-pdf` where the slot is `media:enc=utf8;file-path`
 /// but the stdin source delivers `media:document;ext=pdf`.
 pub(crate) fn build_cap_with_slot_stdin_pairs(
     cap_urn_str: &str,

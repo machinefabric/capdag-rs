@@ -1068,19 +1068,19 @@ mod tests {
             make_test_cap(
                 "extract_metadata",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;file-metadata;record",
+                "media:enc=utf8;file-metadata;record",
                 "Extract Metadata",
             )?,
             make_test_cap(
                 "extract_outline",
                 "media:document;ext=pdf",
-                "media:document-outline;enc=utf-8;record",
+                "media:document-outline;enc=utf8;record",
                 "Extract Outline",
             )?,
             make_test_cap(
                 "disbind",
                 "media:document;ext=pdf",
-                "media:disbound-pages;enc=utf-8;list",
+                "media:disbound-pages;enc=utf8;list",
                 "Disbind PDF",
             )?,
         ];
@@ -1102,13 +1102,13 @@ mod tests {
             make_test_cap(
                 "disbind",
                 "media:document;ext=pdf",
-                "media:disbound-pages;enc=utf-8;list",
+                "media:disbound-pages;enc=utf8;list",
                 "Disbind PDF",
             )?,
             make_test_cap(
                 "disbind",
                 "media:document;ext=pdf",
-                "media:disbound-pages;enc=utf-8;list",
+                "media:disbound-pages;enc=utf8;list",
                 "Disbind PDF Again",
             )?,
         ];
@@ -1143,13 +1143,13 @@ mod tests {
             make_test_cap(
                 "disbind",
                 "media:document;ext=pdf",
-                "media:disbound-pages;enc=utf-8;list",
+                "media:disbound-pages;enc=utf8;list",
                 "Disbind",
             )?,
             make_test_cap(
                 "grind",
                 "media:document;ext=pdf",
-                "media:disbound-pages;enc=utf-8;list",
+                "media:disbound-pages;enc=utf8;list",
                 "Grind",
             )?,
         ];
@@ -1169,13 +1169,13 @@ mod tests {
             make_test_cap(
                 "extract_metadata",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;file-metadata;record",
+                "media:enc=utf8;file-metadata;record",
                 "Extract PDF Metadata",
             )?,
             make_test_cap(
                 "extract_metadata",
-                "media:enc=utf-8;ext=txt",
-                "media:enc=utf-8;file-metadata;record",
+                "media:enc=utf8;ext=txt;plain-text",
+                "media:enc=utf8;file-metadata;record",
                 "Extract TXT Metadata",
             )?,
         ];
@@ -1266,16 +1266,16 @@ mod tests {
 
     // TEST1100: Tests that CapUrn normalizes media URN tags to canonical order
     // This is the root cause fix for caps not matching when cartridges report URNs with
-    // different tag ordering than the registry (e.g., "record;enc=utf-8" vs "enc=utf-8;record")
+    // different tag ordering than the registry (e.g., "record;enc=utf8" vs "enc=utf8;record")
     #[test]
     fn test1100_cap_urn_normalizes_media_urn_tag_order(
     ) -> Result<(), crate::urn::cap_urn::CapUrnError> {
         // Create two CapUrns with different tag ordering in the output media URN
         let urn1 = CapUrn::from_string(
-            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
+            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;file-metadata;record\"",
         )?;
         let urn2 = CapUrn::from_string(
-            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf-8;file-metadata;record\"",
+            "cap:extract-metadata;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;file-metadata;record\"",
         )?;
 
         // After normalization, both should produce the same canonical string
@@ -1286,10 +1286,10 @@ mod tests {
         );
 
         // The canonical form should have tags in alphabetical order: the out
-        // media URN's tags normalize to `enc=utf-8;file-metadata;record`.
+        // media URN's tags normalize to `enc=utf8;file-metadata;record`.
         let canonical = urn1.to_string();
         assert!(
-            canonical.contains("enc=utf-8;file-metadata;record"),
+            canonical.contains("enc=utf8;file-metadata;record"),
             "Canonical form should contain the normalized out tags: {}",
             canonical
         );
@@ -1376,9 +1376,9 @@ mod tests {
         // this is the shape that actually arrives from a persisted run.
         let step_json = serde_json::json!({
             "token_id": "",
-            "step_type": { "ForEach": { "media_def": "media:ext=txt;text" } },
-            "from_spec": "media:ext=txt;text",
-            "to_spec": "media:ext=txt;text",
+            "step_type": { "ForEach": { "media_def": "media:ext=txt;plain-text;text" } },
+            "from_spec": "media:ext=txt;plain-text;text",
+            "to_spec": "media:ext=txt;plain-text;text",
         });
         assert!(
             serde_json::from_value::<crate::planner::live_cap_fab::StrandStep>(step_json).is_err(),

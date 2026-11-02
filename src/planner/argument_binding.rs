@@ -309,7 +309,7 @@ impl<'a> ArgumentResolutionContext<'a> {
 /// cartridge will see on its arg stream.
 ///
 /// The wire contract for an arg stream is "bytes of the typed
-/// media URN" — for a `media:enc=utf-8` arg, plain UTF-8 text. A
+/// media URN" — for a `media:enc=utf8` arg, plain UTF-8 text. A
 /// scalar JSON value (string / number / bool / null) is encoded
 /// as its lexical wire form, matching exactly what the same value
 /// typed at a CLI flag would produce. Composite values (object,
@@ -948,13 +948,13 @@ mod tests {
             slot_values: None,
         };
         let binding = ArgumentBinding::Slot {
-            name: "media:enc=utf-8;question".to_string(),
+            name: "media:enc=utf8;question".to_string(),
             schema: None,
         };
         let result = resolve_binding(&binding, &context, "cap:generate", "step_0", None, true);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("media:enc=utf-8;question"));
+        assert!(err.contains("media:enc=utf8;question"));
     }
 
     // TEST671: resolve_binding returns None when optional slot has no value and no default
@@ -971,7 +971,7 @@ mod tests {
             slot_values: None,
         };
         let binding = ArgumentBinding::Slot {
-            name: "media:enc=utf-8;suffix".to_string(),
+            name: "media:enc=utf8;suffix".to_string(),
             schema: None,
         };
         let result =
@@ -1000,7 +1000,7 @@ mod tests {
     #[test]
     fn test1105_two_steps_same_cap_urn_different_slot_values() {
         let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
-        let slot_name = "media:enc=utf-8;list;question";
+        let slot_name = "media:enc=utf8;list;question";
         let files = vec![];
         let prev_outputs = HashMap::new();
         let mut slot_values: HashMap<String, Vec<u8>> = HashMap::new();
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn test1106_slot_falls_through_to_cap_settings_shared() {
         let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
-        let slot_name = "media:enc=utf-8;language-code";
+        let slot_name = "media:enc=utf8;language-code";
         let files = vec![];
         let prev_outputs = HashMap::new();
         let mut cap_settings: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
@@ -1088,7 +1088,7 @@ mod tests {
     #[test]
     fn test1107_slot_value_overrides_cap_settings_per_step() {
         let cap_urn = "cap:in=\"media:document;ext=pdf\";make-decision;out=\"media:bool\"";
-        let slot_name = "media:enc=utf-8;language-code";
+        let slot_name = "media:enc=utf8;language-code";
         let files = vec![];
         let prev_outputs = HashMap::new();
 

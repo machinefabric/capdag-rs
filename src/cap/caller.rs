@@ -32,7 +32,7 @@ pub enum StdinSource {
 /// The cap definition's sources specify how to extract values (stdin, position, cli_flag).
 #[derive(Debug, Clone)]
 pub struct CapArgumentValue {
-    /// Semantic identifier, e.g., "media:enc=utf-8;model-spec"
+    /// Semantic identifier, e.g., "media:enc=utf8;model-spec"
     pub media_urn: String,
     /// Value bytes (UTF-8 for text, raw for binary)
     pub value: Vec<u8>,
@@ -302,16 +302,16 @@ mod tests {
     // TEST274: Test CapArgumentValue::new stores media_urn and raw byte value
     #[test]
     fn test274_cap_argument_value_new() {
-        let arg = CapArgumentValue::new("media:enc=utf-8;model-spec", b"gpt-4".to_vec());
-        assert_eq!(arg.media_urn, "media:enc=utf-8;model-spec");
+        let arg = CapArgumentValue::new("media:enc=utf8;model-spec", b"gpt-4".to_vec());
+        assert_eq!(arg.media_urn, "media:enc=utf8;model-spec");
         assert_eq!(arg.value, b"gpt-4");
     }
 
     // TEST275: Test CapArgumentValue::from_str converts string to UTF-8 bytes
     #[test]
     fn test275_cap_argument_value_from_str() {
-        let arg = CapArgumentValue::from_str("media:enc=utf-8;string", "hello world");
-        assert_eq!(arg.media_urn, "media:enc=utf-8;string");
+        let arg = CapArgumentValue::from_str("media:enc=utf8;string", "hello world");
+        assert_eq!(arg.media_urn, "media:enc=utf8;string");
         assert_eq!(arg.value, b"hello world");
     }
 
@@ -387,7 +387,7 @@ mod tests {
         use crate::bifaci::frame::FrameType;
         use crate::MessageId;
 
-        let full_urn = "media:fmt=json;llm-generation-request;record";
+        let full_urn = "media:enc=utf8;fmt=json;llm-generation-request;record";
         let arg = CapArgumentValue::new(full_urn, b"{\"prompt\":\"test\"}".to_vec());
         let rid = MessageId::new_uuid();
         let frames = CapArgumentValue::build_request_frames(&rid, "cap:test", &[arg], 32768);
@@ -411,7 +411,7 @@ mod tests {
         use crate::bifaci::frame::FrameType;
         use crate::{find_stream, MessageId};
 
-        let full_urn = "media:fmt=json;llm-generation-request;record";
+        let full_urn = "media:enc=utf8;fmt=json;llm-generation-request;record";
         let payload = b"{\"prompt\":\"hello\",\"model_spec\":\"test\"}";
         let arg = CapArgumentValue::new(full_urn, payload.to_vec());
         let rid = MessageId::new_uuid();
@@ -470,7 +470,7 @@ mod tests {
     // TEST677: build_request_frames with BASE URN → find_stream with FULL URN FAILS
     // This documents the root cause of the cartridge_client.rs bug:
     // sender used "media:llm-generation-request" (base), receiver looked for
-    // "media:fmt=json;llm-generation-request;record" (full). is_equivalent requires
+    // "media:enc=utf8;fmt=json;llm-generation-request;record" (full). is_equivalent requires
     // exact tag set match, so base != full.
     #[test]
     fn test677_base_urn_does_not_match_full_urn_in_find_stream() {
@@ -479,7 +479,7 @@ mod tests {
 
         // Sender uses BASE URN (the bug)
         let base_urn = "media:llm-generation-request";
-        let full_urn = "media:fmt=json;llm-generation-request;record";
+        let full_urn = "media:enc=utf8;fmt=json;llm-generation-request;record";
         let arg = CapArgumentValue::new(base_urn, b"{}".to_vec());
         let rid = MessageId::new_uuid();
         let frames = CapArgumentValue::build_request_frames(&rid, "cap:test", &[arg], 32768);

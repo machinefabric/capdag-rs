@@ -29,15 +29,22 @@ use tagged_urn::{TaggedUrn, TaggedUrnCoordinateDelta, TaggedUrnError};
 //
 // Examples:
 // - `media:document;ext=pdf` → scalar, opaque (no markers)
-// - `media:enc=utf-8;list` → list, opaque (has list marker)
-// - `media:fmt=json;record` → scalar, record (has record marker)
-// - `media:fmt=json;list;record` → list of records (has both markers)
+// - `media:enc=utf8;list` → list, opaque (has list marker)
+// - `media:enc=utf8;fmt=json;record` → scalar, record (has record marker)
+// - `media:enc=utf8;fmt=json;list;record` → list of records (has both markers)
 
 // Primitive types - URNs must match base.toml definitions
 /// Media URN for void (no input/output) - no coercion tags
 pub const MEDIA_VOID: &str = "media:void";
-/// Media URN for string type — bare UTF-8 text (`enc=utf-8`), scalar by default (no list marker)
-pub const MEDIA_STRING: &str = "media:enc=utf-8";
+/// Media URN for string type — any UTF-8 string (`enc=utf8`): prose, code,
+/// markup or a textual serialization alike. Scalar by default (no list marker).
+pub const MEDIA_STRING: &str = "media:enc=utf8";
+/// Media URN for plain text — UTF-8 text written to be read. What a cap that
+/// reads text as language (summarizing, classifying, embedding, prompting a
+/// model) takes; every prose file type, document page, digitized text and
+/// image description conforms to it, and source code, markup and serialized
+/// data do not.
+pub const MEDIA_PLAIN_TEXT: &str = "media:enc=utf8;plain-text";
 /// Media URN for integer type — numeric (math ops valid), scalar by default
 pub const MEDIA_INTEGER: &str = "media:integer;numeric";
 /// Media URN for number type — numeric, scalar by default
@@ -54,7 +61,7 @@ pub const MEDIA_IDENTITY: &str = "media:";
 /// Media URN for untyped list - ordered sequence of opaque byte sequences
 pub const MEDIA_LIST: &str = "media:list";
 /// Media URN for string array type — ordered sequence of bare UTF-8 text values
-pub const MEDIA_STRING_LIST: &str = "media:enc=utf-8;list";
+pub const MEDIA_STRING_LIST: &str = "media:enc=utf8;list";
 /// Media URN for integer array type — numeric with list marker
 pub const MEDIA_INTEGER_LIST: &str = "media:integer;list;numeric";
 /// Media URN for number list type - text file with one number per line
@@ -116,7 +123,7 @@ pub const MEDIA_MKV: &str = "media:ext=mkv;video";
 /// `plain-text` (the finalised-text marker that opts into
 /// `cap:save-as-txt`'s persistence path), and `file-type=txt` (binds the
 /// URN to the `.txt` extension at the registry).
-pub const MEDIA_TEXTABLE_PAGE: &str = "media:enc=utf-8;ext=txt;page;plain-text";
+pub const MEDIA_TEXTABLE_PAGE: &str = "media:enc=utf8;ext=txt;page;plain-text";
 
 // Document types (PRIMARY naming - type IS the format)
 /// Media URN for PDF documents
@@ -126,61 +133,61 @@ pub const MEDIA_EPUB: &str = "media:document;ext=epub";
 
 // Text format types (PRIMARY naming - type IS the format)
 /// Media URN for Markdown text
-pub const MEDIA_MD: &str = "media:enc=utf-8;ext=md";
+pub const MEDIA_MD: &str = "media:enc=utf8;ext=md;plain-text";
 /// Media URN for plain text
-pub const MEDIA_TXT: &str = "media:enc=utf-8;ext=txt";
+pub const MEDIA_TXT: &str = "media:enc=utf8;ext=txt;plain-text";
 /// Media URN for reStructuredText
-pub const MEDIA_RST: &str = "media:enc=utf-8;ext=rst";
+pub const MEDIA_RST: &str = "media:enc=utf8;ext=rst;plain-text";
 /// Media URN for log files
-pub const MEDIA_LOG: &str = "media:enc=utf-8;ext=log";
+pub const MEDIA_LOG: &str = "media:enc=utf8;ext=log;plain-text";
 /// Media URN for HTML documents
-pub const MEDIA_HTML: &str = "media:enc=utf-8;ext=html";
+pub const MEDIA_HTML: &str = "media:enc=utf8;ext=html";
 /// Media URN for XML documents
-pub const MEDIA_XML: &str = "media:enc=utf-8;ext=xml";
+pub const MEDIA_XML: &str = "media:enc=utf8;ext=xml";
 /// Media URN for JSON data - has record marker (structured key-value)
-pub const MEDIA_JSON: &str = "media:fmt=json;record";
+pub const MEDIA_JSON: &str = "media:enc=utf8;fmt=json;record";
 /// Media URN for JSON with schema constraint (input for structured queries)
-pub const MEDIA_JSON_SCHEMA: &str = "media:fmt=json;json-schema;record";
+pub const MEDIA_JSON_SCHEMA: &str = "media:enc=utf8;fmt=json;json-schema;record";
 /// Media URN for YAML data - has record marker (structured key-value)
-pub const MEDIA_YAML: &str = "media:fmt=yaml;record";
+pub const MEDIA_YAML: &str = "media:enc=utf8;fmt=yaml;record";
 
 // Format-specific variants for JSON, YAML, CSV
 /// Media URN for a generic JSON value (scalar — string, number, boolean, null, or object)
-pub const MEDIA_JSON_VALUE: &str = "media:fmt=json";
+pub const MEDIA_JSON_VALUE: &str = "media:enc=utf8;fmt=json";
 /// Media URN for a JSON object (alias for MEDIA_JSON)
-pub const MEDIA_JSON_RECORD: &str = "media:fmt=json;record";
+pub const MEDIA_JSON_RECORD: &str = "media:enc=utf8;fmt=json;record";
 /// Media URN for a JSON array (list of values)
-pub const MEDIA_JSON_LIST: &str = "media:fmt=json;list";
+pub const MEDIA_JSON_LIST: &str = "media:enc=utf8;fmt=json;list";
 /// Media URN for a JSON array of objects (list of records)
-pub const MEDIA_JSON_LIST_RECORD: &str = "media:fmt=json;list;record";
+pub const MEDIA_JSON_LIST_RECORD: &str = "media:enc=utf8;fmt=json;list;record";
 /// Media URN for a generic YAML value (scalar — string, number, boolean, null, or mapping)
-pub const MEDIA_YAML_VALUE: &str = "media:fmt=yaml";
+pub const MEDIA_YAML_VALUE: &str = "media:enc=utf8;fmt=yaml";
 /// Media URN for a YAML mapping (alias for MEDIA_YAML)
-pub const MEDIA_YAML_RECORD: &str = "media:fmt=yaml;record";
+pub const MEDIA_YAML_RECORD: &str = "media:enc=utf8;fmt=yaml;record";
 /// Media URN for a YAML sequence (list of values)
-pub const MEDIA_YAML_LIST: &str = "media:fmt=yaml;list";
+pub const MEDIA_YAML_LIST: &str = "media:enc=utf8;fmt=yaml;list";
 /// Media URN for a YAML sequence of mappings (list of records)
-pub const MEDIA_YAML_LIST_RECORD: &str = "media:fmt=yaml;list;record";
+pub const MEDIA_YAML_LIST_RECORD: &str = "media:enc=utf8;fmt=yaml;list;record";
 /// Media URN for CSV data — by definition a list of records (header row + data rows)
-pub const MEDIA_CSV: &str = "media:fmt=csv;list;record";
+pub const MEDIA_CSV: &str = "media:enc=utf8;fmt=csv;list;record";
 /// Media URN for single-column CSV — list of values without record structure
-pub const MEDIA_CSV_LIST: &str = "media:fmt=csv;list;record";
+pub const MEDIA_CSV_LIST: &str = "media:enc=utf8;fmt=csv;list;record";
 
 // File path type — for arguments that represent filesystem paths.
 // There is a single media URN; cardinality lives on `is_sequence`, not on
 // URN tags.
-pub const MEDIA_FILE_PATH: &str = "media:enc=utf-8;file-path";
+pub const MEDIA_FILE_PATH: &str = "media:enc=utf8;file-path";
 
 // Semantic text input types - distinguished by their purpose/context
 /// Media URN for model spec (provider:model format, HuggingFace name, etc.) - scalar by default
 /// Generic, backend-agnostic — used by modelcartridge for download/status/path operations.
-pub const MEDIA_MODEL_SPEC: &str = "media:enc=utf-8;model-spec";
+pub const MEDIA_MODEL_SPEC: &str = "media:enc=utf8;model-spec";
 /// Media URN for MLX model path - scalar by default
-pub const MEDIA_MLX_MODEL_PATH: &str = "media:enc=utf-8;mlx-model-path";
+pub const MEDIA_MLX_MODEL_PATH: &str = "media:enc=utf8;mlx-model-path";
 
 // Backend-agnostic model-spec variants (used by inference caps).
 /// Backend-agnostic LLM model spec — model spec string determines the backend.
-pub const MEDIA_MODEL_SPEC_LLM: &str = "media:enc=utf-8;llm;model-spec";
+pub const MEDIA_MODEL_SPEC_LLM: &str = "media:enc=utf8;llm;model-spec";
 
 // Backend + use-case specific model-spec variants.
 // Each inference cap declares the variant matching its backend and purpose,
@@ -198,13 +205,13 @@ pub const MEDIA_MODEL_SPEC_LLM: &str = "media:enc=utf-8;llm;model-spec";
 //
 /// GGUF vision model spec (moondream2, Gemma 3-vision, …).
 pub const MEDIA_MODEL_SPEC_GGUF_VISION: &str =
-    "media:enc=utf-8;gguf;model-spec;tokenizer-embedded-gguf;vision";
+    "media:enc=utf8;gguf;model-spec;tokenizer-embedded-gguf;vision";
 /// GGUF LLM model spec (Qwen, Mistral, Llama, …).
 pub const MEDIA_MODEL_SPEC_GGUF_LLM: &str =
-    "media:enc=utf-8;gguf;llm;model-spec;tokenizer-embedded-gguf";
+    "media:enc=utf8;gguf;llm;model-spec;tokenizer-embedded-gguf";
 /// GGUF embeddings model spec (nomic-embed, embeddinggemma, …).
 pub const MEDIA_MODEL_SPEC_GGUF_EMBEDDINGS: &str =
-    "media:embeddings;enc=utf-8;gguf;model-spec;tokenizer-embedded-gguf";
+    "media:embeddings;enc=utf8;gguf;model-spec;tokenizer-embedded-gguf";
 /// GGUF OCR model spec (e.g. GLM-OCR). Distinct from
 /// `MEDIA_MODEL_SPEC_GGUF_VISION` — both are multimodal GGUF
 /// files with a text-model + mmproj pair, but the `model-task`
@@ -212,26 +219,26 @@ pub const MEDIA_MODEL_SPEC_GGUF_EMBEDDINGS: &str =
 /// generic VLM use, `ocr` is reserved for models specifically
 /// trained to transcribe text *contained in* an image.
 pub const MEDIA_MODEL_SPEC_GGUF_OCR: &str =
-    "media:enc=utf-8;gguf;model-spec;ocr;tokenizer-embedded-gguf";
+    "media:enc=utf8;gguf;model-spec;ocr;tokenizer-embedded-gguf";
 
 // Backend-narrowed model-spec supertypes. Each backend cartridge's
 // adapter handler returns the URN for its backend so the engine's
 // adapter-discrimination knows which backend claims the spec.
-/// Candle backend's model-spec supertype, narrower than `media:enc=utf-8;model-spec`
+/// Candle backend's model-spec supertype, narrower than `media:enc=utf8;model-spec`
 /// but broader than the per-task variants below.
-pub const MEDIA_MODEL_SPEC_CANDLE: &str = "media:candle;enc=utf-8;model-spec";
+pub const MEDIA_MODEL_SPEC_CANDLE: &str = "media:candle;enc=utf8;model-spec";
 /// GGUF backend's model-spec supertype.
-pub const MEDIA_MODEL_SPEC_GGUF: &str = "media:enc=utf-8;gguf;model-spec";
+pub const MEDIA_MODEL_SPEC_GGUF: &str = "media:enc=utf8;gguf;model-spec";
 /// MLX backend's model-spec supertype.
-pub const MEDIA_MODEL_SPEC_MLX: &str = "media:enc=utf-8;mlx;model-spec";
+pub const MEDIA_MODEL_SPEC_MLX: &str = "media:enc=utf8;mlx;model-spec";
 
 // MLX backend
 /// MLX vision model spec (e.g. Qwen3-VL)
-pub const MEDIA_MODEL_SPEC_MLX_VISION: &str = "media:enc=utf-8;mlx;model-spec;vision";
+pub const MEDIA_MODEL_SPEC_MLX_VISION: &str = "media:enc=utf8;mlx;model-spec;vision";
 /// MLX LLM model spec (e.g. Llama-3.2-3B)
-pub const MEDIA_MODEL_SPEC_MLX_LLM: &str = "media:enc=utf-8;llm;mlx;model-spec";
+pub const MEDIA_MODEL_SPEC_MLX_LLM: &str = "media:enc=utf8;llm;mlx;model-spec";
 /// MLX embeddings model spec (e.g. all-MiniLM-L6-v2)
-pub const MEDIA_MODEL_SPEC_MLX_EMBEDDINGS: &str = "media:embeddings;enc=utf-8;mlx;model-spec";
+pub const MEDIA_MODEL_SPEC_MLX_EMBEDDINGS: &str = "media:embeddings;enc=utf8;mlx;model-spec";
 
 // Candle backend.
 //
@@ -250,50 +257,50 @@ pub const MEDIA_MODEL_SPEC_MLX_EMBEDDINGS: &str = "media:embeddings;enc=utf-8;ml
 /// Candle vision model spec (BLIP). Loader requires safetensors
 /// weights and a unified `tokenizer.json`.
 pub const MEDIA_MODEL_SPEC_CANDLE_VISION: &str =
-    "media:candle;enc=utf-8;model-spec;repo-safetensors;tokenizer-unified;vision";
+    "media:candle;enc=utf8;model-spec;repo-safetensors;tokenizer-unified;vision";
 /// Candle text-embeddings model spec (BERT). Same physical
 /// requirements as `MEDIA_MODEL_SPEC_CANDLE_VISION`.
 pub const MEDIA_MODEL_SPEC_CANDLE_EMBEDDINGS: &str =
-    "media:candle;embeddings;enc=utf-8;model-spec;repo-safetensors;tokenizer-unified";
+    "media:candle;embeddings;enc=utf8;model-spec;repo-safetensors;tokenizer-unified";
 /// Candle image-embeddings model spec (CLIP). Loader has fallbacks
 /// on both axes — `pytorch_model.bin` for repo-format and
 /// `bpe-pair` for tokenizer-shape — so neither can be tightened
 /// without rejecting models the loader can physically handle.
 pub const MEDIA_MODEL_SPEC_CANDLE_IMAGE_EMBEDDINGS: &str =
-    "media:candle;enc=utf-8;image-embeddings;model-spec";
+    "media:candle;enc=utf8;image-embeddings;model-spec";
 /// Candle LLM model spec (Mistral, Llama, Qwen, …). Loader requires
 /// safetensors weights and a unified `tokenizer.json`.
 pub const MEDIA_MODEL_SPEC_CANDLE_LLM: &str =
-    "media:candle;enc=utf-8;llm;model-spec;repo-safetensors;tokenizer-unified";
+    "media:candle;enc=utf8;llm;model-spec;repo-safetensors;tokenizer-unified";
 /// Candle transcription model spec (Whisper). Same physical
 /// requirements as the LLM/vision/embeddings variants.
 pub const MEDIA_MODEL_SPEC_CANDLE_TRANSCRIPTION: &str =
-    "media:candle;enc=utf-8;model-spec;repo-safetensors;tokenizer-unified;transcription";
+    "media:candle;enc=utf8;model-spec;repo-safetensors;tokenizer-unified;transcription";
 /// Media URN for model repository (input for list-models) — a JSON record
-pub const MEDIA_MODEL_REPO: &str = "media:fmt=json;model-repo;record";
+pub const MEDIA_MODEL_REPO: &str = "media:enc=utf8;fmt=json;model-repo;record";
 
 /// HuggingFace bearer token, passed as an optional argument to caps that
 /// hit the HuggingFace API. Carries a `secret` tag so UIs and logs can mask
 /// the value.
-pub const MEDIA_HF_TOKEN: &str = "media:enc=utf-8;hf-token;secret";
+pub const MEDIA_HF_TOKEN: &str = "media:enc=utf8;hf-token;secret";
 
 /// JSON record carrying `{ "architectures": ["mistral", "llama", ...] }`
 /// used by the `list-compatible-models` cap to filter cached models by
 /// `model_type`.
-pub const MEDIA_MODEL_ARCH_LIST: &str = "media:fmt=json;model-arch-list;record";
+pub const MEDIA_MODEL_ARCH_LIST: &str = "media:enc=utf8;fmt=json;model-arch-list;record";
 
 /// JSON record carrying a [`crate::ModelSearchRequest`] equivalent — query,
 /// limit, sort, cursor, and the optional `architectures` field driving
 /// cap-aware result filtering.
-pub const MEDIA_MODEL_SEARCH_REQUEST: &str = "media:fmt=json;model-search-request;record";
+pub const MEDIA_MODEL_SEARCH_REQUEST: &str = "media:enc=utf8;fmt=json;model-search-request;record";
 
 /// JSON record carrying a [`crate::ModelSearchResponse`] equivalent.
-pub const MEDIA_MODEL_SEARCH_RESPONSE: &str = "media:fmt=json;model-search-response;record";
+pub const MEDIA_MODEL_SEARCH_RESPONSE: &str = "media:enc=utf8;fmt=json;model-search-response;record";
 
 /// JSON record carrying the dry-run result of `resolve-model-filters` —
 /// the spec, the user filters, the architecture-required additions, and
 /// the resulting effective file list.
-pub const MEDIA_MODEL_FILTER_RESOLUTION: &str = "media:fmt=json;model-filter-resolution;record";
+pub const MEDIA_MODEL_FILTER_RESOLUTION: &str = "media:enc=utf8;fmt=json;model-filter-resolution;record";
 
 /// Helper to build a bare file media URN for a given extension — a file of the
 /// given type with no content-format or encoding claim (e.g. `media:document;ext=pdf`).
@@ -302,10 +309,19 @@ pub fn file_media_urn_for_ext(ext: &str) -> String {
 }
 
 /// Helper to build a UTF-8 text file media URN for a given extension
-/// (e.g. `media:enc=utf-8;ext=md`).
+/// (e.g. `media:enc=utf8;ext=md;plain-text`).
 pub fn text_media_urn_for_ext(ext: &str) -> String {
-    format!("media:enc=utf-8;ext={}", ext)
+    if PLAIN_TEXT_EXTENSIONS.contains(&ext) {
+        format!("media:enc=utf8;ext={};plain-text", ext)
+    } else {
+        format!("media:enc=utf8;ext={}", ext)
+    }
 }
+
+/// The file extensions whose content is plain text — prose written to be read
+/// rather than code, markup or data to be parsed. A UTF-8 file of one of these
+/// types also carries `plain-text`, as the fabric's `plain-text` dim declares.
+pub const PLAIN_TEXT_EXTENSIONS: &[&str] = &["txt", "md", "rst", "asciidoc", "org", "log"];
 
 /// Helper to build image media URN with extension
 pub fn image_media_urn_for_ext(ext: &str) -> String {
@@ -321,19 +337,19 @@ pub fn audio_media_urn_for_ext(ext: &str) -> String {
 /// Media URN for model dimension output - scalar by default (no list marker)
 pub const MEDIA_MODEL_DIM: &str = "media:integer;model-dim;numeric";
 /// Media URN for model download output — a JSON record
-pub const MEDIA_DOWNLOAD_OUTPUT: &str = "media:download-result;fmt=json;record";
+pub const MEDIA_DOWNLOAD_OUTPUT: &str = "media:download-result;enc=utf8;fmt=json;record";
 /// Media URN for model list output — a JSON record
-pub const MEDIA_LIST_OUTPUT: &str = "media:fmt=json;model-list;record";
+pub const MEDIA_LIST_OUTPUT: &str = "media:enc=utf8;fmt=json;model-list;record";
 /// Media URN for model status output — a JSON record
-pub const MEDIA_STATUS_OUTPUT: &str = "media:fmt=json;model-status;record";
+pub const MEDIA_STATUS_OUTPUT: &str = "media:enc=utf8;fmt=json;model-status;record";
 /// Media URN for model contents output — a JSON record
-pub const MEDIA_CONTENTS_OUTPUT: &str = "media:fmt=json;model-contents;record";
+pub const MEDIA_CONTENTS_OUTPUT: &str = "media:enc=utf8;fmt=json;model-contents;record";
 /// Media URN for model availability output — a JSON record
-pub const MEDIA_AVAILABILITY_OUTPUT: &str = "media:fmt=json;model-availability;record";
+pub const MEDIA_AVAILABILITY_OUTPUT: &str = "media:enc=utf8;fmt=json;model-availability;record";
 /// Media URN for model path output — a JSON record
-pub const MEDIA_PATH_OUTPUT: &str = "media:fmt=json;model-path;record";
+pub const MEDIA_PATH_OUTPUT: &str = "media:enc=utf8;fmt=json;model-path;record";
 /// Media URN for embedding vector output — a JSON record
-pub const MEDIA_EMBEDDING_VECTOR: &str = "media:embedding-vector;fmt=json;record";
+pub const MEDIA_EMBEDDING_VECTOR: &str = "media:embedding-vector;enc=utf8;fmt=json;record";
 /// Media URN for vision inference output — a concrete UTF-8 text terminal.
 ///
 /// The composite URN carries `image-description` (the vision-specific marker
@@ -341,34 +357,29 @@ pub const MEDIA_EMBEDDING_VECTOR: &str = "media:embedding-vector;fmt=json;record
 /// (the finalised-text marker that opts into `cap:save-as-txt`'s persistence
 /// path), and `file-type=txt` (binds the URN to the `.txt` extension at the
 /// registry).
-pub const MEDIA_IMAGE_DESCRIPTION: &str = "media:enc=utf-8;ext=txt;image-description;plain-text";
+pub const MEDIA_IMAGE_DESCRIPTION: &str = "media:enc=utf8;ext=txt;image-description;plain-text";
 /// Media URN for OCR output — verbatim text digitized from an image, scalar by default.
 /// Distinct from `MEDIA_IMAGE_DESCRIPTION` (which is a generated caption / answer about
 /// the image) — `digitized-text` carries text that is *present* in the image.
 ///
-/// The composite URN carries `digitized-text` (the OCR-specific marker), `plain-text`
-/// (the finalised-text marker that opts into `cap:save-as-txt`'s persistence path),
+/// The composite URN carries `digitized` (the kind of plain text OCR reads), `plain-text`
+/// (text written to be read, so every cap that reads text as language accepts it),
 /// and `file-type=txt` (binds the URN to the `.txt` extension at the registry).
-pub const MEDIA_DIGITIZED_TEXT: &str = "media:digitized-text;enc=utf-8;ext=txt;plain-text";
-/// Media URN for finalised plain text — the canonical input/output of `cap:save-as-txt`.
-/// Producers of user-facing prose (LLM text-generation, OCR's digitized text,
-/// summarisation) declare this URN as their `out` so the planner restricts the
-/// `.txt` persistence path to those caps. See `fabric/media/plain-text.toml`.
-pub const MEDIA_PLAIN_TEXT: &str = "media:enc=utf-8;ext=txt;plain-text";
+pub const MEDIA_DIGITIZED_TEXT: &str = "media:digitized;enc=utf8;ext=txt;plain-text";
 /// Media URN for a transcript — the JSON record a transcription produces
-pub const MEDIA_TRANSCRIPT_OUTPUT: &str = "media:fmt=json;record;transcript";
+pub const MEDIA_TRANSCRIPT_OUTPUT: &str = "media:enc=utf8;fmt=json;record;transcript";
 /// Media URN for decision output — JSON object with identifier and boolean value
-pub const MEDIA_DECISION: &str = "media:decision;fmt=json;record";
+pub const MEDIA_DECISION: &str = "media:decision;enc=utf8;fmt=json;record";
 
 /// Media URN for a semantic-judgment record — the shared output
 /// envelope of the semantic-primitive cap family (`same`, and the
 /// primitives that follow it): `{result..., confidence, reason}`.
 /// See docs/semantic-primitives.md (law P2).
-pub const MEDIA_SEMANTIC_JUDGMENT: &str = "media:fmt=json;record;semantic-judgment";
+pub const MEDIA_SEMANTIC_JUDGMENT: &str = "media:enc=utf8;fmt=json;record;semantic-judgment";
 
 /// Media URN for adapter selection output — JSON object with media_urns array
 /// Returned by cartridge content-inspection adapters to identify file media types
-pub const MEDIA_ADAPTER_SELECTION: &str = "media:adapter-selection;fmt=json;record";
+pub const MEDIA_ADAPTER_SELECTION: &str = "media:adapter-selection;enc=utf8;fmt=json;record";
 
 /// Media URN for a canonical cap URN string.
 ///
@@ -377,7 +388,7 @@ pub const MEDIA_ADAPTER_SELECTION: &str = "media:adapter-selection;fmt=json;reco
 /// canonical (alphabetically normalised) serialisation produced by the
 /// `CapUrn` parser; consumers re-parse it through `CapUrn::from_string`
 /// before any comparison or dispatch decision.
-pub const MEDIA_CAP_URN: &str = "media:cap-urn;enc=utf-8";
+pub const MEDIA_CAP_URN: &str = "media:cap-urn;enc=utf8";
 
 /// Media URN for a canonical media URN string.
 ///
@@ -386,7 +397,7 @@ pub const MEDIA_CAP_URN: &str = "media:cap-urn;enc=utf-8";
 /// be the canonical (alphabetically normalised) serialisation produced by
 /// the `MediaUrn` parser; consumers re-parse it through
 /// `MediaUrn::from_string` before any comparison or dispatch decision.
-pub const MEDIA_MEDIA_URN: &str = "media:enc=utf-8;media-urn";
+pub const MEDIA_MEDIA_URN: &str = "media:enc=utf8;media-urn";
 
 /// Media URN for a fabric registry per-definition version (defver).
 ///
@@ -395,19 +406,19 @@ pub const MEDIA_MEDIA_URN: &str = "media:enc=utf-8;media-urn";
 /// representation of a positive integer. Absent ⇒ the lookup cartridge
 /// resolves the URN under its own pinned fabric manifest; present ⇒ the
 /// caller is asking for that exact defver.
-pub const MEDIA_FABRIC_DEFVER: &str = "media:defver;enc=utf-8";
+pub const MEDIA_FABRIC_DEFVER: &str = "media:defver;enc=utf8";
 
 /// Media URN for the full flattened cap definition published by the registry.
 ///
 /// JSON record returned by `cap:lookup-cap;fabric`. Shape mirrors the
 /// `flattenCapability` output in the fabric build pipeline.
-pub const MEDIA_CAP_DEFINITION: &str = "media:cap-definition;fmt=json;record";
+pub const MEDIA_CAP_DEFINITION: &str = "media:cap-definition;enc=utf8;fmt=json;record";
 
 /// Media URN for the full media definition published by the registry.
 ///
 /// JSON record returned by `cap:lookup-media-def;fabric`. Shape mirrors
 /// the media def emitter output in the fabric build pipeline.
-pub const MEDIA_MEDIA_DEFINITION: &str = "media:fmt=json;media-definition;record";
+pub const MEDIA_MEDIA_DEFINITION: &str = "media:enc=utf8;fmt=json;media-definition;record";
 
 // =============================================================================
 // MEDIA URN TYPE
@@ -530,7 +541,7 @@ impl MediaUrn {
     /// - Single input → returned as-is
     /// - `[media:document;ext=pdf, media:document;ext=pdf]` → `media:document;ext=pdf`
     /// - `[media:document;ext=pdf, media:ext=png;image]` → `media:ext`
-    /// - `[media:fmt=json;list, media:fmt=json]` → `media:fmt=json`
+    /// - `[media:enc=utf8;fmt=json;list, media:enc=utf8;fmt=json]` → `media:enc=utf8;fmt=json`
     pub fn least_upper_bound(urns: &[MediaUrn]) -> MediaUrn {
         if urns.is_empty() {
             return MediaUrn::from_string("media:").unwrap_or_else(|_| {
@@ -657,7 +668,7 @@ impl MediaUrn {
     /// Returns true if this media URN describes list-type data (has `list` marker tag).
     ///
     /// This is a **semantic type** check — it means "the data format IS a list/array"
-    /// (e.g., `media:fmt=json;list` is a JSON array).
+    /// (e.g., `media:enc=utf8;fmt=json;list` is a JSON array).
     ///
     /// This does NOT indicate input cardinality/shape (single vs multiple items).
     /// Cardinality is tracked by `is_sequence` on the wire protocol, not by URN tags.
@@ -713,7 +724,7 @@ impl MediaUrn {
     ///
     /// CSV content is identified by the `fmt=csv` content-format tag — the only
     /// form the catalog publishes (every datacartridge convert-format /
-    /// collect-records cap declares its CSV media as `media:fmt=csv;list;record`).
+    /// collect-records cap declares its CSV media as `media:enc=utf8;fmt=csv;list;record`).
     /// A `.csv` file on disk carries `ext=csv` *and* `fmt=csv`; the file-type tag
     /// alone (`ext=csv`) does not make a value CSV content.
     pub fn is_csv(&self) -> bool {
@@ -771,7 +782,7 @@ impl MediaUrn {
 
     /// Check if this represents a file path type.
     ///
-    /// There is a single file-path media URN (`media:enc=utf-8;file-path`);
+    /// There is a single file-path media URN (`media:enc=utf8;file-path`);
     /// cardinality (single file vs multiple files) is carried on the wire
     /// via `is_sequence`, not via URN tags.
     pub fn is_file_path(&self) -> bool {
@@ -908,13 +919,13 @@ mod tests {
     #[test]
     fn test062_is_record() {
         // is_record returns true if record marker tag is present (key-value structure)
-        assert!(MediaUrn::from_string(MEDIA_OBJECT).unwrap().is_record()); // "media:enc=utf-8;record"
+        assert!(MediaUrn::from_string(MEDIA_OBJECT).unwrap().is_record()); // "media:enc=utf8;record"
         assert!(MediaUrn::from_string("media:custom;record")
             .unwrap()
             .is_record());
-        assert!(MediaUrn::from_string(MEDIA_JSON).unwrap().is_record()); // "media:fmt=json;record"
+        assert!(MediaUrn::from_string(MEDIA_JSON).unwrap().is_record()); // "media:enc=utf8;fmt=json;record"
                                                                          // Without record marker, is_record is false
-        assert!(!MediaUrn::from_string("media:enc=utf-8")
+        assert!(!MediaUrn::from_string("media:enc=utf8")
             .unwrap()
             .is_record());
         assert!(!MediaUrn::from_string(MEDIA_STRING).unwrap().is_record()); // scalar, no record marker
@@ -927,12 +938,12 @@ mod tests {
     #[test]
     fn test063_is_scalar() {
         // is_scalar returns true if NO list marker (scalar is default cardinality)
-        assert!(MediaUrn::from_string(MEDIA_STRING).unwrap().is_scalar()); // "media:enc=utf-8" - no list marker
+        assert!(MediaUrn::from_string(MEDIA_STRING).unwrap().is_scalar()); // "media:enc=utf8" - no list marker
         assert!(MediaUrn::from_string(MEDIA_INTEGER).unwrap().is_scalar()); // no list marker
         assert!(MediaUrn::from_string(MEDIA_NUMBER).unwrap().is_scalar()); // no list marker
         assert!(MediaUrn::from_string(MEDIA_BOOLEAN).unwrap().is_scalar()); // no list marker
         assert!(MediaUrn::from_string(MEDIA_OBJECT).unwrap().is_scalar()); // record but scalar
-        assert!(MediaUrn::from_string("media:enc=utf-8")
+        assert!(MediaUrn::from_string("media:enc=utf8")
             .unwrap()
             .is_scalar()); // plain text is scalar
                            // With list marker, is_scalar is false
@@ -948,9 +959,9 @@ mod tests {
     #[test]
     fn test064_is_list() {
         // is_list returns true if list marker tag is present (ordered collection)
-        assert!(MediaUrn::from_string(MEDIA_STRING_LIST).unwrap().is_list()); // "media:enc=utf-8;list"
+        assert!(MediaUrn::from_string(MEDIA_STRING_LIST).unwrap().is_list()); // "media:enc=utf8;list"
         assert!(MediaUrn::from_string(MEDIA_INTEGER_LIST).unwrap().is_list()); // has list marker
-        assert!(MediaUrn::from_string(MEDIA_OBJECT_LIST).unwrap().is_list()); // "media:enc=utf-8;list;record"
+        assert!(MediaUrn::from_string(MEDIA_OBJECT_LIST).unwrap().is_list()); // "media:enc=utf8;list;record"
         assert!(MediaUrn::from_string("media:custom;list")
             .unwrap()
             .is_list());
@@ -968,7 +979,7 @@ mod tests {
             .unwrap()
             .is_opaque()); // list but no record
         assert!(MediaUrn::from_string(MEDIA_PDF).unwrap().is_opaque()); // binary, no record
-        assert!(MediaUrn::from_string("media:enc=utf-8")
+        assert!(MediaUrn::from_string("media:enc=utf8")
             .unwrap()
             .is_opaque()); // no record marker
                            // With record marker, is_opaque is false
@@ -983,19 +994,19 @@ mod tests {
     #[test]
     fn test066_is_json() {
         // is_json returns true only if "json" marker tag is present (JSON representation)
-        assert!(MediaUrn::from_string(MEDIA_JSON).unwrap().is_json()); // "media:fmt=json;record"
-        assert!(MediaUrn::from_string("media:custom;fmt=json")
+        assert!(MediaUrn::from_string(MEDIA_JSON).unwrap().is_json()); // "media:enc=utf8;fmt=json;record"
+        assert!(MediaUrn::from_string("media:custom;enc=utf8;fmt=json")
             .unwrap()
             .is_json());
         // record alone does not mean JSON representation
         assert!(!MediaUrn::from_string(MEDIA_OBJECT).unwrap().is_json()); // map structure, not necessarily JSON
-        assert!(!MediaUrn::from_string("media:enc=utf-8").unwrap().is_json());
+        assert!(!MediaUrn::from_string("media:enc=utf8").unwrap().is_json());
     }
 
     // TEST552: is_csv recognizes the CANONICAL published CSV media, which spells
     // the format as the `ext=csv` extension tag — not a bare `csv` marker. Every
     // datacartridge convert-format/collect-records cap declares its CSV media as
-    // `media:fmt=csv;list;record` (see MEDIA_CSV), so an is_csv() that
+    // `media:enc=utf8;fmt=csv;list;record` (see MEDIA_CSV), so an is_csv() that
     // only checked the bare marker returned false for real CSV media, collapsing
     // it to a text list and breaking list<->csv conversion with "Unsupported
     // conversion: TextableList -> TextableList". This test pins both accepted
@@ -1007,35 +1018,41 @@ mod tests {
             MediaUrn::from_string(MEDIA_CSV).unwrap().is_csv(),
             "the canonical CSV media (ext=csv) must be recognized as CSV"
         );
-        assert!(MediaUrn::from_string("media:fmt=csv").unwrap().is_csv());
+        assert!(MediaUrn::from_string("media:enc=utf8;fmt=csv").unwrap().is_csv());
         // The bare `csv` marker spelling is still accepted.
-        assert!(MediaUrn::from_string("media:fmt=csv;list")
+        assert!(MediaUrn::from_string("media:enc=utf8;fmt=csv;list")
             .unwrap()
             .is_csv());
         // A text list with no CSV signal is NOT csv (the failure mode that
         // collapsed CSV into a text list).
-        assert!(!MediaUrn::from_string("media:enc=utf-8;list")
+        assert!(!MediaUrn::from_string("media:enc=utf8;list")
             .unwrap()
             .is_csv());
         // JSON / YAML are not CSV.
         assert!(!MediaUrn::from_string(MEDIA_JSON).unwrap().is_csv());
-        assert!(!MediaUrn::from_string("media:fmt=yaml;list;record")
+        assert!(!MediaUrn::from_string("media:enc=utf8;fmt=yaml;list;record")
             .unwrap()
             .is_csv());
     }
 
-    // TEST067: Text-representability is now carried by the orthogonal `enc=` tag
-    // (the old `textable` marker and is_text() are gone). A media is "text" iff it
-    // declares an encoding. enc is orthogonal to format/numeric, so only media that
-    // actually carry enc= are text.
+    // TEST067: A media is characters iff it declares an encoding (`enc=`). Every
+    // textual value carries it — free text and the textual serializations alike
+    // (a JSON record is UTF-8) — while a boolean, a number, an image and the top
+    // type do not. Whether text is written to be read is `plain-text`'s to say
+    // (TEST1973), never enc's.
     #[test]
     fn test067_is_text() {
-        // Has enc= → text-representable
+        // Has enc= → characters
         assert!(MediaUrn::from_string(MEDIA_STRING)
             .unwrap()
             .get_tag("enc")
-            .is_some()); // "media:enc=utf-8"
-                         // No enc= → not text-representable
+            .is_some()); // "media:enc=utf8"
+        assert_eq!(
+            MediaUrn::from_string(MEDIA_JSON).unwrap().get_tag("enc").as_deref(),
+            Some("utf8"),
+            "a JSON record is UTF-8"
+        ); // "media:enc=utf8;fmt=json;record"
+           // No enc= → not characters
         assert!(MediaUrn::from_string(MEDIA_BOOLEAN)
             .unwrap()
             .get_tag("enc")
@@ -1044,10 +1061,6 @@ mod tests {
             .unwrap()
             .get_tag("enc")
             .is_none()); // "media:integer;numeric"
-        assert!(MediaUrn::from_string(MEDIA_JSON)
-            .unwrap()
-            .get_tag("enc")
-            .is_none()); // "media:fmt=json;record"
         assert!(MediaUrn::from_string(MEDIA_IDENTITY)
             .unwrap()
             .get_tag("enc")
@@ -1125,7 +1138,8 @@ mod tests {
         );
         assert_eq!(parsed.extension(), Some("pdf"));
 
-        // Test text_media_urn_for_ext — a UTF-8 text file carries enc=utf-8 + ext
+        // Test text_media_urn_for_ext — a UTF-8 text file carries enc=utf8 + ext,
+        // and a prose file type is plain text besides
         let md_urn = text_media_urn_for_ext("md");
         let parsed = MediaUrn::from_string(&md_urn).unwrap();
         assert!(
@@ -1133,10 +1147,50 @@ mod tests {
             "text ext helper must set ext=md"
         );
         assert!(
-            parsed.has_tag("enc", "utf-8"),
-            "text ext helper must set enc=utf-8"
+            parsed.has_tag("enc", "utf8"),
+            "text ext helper must set enc=utf8"
         );
+        assert!(parsed.has_marker_tag("plain-text"), "Markdown is plain text");
         assert_eq!(parsed.extension(), Some("md"));
+        assert_eq!(md_urn, MEDIA_MD, "the helper spells the published Markdown URN");
+        let html = MediaUrn::from_string(&text_media_urn_for_ext("html")).unwrap();
+        assert!(!html.has_marker_tag("plain-text"), "HTML is markup, not plain text");
+        assert_eq!(text_media_urn_for_ext("html"), MEDIA_HTML);
+    }
+
+    // TEST1973: Plain text is UTF-8 text written to be read. Every prose file
+    // type and the kinds of plain text conform to MEDIA_PLAIN_TEXT; a bare UTF-8
+    // string, markup and serialized data do not. Every textual value — plain
+    // text and the textual serializations alike — is a UTF-8 string and
+    // conforms to MEDIA_STRING.
+    #[test]
+    fn test1973_plain_text_and_utf8_strings() {
+        let plain = MediaUrn::from_string(MEDIA_PLAIN_TEXT).unwrap();
+        let string = MediaUrn::from_string(MEDIA_STRING).unwrap();
+        for urn in [
+            MEDIA_TXT,
+            MEDIA_MD,
+            MEDIA_RST,
+            MEDIA_LOG,
+            MEDIA_TEXTABLE_PAGE,
+            "media:digitized;enc=utf8;ext=txt;plain-text",
+            "media:enc=utf8;ext=txt;image-description;plain-text",
+        ] {
+            let m = MediaUrn::from_string(urn).unwrap();
+            assert!(m.conforms_to(&plain).unwrap(), "{} is plain text", urn);
+        }
+        for urn in [MEDIA_STRING, MEDIA_HTML, MEDIA_JSON, MEDIA_YAML, MEDIA_CSV, "media:code;enc=utf8;python"] {
+            let m = MediaUrn::from_string(urn).unwrap();
+            assert!(!m.conforms_to(&plain).unwrap(), "{} is not plain text", urn);
+        }
+        for urn in [MEDIA_PLAIN_TEXT, MEDIA_TXT, MEDIA_HTML, MEDIA_JSON, MEDIA_JSON_LIST, MEDIA_YAML, MEDIA_CSV] {
+            let m = MediaUrn::from_string(urn).unwrap();
+            assert!(m.conforms_to(&string).unwrap(), "{} is a UTF-8 string", urn);
+        }
+        for urn in [MEDIA_BOOLEAN, MEDIA_INTEGER, MEDIA_PNG, MEDIA_OBJECT] {
+            let m = MediaUrn::from_string(urn).unwrap();
+            assert!(!m.conforms_to(&string).unwrap(), "{} is not characters", urn);
+        }
     }
 
     // TEST074: Test media URN conforms_to using tagged URN semantics with specific and generic requirements
@@ -1151,8 +1205,8 @@ mod tests {
             .expect("MediaUrn prefix mismatch impossible"));
 
         // Markdown listing conforms to md requirement (PRIMARY type naming)
-        let md_listing = MediaUrn::from_string(MEDIA_MD).unwrap(); // "media:enc=utf-8;ext=md"
-        let md_requirement = MediaUrn::from_string("media:ext=md").unwrap();
+        let md_listing = MediaUrn::from_string(MEDIA_MD).unwrap(); // "media:enc=utf8;ext=md;plain-text"
+        let md_requirement = MediaUrn::from_string("media:ext=md;plain-text").unwrap();
         assert!(md_listing
             .conforms_to(&md_requirement)
             .expect("MediaUrn prefix mismatch impossible"));
@@ -1184,12 +1238,12 @@ mod tests {
     // TEST076: Test specificity increases with more tags for ranking conformance
     #[test]
     fn test076_specificity() {
-        // More tags = higher specificity. Use the same enc=utf-8 base and add
+        // More tags = higher specificity. Use the same enc=utf8 base and add
         // markers so each URN is a strict superset of the previous — the
         // specificity must be monotonic non-decreasing as tags accrue.
-        let urn1 = MediaUrn::from_string("media:enc=utf-8").unwrap();
-        let urn2 = MediaUrn::from_string("media:enc=utf-8;numeric").unwrap();
-        let urn3 = MediaUrn::from_string("media:enc=utf-8;list;numeric").unwrap();
+        let urn1 = MediaUrn::from_string("media:enc=utf8").unwrap();
+        let urn2 = MediaUrn::from_string("media:enc=utf8;numeric").unwrap();
+        let urn3 = MediaUrn::from_string("media:enc=utf8;list;numeric").unwrap();
 
         // Verify specificity increases with more tags
         // Note: The exact values may depend on implementation, but relative order should hold
@@ -1244,7 +1298,7 @@ mod debug_tests {
         );
         assert!(
             !obj_urn.conforms_to(&str_urn).unwrap(),
-            "MEDIA_OBJECT should NOT conform to MEDIA_STRING (missing enc=utf-8)"
+            "MEDIA_OBJECT should NOT conform to MEDIA_STRING (missing enc=utf8)"
         );
     }
 
@@ -1253,7 +1307,8 @@ mod debug_tests {
     fn test304_media_availability_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_AVAILABILITY_OUTPUT).expect("must parse");
         assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-availability is a JSON record");
-        assert!(urn.get_tag("enc").is_none(), "a JSON record is not also text (no enc=)");
+        assert_eq!(urn.get_tag("enc").as_deref(), Some("utf8"), "a JSON record is UTF-8");
+        assert!(!urn.has_marker_tag("plain-text"), "a JSON record is not plain text");
         assert!(
             urn.is_record(),
             "model-availability must have record marker"
@@ -1271,7 +1326,8 @@ mod debug_tests {
     fn test305_media_path_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_PATH_OUTPUT).expect("must parse");
         assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-path is a JSON record");
-        assert!(urn.get_tag("enc").is_none(), "a JSON record is not also text (no enc=)");
+        assert_eq!(urn.get_tag("enc").as_deref(), Some("utf8"), "a JSON record is UTF-8");
+        assert!(!urn.has_marker_tag("plain-text"), "a JSON record is not plain text");
         assert!(urn.is_record(), "model-path must have record marker");
         let reparsed = MediaUrn::from_string(&urn.to_string()).expect("roundtrip must parse");
         assert!(
@@ -1550,16 +1606,16 @@ mod debug_tests {
     // TEST854: LUB keeps common tags, drops differing ones
     #[test]
     fn test854_lub_partial_overlap() {
-        // Both inputs are UTF-8 text (shared enc=utf-8) but differ in structure
-        // (list vs record). The LUB keeps the common enc=utf-8 and drops the
+        // Both inputs are UTF-8 text (shared enc=utf8) but differ in structure
+        // (list vs record). The LUB keeps the common enc=utf8 and drops the
         // differing structural markers.
-        let text_list = MediaUrn::from_string("media:enc=utf-8;list").unwrap();
-        let text_record = MediaUrn::from_string("media:enc=utf-8;record").unwrap();
+        let text_list = MediaUrn::from_string("media:enc=utf8;list").unwrap();
+        let text_record = MediaUrn::from_string("media:enc=utf8;record").unwrap();
         let lub = MediaUrn::least_upper_bound(&[text_list, text_record]);
-        let expected = MediaUrn::from_string("media:enc=utf-8").unwrap();
+        let expected = MediaUrn::from_string("media:enc=utf8").unwrap();
         assert!(
             lub.is_equivalent(&expected).unwrap(),
-            "LUB should be media:enc=utf-8 but got {}",
+            "LUB should be media:enc=utf8 but got {}",
             lub.to_string()
         );
     }
@@ -1567,10 +1623,10 @@ mod debug_tests {
     // TEST855: LUB of list and non-list drops list tag
     #[test]
     fn test855_lub_list_vs_scalar() {
-        let json_list = MediaUrn::from_string("media:fmt=json;list").unwrap();
-        let json_scalar = MediaUrn::from_string("media:fmt=json").unwrap();
+        let json_list = MediaUrn::from_string("media:enc=utf8;fmt=json;list").unwrap();
+        let json_scalar = MediaUrn::from_string("media:enc=utf8;fmt=json").unwrap();
         let lub = MediaUrn::least_upper_bound(&[json_list, json_scalar]);
-        let expected = MediaUrn::from_string("media:fmt=json").unwrap();
+        let expected = MediaUrn::from_string("media:enc=utf8;fmt=json").unwrap();
         assert!(
             lub.is_equivalent(&expected).unwrap(),
             "LUB should drop list tag, got {}",
@@ -1600,9 +1656,9 @@ mod debug_tests {
         // All three are lists (shared `list`) and all three HAVE a `fmt`
         // (json/csv/ndjson — differing values → promoted to must-have-any).
         // The record marker is on a,b but not c → dropped.
-        let a = MediaUrn::from_string("media:fmt=json;list;record").unwrap();
-        let b = MediaUrn::from_string("media:fmt=csv;list;record").unwrap();
-        let c = MediaUrn::from_string("media:fmt=ndjson;list").unwrap();
+        let a = MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
+        let b = MediaUrn::from_string("media:enc=utf8;fmt=csv;list;record").unwrap();
+        let c = MediaUrn::from_string("media:enc=utf8;fmt=ndjson;list").unwrap();
         let lub = MediaUrn::least_upper_bound(&[a.clone(), b.clone(), c.clone()]);
         let expected = MediaUrn::from_string("media:fmt;list").unwrap();
         assert!(

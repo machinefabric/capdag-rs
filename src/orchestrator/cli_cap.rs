@@ -529,7 +529,7 @@ mod tests {
 
     fn test_cap() -> Cap {
         let urn = CapUrn::from_string(
-            r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8;summary""#,
+            r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf8;summary""#,
         )
         .unwrap();
         let mut cap = Cap::new(urn, "Summarize".to_string(), vec!["summarize".to_string()]);
@@ -544,7 +544,7 @@ mod tests {
                 None,
             ),
             arg(
-                "media:enc=utf-8;model-spec",
+                "media:enc=utf8;model-spec",
                 "model-spec",
                 true,
                 vec![ArgSource::CliFlag {
@@ -562,7 +562,7 @@ mod tests {
                 Some(serde_json::json!(400)),
             ),
             arg(
-                "media:criterion;enc=utf-8",
+                "media:criterion;enc=utf8",
                 "criterion",
                 false,
                 vec![ArgSource::Position { position: 0 }],
@@ -570,7 +570,7 @@ mod tests {
             ),
         ];
         cap.outputs = vec![CapOutput {
-            media_urn: "media:enc=utf-8;summary".to_string(),
+            media_urn: "media:enc=utf8;summary".to_string(),
             name: "output".to_string(),
             optional: false,
             carries: None,
@@ -663,11 +663,11 @@ mod tests {
             invocation.cap_arguments,
             vec![
                 (
-                    "media:enc=utf-8;model-spec".to_string(),
+                    "media:enc=utf8;model-spec".to_string(),
                     b"hf:foo/bar".to_vec()
                 ),
                 (
-                    "media:criterion;enc=utf-8".to_string(),
+                    "media:criterion;enc=utf8".to_string(),
                     b"focus on costs".to_vec()
                 ),
             ]
@@ -701,12 +701,12 @@ mod tests {
             &cap,
             &[],
             &[(
-                "media:model-spec;enc=utf-8".to_string(),
+                "media:model-spec;enc=utf8".to_string(),
                 format!("@{}", file.display()),
             )],
         )
         .unwrap();
-        assert_eq!(invocation.cap_arguments[0].0, "media:enc=utf-8;model-spec");
+        assert_eq!(invocation.cap_arguments[0].0, "media:enc=utf8;model-spec");
         assert_eq!(invocation.cap_arguments[0].1, b"\x00\x01binary");
 
         // Missing required defaultless arg fails pre-flight naming the flag;
@@ -716,7 +716,7 @@ mod tests {
         assert!(err.contains("missing required options"), "{err}");
         assert!(err.contains("--model-spec"), "{err}");
         assert!(
-            err.contains("media:enc=utf-8;model-spec"),
+            err.contains("media:enc=utf8;model-spec"),
             "missing options are named with their media URN: {err}"
         );
         assert!(
@@ -742,7 +742,7 @@ mod tests {
             classify_cap_token("pdf2summary").unwrap(),
             CapToken::Alias("pdf2summary".to_string())
         );
-        match classify_cap_token(r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf-8""#)
+        match classify_cap_token(r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf8""#)
             .unwrap()
         {
             CapToken::Urn(urn) => assert!(urn.contains("summarize")),

@@ -68,14 +68,14 @@ const TAG: &str = "ProtocolE2ETest";
 // Cap URNs under test (must match testcartridge's manifest verbatim)
 // =============================================================================
 
-const CAP_STREAM_N_CHUNKS: &str = r#"cap:in="media:enc=utf-8;count-spec";test-stream-n-chunks;out="media:enc=utf-8;chunk-stream""#;
-const CAP_SLOW_CONSUME: &str = r#"cap:in="media:enc=utf-8;chunk-stream";test-slow-consume;out="media:enc=utf-8;consume-report""#;
+const CAP_STREAM_N_CHUNKS: &str = r#"cap:in="media:enc=utf8;count-spec";test-stream-n-chunks;out="media:enc=utf8;chunk-stream""#;
+const CAP_SLOW_CONSUME: &str = r#"cap:in="media:enc=utf8;chunk-stream";test-slow-consume;out="media:enc=utf8;consume-report""#;
 /// Echoes ONE value, chunk by chunk as it arrives.
 const CAP_ECHO_STREAM: &str =
-    r#"cap:in="media:enc=utf-8;chunk-stream";test-echo-stream;out="media:enc=utf-8;echoed-stream""#;
+    r#"cap:in="media:enc=utf8;chunk-stream";test-echo-stream;out="media:enc=utf8;echoed-stream""#;
 /// The same handler over a SEQUENCE of items.
 const CAP_ECHO_ITEMS: &str =
-    r#"cap:in="media:enc=utf-8;chunk-stream";test-echo-items;out="media:enc=utf-8;echoed-items""#;
+    r#"cap:in="media:enc=utf8;chunk-stream";test-echo-items;out="media:enc=utf8;echoed-items""#;
 
 // =============================================================================
 // Payloads

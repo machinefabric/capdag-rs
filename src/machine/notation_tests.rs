@@ -19,15 +19,15 @@ use super::graph::{BindingSource, Machine, MachineEdge};
 use super::parser::{parse_machine, parse_machine_with_node_names};
 use super::syntax::{OnError, StepPolicy};
 
-pub(super) const SERIES: &str = "media:fmt=json;list;record;time-series";
-const BENCHMARK: &str = "media:benchmark;fmt=json;list;record;time-series";
+pub(super) const SERIES: &str = "media:enc=utf8;fmt=json;list;record;time-series";
+const BENCHMARK: &str = "media:benchmark;enc=utf8;fmt=json;list;record;time-series";
 const WINDOW: &str = "media:integer;window";
-const LABEL: &str = "media:enc=utf-8;label";
-const TAG: &str = "media:enc=utf-8;tag";
-pub(super) const COMPARISON: &str = "media:comparison;fmt=json;record";
-pub(super) const RESIDUALS: &str = "media:fmt=json;list;record;residual";
-pub(super) const NOTE: &str = "media:enc=utf-8;note";
-const REFERENCE: &str = "media:enc=utf-8;series-ref";
+const LABEL: &str = "media:enc=utf8;label";
+const TAG: &str = "media:enc=utf8;tag";
+pub(super) const COMPARISON: &str = "media:comparison;enc=utf8;fmt=json;record";
+pub(super) const RESIDUALS: &str = "media:enc=utf8;fmt=json;list;record;residual";
+pub(super) const NOTE: &str = "media:enc=utf8;note";
+const REFERENCE: &str = "media:enc=utf8;series-ref";
 
 pub(super) fn definition(urn: &str, title: &str, args: Vec<CapArg>, outputs: Vec<CapOutput>) -> Cap {
     let cap = Cap {
@@ -176,11 +176,11 @@ pub(super) fn registry() -> FabricRegistry {
 }
 
 pub(super) const HEADERS: &str = "\
-[compare cap:in=\"media:fmt=json;list;record;time-series\";compare;out=\"media:comparison;fmt=json;record\"]\
-[fetch cap:in=media:void;fetch;out=\"media:fmt=json;list;record;time-series\"]\
-[publish cap:in=\"media:comparison;fmt=json;record\";publish;out=media:void]\
-[mean cap:in=\"media:fmt=json;list;record;residual\";mean;out=\"media:mean;numeric\"]\
-[score cap:in=\"media:fmt=json;list;record;residual\";score;out=\"media:numeric;score\"]";
+[compare cap:in=\"media:enc=utf8;fmt=json;list;record;time-series\";compare;out=\"media:comparison;enc=utf8;fmt=json;record\"]\
+[fetch cap:in=media:void;fetch;out=\"media:enc=utf8;fmt=json;list;record;time-series\"]\
+[publish cap:in=\"media:comparison;enc=utf8;fmt=json;record\";publish;out=media:void]\
+[mean cap:in=\"media:enc=utf8;fmt=json;list;record;residual\";mean;out=\"media:mean;numeric\"]\
+[score cap:in=\"media:enc=utf8;fmt=json;list;record;residual\";score;out=\"media:numeric;score\"]";
 
 fn parse(wirings: &str) -> Result<Machine, MachineParseError> {
     parse_machine(&format!("{HEADERS}{wirings}"), &registry())
@@ -309,8 +309,8 @@ fn test12737_a_named_member_binds_the_arg_it_names() {
         "mix",
         vec![
             CapArg::new(SERIES, "first", true, vec![ArgSource::Stdin { stdin: SERIES.to_string() }]),
-            flag("media:second;fmt=json;list;record;time-series", "second").accepting(SERIES),
-            flag("media:third;fmt=json;list;record;time-series", "third").accepting(SERIES),
+            flag("media:second;fmt=json;list;record;time-series;enc=utf8", "second").accepting(SERIES),
+            flag("media:third;fmt=json;list;record;time-series;enc=utf8", "third").accepting(SERIES),
         ],
         vec![CapOutput::new(COMPARISON, "mixed", "The mix")],
     )]);
@@ -754,7 +754,7 @@ fn test12743_render_payload_carries_names_constants_and_outputs() {
 // is part of what the machine is, although both hold one type.
 #[test]
 fn test12833_a_carried_output_holds_the_inputs_type() {
-    const VERDICT: &str = "media:enc=utf-8;verdict";
+    const VERDICT: &str = "media:enc=utf8;verdict";
     const KEPT: &str = "media:kept;marker";
     const DROPPED: &str = "media:dropped;marker";
     let route_urn = format!(r#"cap:in="{SERIES}";route;out="{VERDICT}""#);
@@ -836,7 +836,7 @@ fn test12838_urns_are_ordered_by_their_parts_not_their_text() {
     // value before the same tag with one; values in their own order.
     assert!(stands_before("media:file", "media:file;sample"));
     assert!(stands_before("media:enc", "media:enc=ascii"));
-    assert!(stands_before("media:enc=ascii", "media:enc=utf-8"));
+    assert!(stands_before("media:enc=ascii", "media:enc=utf8"));
     assert!(media("media:sample;file") == media(sample));
 
     let cap = |text: &str| CapUrn::from_string(text).unwrap_or_else(|e| panic!("{text}: {e}"));

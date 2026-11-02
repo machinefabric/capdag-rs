@@ -3571,16 +3571,16 @@ mod tests {
 
         let rid = MessageId::new_uuid();
         // Two outputs of one cap may carry the same type: the name tells them apart.
-        let kept = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf-8".to_string(), Some(false))
-            .for_output("media:enc=utf-8;kept");
-        let dropped = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf-8".to_string(), Some(false))
-            .for_output("media:dropped;enc=utf-8");
+        let kept = Frame::stream_start(rid.clone(), "s1".to_string(), "media:enc=utf8".to_string(), Some(false))
+            .for_output("media:enc=utf8;kept");
+        let dropped = Frame::stream_start(rid.clone(), "s2".to_string(), "media:enc=utf8".to_string(), Some(false))
+            .for_output("media:dropped;enc=utf8");
         let kept_back = decode_frame(&encode_frame(&kept).unwrap()).unwrap();
         let dropped_back = decode_frame(&encode_frame(&dropped).unwrap()).unwrap();
-        assert_eq!(kept_back.output_urn(), Some("media:enc=utf-8;kept"));
-        assert_eq!(dropped_back.output_urn(), Some("media:dropped;enc=utf-8"));
+        assert_eq!(kept_back.output_urn(), Some("media:enc=utf8;kept"));
+        assert_eq!(dropped_back.output_urn(), Some("media:dropped;enc=utf8"));
         assert_eq!(kept_back.media_urn, dropped_back.media_urn, "the data's type is its own field");
-        assert_eq!(kept_back.media_urn.as_deref(), Some("media:enc=utf-8"));
+        assert_eq!(kept_back.media_urn.as_deref(), Some("media:enc=utf8"));
 
         // The unbounded form keeps both.
         let feed = Frame::stream_start_unbounded(rid.clone(), "s3".to_string(), "media:tick".to_string(), Some(true))
@@ -3591,7 +3591,7 @@ mod tests {
 
         // The main output's stream and a request stream name no output, and
         // the key is not written.
-        let argument = Frame::stream_start(rid.clone(), "s4".to_string(), "media:enc=utf-8".to_string(), None);
+        let argument = Frame::stream_start(rid.clone(), "s4".to_string(), "media:enc=utf8".to_string(), None);
         let encoded = encode_frame(&argument).unwrap();
         let map: ciborium::Value = ciborium::from_reader(&encoded[..]).unwrap();
         let has_key = map.as_map().unwrap().iter().any(|(k, _)| {
@@ -3603,7 +3603,7 @@ mod tests {
 
         // Only a STREAM_START may name an output.
         let mut chunk = Frame::chunk(rid, "s1".to_string(), 0, b"x".to_vec(), 0, Frame::compute_checksum(b"x"));
-        chunk.output = Some("media:enc=utf-8;kept".to_string());
+        chunk.output = Some("media:enc=utf8;kept".to_string());
         let err = decode_frame(&encode_frame(&chunk).unwrap()).expect_err("a CHUNK naming an output is refused");
         assert!(err.to_string().contains("output"), "{err}");
 
@@ -3633,7 +3633,7 @@ mod tests {
         let bounded = Frame::stream_start(
             rid.clone(),
             "s1".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(false),
         );
         assert!(!bounded.is_unbounded());
@@ -3644,7 +3644,7 @@ mod tests {
         let unbounded = Frame::stream_start_unbounded(
             rid,
             "s2".to_string(),
-            "media:enc=utf-8".to_string(),
+            "media:enc=utf8".to_string(),
             Some(true),
         );
         assert!(unbounded.is_unbounded());

@@ -505,11 +505,11 @@ mod tests {
             .await
             .expect_err("chunk before start");
         assert!(err.to_string().contains("STREAM_START"), "{err}");
-        w.on_stream_start(Some(false), "media:enc=utf-8", None, None)
+        w.on_stream_start(Some(false), "media:enc=utf8", None, None)
             .await
             .unwrap();
         let err = w
-            .on_stream_start(Some(false), "media:enc=utf-8", None, None)
+            .on_stream_start(Some(false), "media:enc=utf8", None, None)
             .await
             .expect_err("second stream");
         assert!(err.to_string().contains("second stream"), "{err}");

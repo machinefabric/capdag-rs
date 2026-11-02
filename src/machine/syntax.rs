@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn test12734_cap_headers_and_machine_headers() {
         let statements = parse_syntax(
-            "extract cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8\"\n\
+            "extract cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8\"\n\
              clean machine \"lib/clean \\\"v2\\\".machine\"\n\
              [machine cap:in=media:;machine;out=media:]\n\
              machine -> machine -> machinery",
@@ -603,7 +603,7 @@ mod tests {
         match &statements[0].kind {
             SyntaxStatementKind::CapHeader { alias, cap_urn } => {
                 assert_eq!(alias.value, "extract");
-                assert_eq!(cap_urn.value, "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8\"");
+                assert_eq!(cap_urn.value, "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8\"");
             }
             other => panic!("{other:?}"),
         }

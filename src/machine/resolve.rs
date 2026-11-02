@@ -1381,18 +1381,18 @@ mod tests {
     // TEST1179: Source-to-arg matching assigns a more specific source to a compatible general argument.
     #[test]
     fn test1179_match_more_specific_source_assigned_to_general_arg() {
-        // The cap declares `media:enc=utf-8`. The source is the
-        // more-specific `media:enc=utf-8;page`. The source must
-        // conform (it does, enc=utf-8;page ⪯ enc=utf-8) and get
+        // The cap declares `media:enc=utf8`. The source is the
+        // more-specific `media:enc=utf8;page`. The source must
+        // conform (it does, enc=utf8;page ⪯ enc=utf8) and get
         // assigned to that arg with distance > 0.
-        let sources = vec![media("media:enc=utf-8;page")];
-        let args = vec![media("media:enc=utf-8")];
+        let sources = vec![media("media:enc=utf8;page")];
+        let args = vec![media("media:enc=utf8")];
         let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None)
             .expect("more-specific source must be matched to its arg");
-        assert!(pairs[0].0.is_equivalent(&media("media:enc=utf-8")).unwrap());
+        assert!(pairs[0].0.is_equivalent(&media("media:enc=utf8")).unwrap());
         assert!(pairs[0]
             .1
-            .is_equivalent(&media("media:enc=utf-8;page"))
+            .is_equivalent(&media("media:enc=utf8;page"))
             .unwrap());
     }
 
@@ -1403,14 +1403,14 @@ mod tests {
         // args. Must surface as `UnmatchedSourceInCapArgs` —
         // never as a silent zero-cost or random pairing.
         let sources = vec![media("media:numeric")];
-        let args = vec![media("media:enc=utf-8")];
+        let args = vec![media("media:enc=utf8")];
         assert_eq!(
             match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 0 })
         );
         // It is the source that fits nothing that is named, wherever it stands.
-        let sources = vec![media("media:enc=utf-8;page"), media("media:numeric")];
-        let args = vec![media("media:enc=utf-8"), media("media:enc=utf-8;page")];
+        let sources = vec![media("media:enc=utf8;page"), media("media:numeric")];
+        let args = vec![media("media:enc=utf8"), media("media:enc=utf8;page")];
         assert_eq!(
             match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 1 })
@@ -1425,24 +1425,24 @@ mod tests {
         // remaining arg. The resolver picks the unique minimum-
         // cost matching.
         //
-        // sources: [media:ext=png;image, media:enc=utf-8;model-spec]
-        // args:    [media:ext=png;image, media:enc=utf-8]
+        // sources: [media:ext=png;image, media:enc=utf8;model-spec]
+        // args:    [media:ext=png;image, media:enc=utf8]
         //
-        // image;png ⪯ image;png (dist 0); image;png ⪯ enc=utf-8? no
-        // enc=utf-8;model-spec ⪯ image;png? no
-        // enc=utf-8;model-spec ⪯ enc=utf-8 (dist 1)
+        // image;png ⪯ image;png (dist 0); image;png ⪯ enc=utf8? no
+        // enc=utf8;model-spec ⪯ image;png? no
+        // enc=utf8;model-spec ⪯ enc=utf8 (dist 1)
         //
-        // Unique optimum: (image;png → image;png), (enc=utf-8;model-spec → enc=utf-8)
+        // Unique optimum: (image;png → image;png), (enc=utf8;model-spec → enc=utf8)
         let sources = vec![
             media("media:ext=png;image"),
-            media("media:enc=utf-8;model-spec"),
+            media("media:enc=utf8;model-spec"),
         ];
-        let args = vec![media("media:ext=png;image"), media("media:enc=utf-8")];
+        let args = vec![media("media:ext=png;image"), media("media:enc=utf8")];
         let pairs =
             match_sources_to_args(&sources, &args, &vec![false; args.len()], None).unwrap();
         assert_eq!(pairs.len(), 2);
         // Pairs are sorted by cap_arg_media_urn structurally.
-        // image;png and enc=utf-8: structural Ord places
+        // image;png and enc=utf8: structural Ord places
         // image;png first (more tags / different prefix string).
         // Don't depend on the exact sort order; check the
         // mapping by content instead.
@@ -1452,9 +1452,9 @@ mod tests {
             if arg.is_equivalent(&media("media:ext=png;image")).unwrap() {
                 assert!(src.is_equivalent(&media("media:ext=png;image")).unwrap());
                 found_image = true;
-            } else if arg.is_equivalent(&media("media:enc=utf-8")).unwrap() {
+            } else if arg.is_equivalent(&media("media:enc=utf8")).unwrap() {
                 assert!(src
-                    .is_equivalent(&media("media:enc=utf-8;model-spec"))
+                    .is_equivalent(&media("media:enc=utf8;model-spec"))
                     .unwrap());
                 found_text = true;
             }
@@ -1479,8 +1479,8 @@ mod tests {
 
         // One source that fits two args takes the one it is closest to,
         // whichever of the two is tried first.
-        let page = vec![media("media:enc=utf-8;page")];
-        let (general, exact) = (media("media:enc=utf-8"), media("media:enc=utf-8;page"));
+        let page = vec![media("media:enc=utf8;page")];
+        let (general, exact) = (media("media:enc=utf8"), media("media:enc=utf8;page"));
         for either in [vec![general.clone(), exact.clone()], vec![exact.clone(), general.clone()]] {
             let pairs = match_sources_to_args(&page, &either, &[false, false], None).unwrap();
             assert_eq!(pairs.len(), 1);
@@ -1499,11 +1499,11 @@ mod tests {
         // the same total cost. The minimum-cost matching is not
         // unique → AmbiguousMachineNotation.
         //
-        // Both sources are `media:enc=utf-8`; both args are
-        // `media:enc=utf-8`. Distance 0 either way; both
+        // Both sources are `media:enc=utf8`; both args are
+        // `media:enc=utf8`. Distance 0 either way; both
         // permutations are tied at total cost 0.
-        let sources = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
-        let args = vec![media("media:enc=utf-8"), media("media:enc=utf-8")];
+        let sources = vec![media("media:enc=utf8"), media("media:enc=utf8")];
+        let args = vec![media("media:enc=utf8"), media("media:enc=utf8")];
         // Both are left open, and each could go to either arg.
         assert_eq!(
             match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
@@ -1512,8 +1512,8 @@ mod tests {
 
         // Only the sources the tie is about are named: a third that fits one
         // arg alone is decided, whatever the other two do.
-        let sources = vec![media("media:enc=utf-8"), media("media:numeric"), media("media:enc=utf-8")];
-        let args = vec![media("media:enc=utf-8"), media("media:enc=utf-8"), media("media:numeric")];
+        let sources = vec![media("media:enc=utf8"), media("media:numeric"), media("media:enc=utf8")];
+        let args = vec![media("media:enc=utf8"), media("media:enc=utf8"), media("media:numeric")];
         assert_eq!(
             match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
             Err(MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (2, vec![0, 1])] })
@@ -1554,18 +1554,18 @@ mod tests {
     #[test]
     fn test1184_resolve_strand_single_cap_produces_one_edge() {
         let extract_cap = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![extract_cap]);
         let strand = strand_from_steps(
             vec![cap_step(
-                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "extract",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "pdf to txt",
         );
@@ -1581,14 +1581,14 @@ mod tests {
             .unwrap());
         let src_urn = resolved.node_urn(binding.node().expect("a node binding"));
         assert!(src_urn.is_equivalent(&media("media:document;ext=pdf")).unwrap());
-        // Anchors: input is media:document;ext=pdf, output is media:enc=utf-8;ext=txt.
+        // Anchors: input is media:document;ext=pdf, output is media:enc=utf8;ext=txt.
         let inputs = resolved.input_anchors();
         let outputs = resolved.output_anchors();
         assert_eq!(inputs.len(), 1);
         assert_eq!(outputs.len(), 1);
         assert!(inputs[0].is_equivalent(&media("media:document;ext=pdf")).unwrap());
         assert!(outputs[0]
-            .is_equivalent(&media("media:enc=utf-8;ext=txt"))
+            .is_equivalent(&media("media:enc=utf8;ext=txt;plain-text"))
             .unwrap());
     }
 
@@ -1596,20 +1596,20 @@ mod tests {
     #[test]
     fn test1185_resolve_strand_chained_caps_share_intermediate_node() {
         // Two-step strand: pdf → extract → txt → embed → vec.
-        // The intermediate node `media:enc=utf-8;ext=txt` is produced
+        // The intermediate node `media:enc=utf8;ext=txt;plain-text` is produced
         // by extract and consumed by embed. The resolver must
         // intern these as the SAME NodeId, so the strand has
         // exactly three node positions, not four.
         let extract = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let embed = build_cap(
-            "cap:in=\"media:enc=utf-8\";embed;out=\"media:vec;record\"",
+            "cap:in=\"media:enc=utf8\";embed;out=\"media:vec;record\"",
             "embed",
-            &["media:enc=utf-8"],
+            &["media:enc=utf8"],
             "media:vec;record",
         );
         let registry = registry_with(vec![extract, embed]);
@@ -1617,15 +1617,15 @@ mod tests {
         let strand = strand_from_steps(
             vec![
                 cap_step(
-                    "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+                    "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
                     "extract",
                     "media:document;ext=pdf",
-                    "media:enc=utf-8;ext=txt",
+                    "media:enc=utf8;ext=txt;plain-text",
                 ),
                 cap_step(
-                    "cap:in=\"media:enc=utf-8\";embed;out=\"media:vec;record\"",
+                    "cap:in=\"media:enc=utf8\";embed;out=\"media:vec;record\"",
                     "embed",
-                    "media:enc=utf-8;ext=txt",
+                    "media:enc=utf8;ext=txt;plain-text",
                     "media:vec;record",
                 ),
             ],
@@ -1637,7 +1637,7 @@ mod tests {
         assert_eq!(
             resolved.nodes().len(),
             3,
-            "three distinct data positions: pdf, txt;enc=utf-8, vec;record"
+            "three distinct data positions: pdf, txt;enc=utf8, vec;record"
         );
 
         // The first edge's target NodeId must equal the second
@@ -1668,36 +1668,36 @@ mod tests {
         // consumes a scalar page, so make_decision's edge maps per item. Collect at
         // the end is elided.
         let mut disbind = build_cap(
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
             "disbind",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         disbind.outputs[0].is_sequence = true;
         let make_decision = build_cap(
-            "cap:in=\"media:enc=utf-8\";make-decision;out=\"media:decision;fmt=json;record\"",
+            "cap:in=\"media:enc=utf8\";make-decision;out=\"media:decision;enc=utf8;fmt=json;record\"",
             "make_decision",
-            &["media:enc=utf-8"],
-            "media:decision;fmt=json;record",
+            &["media:enc=utf8"],
+            "media:decision;enc=utf8;fmt=json;record",
         );
         let registry = registry_with(vec![disbind, make_decision]);
 
         let strand = strand_from_steps(
             vec![
                 cap_step(
-                    "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
                     "disbind",
                     "media:document;ext=pdf",
-                    "media:enc=utf-8;page",
+                    "media:enc=utf8;page",
                 ),
-                for_each_step("media:enc=utf-8;page"),
+                for_each_step("media:enc=utf8;page"),
                 cap_step(
-                    "cap:in=\"media:enc=utf-8\";make-decision;out=\"media:decision;fmt=json;record\"",
+                    "cap:in=\"media:enc=utf8\";make-decision;out=\"media:decision;enc=utf8;fmt=json;record\"",
                     "make_decision",
-                    "media:enc=utf-8",
-                    "media:decision;fmt=json;record",
+                    "media:enc=utf8",
+                    "media:decision;enc=utf8;fmt=json;record",
                 ),
-                collect_step("media:decision;fmt=json;record"),
+                collect_step("media:decision;enc=utf8;fmt=json;record"),
             ],
             "disbind+foreach+make_decision",
         );
@@ -1723,9 +1723,9 @@ mod tests {
 
         // Critical: disbind's target NodeId must be the same
         // as make_decision's source NodeId — the intermediate
-        // data position (media:enc=utf-8;page) is shared even
-        // though disbind declares out=media:enc=utf-8;page and
-        // make_decision declares in=media:enc=utf-8 (less
+        // data position (media:enc=utf8;page) is shared even
+        // though disbind declares out=media:enc=utf8;page and
+        // make_decision declares in=media:enc=utf8 (less
         // specific, but on the same specialization chain).
         // Positional interning collapses them.
         let disbind_target = disbind_edge.main_target().expect("the main output is taken");
@@ -1735,13 +1735,13 @@ mod tests {
             "disbind target and make_decision source must share the same NodeId (positional interning)"
         );
         // The canonical URN at that shared node must be
-        // the more-specific one: media:page;enc=utf-8.
+        // the more-specific one: media:page;enc=utf8.
         assert!(
             resolved
                 .node_urn(disbind_target)
-                .is_equivalent(&media("media:enc=utf-8;page"))
+                .is_equivalent(&media("media:enc=utf8;page"))
                 .unwrap(),
-            "shared node URN must be the more-specific media:enc=utf-8;page, got: {}",
+            "shared node URN must be the more-specific media:enc=utf8;page, got: {}",
             resolved.node_urn(disbind_target)
         );
     }
@@ -1752,10 +1752,10 @@ mod tests {
         let registry = registry_with(vec![]);
         let strand = strand_from_steps(
             vec![cap_step(
-                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "extract",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "pdf to txt with empty registry",
         );
@@ -1785,18 +1785,18 @@ mod tests {
         // positions must produce byte-identical canonical
         // anchor URN order. This pins the structural sort.
         let extract = build_cap(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![extract]);
         let strand = strand_from_steps(
             vec![cap_step(
-                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8;ext=txt\"",
+                "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 "extract",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;ext=txt",
+                "media:enc=utf8;ext=txt;plain-text",
             )],
             "pdf to txt",
         );
@@ -1879,7 +1879,7 @@ mod tests {
     fn test1191_resolve_strand_disbind_pdf_with_file_path_slot_identity() {
         // Regression: a cap whose arg slot identity differs
         // from its stdin source URN. The disbind cap declares
-        // `media:enc=utf-8;file-path` as the slot identity but
+        // `media:enc=utf8;file-path` as the slot identity but
         // its stdin source delivers `media:document;ext=pdf` (this is the
         // wire-level wraparound: cartridge_runtime auto-converts
         // a file-path argument into a stdin byte stream of
@@ -1890,21 +1890,21 @@ mod tests {
         // the slot identity. Before this fix the resolver
         // would have returned `UnmatchedSourceInCapArgs`
         // because `media:document;ext=pdf` does not conform to
-        // `media:enc=utf-8;file-path`.
+        // `media:enc=utf8;file-path`.
         let disbind = build_cap_with_slot_stdin_pairs(
-            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
             "disbind",
-            &[("media:enc=utf-8;file-path", "media:document;ext=pdf")],
-            "media:enc=utf-8;page",
+            &[("media:enc=utf8;file-path", "media:document;ext=pdf")],
+            "media:enc=utf8;page",
         );
         let registry = registry_with(vec![disbind]);
 
         let strand = strand_from_steps(
             vec![cap_step(
-                "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf-8;page\"",
+                "cap:in=\"media:document;ext=pdf\";disbind;out=\"media:enc=utf8;page\"",
                 "disbind",
                 "media:document;ext=pdf",
-                "media:enc=utf-8;page",
+                "media:enc=utf8;page",
             )],
             "pdf to pages",
         );
@@ -1915,13 +1915,13 @@ mod tests {
         let binding = &resolved.edges()[0].assignment[0];
 
         // The binding's `cap_arg_media_urn` must be the SLOT
-        // identity (`media:enc=utf-8;file-path`), since that is
+        // identity (`media:enc=utf8;file-path`), since that is
         // what the cap definition uses to label the arg slot
         // (RULE1).
         assert!(
             binding
                 .cap_arg_media_urn
-                .is_equivalent(&media("media:enc=utf-8;file-path"))
+                .is_equivalent(&media("media:enc=utf8;file-path"))
                 .unwrap(),
             "binding cap_arg_media_urn must be the slot identity, got: {}",
             binding.cap_arg_media_urn
@@ -1944,30 +1944,30 @@ mod tests {
     // regardless of creation order.
     #[test]
     fn test1138_assignment_bindings_are_sorted_by_cap_arg_media_urn() {
-        // Cap with two stdin args: enc=utf-8 (later alphabetically) and pdf (earlier).
+        // Cap with two stdin args: enc=utf8 (later alphabetically) and pdf (earlier).
         // Args are listed in reverse order so the test fails if sorting is skipped.
         let merge_cap = build_cap(
-            "cap:in=\"media:document;ext=pdf\";merge;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:document;ext=pdf\";merge;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "merge",
-            &["media:enc=utf-8", "media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8", "media:document;ext=pdf"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![merge_cap]);
 
-        // Pre-interned nodes: 0=pdf, 1=enc=utf-8, 2=enc=utf-8;ext=txt (output)
+        // Pre-interned nodes: 0=pdf, 1=enc=utf8, 2=enc=utf8;ext=txt (output)
         let nodes = vec![
             media("media:document;ext=pdf"),
-            media("media:enc=utf-8"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:enc=utf8"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ];
         let cap_urn =
-            CapUrn::from_string("cap:in=\"media:document;ext=pdf\";merge;out=\"media:enc=utf-8;ext=txt\"")
+            CapUrn::from_string("cap:in=\"media:document;ext=pdf\";merge;out=\"media:enc=utf8;ext=txt;plain-text\"")
                 .unwrap();
         let wirings = vec![PreInternedWiring {
             token_id: "tok-1".parse().unwrap(),
             foreach_identity: ForEachIdentity::MintIfRequired,
             cap_urn,
-            source_node_ids: vec![0, 1], // pdf first, enc=utf-8 second
+            source_node_ids: vec![0, 1], // pdf first, enc=utf8 second
             named_sources: Vec::new(),
             targets: vec![(None, 2)],
             policy: StepPolicy::default(),
@@ -1998,13 +1998,13 @@ mod tests {
     // strand index. Cycle: node 0 → cap A → node 1 → cap B → node 0.
     #[test]
     fn test1308_cyclic_strand_fails_hard() {
-        let urn_a = "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8;ext=txt\"";
-        let urn_b = "cap:in=\"media:enc=utf-8;ext=txt\";op-b;out=\"media:document;ext=pdf\"";
-        let cap_a = build_cap(urn_a, "op_a", &["media:document;ext=pdf"], "media:enc=utf-8;ext=txt");
-        let cap_b = build_cap(urn_b, "op_b", &["media:enc=utf-8;ext=txt"], "media:document;ext=pdf");
+        let urn_a = "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8;ext=txt;plain-text\"";
+        let urn_b = "cap:in=\"media:enc=utf8;ext=txt;plain-text\";op-b;out=\"media:document;ext=pdf\"";
+        let cap_a = build_cap(urn_a, "op_a", &["media:document;ext=pdf"], "media:enc=utf8;ext=txt;plain-text");
+        let cap_b = build_cap(urn_b, "op_b", &["media:enc=utf8;ext=txt;plain-text"], "media:document;ext=pdf");
         let registry = registry_with(vec![cap_a, cap_b]);
 
-        let nodes = vec![media("media:document;ext=pdf"), media("media:enc=utf-8;ext=txt")];
+        let nodes = vec![media("media:document;ext=pdf"), media("media:enc=utf8;ext=txt;plain-text")];
         // node 0 -> cap_a -> node 1  and  node 1 -> cap_b -> node 0 (cycle)
         let wirings = vec![
             PreInternedWiring {
@@ -2046,18 +2046,18 @@ mod tests {
     #[test]
     fn test1400_gather_n_sources_into_sequence_arg() {
         let sources = vec![
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;page"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;page"),
         ];
-        let args = vec![media("media:enc=utf-8")];
+        let args = vec![media("media:enc=utf8")];
         let arg_seq = vec![true];
         let pairs = match_sources_to_args(&sources, &args, &arg_seq, None)
             .expect("three sources must gather into the sequence arg");
         assert_eq!(pairs.len(), 3, "one binding per gathered source");
         for (arg, src) in &pairs {
-            assert!(arg.is_equivalent(&media("media:enc=utf-8")).unwrap());
-            assert!(src.is_equivalent(&media("media:enc=utf-8;page")).unwrap());
+            assert!(arg.is_equivalent(&media("media:enc=utf8")).unwrap());
+            assert!(src.is_equivalent(&media("media:enc=utf8;page")).unwrap());
         }
     }
 
@@ -2067,10 +2067,10 @@ mod tests {
     #[test]
     fn test1401_product_precedence_over_gather() {
         let sources = vec![
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;summary"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;summary"),
         ];
-        let args = vec![media("media:enc=utf-8;page"), media("media:enc=utf-8")];
+        let args = vec![media("media:enc=utf8;page"), media("media:enc=utf8")];
         let arg_seq = vec![false, true];
         let pairs = match_sources_to_args(&sources, &args, &arg_seq, None)
             .expect("unique injection must resolve");
@@ -2079,19 +2079,19 @@ mod tests {
         // gathered into the sequence arg alongside the summary.
         let page_pair = pairs
             .iter()
-            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf-8;page")).unwrap())
+            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8;page")).unwrap())
             .expect("scalar page arg must be claimed");
         assert!(page_pair
             .1
-            .is_equivalent(&media("media:enc=utf-8;page"))
+            .is_equivalent(&media("media:enc=utf8;page"))
             .unwrap());
         let seq_pair = pairs
             .iter()
-            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf-8")).unwrap())
+            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8")).unwrap())
             .expect("sequence arg must take the remaining source");
         assert!(seq_pair
             .1
-            .is_equivalent(&media("media:enc=utf-8;summary"))
+            .is_equivalent(&media("media:enc=utf8;summary"))
             .unwrap());
 
         // Two pages, a sequence arg that takes pages and a scalar arg that
@@ -2099,7 +2099,7 @@ mod tests {
         // Gathering both into the sequence arg would be cheaper and unique,
         // and it is not what is asked: a tied product is ambiguous, it does
         // not become a gather.
-        let pages = vec![media("media:enc=utf-8;page"), media("media:enc=utf-8;page")];
+        let pages = vec![media("media:enc=utf8;page"), media("media:enc=utf8;page")];
         assert_eq!(
             match_sources_to_args(&pages, &args, &[true, false], None),
             Err(MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (1, vec![0, 1])] })
@@ -2115,13 +2115,13 @@ mod tests {
         // source's tags → the same absolute specificity gap) → every
         // distribution of the three sources ties → ambiguous.
         let sources = vec![
-            media("media:chunk;enc=utf-8;page"),
-            media("media:chunk;enc=utf-8;page"),
-            media("media:chunk;enc=utf-8;page"),
+            media("media:chunk;enc=utf8;page"),
+            media("media:chunk;enc=utf8;page"),
+            media("media:chunk;enc=utf8;page"),
         ];
         let args = vec![
-            media("media:enc=utf-8;page"),
-            media("media:chunk;enc=utf-8"),
+            media("media:enc=utf8;page"),
+            media("media:chunk;enc=utf8"),
         ];
         let arg_seq = vec![true, true];
         let err = match_sources_to_args(&sources, &args, &arg_seq, None).unwrap_err();
@@ -2138,22 +2138,22 @@ mod tests {
     #[test]
     fn test1403_resolve_gather_emits_n_bindings_on_sequence_arg() {
         let cap_a = build_cap(
-            "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8;page\"",
             "op_a",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         let cap_b = build_cap(
-            "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:ext=md;plain-text\";op-b;out=\"media:enc=utf8;page\"",
             "op_b",
-            &["media:ext=md"],
-            "media:enc=utf-8;page",
+            &["media:ext=md;plain-text"],
+            "media:enc=utf8;page",
         );
         let mut concat = build_cap(
-            "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "concat",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         concat.args[0].is_sequence = true;
         let registry = registry_with(vec![cap_a, cap_b, concat]);
@@ -2161,17 +2161,17 @@ mod tests {
         // nodes: 0=pdf, 1=md, 2=page(from a), 3=page(from b), 4=txt
         let nodes = vec![
             media("media:document;ext=pdf"),
-            media("media:ext=md"),
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:ext=md;plain-text"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ];
         let wirings = vec![
             PreInternedWiring {
                 token_id: "tok-a".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8;page\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![0],
@@ -2184,7 +2184,7 @@ mod tests {
                 token_id: "tok-b".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:ext=md;plain-text\";op-b;out=\"media:enc=utf8;page\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![1],
@@ -2197,7 +2197,7 @@ mod tests {
                 token_id: "tok-concat".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+                    "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![2, 3],
@@ -2249,41 +2249,41 @@ mod tests {
     #[test]
     fn test1404_sequence_producer_in_gather_flattens() {
         let mut cap_a = build_cap(
-            "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8;page\"",
             "op_a",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;page",
+            "media:enc=utf8;page",
         );
         // op-a emits a SEQUENCE of pages.
         cap_a.outputs[0].is_sequence = true;
         let cap_b = build_cap(
-            "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
+            "cap:in=\"media:ext=md;plain-text\";op-b;out=\"media:enc=utf8;page\"",
             "op_b",
-            &["media:ext=md"],
-            "media:enc=utf-8;page",
+            &["media:ext=md;plain-text"],
+            "media:enc=utf8;page",
         );
         let mut concat = build_cap(
-            "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
             "concat",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         concat.args[0].is_sequence = true;
         let registry = registry_with(vec![cap_a, cap_b, concat]);
 
         let nodes = vec![
             media("media:document;ext=pdf"),
-            media("media:ext=md"),
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;page"),
-            media("media:enc=utf-8;ext=txt"),
+            media("media:ext=md;plain-text"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;page"),
+            media("media:enc=utf8;ext=txt;plain-text"),
         ];
         let wirings = vec![
             PreInternedWiring {
                 token_id: "tok-a".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:document;ext=pdf\";op-a;out=\"media:enc=utf8;page\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![0],
@@ -2296,7 +2296,7 @@ mod tests {
                 token_id: "tok-b".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:ext=md\";op-b;out=\"media:enc=utf-8;page\"",
+                    "cap:in=\"media:ext=md;plain-text\";op-b;out=\"media:enc=utf8;page\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![1],
@@ -2309,7 +2309,7 @@ mod tests {
                 token_id: "tok-concat".parse().unwrap(),
                 foreach_identity: ForEachIdentity::MintIfRequired,
                 cap_urn: CapUrn::from_string(
-                    "cap:in=\"media:enc=utf-8\";concat;out=\"media:enc=utf-8;ext=txt\"",
+                    "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
                 )
                 .unwrap(),
                 source_node_ids: vec![2, 3],
@@ -2344,21 +2344,21 @@ mod tests {
     #[test]
     fn test7122_foreach_identity_survives_knit() {
         let cap_urn =
-            "cap:constrained;in=\"media:enc=utf-8\";language=en;out=\"media:enc=utf-8;ext=txt;plain-text\";summarize";
+            "cap:constrained;in=\"media:enc=utf8\";language=en;out=\"media:enc=utf8;ext=txt;plain-text\";summarize";
         let cap = build_cap(
             cap_urn,
             "summarize",
-            &["media:enc=utf-8"],
-            "media:enc=utf-8;ext=txt;plain-text",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
         );
         let registry = registry_with(vec![cap]);
-        let mut boundary = for_each_step("media:enc=utf-8;page");
+        let mut boundary = for_each_step("media:enc=utf8;page");
         boundary.token_id = "tok-foreach".parse().unwrap();
         let mut body = cap_step(
             cap_urn,
             "Summarize",
-            "media:enc=utf-8;page",
-            "media:enc=utf-8;ext=txt;plain-text",
+            "media:enc=utf8;page",
+            "media:enc=utf8;ext=txt;plain-text",
         );
         body.token_id = "tok-cap".parse().unwrap();
         let strand = strand_from_steps(vec![boundary, body], "foreach identity");
@@ -2383,14 +2383,14 @@ mod tests {
     // step of the strand is makes the strand disconnected, and is refused.
     #[test]
     fn test12836_a_strand_input_is_one_node_and_a_missing_producer_is_refused() {
-        const LOOSE: &str = r#"cap:in="media:enc=utf-8";count;out="media:count;numeric""#;
-        const TIGHT: &str = r#"cap:in="media:enc=utf-8;page";title;out="media:enc=utf-8;title""#;
+        const LOOSE: &str = r#"cap:in="media:enc=utf8";count;out="media:count;numeric""#;
+        const TIGHT: &str = r#"cap:in="media:enc=utf8;page";title;out="media:enc=utf8;title""#;
         let registry = registry_with(vec![
-            build_cap(LOOSE, "count", &["media:enc=utf-8"], "media:count;numeric"),
-            build_cap(TIGHT, "title", &["media:enc=utf-8;page"], "media:enc=utf-8;title"),
+            build_cap(LOOSE, "count", &["media:enc=utf8"], "media:count;numeric"),
+            build_cap(TIGHT, "title", &["media:enc=utf8;page"], "media:enc=utf8;title"),
         ]);
-        let loose = || cap_step(LOOSE, "count", "media:enc=utf-8", "media:count;numeric");
-        let tight = || cap_step(TIGHT, "title", "media:enc=utf-8;page", "media:enc=utf-8;title");
+        let loose = || cap_step(LOOSE, "count", "media:enc=utf8", "media:count;numeric");
+        let tight = || cap_step(TIGHT, "title", "media:enc=utf8;page", "media:enc=utf8;title");
         // The steps as given: each names its own source, and none is chained
         // to the one before it.
         let strand_of = |steps: Vec<StrandStep>| Strand {
@@ -2409,7 +2409,7 @@ mod tests {
             assert_eq!(resolved.input_anchor_ids().len(), 1);
             let anchor = resolved.input_anchor_ids()[0];
             assert!(
-                resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf-8;page")).unwrap(),
+                resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf8;page")).unwrap(),
                 "the most specific type a step declares for it, whichever step comes first"
             );
             for edge in resolved.edges() {
@@ -2438,14 +2438,14 @@ mod tests {
     // what it does declare.
     #[test]
     fn test12837_the_resolver_refuses_names_a_definition_does_not_declare() {
-        const CAP: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#;
+        const CAP: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt;plain-text""#;
         let registry = registry_with(vec![build_cap(
             CAP,
             "extract",
             &["media:document;ext=pdf"],
-            "media:enc=utf-8;ext=txt",
+            "media:enc=utf8;ext=txt;plain-text",
         )]);
-        let nodes = || vec![media("media:document;ext=pdf"), media("media:enc=utf-8;ext=txt")];
+        let nodes = || vec![media("media:document;ext=pdf"), media("media:enc=utf8;ext=txt;plain-text")];
         let wiring = |arg: &str, target: (Option<String>, NodeId)| {
             vec![PreInternedWiring {
                 token_id: StepToken::mint(),

@@ -165,12 +165,12 @@ mod tests {
     #[test]
     fn test1881_token_urn_vs_alias_detection() {
         assert!(token_is_urn(
-            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf-8\""
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8\""
         ));
-        assert!(token_is_urn("media:fmt=json;record"));
+        assert!(token_is_urn("media:enc=utf8;fmt=json;record"));
         assert!(!token_is_urn("pdf2text"));
         assert!(is_alias_token("pdf2text"));
-        assert!(!is_alias_token("media:enc=utf-8"));
+        assert!(!is_alias_token("media:enc=utf8"));
     }
 
     // TEST1882: alias target classification distinguishes cap from media by
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn test1882_classify_alias_target_by_prefix() {
         assert_eq!(
-            classify_alias_target("media:fmt=json;record"),
+            classify_alias_target("media:enc=utf8;fmt=json;record"),
             Some(AliasTargetKind::Media)
         );
         assert_eq!(

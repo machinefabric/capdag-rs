@@ -421,7 +421,7 @@ mod tests {
         let artifact = capture_memory_intermediate(
             root.path(),
             "cap_2",
-            "media:enc=utf-8;record",
+            "media:enc=utf8;record",
             &items,
             true,
         )

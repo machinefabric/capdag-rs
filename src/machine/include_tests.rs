@@ -536,8 +536,8 @@ fn test12809_inclusion_nests_and_an_untaken_output_is_not_the_wholes() {
     ))));
 }
 
-const LOOSE: &str = "cap:in=\"media:fmt=json;list;record;time-series\";loose;out=\"media:enc=utf-8\"";
-const TIGHT: &str = "cap:in=\"media:enc=utf-8;note\";tight;out=\"media:tightened\"";
+const LOOSE: &str = "cap:in=\"media:enc=utf8;fmt=json;list;record;time-series\";loose;out=\"media:enc=utf8\"";
+const TIGHT: &str = "cap:in=\"media:enc=utf8;note\";tight;out=\"media:tightened\"";
 
 /// The registry of the tests above, with a step whose output is declared
 /// more loosely than the step after it asks for.
@@ -548,7 +548,7 @@ fn registry_with_a_refinement() -> FabricRegistry {
             LOOSE,
             "loose",
             vec![CapArg::new(SERIES, "series", true, vec![ArgSource::Stdin { stdin: SERIES.to_string() }])],
-            vec![CapOutput::new("media:enc=utf-8", "text", "Some text")],
+            vec![CapOutput::new("media:enc=utf8", "text", "Some text")],
         ),
         definition(
             TIGHT,
