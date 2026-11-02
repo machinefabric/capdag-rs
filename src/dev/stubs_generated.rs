@@ -99,13 +99,13 @@ from ops import DryContext, Op, OpMetadata, WetContext
 # always one of them: a hallucinated label is impossible by construction, and
 # this cartridge does not have to defend against one.
 CLASSIFY_CAP = (
-    'cap:classify;constrained;in="media:enc=utf8";language=en;'
+    'cap:classify;constrained;in="media:enc=utf8;plain-text";language=en;'
     'out="media:enc=utf8;fmt=json;record;semantic-judgment"'
 )
 
 # The item being classified, and the allowed labels — both addressed by MEDIA
 # URN, which is how a peer call names its arguments.
-CLASSIFY_ITEM_MEDIA = "media:enc=utf8"
+CLASSIFY_ITEM_MEDIA = "media:enc=utf8;plain-text"
 CLASSIFY_LABELS_MEDIA = "media:enc=utf8;label-set"
 
 LABELS = "positive,neutral,negative"
@@ -213,7 +213,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.229.2426",
+        version="1.228.2414",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -336,11 +336,11 @@ use std::sync::Arc;
 /// always one of them: a hallucinated label is impossible by construction, and
 /// this cartridge does not have to defend against one.
 const CLASSIFY_CAP: &str =
-    r#"cap:classify;constrained;in="media:enc=utf8";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment""#;
+    r#"cap:classify;constrained;in="media:enc=utf8;plain-text";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment""#;
 
 /// The item being classified, and the allowed labels — both addressed by MEDIA
 /// URN, which is how a peer call names its arguments.
-const CLASSIFY_ITEM_MEDIA: &str = "media:enc=utf8";
+const CLASSIFY_ITEM_MEDIA: &str = "media:enc=utf8;plain-text";
 const CLASSIFY_LABELS_MEDIA: &str = "media:enc=utf8;label-set";
 
 const LABELS: &str = "positive,neutral,negative";
@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.229.2426"
+version = "1.228.2414"
 edition = "2021"
 
 [dependencies]
@@ -655,12 +655,12 @@ import (
 // The labels are token-level constrained to the set we pass, so the answer is
 // always one of them: a hallucinated label is impossible by construction, and
 // this cartridge does not have to defend against one.
-const classifyCap = `cap:classify;constrained;in="media:enc=utf8";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment"`
+const classifyCap = `cap:classify;constrained;in="media:enc=utf8;plain-text";language=en;out="media:enc=utf8;fmt=json;record;semantic-judgment"`
 
 // The item being classified, and the allowed labels — both addressed by MEDIA
 // URN, which is how a peer call names its arguments.
 const (
-	classifyItemMedia   = "media:enc=utf8"
+	classifyItemMedia   = "media:enc=utf8;plain-text"
 	classifyLabelsMedia = "media:enc=utf8;label-set"
 	labels              = "positive,neutral,negative"
 )
@@ -791,7 +791,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.229.2426",
+		"1.228.2414",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -932,12 +932,12 @@ import Ops
 /// always one of them: a hallucinated label is impossible by construction, and
 /// this cartridge does not have to defend against one.
 let classifyCap =
-    "cap:classify;constrained;in=\"media:enc=utf8\";language=en;"
+    "cap:classify;constrained;in=\"media:enc=utf8;plain-text\";language=en;"
     + "out=\"media:enc=utf8;fmt=json;record;semantic-judgment\""
 
 /// The item being classified, and the allowed labels — both addressed by MEDIA
 /// URN, which is how a peer call names its arguments.
-let classifyItemMedia = "media:enc=utf8"
+let classifyItemMedia = "media:enc=utf8;plain-text"
 let classifyLabelsMedia = "media:enc=utf8;label-set"
 
 let labels = "positive,neutral,negative"
@@ -1055,7 +1055,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.229.2426",
+        version: "1.228.2414",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
