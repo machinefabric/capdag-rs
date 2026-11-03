@@ -237,7 +237,7 @@ pub(crate) unsafe extern "C" fn l_Nat_dmul(x_1: Obj, x_2: Obj) -> Obj {
 // Source: <lean>/Init/Prelude.lean:1802:1
 #[inline(always)]
 pub(crate) unsafe extern "C" fn l_Nat_dpow(x_1: Obj, x_2: Obj) -> Obj {
-    let r: Obj = rt::intrinsics::lean_nat_pow(x_1, x_2);
+    let r: Obj = rt::intrinsics::lean_nat_pow_v4_34_1(x_1, x_2);
     r
 }
 

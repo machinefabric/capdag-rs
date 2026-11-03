@@ -45,12 +45,12 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-version = "=1.160.11"
+version = "=1.164.12"
 
 # The runtime the code generated from ../formal runs on (see ../lungo.toml). The
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
-version = "=1.117.0"
+version = "=1.120.164"
 
 # The chain from baked roots to a signed manifest, charter or binary. The
 # formats and charter rules are MachineFabric's, declared in bifaci::trust.
@@ -115,4 +115,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.971.11"
+version = "1.981.181"

@@ -2,8 +2,8 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.117.0",
-  "runtime_abi": 2,
+  "generator_version": "1.120.164",
+  "runtime_abi": 3,
   "modules": [
     "Init.Prelude",
     "Init.Coe",

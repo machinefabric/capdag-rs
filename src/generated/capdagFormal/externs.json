@@ -235,7 +235,7 @@
     "declaration": "Nat.pow",
     "key": "lean_nat_pow",
     "resolution": "runtime",
-    "implementation": "lungo::__runtime::intrinsics::lean_nat_pow",
+    "implementation": "lungo::__runtime::intrinsics::lean_nat_pow_v4_34_1",
     "lean_type": "Nat → Nat → Nat",
     "source": "<lean>/Init/Prelude.lean:1802:1"
   },
