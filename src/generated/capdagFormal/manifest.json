@@ -666,6 +666,7 @@
     "TaggedUrn.Constraint",
     "TaggedUrn.Urn",
     "TaggedUrn.Sorted",
+    "TaggedUrn.Join",
     "TaggedUrn.Exec",
     "TaggedUrn",
     "CapDAG.Cap",
@@ -1086,7 +1087,7 @@
       "module": "TaggedUrn.Exec",
       "rust_path": "_root_::tagged_urn::exec::make",
       "lean_type": "String → List (String × TaggedUrn.Constraint) → Option TaggedUrn.Exec.Wf",
-      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:26:1"
+      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:27:1"
     }
   ]
 }

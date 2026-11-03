@@ -519,66 +519,25 @@ impl MediaUrn {
         Self::new(self.0.apply_delta(delta)?)
     }
 
-    /// Compute the least upper bound — the join `∨` of the dispatch poset
-    /// `(𝑀, ⊑)` ordered by `conforms_to` — of a set of MediaUrns: the **most
-    /// specific** single type every input conforms to (the "denominator").
+    /// The most specific media type every one of `urns` conforms to: their
+    /// common denominator, as a gather's element type or the meeting point
+    /// where branches of different media converge.
     ///
-    /// Per tag key:
-    /// - present in every input with the **same** stored value → kept as-is
-    ///   (exact values and bare markers alike);
-    /// - present in every input with **differing plain values** (exact or the
-    ///   `*` must-have-any sigil) → promoted to the must-have-any wildcard
-    ///   (`key` ≡ `key=*`): every input *has* the key, so "has key, any value"
-    ///   is a sound shared constraint strictly tighter than dropping it. This
-    ///   is what lets `ext=pdf ∨ ext=txt = media:ext` land on generic caps
-    ///   like `in="media:ext"` with zero transformation;
-    /// - present with differing values where any side carries a qualifier form
-    ///   (`?…`/`!…` — optional / must-not-have) → dropped: `!key` asserts
-    ///   *absence*, so presence cannot be soundly required;
-    /// - absent from any input → dropped (presence cannot be required).
+    /// Made by tagged-urn's proved model (`TaggedUrn::least_upper_bound`):
+    /// key by key, the bound allows every state some input allows, and where
+    /// no single form says exactly that, it is the least bound that excludes
+    /// only values the inputs name.
     ///
-    /// - Empty input → `media:` (universal type ⊤)
-    /// - Single input → returned as-is
-    /// - `[media:document;ext=pdf, media:document;ext=pdf]` → `media:document;ext=pdf`
     /// - `[media:document;ext=pdf, media:ext=png;image]` → `media:ext`
+    /// - `[media:ext=png, media:ext!=pdf]` → `media:ext!=pdf` (one holds the other)
     /// - `[media:enc=utf8;fmt=json;list, media:enc=utf8;fmt=json]` → `media:enc=utf8;fmt=json`
+    /// - no inputs → `media:`
     pub fn least_upper_bound(urns: &[MediaUrn]) -> MediaUrn {
-        if urns.is_empty() {
-            return MediaUrn::from_string("media:").unwrap_or_else(|_| {
-                MediaUrn(TaggedUrn::new("media".to_string(), std::collections::BTreeMap::new()))
-            });
-        }
-        if urns.len() == 1 {
-            return urns[0].clone();
-        }
-
-        // A stored value is "plain" when it is an exact value or the `*`
-        // must-have-any sigil — i.e. it asserts presence. Qualifier forms
-        // (`?`, `!`, `?=v`, `!=v`) do not assert presence and are only kept
-        // when identical across every input.
-        let is_plain = |v: &str| !v.starts_with('?') && !v.starts_with('!');
-
-        // Start with the first URN's tags; fold each subsequent URN in.
-        let mut common_tags = urns[0].0.tags().clone();
-        for urn in &urns[1..] {
-            let mut folded = std::collections::BTreeMap::new();
-            for (key, value) in &common_tags {
-                match urn.0.tags().get(key) {
-                    Some(other) if other == value => {
-                        folded.insert(key.clone(), value.clone());
-                    }
-                    Some(other) if is_plain(value) && is_plain(other) => {
-                        // Both assert presence with differing values → promote
-                        // to must-have-any.
-                        folded.insert(key.clone(), "*".to_string());
-                    }
-                    _ => {} // absent, or a qualifier-form conflict → drop
-                }
-            }
-            common_tags = folded;
-        }
-
-        MediaUrn(TaggedUrn::new("media".to_string(), common_tags))
+        let tagged: Vec<TaggedUrn> = urns.iter().map(|u| u.0.clone()).collect();
+        MediaUrn(
+            TaggedUrn::least_upper_bound("media", &tagged)
+                .expect("every MediaUrn has the media prefix"),
+        )
     }
 
     /// Serialize just the tags portion (without "media:" prefix)
@@ -1542,11 +1501,11 @@ mod debug_tests {
         assert!(bool_urn.is_scalar());
         assert!(!bool_urn.is_numeric());
 
-        // MEDIA_JSON must be json, record, scalar. JSON declares its serialization
-        // via `fmt=json`, not via an `enc=` tag, so it carries no enc.
+        // MEDIA_JSON must be json, record, scalar. JSON is characters, so it
+        // carries enc=utf8; `fmt=json` says how those characters are structured.
         let json_urn = MediaUrn::from_string(MEDIA_JSON).unwrap();
         assert!(json_urn.is_json());
-        assert!(json_urn.get_tag("enc").is_none());
+        assert_eq!(json_urn.get_tag("enc"), Some("utf8"));
         assert!(json_urn.is_record());
         assert!(
             json_urn.is_scalar(),
@@ -1653,17 +1612,17 @@ mod debug_tests {
     // TEST858: LUB with three+ inputs narrows correctly
     #[test]
     fn test858_lub_three_inputs() {
-        // All three are lists (shared `list`) and all three HAVE a `fmt`
-        // (json/csv/ndjson — differing values → promoted to must-have-any).
+        // All three are UTF-8 lists (shared `enc=utf8` and `list`) and all
+        // three HAVE a `fmt` (json/csv/ndjson — differing values → "some fmt").
         // The record marker is on a,b but not c → dropped.
         let a = MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
         let b = MediaUrn::from_string("media:enc=utf8;fmt=csv;list;record").unwrap();
         let c = MediaUrn::from_string("media:enc=utf8;fmt=ndjson;list").unwrap();
         let lub = MediaUrn::least_upper_bound(&[a.clone(), b.clone(), c.clone()]);
-        let expected = MediaUrn::from_string("media:fmt;list").unwrap();
+        let expected = MediaUrn::from_string("media:enc=utf8;fmt;list").unwrap();
         assert!(
             lub.is_equivalent(&expected).unwrap(),
-            "LUB should be media:fmt;list but got {}",
+            "LUB should be media:enc=utf8;fmt;list but got {}",
             lub.to_string()
         );
         assert!(a.conforms_to(&lub).unwrap());

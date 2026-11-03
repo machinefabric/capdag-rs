@@ -23,9 +23,10 @@
     "<package:lungo>/Lungo/Spec/State.lean": "a5a5aa8ccb208f06dd45005e5740c4e7096b1a7f8d484f6cc19d4835e816979e",
     "<package:lungo>/Lungo/Trace.lean": "f6f0735df8f533ef42e71cc5f5be73462fcac902c38f56f3d3411b28816a57bf",
     "<package:lungo>/lakefile.toml": "97e0e471de3aaddef73988624b6126e1cf80b8c6f1f51ce3f3a8153d8c13d046",
-    "<package:tagged_urn_formal>/TaggedUrn.lean": "51c451ad004b38af0d8212ffdfa8098e8e3de3831ad4850052301fac4963ed34",
+    "<package:tagged_urn_formal>/TaggedUrn.lean": "cbc3ea3aff7c971572085e664a00de5ffddbff9d01a384747e1c350688607d4c",
     "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean": "20d93e3ff2482334a7288262c6fb229675e13696af5712dcec1af2f3fe6e4028",
-    "<package:tagged_urn_formal>/TaggedUrn/Exec.lean": "6cbe398e8c0fe0ffd30191d41337ebc52d89436e363518bccb38a7732ffcf026",
+    "<package:tagged_urn_formal>/TaggedUrn/Exec.lean": "d8eb4db6b96b06895cb2b0c89731f81c7335734d712960751e0921bdab0a737e",
+    "<package:tagged_urn_formal>/TaggedUrn/Join.lean": "fc725e93953004569da2965e7ff10c13efd868f5cabee9d23ce9300eef3d662e",
     "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean": "63673529b50aeb2faa578b8852be2414d2a3df9e03e2685f6a5a67ebf6da2c9d",
     "<package:tagged_urn_formal>/TaggedUrn/Urn.lean": "6c1905639773812f839ae25bcf12b4efcc653a342e3419938b25f04b0c0ff342",
     "<package:tagged_urn_formal>/lakefile.toml": "d84612abc4598b3b2ed8436aaa4ffe8f3b5cf85caf44866489a482be4e558501",
@@ -49,10 +50,10 @@
   "project": ".",
   "link_directives": [],
   "output_digests": {
-    "assurance.json": "bb7d37b8574bd7aaf2f4c6eee689b173851c754281ded8432b8d2401ad5deab9",
-    "capdagFormal.rs": "4258c1ca64aee0eaa2a8110aef5825fb546604f6c0328a2749a7212612544f7f",
+    "assurance.json": "994a96ed5cdd632b4c77519d7f75bec6a1d7fba6888071c50e4d674fcf419d94",
+    "capdagFormal.rs": "753a2985fe932883d8929a7c500f053aea164670aa32284664730d947ef94bb4",
     "externs.json": "e94af184c3b3fe91b58486ee44423636715f0d3dc16b2031280c20f590b756a6",
-    "manifest.json": "7452e84bb23254df0c838342c9294a98dc9e3a6a32f720b3b5c4f69b083aeac5",
+    "manifest.json": "a169a92d92bc272b965c85a32b71042c4feb4ef935ac4bf837311f804cb7343d",
     "modules/CapDAG-Bifaci-Credit.rs": "509dd16935fe684396c3804281cc985dc1e466ed0784c3aa0a30bcdf84a59824",
     "modules/CapDAG-Bifaci-Flow.rs": "5c20191f8f8f116824d971b856a391fcfacd6128327408cfa2b542a4bef2c7b8",
     "modules/CapDAG-Bifaci-Pools.rs": "b30857e93921d4e1c7e252ad01ee5bc19db44e6294859dd00186af6842c75082",
@@ -90,11 +91,11 @@
     "modules/Lean-Data-Iterators-Producers-PersistentHashMap.rs": "230e0dc6008b884354d2c345710c71e8022d1444dc8037640f4fa98a17179318",
     "modules/Lean-Elab-Structure.rs": "d53110fba6cf7210f04ff528c5c5169b6b76e378438f590940884878757dface",
     "modules/TaggedUrn-Constraint.rs": "158fc3044b01adeb5e0d3c59ff54133aeef366fe4c1cbc561edfd1a82c6abe76",
-    "modules/TaggedUrn-Exec.rs": "af1ee72c79111298e02cf66f928372a87474270c06b8e57fb3751fca584fbac1",
+    "modules/TaggedUrn-Exec.rs": "c4cefb5406f3aca5edee163cdfc6c1e785edce8381753f22a89a853510ab3ad0",
     "modules/TaggedUrn-Sorted.rs": "8d6c40c14595ec21f777cd818b666cfbb843eedaaccce41674994432c078d671",
     "modules/TaggedUrn-Urn.rs": "56fa9e5d567c6c66c22061218f93b2a5de3fb0f723da7037198234843ef32cf5",
     "names.json": "0b83b9fb28d1de66c2a59b4ba9a2df189661ec85c304cdcf1e3dca492795677b",
-    "sources.json": "e1459a06deb632fbad6517474039c96081f045dfa1072c02859a266030f361d4"
+    "sources.json": "c9e9ae91a25cc4e1e3fa5e0f0d15e686cc74c37a20b9bd3dbfc7255aece4aaea"
   },
   "platform_products": []
 }

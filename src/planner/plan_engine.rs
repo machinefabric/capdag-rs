@@ -12,9 +12,9 @@
 //! 1. **Reachability** — forward BFS per source over `get_outgoing_edges`,
 //!    recording the minimum depth per `(media, is_sequence)` state.
 //! 2. **Apex enumeration** — the meet-in-the-middle cut:
-//!    - *Generalize* (∨): the tag-poset join of the sources at depth 0 — the
-//!      free convergence (`MediaUrn::least_upper_bound`, with wildcard
-//!      promotion so `ext=pdf ∨ ext=txt = media:ext`).
+//!    - *Generalize*: the bound of the sources at depth 0 — the free
+//!      convergence (`MediaUrn::least_upper_bound`, made by tagged-urn's
+//!      proved model, so `ext=pdf` and `ext=txt` meet at `media:ext`).
 //!    - *Collect*: media every source reaches as a scalar; the legs homogenize
 //!      and a sequence-consuming fold cap combines them (via the resolver's
 //!      implicit gather — see `machine/resolve.rs`).
@@ -812,7 +812,7 @@ impl LiveCapFab {
 
         let mut apexes: Vec<ApexInfo> = Vec::new();
 
-        // Generalize: the join ∨ at depth 0 — admissible when it is not the
+        // Generalize: the sources' bound at depth 0 — admissible when it is not the
         // trivial top (an empty constraint accepts anything and plans nothing
         // meaningful) and some cap actually consumes it.
         if mechanism_admits(ConvergenceMechanism::Generalize) {
