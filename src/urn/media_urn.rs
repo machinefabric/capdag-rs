@@ -1542,11 +1542,11 @@ mod debug_tests {
         assert!(bool_urn.is_scalar());
         assert!(!bool_urn.is_numeric());
 
-        // MEDIA_JSON must be json, record, scalar. JSON declares its serialization
-        // via `fmt=json`, not via an `enc=` tag, so it carries no enc.
+        // MEDIA_JSON must be json, record, scalar. JSON is characters, so it
+        // carries enc=utf8; `fmt=json` says how those characters are structured.
         let json_urn = MediaUrn::from_string(MEDIA_JSON).unwrap();
         assert!(json_urn.is_json());
-        assert!(json_urn.get_tag("enc").is_none());
+        assert_eq!(json_urn.get_tag("enc").map(String::as_str), Some("utf8"));
         assert!(json_urn.is_record());
         assert!(
             json_urn.is_scalar(),
