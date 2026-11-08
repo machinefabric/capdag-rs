@@ -45,12 +45,16 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-version = "=1.160.11"
+# MFR_LOCAL_LIBS was set when this was rendered: the working copy in this
+# workspace rather than a published release. Re-render without it before
+# committing or releasing — a path resolves on this machine only.
+path = "../../tagged-urn/tagged-urn-rs"
 
 # The runtime the code generated from ../formal runs on (see ../lungo.toml). The
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
-version = "=1.117.0"
+# MFR_LOCAL_LIBS: the working copy, as above.
+path = "../../lungo/lungo-rs/crates/lungo"
 
 # The chain from baked roots to a signed manifest, charter or binary. The
 # formats and charter rules are MachineFabric's, declared in bifaci::trust.
@@ -115,4 +119,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.971.11"
+version = "1.975.69"
