@@ -74,7 +74,9 @@ pub use cbor_util::{
 };
 
 pub use executor::{
-    bundled_providers_of, map_progress, run_dag_on_context, BundledProvider, CapProgressFn,
+    adapter_groups_as_registered, bundled_cartridge_adapter_groups, bundled_providers_of,
+    map_progress, run_dag_on_context, BundledProvider, CapProgressFn, CartridgeAdapterGroups,
+    RefusedAdapterGroup,
     CapStepProgressFn, CartridgeManager, CollateralCause, DagOutput, ExecutionContext,
     ExecutionError, ProgressMapper, RunCancel,
 };

@@ -334,6 +334,8 @@ fn print_usage(program: &str) {
            {p} plan <files...> [--to <t>]... [plan options]          Plan machines for a file set (multi-source aware)\n\
            {p} dag-viz <machine-file> [--mermaid|--dot]              Render the execution plan as a diagram\n\
            {p} find <cap-alias-or-urn>                               Show the providing cartridge(s)\n\
+           {p} cartridges                                            List the bundled cartridges, and any\n\
+                                                                     adapter group of theirs a host refuses\n\
            {p} resolve [--no-cache] <cap-alias-or-urn>...            Print cap definition JSON (array for >1)\n\
            {p} cache [clear|refresh]                                 Invalidate/renew the local fabric cache\n\
            {p} install <cap-alias-or-urn-or-cartridge-id>            Download + verify without running\n\
@@ -489,6 +491,7 @@ async fn main() {
         "plan" => cmd_plan(&args).await,
         "dag-viz" => cmd_dag_viz(&args).await,
         "find" => cmd_find(&args).await,
+        "cartridges" => cmd_cartridges(&args).await,
         "resolve" => cmd_resolve(&args).await,
         "cache" => cmd_cache(&args).await,
         "install" => cmd_install(&args).await,
@@ -3041,6 +3044,48 @@ async fn bundled_providers(cap: &capdag::CapUrn) -> Vec<capdag::orchestrator::Bu
             process::exit(1);
         }
     }
+}
+
+/// `capdag cartridges` — the cartridges bundled with capdag, and any adapter
+/// group of theirs a host refuses to register.
+///
+/// A refused group was only a log line of whichever host met it. txtcartridge
+/// once declared an adapter group that conflicted with itself; every host
+/// registered none of it, and one .txt file was offered as four sources to
+/// combine while nothing a person reads said why. Here it is stated, with
+/// what was done and that the cartridge's manifest should be fixed.
+async fn cmd_cartridges(args: &[String]) -> ! {
+    if args.len() > 2 {
+        eprintln!("Usage: {} cartridges", args[0]);
+        process::exit(2);
+    }
+    let Some(dir) = bundled_cartridges_dir() else {
+        println!("No cartridges are bundled with this capdag.");
+        process::exit(0);
+    };
+    let fabric = fabric_registry_or_exit().await;
+    let cartridges = match capdag::orchestrator::bundled_cartridge_adapter_groups(
+        &dir,
+        BUILD_CHANNEL,
+        BAKED_REGISTRY_URL,
+        capdag::FABRIC_MANIFEST_VERSION,
+        fabric,
+    )
+    .await
+    {
+        Ok(cartridges) => cartridges,
+        Err(e) => {
+            eprintln!("The cartridges bundled with capdag could not be read: {e}");
+            process::exit(1);
+        }
+    };
+    for cartridge in &cartridges {
+        println!("{} v{} — bundled with capdag", cartridge.id, cartridge.version);
+        for refused in &cartridge.refused {
+            println!("  warning: {}", refused.statement(&cartridge.id));
+        }
+    }
+    process::exit(0);
 }
 
 /// `capdag find <cap-alias-or-urn>` — resolve a cap and show which cartridge

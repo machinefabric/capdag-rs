@@ -4106,6 +4106,108 @@ pub async fn bundled_providers_of(
         .collect())
 }
 
+/// A cartridge, and the adapter groups of its own a host refuses to register.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CartridgeAdapterGroups {
+    pub id: String,
+    pub version: String,
+    pub refused: Vec<RefusedAdapterGroup>,
+}
+
+/// An adapter group a host refuses: one of its adapter URNs conforms to
+/// another of its own, or to another cartridge's, so which adapter inspects a
+/// file would be ambiguous. None of the group's adapter URNs is registered;
+/// its caps still run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedAdapterGroup {
+    pub group: String,
+    pub adapter_urn: String,
+    pub conflicting_adapter_urn: String,
+    pub conflicting_cartridge_id: String,
+    pub conflicting_group: String,
+}
+
+impl RefusedAdapterGroup {
+    /// What happened, what was done, and that the manifest of `cartridge_id`
+    /// (the cartridge that declares the group) should be fixed.
+    pub fn statement(&self, cartridge_id: &str) -> String {
+        let owner = if self.conflicting_cartridge_id == cartridge_id && self.conflicting_group == self.group {
+            "by the same group".to_string()
+        } else {
+            format!("by the group '{}' of {}", self.conflicting_group, self.conflicting_cartridge_id)
+        };
+        format!(
+            "adapter group '{}' is not registered: its adapter URN {} conflicts with {}, declared {}, \
+             so which adapter inspects a file would be ambiguous. None of the group's adapter URNs is \
+             registered, so its adapter inspects no file; its caps still run. The manifest of {} should be fixed.",
+            self.group, self.adapter_urn, self.conflicting_adapter_urn, owner, cartridge_id
+        )
+    }
+}
+
+/// Register the adapter groups `cartridges` declare, in the order given, as a
+/// host registers them (`MediaAdapterRegistry::register_cap_group`), and
+/// return each cartridge with the groups refused. Of two conflicting
+/// cartridges, the one registered second is refused.
+pub fn adapter_groups_as_registered(
+    fabric_registry: std::sync::Arc<crate::FabricRegistry>,
+    cartridges: &[(String, String, Vec<crate::CapGroup>)],
+) -> Vec<CartridgeAdapterGroups> {
+    let mut registry = crate::input_resolver::MediaAdapterRegistry::new(fabric_registry);
+    cartridges
+        .iter()
+        .map(|(id, version, groups)| CartridgeAdapterGroups {
+            id: id.clone(),
+            version: version.clone(),
+            refused: groups
+                .iter()
+                .filter(|group| !group.adapter_urns.is_empty())
+                .filter_map(|group| {
+                    registry
+                        .register_cap_group(&group.name, &group.adapter_urns, id)
+                        .err()
+                        .map(|error| RefusedAdapterGroup {
+                            group: group.name.clone(),
+                            adapter_urn: error.new_adapter_urn,
+                            conflicting_adapter_urn: error.existing_adapter_urn,
+                            conflicting_cartridge_id: error.existing_cartridge_id,
+                            conflicting_group: error.existing_group_name,
+                        })
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// The cartridges bundled in `bundled_cartridges_dir`, as a host registers
+/// their adapter groups: in identity order (id, then version — the order the
+/// engine sorts one registry and channel's cartridges in), each with the
+/// groups of its own that are refused.
+pub async fn bundled_cartridge_adapter_groups(
+    bundled_cartridges_dir: &std::path::Path,
+    channel: crate::bifaci::cartridge_repo::CartridgeChannel,
+    registry_url: Option<&str>,
+    fabric_manifest_version: u32,
+    fabric_registry: std::sync::Arc<crate::FabricRegistry>,
+) -> Result<Vec<CartridgeAdapterGroups>, ExecutionError> {
+    let mut found: Vec<(String, String, Vec<crate::CapGroup>)> = discover_bundled_cartridges(
+        bundled_cartridges_dir,
+        channel,
+        registry_url,
+        fabric_manifest_version,
+    )
+    .await?
+    .into_iter()
+    .map(|(_, identity, groups)| {
+        let (id, version, _) = identity
+            .expect("discovery gives every hostable bundled cartridge its identity");
+        (id, version, groups)
+    })
+    .collect();
+    found.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+    Ok(adapter_groups_as_registered(fabric_registry, &found))
+}
+
 #[cfg(test)]
 mod tests {
     // TEST1448: chains split ONLY at the permit-deadlock boundary — two
@@ -4838,4 +4940,56 @@ mod tests {
     // along with the variant — not a tautological removal of a real
     // test, but the deletion of an assertion about a code path that
     // no longer exists.
+
+    // TEST20078: the adapter groups a host refuses are stated per cartridge,
+    // with both URNs of the conflict and whose the other is, what was done,
+    // and that the manifest should be fixed.
+    //
+    // A refusal was only an engine log line. txtcartridge's own text-formats
+    // group, whose `media:ext=txt;plain-text` conforms to its
+    // `media:plain-text`, was refused on every start, and nothing a person
+    // reads said so.
+    #[test]
+    fn test20078_refused_adapter_groups_are_stated_per_cartridge() {
+        let group = |name: &str, urns: &[&str]| crate::CapGroup {
+            name: name.to_string(),
+            caps: Vec::new(),
+            adapter_urns: urns.iter().map(|urn| urn.to_string()).collect(),
+        };
+        let cartridges = vec![
+            ("datacartridge".to_string(), "1.0".to_string(), vec![group("data", &["media:enc=utf8;fmt=json"])]),
+            ("jsoncartridge".to_string(), "0.2".to_string(), vec![group("json", &["media:enc=utf8;fmt=json;record"])]),
+            ("txtcartridge".to_string(), "1.338.840".to_string(), vec![
+                group("text-formats", &["media:ext=txt;plain-text", "media:plain-text"]),
+                group("no-adapters", &[]),
+            ]),
+        ];
+        let fabric = std::sync::Arc::new(crate::FabricRegistry::new_for_test());
+        let stated = super::adapter_groups_as_registered(fabric, &cartridges);
+
+        assert_eq!(stated.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["datacartridge", "jsoncartridge", "txtcartridge"]);
+        assert!(stated[0].refused.is_empty(), "registered first, datacartridge keeps its group");
+        assert_eq!(stated[1].refused, vec![super::RefusedAdapterGroup {
+            group: "json".to_string(),
+            adapter_urn: "media:enc=utf8;fmt=json;record".to_string(),
+            conflicting_adapter_urn: "media:enc=utf8;fmt=json".to_string(),
+            conflicting_cartridge_id: "datacartridge".to_string(),
+            conflicting_group: "data".to_string(),
+        }]);
+        assert_eq!(stated[2].refused, vec![super::RefusedAdapterGroup {
+            group: "text-formats".to_string(),
+            adapter_urn: "media:ext=txt;plain-text".to_string(),
+            conflicting_adapter_urn: "media:plain-text".to_string(),
+            conflicting_cartridge_id: "txtcartridge".to_string(),
+            conflicting_group: "text-formats".to_string(),
+        }]);
+
+        let txt = stated[2].refused[0].statement("txtcartridge");
+        assert!(txt.contains("adapter group 'text-formats' is not registered"), "{txt}");
+        assert!(txt.contains("media:ext=txt;plain-text conflicts with media:plain-text, declared by the same group"), "{txt}");
+        assert!(txt.contains("its caps still run"), "{txt}");
+        assert!(txt.contains("The manifest of txtcartridge should be fixed"), "{txt}");
+        let json = stated[1].refused[0].statement("jsoncartridge");
+        assert!(json.contains("declared by the group 'data' of datacartridge"), "{json}");
+    }
 }
