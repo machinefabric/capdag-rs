@@ -3622,13 +3622,17 @@ impl FilePathContext {
 /// Media, live family) — the live sibling of [`FilePathContext`]. An
 /// incoming stream whose media URN carries the `live` marker is a
 /// reference: the demux accumulates its selector value, opens the feed
-/// through the built-in capture dispatch, and delivers an UNBOUNDED SEQUENCE
-/// `InputStream` labeled with the arg's stdin content URN. Opened feeds
-/// register their handles so a stop (non-force Cancel on a feed-bearing
-/// request) can close the tap and let the run drain (15.2 §Runs Stop).
+/// through the cartridge's own live families or the built-in device
+/// dispatch, and delivers an UNBOUNDED SEQUENCE `InputStream` labeled with
+/// the arg's stdin content URN. Opened feeds register their handles so a
+/// stop (a CloseStream to the feed-bearing request) can close the tap and
+/// let the run drain (15.2 §Runs Stop).
 pub(crate) struct LiveFeedContext {
     cap_urn: String,
     manifest: Option<CapManifest>,
+    /// The families this runtime resolves: the cartridge's own, then the
+    /// built-in devices.
+    families: Arc<crate::bifaci::live_feed::LiveFamilies>,
     /// The runtime-wide overrun aggregate the opened feeds count into
     /// (rides heartbeat meta as `overruns_total`).
     overruns_total: Arc<std::sync::atomic::AtomicU64>,
@@ -3641,6 +3645,7 @@ impl LiveFeedContext {
     fn new(
         cap_urn: &str,
         manifest: Option<CapManifest>,
+        families: Arc<crate::bifaci::live_feed::LiveFamilies>,
         overruns_total: Arc<std::sync::atomic::AtomicU64>,
         handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>,
     ) -> Result<Self, RuntimeError> {
@@ -3658,6 +3663,7 @@ impl LiveFeedContext {
         Ok(Self {
             cap_urn: canonical,
             manifest,
+            families,
             overruns_total,
             handles,
         })
@@ -3754,12 +3760,12 @@ impl LiveFeedContext {
                         self.cap_urn, reference_urn
                     ))
                 })?;
-                let provider_content = crate::capture::content_urn_for(&incoming)
-                    .map(str::to_string)
-                    .ok_or_else(|| {
+                let provider_content =
+                    self.families.content_urn_for(&incoming).ok_or_else(|| {
                         StreamError::Protocol(format!(
-                            "live reference '{}' is not a known device family — no \
-                             capture backend exists for it (13.2 §Reference Media)",
+                            "live reference '{}' is in no family this cartridge resolves: \
+                             not one it registered, and not a built-in device \
+                             (13.2 §Reference Media)",
                             reference_urn
                         ))
                     })?;
@@ -3795,9 +3801,10 @@ impl LiveFeedContext {
         }
         let selector = LiveFeedSelector::parse(selector_bytes)
             .map_err(|e| StreamError::Protocol(e.to_string()))?;
-        let opened =
-            crate::capture::open(reference_urn, selector, Arc::clone(&self.overruns_total))
-                .map_err(|e| StreamError::Protocol(e.to_string()))?;
+        let opened = self
+            .families
+            .open(reference_urn, selector, Arc::clone(&self.overruns_total))
+            .map_err(|e| StreamError::Protocol(e.to_string()))?;
         self.handles
             .lock()
             .unwrap()
@@ -3842,7 +3849,7 @@ struct SeqReassembly {
 ///   (CBOR definite-length encoding is prefix-free, so a truncated item can
 ///   never mis-decode as a complete one.)
 /// - `Err` — the bytes are not valid CBOR at all.
-fn try_decode_sequence_item(buf: &[u8]) -> Result<Option<(ciborium::Value, usize)>, StreamError> {
+pub(crate) fn try_decode_sequence_item(buf: &[u8]) -> Result<Option<(ciborium::Value, usize)>, StreamError> {
     let mut cursor = std::io::Cursor::new(buf);
     match ciborium::from_reader::<ciborium::Value, _>(&mut cursor) {
         Ok(value) => Ok(Some((value, cursor.position() as usize))),
@@ -5091,11 +5098,13 @@ pub struct CartridgeRuntime {
 
     /// Runtime-wide live-feed overrun aggregate (12.5 §Overrun): real-time
     /// items discarded at capture edges because consumers lagged. Rides
-    /// heartbeat meta as `overruns_total` — never counted as drops. The
-    /// capture backends themselves are the built-in compile-time dispatch
-    /// in `crate::capture` — capture is transport resolution, not a plugin
-    /// surface, and there is nothing to register.
+    /// heartbeat meta as `overruns_total` — never counted as drops.
     live_feed_overruns: Arc<std::sync::atomic::AtomicU64>,
+
+    /// The live families this cartridge resolves itself
+    /// ([`register_live_family`](Self::register_live_family)), consulted
+    /// before the built-in device dispatch in `crate::capture`.
+    live_families: Arc<crate::bifaci::live_feed::LiveFamilies>,
 
     /// The host's latest policy (12.2 §Policy): empty until the first Policy
     /// frame, replaced by every later one, read live by every handler through
@@ -5296,6 +5305,7 @@ fn spawn_handler(
     output_tx: &tokio::sync::mpsc::UnboundedSender<Frame>,
     pending_peer_requests: &Arc<Mutex<HashMap<MessageId, PendingPeerRequest>>>,
     manifest: &Option<CapManifest>,
+    live_families: &Arc<crate::bifaci::live_feed::LiveFamilies>,
     max_chunk: usize,
     handler_done_tx: &tokio::sync::mpsc::UnboundedSender<MessageId>,
     drops: &Arc<crate::bifaci::stats::DropCounters>,
@@ -5315,6 +5325,7 @@ fn spawn_handler(
     let credit_router = credit_router.clone();
     let live_feed_overruns = Arc::clone(live_feed_overruns);
     let live_feed_handles = Arc::clone(live_feed_handles);
+    let live_families = Arc::clone(live_families);
 
     tokio::spawn(async move {
         let manifest_for_outputs = manifest_clone.clone();
@@ -5322,6 +5333,7 @@ fn spawn_handler(
         let lf_ctx = LiveFeedContext::new(
             &cap_urn,
             manifest_clone,
+            live_families,
             live_feed_overruns,
             live_feed_handles,
         )
@@ -5499,6 +5511,7 @@ impl CartridgeRuntime {
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            live_families: Arc::new(crate::bifaci::live_feed::LiveFamilies::default()),
             policy: LivePolicy::unset(),
         };
         rt.register_standard_caps();
@@ -5527,6 +5540,7 @@ impl CartridgeRuntime {
             drop_counters: Arc::new(crate::bifaci::stats::DropCounters::new()),
             straggler_counters: Arc::new(crate::bifaci::stats::StragglerCounters::new()),
             live_feed_overruns: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            live_families: Arc::new(crate::bifaci::live_feed::LiveFamilies::default()),
             policy: LivePolicy::unset(),
         };
         rt.register_standard_caps();
@@ -5602,6 +5616,38 @@ impl CartridgeRuntime {
         F: Fn() -> Box<dyn Op<()>> + Send + Sync + 'static,
     {
         self.handlers.insert(cap_urn.to_string(), Arc::new(factory));
+    }
+
+    /// Register a live family this cartridge resolves itself (13.2 §Reference
+    /// Media): a reference `pattern` accepts — a live reference, carrying the
+    /// `live` marker — is opened by `opener`, and its feed delivers
+    /// `content_urn`. The feed is bridged exactly as a device's: the
+    /// selector's ring, overrun policy and stop conditions apply, its handle
+    /// is registered under the request, and a CloseStream to that request
+    /// closes it. `opener` produces into the sink until a push returns false
+    /// (the feed was closed or a stop condition fired), or ends the feed with
+    /// [`LiveFeedSink::finish`](crate::bifaci::live_feed::LiveFeedSink::finish)
+    /// or fails it with [`LiveFeedSink::fail`](crate::bifaci::live_feed::LiveFeedSink::fail).
+    ///
+    /// Refused, naming it, when `pattern` is not a live reference, when
+    /// `content_urn` is one, or when `pattern` covers a reference a built-in
+    /// device family or an already registered family covers.
+    pub fn register_live_family<F>(
+        &mut self,
+        pattern: &str,
+        content_urn: &str,
+        opener: F,
+    ) -> Result<(), RuntimeError>
+    where
+        F: Fn(
+                &crate::bifaci::live_feed::LiveFeedSelector,
+                crate::bifaci::live_feed::LiveFeedSink,
+            ) -> Result<Option<StreamMeta>, RuntimeError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Arc::make_mut(&mut self.live_families).register(pattern, content_urn, Arc::new(opener))
     }
 
     /// Register an Op type for a cap URN. The type must implement Op<()> + Default.
@@ -5925,6 +5971,7 @@ impl CartridgeRuntime {
         let cli_lf_ctx = LiveFeedContext::new(
             &cap.urn_string(),
             self.manifest.clone(),
+            Arc::clone(&self.live_families),
             Arc::clone(&self.live_feed_overruns),
             cli_feed_handles,
         )
@@ -6623,6 +6670,7 @@ impl CartridgeRuntime {
                     &output_tx,
                     &pending_peer_requests,
                     &self.manifest,
+                    &self.live_families,
                     negotiated_limits.max_chunk,
                     &handler_done_tx,
                     &self.drop_counters,
@@ -6834,6 +6882,7 @@ impl CartridgeRuntime {
                                 &output_tx,
                                 &pending_peer_requests,
                                 &self.manifest,
+                                &self.live_families,
                                 negotiated_limits.max_chunk,
                                 &handler_done_tx,
                                 &self.drop_counters,
@@ -8662,6 +8711,7 @@ mod tests {
         let ctx = LiveFeedContext::new(
             "cap:drain;in=\"media:feed-frames\";out=\"media:enc=utf8;fmt=json;record\"",
             Some(manifest),
+            Arc::new(crate::bifaci::live_feed::LiveFamilies::default()),
             Arc::clone(&overruns),
             Arc::clone(&handles),
         )
@@ -8764,6 +8814,7 @@ mod tests {
         let ctx = LiveFeedContext::new(
             &cap_urn,
             Some(manifest),
+            Arc::new(crate::bifaci::live_feed::LiveFamilies::default()),
             Arc::clone(&overruns),
             Arc::clone(&handles),
         )
@@ -8827,6 +8878,198 @@ mod tests {
             err.to_string().contains("does not conform"),
             "the error names the conformance failure: {err}"
         );
+    }
+
+    // ── Live families a cartridge resolves itself ──
+
+    /// A family the test cartridge registers: an endless ticker whose items are
+    /// their own index, produced until a push says the feed is closed.
+    const TICKS: &str = "media:live;ticks";
+    const TICK: &str = "media:tick";
+
+    fn ticks_family() -> Arc<crate::bifaci::live_feed::LiveFamilies> {
+        let mut families = crate::bifaci::live_feed::LiveFamilies::default();
+        families
+            .register(
+                TICKS,
+                TICK,
+                Arc::new(|_selector, sink| {
+                    std::thread::spawn(move || {
+                        let mut index: u64 = 0;
+                        while sink.push(crate::bifaci::live_feed::LiveFeedItem {
+                            payload: index.to_be_bytes().to_vec(),
+                            pts_us: index * 1000,
+                            capture_ts_us: 0,
+                        }) {
+                            index += 1;
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                    });
+                    let mut meta = StreamMeta::new();
+                    meta.insert("feed".to_string(), ciborium::Value::Text("ticks".to_string()));
+                    Ok(Some(meta))
+                }),
+            )
+            .expect("the ticks family registers");
+        Arc::new(families)
+    }
+
+    /// A context for `cap_urn`, whose one arg is `arg_urn` piped as `stdin_urn`,
+    /// resolving through the ticks family.
+    fn ticks_ctx(
+        cap_urn: &str,
+        arg_urn: &str,
+        stdin_urn: &str,
+    ) -> (LiveFeedContext, Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>>) {
+        let manifest_json = format!(
+            r#"{{"name":"TickCartridge","version":"1.0.0","channel":"release","registry_url":null,"description":"Its own live family","cap_groups":[{{"name":"default","caps":[{{"urn":"{}","title":"Ticks","aliases":["ticks"],"args":[{{"media_urn":"{arg_urn}","name":"input","required":true,"is_sequence":true,"sources":[{{"stdin":"{stdin_urn}"}}]}}]}}]}}]}}"#,
+            cap_urn.replace('"', "\\\"")
+        );
+        let manifest: CapManifest = serde_json::from_str(&manifest_json).expect("tick manifest must parse");
+        let handles: Arc<Mutex<Vec<crate::bifaci::live_feed::LiveFeedHandle>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let ctx = LiveFeedContext::new(
+            cap_urn,
+            Some(manifest),
+            ticks_family(),
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::clone(&handles),
+        )
+        .expect("tick context must build");
+        (ctx, handles)
+    }
+
+    fn send_reference(raw_tx: &crossbeam_channel::Sender<Frame>, rid: &MessageId, reference: &str, selector: &str) {
+        let mut payload = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Text(selector.to_string()), &mut payload).unwrap();
+        let checksum = Frame::compute_checksum(&payload);
+        raw_tx.send(Frame::stream_start(rid.clone(), "ref".to_string(), reference.to_string(), None)).unwrap();
+        raw_tx.send(Frame::chunk(rid.clone(), "ref".to_string(), 0, payload, 0, checksum)).unwrap();
+        raw_tx.send(Frame::stream_end(rid.clone(), "ref".to_string(), 1)).unwrap();
+        raw_tx.send(Frame::end(rid.clone(), None)).unwrap();
+    }
+
+    fn tick_index(value: ciborium::Value) -> u64 {
+        match value {
+            ciborium::Value::Bytes(bytes) => u64::from_be_bytes(bytes.try_into().expect("a tick is 8 bytes")),
+            other => panic!("a tick is bytes, got {other:?}"),
+        }
+    }
+
+    // TEST8163: a live family the cartridge registered resolves like a device:
+    // the arg declaring the family's reference is handed an unbounded sequence
+    // labeled with its stdin content, carrying the opener's stream meta, its
+    // handle is registered for stop, and the selector's stop condition ends the
+    // feed — the opener produces without end, and exactly `max_items` arrive.
+    #[tokio::test]
+    async fn test8163_a_registered_live_family_resolves_and_its_stop_condition_applies() {
+        let cap = format!("cap:drain-ticks;in=\"{TICK}\";out=\"media:enc=utf8;fmt=json;record\"");
+        let (ctx, handles) = ticks_ctx(&cap, TICKS, TICK);
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        let rid = MessageId::new_uuid();
+        send_reference(&raw_tx, &rid, TICKS, r#"{"stop":{"max_items":4}}"#);
+        drop(raw_tx);
+
+        let mut package = demux_multi_stream(raw_rx, None, Some(ctx), None);
+        let mut stream = package.recv().await.expect("the feed is delivered").expect("it resolves");
+        assert_eq!(stream.media_urn(), TICK, "labeled with the arg's content");
+        assert!(stream.is_unbounded(), "a feed makes no length promise");
+        assert_eq!(
+            stream.stream_meta().and_then(|m| m.get("feed")).and_then(|v| v.as_text()),
+            Some("ticks"),
+            "the opener's stream meta rides STREAM_START"
+        );
+        let mut ticks = Vec::new();
+        while let Some(item) = stream.recv().await {
+            ticks.push(tick_index(item.expect("items deliver cleanly").0));
+        }
+        assert_eq!(ticks, vec![0, 1, 2, 3], "the selector's max_items ends the family's feed");
+        assert_eq!(handles.lock().unwrap().len(), 1, "the open feed registered its handle");
+    }
+
+    // TEST8164: a transport-blind cap consumes a registered family through its
+    // main input when the family's content conforms to it, and is refused,
+    // naming the conformance, when it does not.
+    #[tokio::test]
+    async fn test8164_a_registered_family_feeds_a_transport_blind_main_input() {
+        let cap = format!("cap:consume;in=\"{TICK}\";out=\"media:enc=utf8;fmt=json;record\"");
+        let (ctx, _handles) = ticks_ctx(&cap, TICK, TICK);
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        let rid = MessageId::new_uuid();
+        send_reference(&raw_tx, &rid, TICKS, r#"{"stop":{"max_items":2}}"#);
+        drop(raw_tx);
+        let mut package = demux_multi_stream(raw_rx, None, Some(ctx), None);
+        let mut stream = package.recv().await.expect("the feed is delivered").expect("it resolves");
+        assert_eq!(stream.media_urn(), TICK);
+        let mut count = 0;
+        while let Some(item) = stream.recv().await {
+            item.expect("items deliver cleanly");
+            count += 1;
+        }
+        assert_eq!(count, 2);
+
+        let other = "media:image;video-frame";
+        let cap = format!("cap:consume;in=\"{other}\";out=\"media:enc=utf8;fmt=json;record\"");
+        let (ctx, _handles) = ticks_ctx(&cap, other, other);
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        send_reference(&raw_tx, &MessageId::new_uuid(), TICKS, "{}");
+        drop(raw_tx);
+        let mut package = demux_multi_stream(raw_rx, None, Some(ctx), None);
+        match package.recv().await.expect("the refusal is delivered") {
+            Err(e) => assert!(e.to_string().contains("does not conform"), "{e}"),
+            Ok(_) => panic!("a family whose content the main input does not take is refused"),
+        }
+    }
+
+    // TEST8165: a stop reaches a registered family's feed as it reaches a
+    // device's: closing the registered handle (what a CloseStream to the
+    // request does) ends the opener's production, the items already given are
+    // delivered, and the stream ends cleanly — no error, no further items.
+    #[tokio::test]
+    async fn test8165_closing_a_registered_familys_feed_drains_and_ends_it() {
+        let cap = format!("cap:drain-ticks;in=\"{TICK}\";out=\"media:enc=utf8;fmt=json;record\"");
+        let (ctx, handles) = ticks_ctx(&cap, TICKS, TICK);
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        send_reference(&raw_tx, &MessageId::new_uuid(), TICKS, "{}");
+        drop(raw_tx);
+        let mut package = demux_multi_stream(raw_rx, None, Some(ctx), None);
+        let mut stream = package.recv().await.expect("the feed is delivered").expect("it resolves");
+        let mut ticks = Vec::new();
+        for _ in 0..3 {
+            let item = stream.recv().await.expect("the feed is running");
+            ticks.push(tick_index(item.expect("items deliver cleanly").0));
+        }
+        for handle in handles.lock().unwrap().iter() {
+            handle.close();
+        }
+        while let Some(item) = stream.recv().await {
+            ticks.push(tick_index(item.expect("a stopped feed ends cleanly, not with an error").0));
+        }
+        assert_eq!(ticks[..3], [0, 1, 2], "in order from the first");
+        assert!(ticks.windows(2).all(|w| w[1] == w[0] + 1), "nothing skipped: {ticks:?}");
+        assert!(handles.lock().unwrap().iter().all(|h| h.is_closed()));
+    }
+
+    // TEST8166: a live family is refused, naming why, when its pattern is no
+    // live reference, when its content is one, when it is a built-in device
+    // family, or when it covers references a registered family covers.
+    #[test]
+    fn test8166_a_live_family_that_cannot_be_one_is_refused() {
+        let opener: crate::bifaci::live_feed::LiveFeedOpener = Arc::new(|_, _| Ok(None));
+        let refused = |families: &mut crate::bifaci::live_feed::LiveFamilies, pattern: &str, content: &str| {
+            match families.register(pattern, content, Arc::clone(&opener)) {
+                Err(e) => e.to_string(),
+                Ok(()) => panic!("{pattern} → {content} should be refused"),
+            }
+        };
+        let mut families = crate::bifaci::live_feed::LiveFamilies::default();
+        assert!(refused(&mut families, "media:ticks", TICK).contains("does not carry the `live` marker"));
+        assert!(refused(&mut families, TICKS, "media:live;other").contains("is itself a live reference"));
+        assert!(refused(&mut families, "media:live;synthetic", TICK).contains("built-in device family"));
+        assert!(refused(&mut families, "media:live", TICK).contains("built-in device family"));
+        families.register(TICKS, TICK, Arc::clone(&opener)).expect("a family of its own registers");
+        assert!(refused(&mut families, "media:live;ticks;fast", TICK).contains("one reference has one opener"));
+        assert!(refused(&mut families, "media:live;ticks", "media:other").contains("one reference has one opener"));
     }
 
     // TEST8129: overrun under drop-oldest — a flooding feed with a lagging

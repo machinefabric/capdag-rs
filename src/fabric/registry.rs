@@ -2027,6 +2027,46 @@ impl FabricRegistry {
         Ok(None)
     }
 
+    /// The cap a host asks to open a live reference of a CARTRIDGE's family
+    /// (`metadata.opened_by` on the matching live media def, by urn
+    /// equivalence; 13.2 §Reference Media, host resolution). `Ok(None)` when
+    /// no live def matches the reference or the def names no opener — a
+    /// device family is opened by the host itself. A named opener that is no
+    /// cap URN, or no cap of this fabric, is a fabric defect and an error.
+    pub async fn live_source_opened_by(
+        &self,
+        reference_urn: &crate::MediaUrn,
+    ) -> Result<Option<crate::Cap>, FabricRegistryError> {
+        for (def_urn, _, _) in self.live_source_defs().await? {
+            let matches = crate::MediaUrn::from_string(&def_urn)
+                .map(|u| u.is_equivalent(reference_urn).unwrap_or(false))
+                .unwrap_or(false);
+            if !matches {
+                continue;
+            }
+            let spec = self.get_media_def(&def_urn).await?;
+            let Some(opened_by) = spec.metadata.as_ref().and_then(|m| m.get("opened_by")) else {
+                return Ok(None);
+            };
+            let opened_by = opened_by.as_str().ok_or_else(|| {
+                FabricRegistryError::CacheError(format!(
+                    "live media def '{}' has a metadata.opened_by that is not a cap URN string: \
+                     {opened_by}",
+                    spec.urn
+                ))
+            })?;
+            let cap = self.get_cap(opened_by).await.map_err(|e| {
+                FabricRegistryError::CacheError(format!(
+                    "live media def '{}' names '{opened_by}' as the cap that opens it, and the \
+                     fabric has no such cap: {e}",
+                    spec.urn
+                ))
+            })?;
+            return Ok(Some(cap));
+        }
+        Ok(None)
+    }
+
     /// Returns all media URNs registered for the given file extension.
     pub fn media_urns_for_extension(
         &self,
