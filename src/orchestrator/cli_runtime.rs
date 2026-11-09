@@ -252,21 +252,6 @@ impl CliHost {
             return Ok(());
         }
 
-        if self.manager.is_none() {
-            let mut manager = CartridgeManager::new(
-                rt.cartridge_dir.clone(),
-                rt.registry_url.clone(),
-                rt.channel,
-                rt.fabric_manifest_version,
-                rt.dev_binaries.clone(),
-                crate::bifaci::trust::content_trust(),
-                rt.fabric_registry.config().anchor.clone(),
-                crate::bifaci::trust::charter_trust(),
-            );
-            manager.init().await?;
-            self.manager = Some(manager);
-        }
-
         // Bundled cartridges are discovered once, on the first segment, and hosted
         // beside the dev/registry cartridges this segment resolves.
         let mut resolved = Vec::new();
@@ -299,11 +284,25 @@ impl CliHost {
             .copied()
             .filter(|cap| !self.bundle_provides(cap))
             .collect();
-        {
-            let manager = self
-                .manager
-                .as_ref()
-                .expect("initialised immediately above");
+        // The manager — and with it the registry it syncs and must verify — is
+        // made only when a cap is not the bundle's. A segment of bundled caps
+        // asks no registry anything, so it runs where none can be reached.
+        if !unbundled.is_empty() {
+            if self.manager.is_none() {
+                let mut manager = CartridgeManager::new(
+                    rt.cartridge_dir.clone(),
+                    rt.registry_url.clone(),
+                    rt.channel,
+                    rt.fabric_manifest_version,
+                    rt.dev_binaries.clone(),
+                    crate::bifaci::trust::content_trust(),
+                    rt.fabric_registry.config().anchor.clone(),
+                    crate::bifaci::trust::charter_trust(),
+                );
+                manager.init().await?;
+                self.manager = Some(manager);
+            }
+            let manager = self.manager.as_ref().expect("made immediately above");
             resolved.extend(manager.resolve_cartridges(&unbundled).await?);
         }
 
