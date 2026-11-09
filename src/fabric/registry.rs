@@ -317,6 +317,48 @@ enum FetchKey {
     Alias { name: String, defver: u32 },
 }
 
+/// The definitions the registry has answered it does not hold, each at the
+/// definition version asked for, with the answer. A definition version is
+/// immutable once published, so the answer stands for as long as the registry
+/// is pinned: such a definition is not asked for again, in the foreground or
+/// in the background, and every later lookup gets the same `NotFound` from
+/// here. Only that answer is kept. A registry failing to answer (an HTTP
+/// error, the network blocked) is not, and the next lookup asks again.
+#[derive(Clone, Debug, Default)]
+struct Unserved(Arc<Mutex<HashMap<FetchKey, String>>>);
+
+impl Unserved {
+    /// The `NotFound` the registry gave for `key`, if it gave one.
+    fn answer(&self, key: &FetchKey) -> Option<FabricRegistryError> {
+        let answers = self.0.lock().ok()?;
+        answers.get(key).map(|message| FabricRegistryError::NotFound(message.clone()))
+    }
+
+    /// Keep `result` for `key` when it is the registry saying it does not
+    /// hold the definition.
+    fn keep<T>(&self, key: FetchKey, result: &Result<T, FabricRegistryError>) {
+        let Err(FabricRegistryError::NotFound(message)) = result else {
+            return;
+        };
+        let Ok(mut answers) = self.0.lock() else {
+            return;
+        };
+        if answers.insert(key.clone(), message.clone()).is_none() {
+            tracing::warn!(
+                target: "capdag::fabric::registry",
+                key = ?key, error = %message,
+                "The registry does not hold this definition; it is not asked for again."
+            );
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut answers) = self.0.lock() {
+            answers.clear();
+        }
+    }
+}
+
 /// A versioned registry snapshot. Mirrors `fabric/manifest.schema.json`
 /// on the wire.
 ///
@@ -405,6 +447,8 @@ pub struct FabricRegistry {
     offline_flag: Arc<AtomicBool>,
     fetch_queue_tx: Option<mpsc::UnboundedSender<FetchKey>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
+    /// The definitions the registry answered it does not hold.
+    unserved: Unserved,
     cache_revision_tx: watch::Sender<u64>,
 }
 
@@ -631,6 +675,7 @@ impl FabricRegistry {
         let extension_index = Arc::new(Mutex::new(extension_index_map));
         let manifest_arc = Arc::new(Mutex::new(manifest));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
+        let unserved = Unserved::default();
         let offline_flag = Arc::new(AtomicBool::new(false));
         let (cache_revision_tx, _) = watch::channel(0u64);
 
@@ -648,6 +693,7 @@ impl FabricRegistry {
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
+                    unserved.clone(),
                     Arc::clone(&offline_flag),
                     locations.clone(),
                     cache_revision_tx.clone(),
@@ -673,6 +719,7 @@ impl FabricRegistry {
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
+            unserved,
             cache_revision_tx,
         };
 
@@ -793,6 +840,7 @@ impl FabricRegistry {
         }
         let defver = self.cap_defver(&normalized_urn)?;
         fetch_one_cap_atomic(
+            &self.unserved,
             &self.client,
             &self.cache_dir,
             &self.cached_caps,
@@ -835,16 +883,6 @@ impl FabricRegistry {
     /// manifest. Same rules as `cap_defver`.
     fn media_defver(&self, normalized_urn: &str) -> Result<u32, FabricRegistryError> {
         if self.manifest_version == 0 {
-            return Ok(0);
-        }
-        // The empty / wildcard URN `media:` is a sentinel — caps use it
-        // to denote "any media", and it has no published spec. Anywhere
-        // we resolve a URN to a defver we must skip it; the upstream
-        // fetch path already special-cases it for fetching, so we just
-        // mirror that here by returning 0 (which would map to a flat
-        // path that doesn't exist, but the caller never reaches the
-        // fetch with this URN).
-        if normalized_urn == "media:" {
             return Ok(0);
         }
         let m = self.manifest.lock().map_err(|e| {
@@ -942,6 +980,7 @@ impl FabricRegistry {
         }
         let defver = self.alias_defver(&normalized)?;
         fetch_one_alias(
+            &self.unserved,
             &self.client,
             &self.cache_dir,
             &self.cached_aliases,
@@ -1364,6 +1403,7 @@ impl FabricRegistry {
         set: &mut tokio::task::JoinSet<(String, Result<StoredAlias, FabricRegistryError>)>,
         name: String,
     ) {
+        let unserved = self.unserved.clone();
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let cached_aliases = Arc::clone(&self.cached_aliases);
@@ -1396,6 +1436,7 @@ impl FabricRegistry {
         };
         set.spawn(async move {
             let result = fetch_one_alias(
+                &unserved,
                 &client,
                 &cache_dir,
                 &cached_aliases,
@@ -1417,6 +1458,7 @@ impl FabricRegistry {
         set: &mut tokio::task::JoinSet<(String, Result<Cap, FabricRegistryError>)>,
         urn: String,
     ) {
+        let unserved = self.unserved.clone();
         let client = self.client.clone();
         let cache_dir = self.cache_dir.clone();
         let cached_caps = Arc::clone(&self.cached_caps);
@@ -1449,6 +1491,7 @@ impl FabricRegistry {
                 }
             };
             let result = fetch_one_cap_atomic(
+                &unserved,
                 &client,
                 &cache_dir,
                 &cached_caps,
@@ -1581,6 +1624,7 @@ impl FabricRegistry {
                 tokio::time::timeout(
                     SYNC_FETCH_DEADLINE,
                     fetch_one_cap_atomic(
+                        &self.unserved,
                         &self.client,
                         &self.cache_dir,
                         &self.cached_caps,
@@ -1605,7 +1649,7 @@ impl FabricRegistry {
                 tracing::debug!(
                     target: "capdag::fabric::registry",
                     urn = %normalized_urn, error = %e,
-                    "Synchronous cap fetch errored within deadline; enqueueing for background fetch."
+                    "Synchronous cap fetch failed within the deadline; it is fetched in the background unless the registry said it does not hold it."
                 );
             }
             Err(_elapsed) => {
@@ -1809,6 +1853,7 @@ impl FabricRegistry {
         }
         let defver = self.media_defver(&normalized)?;
         fetch_one_media_def(
+            &self.unserved,
             &self.client,
             &self.cache_dir,
             &self.cached_media_defs,
@@ -1888,6 +1933,7 @@ impl FabricRegistry {
                 tokio::time::timeout(
                     SYNC_FETCH_DEADLINE,
                     fetch_one_media_def(
+                        &self.unserved,
                         &self.client,
                         &self.cache_dir,
                         &self.cached_media_defs,
@@ -1911,7 +1957,7 @@ impl FabricRegistry {
                 tracing::debug!(
                     target: "capdag::fabric::registry",
                     urn = %normalized, error = %e,
-                    "Synchronous media-def fetch errored within deadline; enqueueing for background fetch."
+                    "Synchronous media-def fetch failed within the deadline; it is fetched in the background unless the registry said it does not hold it."
                 );
             }
             Err(_elapsed) => {
@@ -2130,12 +2176,14 @@ impl FabricRegistry {
         &self.cache_dir
     }
 
-    /// Invalidate every cache for this registry — in-memory maps and the
-    /// entire on-disk cache tree, INCLUDING the manifest snapshot. After
+    /// Invalidate every cache for this registry — in-memory maps, what the
+    /// registry answered it does not hold, and the entire on-disk cache tree,
+    /// INCLUDING the manifest snapshot. After
     /// this the next lookup (or a freshly constructed `FabricRegistry`)
     /// re-fetches the manifest and all bodies from the network, so this is
     /// the way to force a full renewal against a mutated channel.
     pub fn clear_cache(&self) -> Result<(), FabricRegistryError> {
+        self.unserved.clear();
         if let Ok(mut g) = self.cached_caps.lock() {
             g.clear();
         }
@@ -2237,6 +2285,9 @@ impl FabricRegistry {
         let Some(tx) = self.fetch_queue_tx.as_ref() else {
             return;
         };
+        if self.unserved.answer(&key).is_some() {
+            return;
+        }
         let mut in_queue = match self.fetch_in_queue.lock() {
             Ok(g) => g,
             Err(_) => return,
@@ -2614,6 +2665,7 @@ impl FabricRegistry {
         let extension_index = Arc::new(Mutex::new(HashMap::new()));
         let manifest_arc = Arc::new(Mutex::new(Manifest::empty(manifest_version)));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
+        let unserved = Unserved::default();
         let offline_flag = Arc::new(AtomicBool::new(false));
         let client = reqwest::Client::new();
         let (cache_revision_tx, _) = watch::channel(0u64);
@@ -2632,6 +2684,7 @@ impl FabricRegistry {
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
+                    unserved.clone(),
                     Arc::clone(&offline_flag),
                     locations.clone(),
                     cache_revision_tx.clone(),
@@ -2657,6 +2710,7 @@ impl FabricRegistry {
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
+            unserved,
             cache_revision_tx,
         };
         registry.ensure_identity_cap();
@@ -2723,6 +2777,18 @@ async fn fetch_body(
     .await
 }
 
+/// What a registry's answer without a body means. A 404 is the registry saying
+/// it does not hold `what` (`NotFound`); any other status — a 503 that outlasted
+/// the retries, a 500, a 403 — is the registry failing to answer
+/// (`HttpError`), which says nothing about whether it holds it.
+fn unserved_status(status: reqwest::StatusCode, what: &str, url: &str) -> FabricRegistryError {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        FabricRegistryError::NotFound(format!("{what} not found in registry (HTTP {status}) at {url}"))
+    } else {
+        FabricRegistryError::HttpError(format!("{what} was not served (HTTP {status}) at {url}"))
+    }
+}
+
 /// A cap definition as a registry served it: parsed, then held to the
 /// definition rules (`capdag/docs/10-validation-rules.md`).
 ///
@@ -2766,6 +2832,37 @@ fn alias_url_and_cache_path(
 /// as a cap or media URN.
 #[allow(clippy::too_many_arguments)]
 async fn fetch_one_alias(
+    unserved: &Unserved,
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_aliases: &Arc<Mutex<HashMap<String, StoredAlias>>>,
+    offline_flag: &Arc<AtomicBool>,
+    locations: &FabricLocations,
+    cache_revision_tx: &watch::Sender<u64>,
+    normalized_name: &str,
+    defver: u32,
+) -> Result<StoredAlias, FabricRegistryError> {
+    let key = FetchKey::Alias { name: normalized_name.to_string(), defver };
+    if let Some(answer) = unserved.answer(&key) {
+        return Err(answer);
+    }
+    let result = fetch_alias_from_registry(
+        client,
+        cache_dir,
+        cached_aliases,
+        offline_flag,
+        locations,
+        cache_revision_tx,
+        normalized_name,
+        defver,
+    )
+    .await;
+    unserved.keep(key, &result);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_alias_from_registry(
     client: &reqwest::Client,
     cache_dir: &Path,
     cached_aliases: &Arc<Mutex<HashMap<String, StoredAlias>>>,
@@ -2797,10 +2894,7 @@ async fn fetch_one_alias(
             ))
         })?;
     if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "alias '{}' not found in registry (HTTP {}) at {}",
-            normalized_name, status, url
-        )));
+        return Err(unserved_status(status, &format!("alias '{}'", normalized_name), &url));
     }
     let alias: StoredAlias = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
@@ -2936,10 +3030,7 @@ async fn fetch_one_dim(
         .await
         .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch dim '{}': {}", name, e)))?;
     if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "dim '{}' not found in registry (HTTP {}) at {}",
-            name, status, url
-        )));
+        return Err(unserved_status(status, &format!("dim '{}'", name), &url));
     }
     let dim = checked_dim(&body, name, defver)?;
     let entry = DimCacheEntry {
@@ -3117,7 +3208,8 @@ async fn ensure_dims_cached(
 /// `in=` and `out=`, every arg's URN and the type it accepts (its stdin
 /// source's, or its `accepts`), and every output's URN — the main one and
 /// the others alike, since each is the type of a node a machine can hold.
-/// The wildcard `media:` names no definition and is left out.
+/// The universal type `media:` is among them: the fabric defines it like any
+/// other media URN, and a node of that type is drawn with its title.
 ///
 /// A malformed URN means the definition is corrupt: it is an error, never a
 /// URN quietly skipped.
@@ -3125,7 +3217,7 @@ fn referenced_media_urns(cap: &Cap) -> Result<Vec<String>, FabricRegistryError> 
     let mut referenced: Vec<String> = Vec::new();
     let mut push = |urn: &str| -> Result<(), FabricRegistryError> {
         let normalized = normalize_media_urn(urn)?;
-        if normalized != "media:" && !referenced.contains(&normalized) {
+        if !referenced.contains(&normalized) {
             referenced.push(normalized);
         }
         Ok(())
@@ -3152,6 +3244,49 @@ fn referenced_media_urns(cap: &Cap) -> Result<Vec<String>, FabricRegistryError> 
 /// snapshots are required to be self-consistent.
 #[allow(clippy::too_many_arguments)]
 async fn fetch_one_cap_atomic(
+    unserved: &Unserved,
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_caps: &Arc<Mutex<HashMap<String, Cap>>>,
+    cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
+    extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    manifest: &Arc<Mutex<Manifest>>,
+    offline_flag: &Arc<AtomicBool>,
+    locations: &FabricLocations,
+    manifest_version: u32,
+    cache_revision_tx: &watch::Sender<u64>,
+    normalized_urn: &str,
+    defver: u32,
+) -> Result<Cap, FabricRegistryError> {
+    let key = FetchKey::Cap { urn: normalized_urn.to_string(), defver };
+    if let Some(answer) = unserved.answer(&key) {
+        return Err(answer);
+    }
+    let result = fetch_cap_from_registry(
+        unserved,
+        client,
+        cache_dir,
+        cached_caps,
+        cached_media_defs,
+        cached_dims,
+        extension_index,
+        manifest,
+        offline_flag,
+        locations,
+        manifest_version,
+        cache_revision_tx,
+        normalized_urn,
+        defver,
+    )
+    .await;
+    unserved.keep(key, &result);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_cap_from_registry(
+    unserved: &Unserved,
     client: &reqwest::Client,
     cache_dir: &Path,
     cached_caps: &Arc<Mutex<HashMap<String, Cap>>>,
@@ -3179,10 +3314,11 @@ async fn fetch_one_cap_atomic(
         .await
         .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch cap: {}", e)))?;
     if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Cap '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn, defver, status, url
-        )));
+        return Err(unserved_status(
+            status,
+            &format!("Cap '{}' (defver {})", normalized_urn, defver),
+            &url,
+        ));
     }
     let cap = checked_cap_definition(&body, normalized_urn)?;
 
@@ -3221,6 +3357,7 @@ async fn fetch_one_cap_atomic(
             }
         };
         if let Err(e) = fetch_one_media_def(
+            unserved,
             client,
             cache_dir,
             cached_media_defs,
@@ -3301,7 +3438,46 @@ async fn fetch_one_cap_atomic(
 /// Atomic media-def fetcher: the media def is cached only once every dim it
 /// names is cached (see `ensure_dims_cached`).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn fetch_one_media_def(
+async fn fetch_one_media_def(
+    unserved: &Unserved,
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
+    extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    manifest: &Arc<Mutex<Manifest>>,
+    manifest_version: u32,
+    offline_flag: &Arc<AtomicBool>,
+    locations: &FabricLocations,
+    cache_revision_tx: &watch::Sender<u64>,
+    normalized_urn: &str,
+    defver: u32,
+) -> Result<StoredMediaDef, FabricRegistryError> {
+    let key = FetchKey::Media { urn: normalized_urn.to_string(), defver };
+    if let Some(answer) = unserved.answer(&key) {
+        return Err(answer);
+    }
+    let result = fetch_media_def_from_registry(
+        client,
+        cache_dir,
+        cached_media_defs,
+        cached_dims,
+        extension_index,
+        manifest,
+        manifest_version,
+        offline_flag,
+        locations,
+        cache_revision_tx,
+        normalized_urn,
+        defver,
+    )
+    .await;
+    unserved.keep(key, &result);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_media_def_from_registry(
     client: &reqwest::Client,
     cache_dir: &Path,
     cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
@@ -3328,10 +3504,11 @@ pub(crate) async fn fetch_one_media_def(
         .await
         .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch media def: {}", e)))?;
     if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Media def '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn, defver, status, url
-        )));
+        return Err(unserved_status(
+            status,
+            &format!("Media def '{}' (defver {})", normalized_urn, defver),
+            &url,
+        ));
     }
     let spec: StoredMediaDef = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
@@ -3444,10 +3621,7 @@ async fn load_or_fetch_manifest(
             ))
         })?;
     if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Manifest v{} not found in registry (HTTP {}) at {}",
-            version, status, url
-        )));
+        return Err(unserved_status(status, &format!("Manifest v{}", version), &url));
     }
     let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!("Failed to parse manifest v{}: {}", version, e))
@@ -3588,6 +3762,7 @@ async fn run_fetch_consumer(
     extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: Arc<Mutex<Manifest>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
+    unserved: Unserved,
     offline_flag: Arc<AtomicBool>,
     locations: FabricLocations,
     cache_revision_tx: watch::Sender<u64>,
@@ -3606,6 +3781,7 @@ async fn run_fetch_consumer(
                     .unwrap_or(false);
                 if !already_cached {
                     match fetch_one_cap_atomic(
+                        &unserved,
                         &client,
                         &cache_dir,
                         &cached_caps,
@@ -3650,6 +3826,7 @@ async fn run_fetch_consumer(
                     .unwrap_or(false);
                 if !already_cached {
                     match fetch_one_media_def(
+                        &unserved,
                         &client,
                         &cache_dir,
                         &cached_media_defs,
@@ -3693,6 +3870,7 @@ async fn run_fetch_consumer(
                     .unwrap_or(false);
                 if !already_cached {
                     match fetch_one_alias(
+                        &unserved,
                         &client,
                         &cache_dir,
                         &cached_aliases,
@@ -3805,8 +3983,9 @@ mod alias_tests {
     // TEST12816: fetching a cap requires the definition of every media URN a
     // machine can meet through it: its in= and out=, every arg's own URN and
     // the type it accepts, and every output's URN — not the main output's
-    // alone. Each once; the wildcard names no definition; a URN that does not
-    // parse fails the footprint rather than being left out of it.
+    // alone. Each once, the universal type `media:` among them (it is a
+    // definition like any other); a URN that does not parse fails the
+    // footprint rather than being left out of it.
     #[test]
     fn test12816_a_caps_media_footprint_covers_every_output_and_accepted_type() {
         let mut cap = cap_with_urn(r#"cap:in="media:document;ext=pdf";footprint;out="media:enc=utf8""#);
@@ -3833,6 +4012,7 @@ mod alias_tests {
             "media:enc=utf8;second",
             "media:enc=utf8;accepted",
             "media:enc=utf8;rest",
+            "media:",
         ]
         .iter()
         .map(|urn| normalized(urn))
@@ -5082,5 +5262,179 @@ mod dim_tests {
         );
         let err = ensure(vec![DimRef::new("language", "en"), DimRef::new("language", "en")]).await.unwrap_err();
         assert!(matches!(&err, FabricRegistryError::ValidationError(m) if m.contains("named more than once")), "{err}");
+    }
+}
+
+// =============================================================================
+// SERVED FABRIC TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod served_fabric_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// The body the fabric publishes for `media:` (fabric/media/_identity.toml).
+    const ANY_MEDIA_BODY: &str = r#"{"urn":"media:","version":2,"title":"Any Media","media_type":"application/octet-stream","description":"Identity URN; matches any media value"}"#;
+
+    /// A fabric served over a real socket: each path answers with its status
+    /// and body, any other path is a 404, and every request's path is counted.
+    struct ServedFabric {
+        anchor: String,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ServedFabric {
+        async fn start(routes: Vec<(String, u16, String)>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let anchor = format!("http://{}", listener.local_addr().unwrap());
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&requests);
+            tokio::spawn(async move {
+                loop {
+                    let Ok((mut sock, _)) = listener.accept().await else { return };
+                    let routes = routes.clone();
+                    let seen = Arc::clone(&seen);
+                    tokio::spawn(async move {
+                        let mut buf = vec![0u8; 4096];
+                        let n = sock.read(&mut buf).await.unwrap_or(0);
+                        let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                        seen.lock().unwrap().push(path.clone());
+                        let (status, body) = routes
+                            .iter()
+                            .find(|(p, _, _)| *p == path)
+                            .map(|(_, s, b)| (*s, b.clone()))
+                            .unwrap_or((404, "not found".to_string()));
+                        let response = format!(
+                            "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        let _ = sock.write_all(response.as_bytes()).await;
+                        let _ = sock.flush().await;
+                    });
+                }
+            });
+            Self { anchor, requests }
+        }
+
+        fn requests_for(&self, path: &str) -> usize {
+            self.requests.lock().unwrap().iter().filter(|p| *p == path).count()
+        }
+    }
+
+    /// The path a media definition is published at.
+    fn media_path(urn: &str, defver: u32) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(urn.as_bytes());
+        format!("/media/{:x}/{defver}.json", hasher.finalize())
+    }
+
+    /// A registry pinned at `version` whose manifest holds `media`, reading the
+    /// served fabric, with an empty cache of its own: a fresh profile.
+    fn fresh_registry(anchor: &str, version: u32, media: &[(&str, u32)], cache: &Path) -> FabricRegistry {
+        let config = RegistryConfig { anchor: anchor.to_string(), ..RegistryConfig::default() };
+        let mut registry = FabricRegistry::new_for_test_with_config_and_version(config, version);
+        registry.cache_dir = cache.to_path_buf();
+        {
+            let mut manifest = registry.manifest.lock().unwrap();
+            for (urn, defver) in media {
+                manifest.media.insert(normalize_media_urn(urn).unwrap(), *defver);
+            }
+        }
+        registry
+    }
+
+    /// Wait until the background fetch queue is empty.
+    async fn drained(registry: &FabricRegistry) {
+        for _ in 0..200 {
+            if registry.fetch_in_queue.lock().unwrap().is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the background fetch queue did not drain");
+    }
+
+    // TEST1974: the universal type `media:` is a definition like any other:
+    // under a versioned manifest it resolves at the definition version the
+    // manifest pins, and a manifest that does not hold it does not resolve it.
+    #[test]
+    fn test1974_the_universal_type_resolves_at_its_pinned_defver() {
+        let cache = tempfile::TempDir::new().unwrap();
+        let registry = fresh_registry("https://fabric.invalid", 12, &[("media:", 2)], cache.path());
+        assert_eq!(registry.media_defver_for("media:").unwrap(), 2);
+
+        let without = fresh_registry("https://fabric.invalid", 12, &[], cache.path());
+        let err = without.media_defver_for("media:").unwrap_err();
+        assert!(
+            matches!(&err, FabricRegistryError::NotFound(m) if m == "media def 'media:' is not part of manifest v12"),
+            "{err}"
+        );
+    }
+
+    // TEST8025: a blank machine — the identity cap between two nodes of the
+    // universal type — is drawn on a fresh profile: with nothing cached, the
+    // registry fetches `media:` at the defver the manifest pins and each node
+    // carries the title the fabric gives it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test8025_a_blank_machine_is_drawn_with_nothing_cached() {
+        let served =
+            ServedFabric::start(vec![(media_path("media:", 2), 200, ANY_MEDIA_BODY.to_string())]).await;
+        let cache = tempfile::TempDir::new().unwrap();
+        let registry = fresh_registry(&served.anchor, 12, &[("media:", 2)], cache.path());
+
+        let machine =
+            crate::machine::parse_machine("identity cap:effect=none\nn0 -> identity -> n1", &registry).unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(&machine.to_render_payload_json(&registry).unwrap()).unwrap();
+        let nodes = payload["strands"][0]["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 2);
+        for node in nodes {
+            assert_eq!(node["urn"], "media:");
+            assert_eq!(node["title"], "Any Media");
+        }
+        assert_eq!(served.requests_for(&media_path("media:", 2)), 1);
+    }
+
+    // TEST8044: a definition the registry answers 404 for is not asked for
+    // again: the lookup that met the 404 and every later one say it is not
+    // there, from memory, and nothing is queued to fetch it in the background.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test8044_a_definition_the_registry_does_not_hold_is_asked_for_once() {
+        let served = ServedFabric::start(vec![]).await;
+        let cache = tempfile::TempDir::new().unwrap();
+        let urn = "media:enc=utf8;withdrawn";
+        let registry = fresh_registry(&served.anchor, 12, &[(urn, 3)], cache.path());
+        let path = media_path(&normalize_media_urn(urn).unwrap(), 3);
+
+        for _ in 0..5 {
+            assert!(registry.get_cached_media_def(urn).is_none());
+            drained(&registry).await;
+        }
+        let err = registry.get_media_def(urn).await.unwrap_err();
+        assert!(matches!(&err, FabricRegistryError::NotFound(_)), "{err}");
+        assert_eq!(served.requests_for(&path), 1, "{:?}", served.requests.lock().unwrap());
+    }
+
+    // TEST8047: a registry that fails to answer (a 503 that outlasts the
+    // retries) is an HTTP error, not a definition it does not hold: the
+    // lookup fails, and the next one asks again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test8047_a_failed_answer_is_an_http_error_and_is_asked_again() {
+        let urn = "media:enc=utf8;unanswered";
+        let path = media_path(&normalize_media_urn(urn).unwrap(), 4);
+        let served = ServedFabric::start(vec![(path.clone(), 503, "busy".to_string())]).await;
+        let cache = tempfile::TempDir::new().unwrap();
+        let registry = fresh_registry(&served.anchor, 12, &[(urn, 4)], cache.path());
+
+        let err = registry.get_media_def(urn).await.unwrap_err();
+        assert!(matches!(&err, FabricRegistryError::HttpError(m) if m.contains("503")), "{err}");
+        let first = served.requests_for(&path);
+        assert!(first >= 1);
+        let err = registry.get_media_def(urn).await.unwrap_err();
+        assert!(matches!(&err, FabricRegistryError::HttpError(_)), "{err}");
+        assert!(served.requests_for(&path) > first, "the second lookup asks again");
     }
 }
