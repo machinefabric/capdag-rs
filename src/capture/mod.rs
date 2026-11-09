@@ -10,10 +10,12 @@
 //! the content stream. The op (or the engine's region driver) is
 //! transport-blind.
 //!
-//! This is NOT a plugin system: the set of capture backends is closed and
-//! known at compile time, dispatched by reference-URN family in plain code
-//! below — exactly as file paths are read by plain code, with no registry
-//! and no registration. The hardware backends (microphone, webcam) sit
+//! The set of DEVICE backends is closed and known at compile time,
+//! dispatched by reference-URN family in plain code below — exactly as file
+//! paths are read by plain code. A live family that is not a device is a
+//! cartridge's own: it registers the family and its opener with its
+//! runtime (`bifaci::live_feed::LiveFamilies`), which consults the
+//! cartridge's families before this dispatch. The hardware backends (microphone, webcam) sit
 //! behind the `capture` cargo feature (they carry the vendored ffmpeg
 //! device stack); the deterministic synthetic feed is always built. A
 //! reference whose family has no backend — or a hardware family in a build
@@ -45,6 +47,10 @@ pub const MICROPHONE_CONTENT: &str = "media:audio;audio-frames;pcm";
 pub const WEBCAM_REFERENCE: &str = "media:image;live;webcam";
 /// The content a resolved webcam feed delivers.
 pub const WEBCAM_CONTENT: &str = "media:image;video-frame";
+
+/// The reference of every device family this codebase resolves: the families a
+/// cartridge's own live family may not cover.
+pub const DEVICE_FAMILIES: [&str; 3] = [MEDIA_LIVE_SYNTHETIC, MICROPHONE_REFERENCE, WEBCAM_REFERENCE];
 
 /// The closed set of device families this codebase can resolve.
 enum Backend {

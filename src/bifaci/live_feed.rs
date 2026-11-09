@@ -2,8 +2,9 @@
 //!
 //! A live feed is an input that arrives BY REFERENCE: the wire value is a
 //! small selector record, and the resolving runtime — never the op —
-//! opens the device through the built-in capture dispatch
-//! (`crate::capture::open`, the device analog of file-path reading) and
+//! opens the feed: through a live family the cartridge registered
+//! ([`LiveFamilies`]), else through the built-in device dispatch
+//! (`crate::capture::open`, the device analog of file-path reading), and
 //! delivers an UNBOUNDED SEQUENCE stream of items labeled with the arg's
 //! stdin content URN. The op is transport-blind: it consumes frames exactly
 //! as it would consume a file's bytes, and cannot tell the difference.
@@ -19,14 +20,18 @@
 //!
 //! This module owns the feed TRANSPORT: the selector contract, the ring +
 //! feeder backpressure bridge ([`bridge_feed`]), the sink the capture
-//! backends push into, and the stop/drain handle. The capture backends
-//! themselves — which device families exist and how each opens — live in
-//! `crate::capture` as plain compile-time dispatch: capture is transport
-//! resolution, not a capability and not a plugin surface. Which runtime
-//! resolves is a deployment detail (13.2 §Reference Media): the cartridge
-//! runtime when the consumer is an op; the HOST when the cartridge cannot
-//! reach the device, or when the host itself consumes the items
-//! (engine-side per-item dispatch over a live source).
+//! backends push into, the stop/drain handle, and the live families a
+//! cartridge registers ([`LiveFamilies`]). The device families — which
+//! devices exist and how each opens — live in `crate::capture` as plain
+//! compile-time dispatch. A family that is not a device (a source a
+//! cartridge reaches, such as a market's quote stream) is the cartridge's
+//! own: it registers the family with an opener, and its feeds are bridged
+//! and stopped exactly as a device's. Which runtime resolves is a
+//! deployment detail (13.2 §Reference Media): the cartridge runtime when
+//! the consumer is an op; the HOST when the cartridge cannot reach the
+//! device, or when the host itself consumes the items (engine-side
+//! per-item dispatch over a live source) — a cartridge's family the host
+//! asks that cartridge to open.
 
 use crate::bifaci::cartridge_runtime::{RuntimeError, StreamMeta};
 use crate::urn::media_urn::MediaUrn;
@@ -166,7 +171,9 @@ impl FeedShared {
 }
 
 /// The capture backend's write side of a feed. Owned by the backend's capture
-/// thread; `push` applies the overrun policy at the capture edge.
+/// thread; `push` applies the overrun policy at the capture edge. A clone writes
+/// to the same feed.
+#[derive(Clone)]
 pub struct LiveFeedSink {
     shared: Arc<FeedShared>,
     max_items: Option<u64>,
@@ -460,6 +467,136 @@ pub fn bridge_feed(
         stream_meta,
         handle: LiveFeedHandle { shared, stream_id: None },
     })
+}
+
+// ---------------------------------------------------------------------------
+// Live families a cartridge resolves itself (13.2 §Reference Media)
+// ---------------------------------------------------------------------------
+
+/// What opens one live family's feeds: handed the selector and the feed's sink,
+/// it starts producing items into the sink (on a thread of its own) and returns
+/// the stream-level meta for STREAM_START. The shape of `crate::capture`'s
+/// built-in backends, so a cartridge's family is bridged exactly as a device is:
+/// the same ring, overrun policy, stop conditions and stop.
+pub type LiveFeedOpener = Arc<
+    dyn Fn(&LiveFeedSelector, LiveFeedSink) -> Result<Option<StreamMeta>, RuntimeError>
+        + Send
+        + Sync,
+>;
+
+/// One live family a cartridge resolves: every reference its pattern accepts is
+/// opened by its opener and delivers its content.
+#[derive(Clone)]
+struct LiveFamily {
+    pattern: MediaUrn,
+    content_urn: String,
+    opener: LiveFeedOpener,
+}
+
+/// The live families a runtime resolves (13.2 §Reference Media): the families a
+/// cartridge registered, then the built-in device families of `crate::capture`.
+/// A reference neither covers is a hard, named error.
+#[derive(Clone, Default)]
+pub struct LiveFamilies {
+    families: Vec<LiveFamily>,
+}
+
+impl LiveFamilies {
+    /// Register a family. `pattern` must be a live reference (it carries the
+    /// `live` marker) and `content_urn` a media URN that is not one. A family
+    /// that covers a reference a built-in device family or an already registered
+    /// family also covers is refused, naming both: one reference has one opener.
+    pub fn register(
+        &mut self,
+        pattern: &str,
+        content_urn: &str,
+        opener: LiveFeedOpener,
+    ) -> Result<(), RuntimeError> {
+        let parsed = MediaUrn::from_string(pattern).map_err(|e| {
+            RuntimeError::Handler(format!("live family '{pattern}' is not a valid media URN: {e}"))
+        })?;
+        if !parsed.is_live_feed() {
+            return Err(RuntimeError::Handler(format!(
+                "live family '{pattern}' does not carry the `live` marker: only a live reference \
+                 names a family"
+            )));
+        }
+        let content = MediaUrn::from_string(content_urn).map_err(|e| {
+            RuntimeError::Handler(format!(
+                "live family '{pattern}' delivers '{content_urn}', which is not a valid media URN: {e}"
+            ))
+        })?;
+        if content.is_live_feed() {
+            return Err(RuntimeError::Handler(format!(
+                "live family '{pattern}' delivers '{content_urn}', which is itself a live reference: \
+                 a feed delivers content"
+            )));
+        }
+        let overlaps = |a: &MediaUrn, b: &MediaUrn| {
+            a.accepts(b).unwrap_or(false) || b.accepts(a).unwrap_or(false)
+        };
+        for device in crate::capture::DEVICE_FAMILIES {
+            let device_urn = MediaUrn::from_string(device)
+                .expect("BUG: a device family constant is an invalid media URN");
+            if overlaps(&device_urn, &parsed) {
+                return Err(RuntimeError::Handler(format!(
+                    "live family '{pattern}' covers references the built-in device family \
+                     '{device}' covers, which capdag opens itself"
+                )));
+            }
+        }
+        if let Some(existing) = self.families.iter().find(|f| overlaps(&f.pattern, &parsed)) {
+            return Err(RuntimeError::Handler(format!(
+                "live family '{pattern}' covers references '{}', registered already, covers too: \
+                 one reference has one opener",
+                existing.pattern
+            )));
+        }
+        self.families.push(LiveFamily {
+            pattern: parsed,
+            content_urn: content_urn.to_string(),
+            opener,
+        });
+        Ok(())
+    }
+
+    fn find(&self, reference: &MediaUrn) -> Option<&LiveFamily> {
+        self.families
+            .iter()
+            .find(|family| family.pattern.accepts(reference).unwrap_or(false))
+    }
+
+    /// The content a reference's feed delivers: a registered family's, else a
+    /// built-in device family's. None when no family covers the reference.
+    pub fn content_urn_for(&self, reference: &MediaUrn) -> Option<String> {
+        match self.find(reference) {
+            Some(family) => Some(family.content_urn.clone()),
+            None => crate::capture::content_urn_for(reference).map(str::to_string),
+        }
+    }
+
+    /// Open the feed a reference names: through the registered family that
+    /// covers it, else through the built-in capture dispatch, which names a
+    /// reference no family covers.
+    pub fn open(
+        &self,
+        reference_urn: &str,
+        selector: LiveFeedSelector,
+        overruns_total: Arc<AtomicU64>,
+    ) -> Result<OpenedFeed, RuntimeError> {
+        let reference = MediaUrn::from_string(reference_urn).map_err(|e| {
+            RuntimeError::Handler(format!(
+                "live-feed reference URN '{reference_urn}' is not a valid media URN: {e}"
+            ))
+        })?;
+        match self.find(&reference) {
+            Some(family) => {
+                let opener = Arc::clone(&family.opener);
+                bridge_feed(selector, overruns_total, move |selector, sink| opener(selector, sink))
+            }
+            None => crate::capture::open(reference_urn, selector, overruns_total),
+        }
+    }
 }
 
 

@@ -25,6 +25,7 @@ pub mod cli_runtime;
 pub mod cli_writer;
 pub mod execute_plan;
 pub mod executor;
+pub(crate) mod host_feed;
 pub mod machine_plan;
 pub mod plan_converter;
 pub mod run_arguments;

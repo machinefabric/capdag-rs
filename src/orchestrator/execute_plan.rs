@@ -1909,30 +1909,61 @@ impl Run {
                 }
                 // A LIVE reference feeding a map directly is resolved by the
                 // HOST (13.2 §Reference Media, host resolution): this is the
-                // runtime that iterates the items, so it opens the device
-                // itself and dispatches one body per delivered item WHILE the
-                // capture runs.
+                // runtime that iterates the items, so it holds the feed and
+                // dispatches one body per delivered item WHILE the feed runs.
+                // A device it opens itself; a cartridge's family it asks that
+                // cartridge to open, through the cap the family's fabric
+                // definition names.
                 Held::Live {
                     reference_urn,
                     selector,
                     ..
                 } => {
-                    let selector = crate::bifaci::live_feed::LiveFeedSelector::parse(selector)
-                        .map_err(|e| {
-                            at_step(ExecutionError::HostError(format!(
-                                "live source '{reference_urn}' feeding map '{map}': {e}"
-                            )))
-                        })?;
-                    let opened = crate::capture::open(
-                        reference_urn,
-                        selector,
-                        Arc::new(std::sync::atomic::AtomicU64::new(0)),
-                    )
-                    .map_err(|e| {
+                    let reference = crate::MediaUrn::from_string(reference_urn).map_err(|e| {
                         at_step(ExecutionError::HostError(format!(
-                            "host capture for map '{map}': {e}"
+                            "live source '{reference_urn}' feeding map '{map}' is no media URN: {e}"
                         )))
                     })?;
+                    let opened = if crate::capture::content_urn_for(&reference).is_some() {
+                        let selector = crate::bifaci::live_feed::LiveFeedSelector::parse(selector)
+                            .map_err(|e| {
+                                at_step(ExecutionError::HostError(format!(
+                                    "live source '{reference_urn}' feeding map '{map}': {e}"
+                                )))
+                            })?;
+                        crate::capture::open(
+                            reference_urn,
+                            selector,
+                            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                        )
+                        .map_err(|e| {
+                            at_step(ExecutionError::HostError(format!(
+                                "host capture for map '{map}': {e}"
+                            )))
+                        })?
+                    } else {
+                        let opener = self
+                            .runtime
+                            .fabric_registry()
+                            .live_source_opened_by(&reference)
+                            .await
+                            .map_err(|e| at_step(ExecutionError::HostError(e.to_string())))?
+                            .ok_or_else(|| {
+                                at_step(ExecutionError::HostError(format!(
+                                    "live source '{reference_urn}' feeds map '{map}', and it is no \
+                                     device family and its fabric definition names no cap that \
+                                     opens it (metadata.opened_by)"
+                                )))
+                            })?;
+                        crate::orchestrator::host_feed::open_through_cartridge(
+                            self.runtime.clone(),
+                            reference_urn,
+                            selector.clone(),
+                            opener,
+                            cancel.clone(),
+                        )
+                        .map_err(&at_step)?
+                    };
                     // Register the tap so a run stop closes it (drain
                     // semantics, 15.2 §Runs Stop).
                     self.runtime.on_host_feed_open(&opened.handle);
