@@ -69,7 +69,9 @@ version = "1.0"
 # built.
 [dependencies.ffmpeg-bundle]
 git = "https://github.com/jowharshamshiri/ffmpeg-bundle"
-tag = "v1.49.0"
+# 1.51.0: ffmpeg compiled with the target's C flags, so a sysroot build links
+# archives built against the same sysroot.
+rev = "229333f58dd7ef7262f3d0c2462828f3c644a7cf"
 optional = true
 
 [dependencies.image]

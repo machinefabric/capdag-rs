@@ -4,7 +4,7 @@ Architecture: @{arch}
 Maintainer: MachineFabric <support@machinefabric.com>
 Section: utils
 Priority: optional
-Depends: libc6 (>= 2.31)
+Depends: libc6 (>= @{glibc}), libssl3 (>= 3.0.2), libasound2 (>= 1.2.6)
 Homepage: https://capdag.com
 Description: @{package} — machine-notation and single-cap executor CLI
  Runs machine-notation pipelines and individual capability executions, shipping

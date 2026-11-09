@@ -6,7 +6,8 @@
 # packages it and wires the /usr/bin/capdag launcher symlink. There is no compile
 # step here — the binary is built + baked-hash-staged by the workspace bundle step.
 
-# Prebuilt binary: no debuginfo extraction, no auto-generated deps, and none of rpm's
+# Prebuilt binary: no debuginfo extraction, no auto-generated deps (they are declared
+# below), and none of rpm's
 # post-install processing. That processing strips every binary in the payload, and the
 # bundled cartridges are verified by their baked hashes: a stripped one is refused.
 %global debug_package %{nil}
@@ -19,6 +20,13 @@ Release:        1%{?dist}
 Summary:        Machine-notation and single-cap executor CLI
 License:        Proprietary
 URL:            https://capdag.com
+# AutoReqProv is off, so what the bundle needs is stated here: the glibc its
+# programs are held to (the release's floor, refused below it by dnf naming the
+# version), OpenSSL 3 and ALSA, by the sonames they are linked against.
+Requires:       glibc >= @GLIBC@
+Requires:       libssl.so.3()(64bit)
+Requires:       libcrypto.so.3()(64bit)
+Requires:       libasound.so.2()(64bit)
 
 %description
 The capdag CLI runs machine-notation pipelines and individual capability
