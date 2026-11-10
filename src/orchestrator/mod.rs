@@ -32,6 +32,7 @@ pub mod observe;
 pub mod plan_converter;
 pub mod plan_view;
 pub mod run_arguments;
+pub mod run_control;
 pub mod run_flow;
 pub mod stream_io;
 pub mod transient;
@@ -58,15 +59,20 @@ pub use execute_plan::{
 
 pub use cli_cap::{
     classify_cap_token, map_invocation, render_cap_interface, synthesize_single_cap_notation,
+    InterfaceNames,
     CapInvocation, CapToken, SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
 };
 pub use cli_output::{emit_terminals, emit_terminals_by_output, extension_for_media, EmitOptions};
 pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_UNSCOPED_FLOW};
 pub use cli_session::{
-    finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, RunEnd, StrandHandle,
-    StrandReport, StrandRun,
+    finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, StrandFailure,
+    StrandHandle, StrandNote, StrandReport, StrandRun,
 };
 pub use cli_writer::{CliDiskWriter, PART_FILE_PREFIX};
+pub use run_control::{
+    exit_status, join_outcomes, stop_runs, RunAct, RunAsk, RunControl, RunOutcome, RunPhase,
+    ABORT_GRACE,
+};
 pub use transient::{
     read_sidecar, read_transient_item, TransientArtifact, TransientSidecar, TRANSIENT_DATA_FILE,
     TRANSIENT_SIDECAR, TRANSIENT_STAGING_SUFFIX,

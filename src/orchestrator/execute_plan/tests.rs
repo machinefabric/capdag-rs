@@ -756,6 +756,7 @@ async fn run_with(
         flags,
         ledger,
         callbacks,
+        Arc::new(RunControl::new()),
     )
     .await
 }
@@ -897,6 +898,7 @@ async fn test12773_a_plan_is_given_exactly_its_inputs() {
                 flags,
                 ledger,
                 RunCallbacks::default(),
+                Arc::new(RunControl::new()),
             )
             .await
             .map(|_| ())
@@ -1712,6 +1714,7 @@ async fn test12787_an_argument_update_lands_between_dispatches() {
                 HashMap::from([(slot, false)]),
                 ledger,
                 RunCallbacks::default(),
+                Arc::new(RunControl::new()),
             )
             .await
         })
@@ -1775,6 +1778,7 @@ async fn test1449_live_reference_reaches_segment_intact() {
         HashMap::from([(slot.clone(), false)]),
         ledger,
         RunCallbacks::default(),
+        Arc::new(RunControl::new()),
     )
     .await
     .unwrap();
@@ -1822,6 +1826,7 @@ async fn test1454_live_source_drives_a_map_host_side() {
             })),
             ..Default::default()
         },
+        Arc::new(RunControl::new()),
     )
     .await
     .expect("a live source drives the map host-side");
@@ -1998,6 +2003,7 @@ async fn test1460_a_node_recorded_on_disk_and_in_memory_is_refused() {
         HashMap::from([(slot, false)]),
         ledger,
         RunCallbacks::default(),
+        Arc::new(RunControl::new()),
     )
     .await
     .unwrap_err();

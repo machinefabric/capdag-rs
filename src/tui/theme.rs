@@ -2,9 +2,9 @@
 //! and marks are drawn with, and what kind of thing a medium is.
 //!
 //! The palette is FabricLoomUIKit's own (`styles/foundations.scss`), both
-//! appearances, so a run reads the same on the desktop and in a terminal:
-//! blue for what comes in, green for what goes out, amber for a loop, red for
-//! a failure. A terminal that does not draw 24-bit colour is given the nearest
+//! appearances, so a machine reads the same on the desktop and in a
+//! terminal: blue for what comes in, green for what goes out, amber for a
+//! warning, red for what is wrong. A terminal that does not draw 24-bit colour is given the nearest
 //! of its 256; one told `NO_COLOR` is given none, and everything a colour says
 //! is also said by a glyph or a word.
 
@@ -167,32 +167,29 @@ pub enum Tone {
     Source,
     /// What goes out.
     Target,
-    /// The system's accent: focus, selection, what is active.
+    /// The system's accent: focus, selection, what is in progress.
     Accent,
-    /// A loop, a wait, a warning.
+    /// A warning; a constant in the source.
     Warning,
     Success,
     Danger,
 }
 
-/// The look of everything drawn: palette, depth, glyphs, motion.
+/// The look of everything drawn: palette, depth, glyphs.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub appearance: Appearance,
     pub depth: ColorDepth,
     pub glyphs: GlyphSet,
-    /// Whether anything moves: spinners, marching edges, pulses.
-    pub motion: bool,
     palette: Palette,
 }
 
 impl Theme {
-    pub fn new(appearance: Appearance, depth: ColorDepth, glyphs: GlyphSet, motion: bool) -> Self {
+    pub fn new(appearance: Appearance, depth: ColorDepth, glyphs: GlyphSet) -> Self {
         Self {
             appearance,
             depth,
             glyphs,
-            motion,
             palette: match appearance {
                 Appearance::Dark => DARK,
                 Appearance::Light => LIGHT,
@@ -260,7 +257,7 @@ impl Theme {
         }
     }
 
-    /// The soft ground of a tone: a selected row, a failure badge.
+    /// The soft ground of a tone: a selected row, a banner.
     pub fn soft(&self, tone: Tone) -> Style {
         let p = &self.palette;
         let rgb = match tone {
@@ -277,7 +274,7 @@ impl Theme {
         }
     }
 
-    /// The ground of chrome: bars, the dock.
+    /// The ground of chrome: bars, panels, palettes.
     pub fn chrome(&self) -> Style {
         match self.color(self.palette.surface) {
             Some(color) => Style::default().bg(color).fg(self.color(self.palette.ink).expect("same depth")),
@@ -402,26 +399,6 @@ impl MediaKind {
         }
         MediaKind::Binary
     }
-
-    /// The word for the kind, as the uikit labels it.
-    pub fn label(self) -> &'static str {
-        match self {
-            MediaKind::Image => "Image",
-            MediaKind::Audio => "Audio",
-            MediaKind::Video => "Video",
-            MediaKind::Document => "Document",
-            MediaKind::Text => "Text",
-            MediaKind::Table => "Table",
-            MediaKind::Record => "Record",
-            MediaKind::Numeric => "Number",
-            MediaKind::Boolean => "Boolean",
-            MediaKind::Model => "Model",
-            MediaKind::Live => "Live feed",
-            MediaKind::Urn => "Identifier",
-            MediaKind::None => "Nothing",
-            MediaKind::Binary => "Binary",
-        }
-    }
 }
 
 /// A mark a node is drawn with.
@@ -430,25 +407,8 @@ pub enum Icon {
     Media(MediaKind),
     /// A step: a cap.
     Operation,
-    /// A map's stack.
+    /// A map.
     Map,
-    /// A gather.
-    Gather,
-}
-
-/// Where a step stands, as its card's corner says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusMark {
-    /// Running: one frame of the spinner.
-    Spinner(usize),
-    Done,
-    Failed,
-    Queued,
-    Skipped,
-    Retried,
-    Tolerated,
-    /// Stopped by a cancel, never painted as a failure.
-    Cancelled,
 }
 
 /// One cell's line directions: north, east, south, west.
@@ -457,122 +417,43 @@ pub const EAST: u8 = 0b0010;
 pub const SOUTH: u8 = 0b0100;
 pub const WEST: u8 = 0b1000;
 
-/// How heavy a line is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Weight {
-    /// A dashed light line: a loop, a wait.
-    Dashed,
-    Light,
-    /// What is flowing now.
-    Heavy,
-}
-
-const SPINNER_UNICODE: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const SPINNER_ASCII: [char; 4] = ['|', '/', '-', '\\'];
-
 impl GlyphSet {
-    /// The glyph for a cell whose line runs in `directions`, at `weight`.
-    /// `rounded` turns a light corner into an arc.
-    pub fn line(self, directions: u8, weight: Weight, rounded: bool) -> char {
+    /// The glyph for a cell whose line runs in `directions`. `rounded` turns
+    /// a corner into an arc.
+    pub fn line(self, directions: u8, rounded: bool) -> char {
         if self == GlyphSet::Ascii {
             return match directions {
-                d if d == NORTH | SOUTH || d == NORTH || d == SOUTH => {
-                    if weight == Weight::Dashed { ':' } else { '|' }
-                }
-                d if d == EAST | WEST || d == EAST || d == WEST => match weight {
-                    Weight::Dashed => '.',
-                    Weight::Light => '-',
-                    Weight::Heavy => '=',
-                },
+                d if d == NORTH | SOUTH || d == NORTH || d == SOUTH => '|',
+                d if d == EAST | WEST || d == EAST || d == WEST => '-',
                 0 => ' ',
                 _ => '+',
             };
         }
-        let heavy = weight == Weight::Heavy;
-        let dashed = weight == Weight::Dashed;
         match directions {
             0 => ' ',
-            d if d == NORTH | SOUTH => {
-                if heavy {
-                    '┃'
-                } else if dashed {
-                    '┆'
-                } else {
-                    '│'
-                }
-            }
-            d if d == EAST | WEST => {
-                if heavy {
-                    '━'
-                } else if dashed {
-                    '┄'
-                } else {
-                    '─'
-                }
-            }
-            d if d == NORTH => {
-                if heavy { '╹' } else { '╵' }
-            }
-            d if d == SOUTH => {
-                if heavy { '╻' } else { '╷' }
-            }
-            d if d == EAST => {
-                if heavy { '╺' } else { '╶' }
-            }
-            d if d == WEST => {
-                if heavy { '╸' } else { '╴' }
-            }
+            d if d == NORTH | SOUTH => '│',
+            d if d == EAST | WEST => '─',
+            d if d == NORTH => '╵',
+            d if d == SOUTH => '╷',
+            d if d == EAST => '╶',
+            d if d == WEST => '╴',
             d if d == NORTH | EAST => {
-                if heavy {
-                    '┗'
-                } else if rounded {
-                    '╰'
-                } else {
-                    '└'
-                }
+                if rounded { '╰' } else { '└' }
             }
             d if d == EAST | SOUTH => {
-                if heavy {
-                    '┏'
-                } else if rounded {
-                    '╭'
-                } else {
-                    '┌'
-                }
+                if rounded { '╭' } else { '┌' }
             }
             d if d == SOUTH | WEST => {
-                if heavy {
-                    '┓'
-                } else if rounded {
-                    '╮'
-                } else {
-                    '┐'
-                }
+                if rounded { '╮' } else { '┐' }
             }
             d if d == WEST | NORTH => {
-                if heavy {
-                    '┛'
-                } else if rounded {
-                    '╯'
-                } else {
-                    '┘'
-                }
+                if rounded { '╯' } else { '┘' }
             }
-            d if d == NORTH | EAST | SOUTH => {
-                if heavy { '┣' } else { '├' }
-            }
-            d if d == EAST | SOUTH | WEST => {
-                if heavy { '┳' } else { '┬' }
-            }
-            d if d == SOUTH | WEST | NORTH => {
-                if heavy { '┫' } else { '┤' }
-            }
-            d if d == WEST | NORTH | EAST => {
-                if heavy { '┻' } else { '┴' }
-            }
-            _ => {
-                if heavy { '╋' } else { '┼' }
-            }
+            d if d == NORTH | EAST | SOUTH => '├',
+            d if d == EAST | SOUTH | WEST => '┬',
+            d if d == SOUTH | WEST | NORTH => '┤',
+            d if d == WEST | NORTH | EAST => '┴',
+            _ => '┼',
         }
     }
 
@@ -589,7 +470,6 @@ impl GlyphSet {
             return match icon {
                 Icon::Operation => '*',
                 Icon::Map => '%',
-                Icon::Gather => '&',
                 Icon::Media(kind) => match kind {
                     MediaKind::Image => 'i',
                     MediaKind::Audio => 'a',
@@ -611,7 +491,6 @@ impl GlyphSet {
         match icon {
             Icon::Operation => '◇',
             Icon::Map => '∀',
-            Icon::Gather => '∑',
             Icon::Media(kind) => match kind {
                 MediaKind::Image => '◩',
                 MediaKind::Audio => '♫',
@@ -631,34 +510,11 @@ impl GlyphSet {
         }
     }
 
-    pub fn status(self, mark: StatusMark) -> char {
-        match (self, mark) {
-            (GlyphSet::Unicode, StatusMark::Spinner(frame)) => {
-                SPINNER_UNICODE[frame % SPINNER_UNICODE.len()]
-            }
-            (GlyphSet::Ascii, StatusMark::Spinner(frame)) => SPINNER_ASCII[frame % SPINNER_ASCII.len()],
-            (GlyphSet::Unicode, StatusMark::Done) => '✓',
-            (GlyphSet::Unicode, StatusMark::Failed) => '✗',
-            (GlyphSet::Unicode, StatusMark::Queued) => '⋯',
-            (GlyphSet::Unicode, StatusMark::Skipped) => '↷',
-            (GlyphSet::Unicode, StatusMark::Retried) => '↻',
-            (GlyphSet::Unicode, StatusMark::Tolerated) => '△',
-            (GlyphSet::Unicode, StatusMark::Cancelled) => '◼',
-            (GlyphSet::Ascii, StatusMark::Done) => 'v',
-            (GlyphSet::Ascii, StatusMark::Failed) => 'X',
-            (GlyphSet::Ascii, StatusMark::Queued) => 'q',
-            (GlyphSet::Ascii, StatusMark::Skipped) => 's',
-            (GlyphSet::Ascii, StatusMark::Retried) => 'r',
-            (GlyphSet::Ascii, StatusMark::Tolerated) => '!',
-            (GlyphSet::Ascii, StatusMark::Cancelled) => '#',
-        }
-    }
-
-    /// Eighth-blocks for a progress bar: index 0 is empty, 8 full.
-    pub fn bar_eighths(self) -> [char; 9] {
+    /// The mark of what cannot be.
+    pub fn failed(self) -> char {
         match self {
-            GlyphSet::Unicode => [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
-            GlyphSet::Ascii => [' ', ' ', ' ', ' ', '=', '=', '=', '=', '='],
+            GlyphSet::Unicode => '✗',
+            GlyphSet::Ascii => 'X',
         }
     }
 }
@@ -676,10 +532,10 @@ mod tests {
         let kind = |urn: &str| MediaKind::of(&MediaUrn::from_string(urn).expect(urn));
         assert_eq!(kind("media:audio;ext=wav"), MediaKind::Audio);
         assert_eq!(kind("media:document;ext=pdf"), MediaKind::Document);
-        assert_eq!(kind("media:enc=utf-8;ext=csv;fmt=csv"), MediaKind::Table);
+        assert_eq!(kind("media:enc=utf8;ext=csv;fmt=csv"), MediaKind::Table);
         assert_eq!(kind("media:fmt=json;record"), MediaKind::Record);
-        assert_eq!(kind("media:enc=utf-8;ext=txt"), MediaKind::Text);
-        assert_eq!(kind("media:enc=utf-8"), MediaKind::Text);
+        assert_eq!(kind("media:enc=utf8;ext=txt"), MediaKind::Text);
+        assert_eq!(kind("media:enc=utf8"), MediaKind::Text);
         assert_eq!(kind("media:audio;live;microphone"), MediaKind::Live);
         assert_eq!(kind("media:void"), MediaKind::None);
         assert_eq!(kind("media:ext=bin"), MediaKind::Binary);
@@ -693,34 +549,28 @@ mod tests {
         // The sides each box-drawing glyph connects, read off the glyph.
         let sides = |c: char| -> u8 {
             match c {
-                '│' | '┃' | '┆' => NORTH | SOUTH,
-                '─' | '━' | '┄' => EAST | WEST,
-                '╵' | '╹' => NORTH,
-                '╷' | '╻' => SOUTH,
-                '╶' | '╺' => EAST,
-                '╴' | '╸' => WEST,
-                '└' | '╰' | '┗' => NORTH | EAST,
-                '┌' | '╭' | '┏' => EAST | SOUTH,
-                '┐' | '╮' | '┓' => SOUTH | WEST,
-                '┘' | '╯' | '┛' => WEST | NORTH,
-                '├' | '┣' => NORTH | EAST | SOUTH,
-                '┬' | '┳' => EAST | SOUTH | WEST,
-                '┤' | '┫' => SOUTH | WEST | NORTH,
-                '┴' | '┻' => WEST | NORTH | EAST,
-                '┼' | '╋' => NORTH | EAST | SOUTH | WEST,
+                '│' => NORTH | SOUTH,
+                '─' => EAST | WEST,
+                '╵' => NORTH,
+                '╷' => SOUTH,
+                '╶' => EAST,
+                '╴' => WEST,
+                '└' | '╰' => NORTH | EAST,
+                '┌' | '╭' => EAST | SOUTH,
+                '┐' | '╮' => SOUTH | WEST,
+                '┘' | '╯' => WEST | NORTH,
+                '├' => NORTH | EAST | SOUTH,
+                '┬' => EAST | SOUTH | WEST,
+                '┤' => SOUTH | WEST | NORTH,
+                '┴' => WEST | NORTH | EAST,
+                '┼' => NORTH | EAST | SOUTH | WEST,
                 other => panic!("unexpected glyph {other:?}"),
             }
         };
         for directions in 1u8..16 {
-            for weight in [Weight::Light, Weight::Heavy] {
-                for rounded in [false, true] {
-                    let glyph = GlyphSet::Unicode.line(directions, weight, rounded);
-                    assert_eq!(
-                        sides(glyph),
-                        directions,
-                        "directions {directions:04b} weight {weight:?} drew {glyph:?}"
-                    );
-                }
+            for rounded in [false, true] {
+                let glyph = GlyphSet::Unicode.line(directions, rounded);
+                assert_eq!(sides(glyph), directions, "directions {directions:04b} drew {glyph:?}");
             }
         }
     }

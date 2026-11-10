@@ -144,6 +144,48 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Run.Control.RunAct",
+    "kind": "type",
+    "rust_path": "run::control::RunAct",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk",
+    "kind": "type",
+    "rust_path": "run::control::RunAsk",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunNext",
+    "kind": "type",
+    "rust_path": "run::control::RunNext",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome",
+    "kind": "type",
+    "rust_path": "run::control::RunOutcome",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase",
+    "kind": "type",
+    "rust_path": "run::control::RunPhase",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport",
+    "kind": "type",
+    "rust_path": "run::step::StepReport",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState",
+    "kind": "type",
+    "rust_path": "run::step::StepState",
+    "renamed": false
+  },
+  {
     "lean_name": "TaggedUrn.Constraint",
     "kind": "type",
     "rust_path": "_root_::tagged_urn::Constraint",
@@ -489,6 +531,48 @@
     "lean_name": "CapDAG.Exec.specificity",
     "kind": "function",
     "rust_path": "exec::specificity",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.admits",
+    "kind": "function",
+    "rust_path": "run::control::admits",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.exitStatus",
+    "kind": "function",
+    "rust_path": "run::control::exit_status",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.joinOutcomes",
+    "kind": "function",
+    "rust_path": "run::control::join_outcomes",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.next",
+    "kind": "function",
+    "rust_path": "run::control::next",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.outcome",
+    "kind": "function",
+    "rust_path": "run::control::outcome",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.final",
+    "kind": "function",
+    "rust_path": "run::step::step_state::r#final",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.on",
+    "kind": "function",
+    "rust_path": "run::step::on",
     "renamed": false
   },
   {
@@ -1275,6 +1359,234 @@
     "lean_name": "CapDAG.Grade.none",
     "kind": "constructor",
     "rust_path": "Grade::None",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.none",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAct::None",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.stop",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAct::Stop",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.cancel",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAct::Cancel",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.kill",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAct::Kill",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.finish",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAct::Finish",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.interrupt",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAsk::Interrupt",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.stop",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAsk::Stop",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.abort",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAsk::Abort",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.drained",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAsk::Drained",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.graceOver",
+    "kind": "constructor",
+    "rust_path": "run::control::RunAsk::GraceOver",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunNext.mk",
+    "kind": "constructor",
+    "rust_path": "run::control::RunNext",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunNext.phase",
+    "kind": "field",
+    "rust_path": "run::control::RunNext.phase",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunNext.act",
+    "kind": "field",
+    "rust_path": "run::control::RunNext.act",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.completed",
+    "kind": "constructor",
+    "rust_path": "run::control::RunOutcome::Completed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.tolerated",
+    "kind": "constructor",
+    "rust_path": "run::control::RunOutcome::Tolerated",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.stopped",
+    "kind": "constructor",
+    "rust_path": "run::control::RunOutcome::Stopped",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.failed",
+    "kind": "constructor",
+    "rust_path": "run::control::RunOutcome::Failed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.aborted",
+    "kind": "constructor",
+    "rust_path": "run::control::RunOutcome::Aborted",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.running",
+    "kind": "constructor",
+    "rust_path": "run::control::RunPhase::Running",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.stopping",
+    "kind": "constructor",
+    "rust_path": "run::control::RunPhase::Stopping",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.aborting",
+    "kind": "constructor",
+    "rust_path": "run::control::RunPhase::Aborting",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.ended",
+    "kind": "constructor",
+    "rust_path": "run::control::RunPhase::Ended",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.progress",
+    "kind": "constructor",
+    "rust_path": "run::step::StepReport::Progress",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.progress.complete",
+    "kind": "field",
+    "rust_path": "run::step::StepReport::Progress.complete",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.skipped",
+    "kind": "constructor",
+    "rust_path": "run::step::StepReport::Skipped",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.tolerated",
+    "kind": "constructor",
+    "rust_path": "run::step::StepReport::Tolerated",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.failed",
+    "kind": "constructor",
+    "rust_path": "run::step::StepReport::Failed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.runEnded",
+    "kind": "constructor",
+    "rust_path": "run::step::StepReport::RunEnded",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.runEnded.completed",
+    "kind": "field",
+    "rust_path": "run::step::StepReport::RunEnded.completed",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.runEnded.aborted",
+    "kind": "field",
+    "rust_path": "run::step::StepReport::RunEnded.aborted",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.waiting",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Waiting",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.running",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Running",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.done",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Done",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.skipped",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Skipped",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.tolerated",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Tolerated",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.failed",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Failed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.notRun",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::NotRun",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.cancelled",
+    "kind": "constructor",
+    "rust_path": "run::step::StepState::Cancelled",
     "renamed": true
   },
   {

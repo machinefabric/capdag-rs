@@ -3,7 +3,7 @@
 //!
 //! - Exactly ONE terminal, scalar, single item, and no `--output` dir given
 //!   → the item's raw bytes go to STDOUT (logs/progress are on stderr), so
-//!   `capdag pdf2summary doc.pdf | wc -w` behaves like a Unix tool.
+//!   `capdag run pdf2summary doc.pdf | wc -w` behaves like a Unix tool.
 //! - Anything else (sequence output, several terminals, or an explicit
 //!   `--output`) → each item is written as a FILE in the output directory
 //!   (default: the current directory), named

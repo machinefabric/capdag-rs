@@ -56,6 +56,7 @@ use crate::orchestrator::executor::{
 };
 use crate::orchestrator::plan_converter::steps_to_resolved_graph;
 use crate::orchestrator::run_arguments::RunArgumentLedger;
+use crate::orchestrator::run_control::RunControl;
 use crate::orchestrator::stream_io::{PipelineLogRecord, PipelineProgressTracker};
 use crate::orchestrator::types::{ResolvedGraph, ResolvedStep, StepSource};
 use crate::planner::plan::MapRun;
@@ -1114,6 +1115,9 @@ struct Run {
     tolerated: AtomicBool,
     /// Spool files the run owns: removed when it ends, however it ends.
     spools: Mutex<Vec<std::path::PathBuf>>,
+    /// Whether the run still admits work, and the cancel its chains tear
+    /// down on (15.2 §Runs stop).
+    control: Arc<RunControl>,
 }
 
 impl Drop for Run {
@@ -1142,6 +1146,7 @@ pub async fn execute_plan(
     initial_is_sequence: HashMap<String, bool>,
     arguments: Arc<RunArgumentLedger>,
     callbacks: RunCallbacks,
+    control: Arc<RunControl>,
 ) -> Result<PipelineResult, ExecutionError> {
     plan.validate()
         .map_err(|e| ExecutionError::HostError(format!("plan '{}' is not valid: {e}", plan.name)))?;
@@ -1206,6 +1211,7 @@ pub async fn execute_plan(
         tolerated: AtomicBool::new(false),
         spools: Mutex::new(Vec::new()),
         callbacks,
+        control: control.clone(),
     });
 
     let started = Instant::now();
@@ -1215,7 +1221,7 @@ pub async fn execute_plan(
     };
     let values = run
         .clone()
-        .run_scope(None, env.clone(), None, run.callbacks.progress.clone(), RunCancel::new())
+        .run_scope(None, env.clone(), None, run.callbacks.progress.clone(), control.cancel().clone())
         .await?;
 
     // ── Assemble terminals ──
@@ -2041,6 +2047,12 @@ impl Run {
             }
             tokio::select! {
                 biased;
+                // The run was stopped: it admits no more items (15.2 §Runs
+                // stop). The items it admitted run on to the outputs.
+                _ = self.control.admission_closed(), if !source_done && !stopping => {
+                    source_done = true;
+                    continue;
+                }
                 joined = bodies.join_next(), if completed < dispatched => {
                     let Some(joined) = joined else { break };
                     completed += 1;

@@ -145,19 +145,19 @@ impl<A: Clone> Palette<A> {
         }
         let border = theme.fg(Tone::Accent).patch(ground);
         let glyphs = theme.glyphs;
-        use crate::tui::theme::{Weight, EAST, NORTH, SOUTH, WEST};
+        use crate::tui::theme::{EAST, NORTH, SOUTH, WEST};
         for col in x..x + w {
-            buffer[(col, y)].set_char(glyphs.line(EAST | WEST, Weight::Light, false)).set_style(border);
-            buffer[(col, y + h - 1)].set_char(glyphs.line(EAST | WEST, Weight::Light, false)).set_style(border);
+            buffer[(col, y)].set_char(glyphs.line(EAST | WEST, false)).set_style(border);
+            buffer[(col, y + h - 1)].set_char(glyphs.line(EAST | WEST, false)).set_style(border);
         }
         for row in y..y + h {
-            buffer[(x, row)].set_char(glyphs.line(NORTH | SOUTH, Weight::Light, false)).set_style(border);
-            buffer[(x + w - 1, row)].set_char(glyphs.line(NORTH | SOUTH, Weight::Light, false)).set_style(border);
+            buffer[(x, row)].set_char(glyphs.line(NORTH | SOUTH, false)).set_style(border);
+            buffer[(x + w - 1, row)].set_char(glyphs.line(NORTH | SOUTH, false)).set_style(border);
         }
-        buffer[(x, y)].set_char(glyphs.line(EAST | SOUTH, Weight::Light, true)).set_style(border);
-        buffer[(x + w - 1, y)].set_char(glyphs.line(SOUTH | WEST, Weight::Light, true)).set_style(border);
-        buffer[(x, y + h - 1)].set_char(glyphs.line(NORTH | EAST, Weight::Light, true)).set_style(border);
-        buffer[(x + w - 1, y + h - 1)].set_char(glyphs.line(NORTH | WEST, Weight::Light, true)).set_style(border);
+        buffer[(x, y)].set_char(glyphs.line(EAST | SOUTH, true)).set_style(border);
+        buffer[(x + w - 1, y)].set_char(glyphs.line(SOUTH | WEST, true)).set_style(border);
+        buffer[(x, y + h - 1)].set_char(glyphs.line(NORTH | EAST, true)).set_style(border);
+        buffer[(x + w - 1, y + h - 1)].set_char(glyphs.line(NORTH | WEST, true)).set_style(border);
         let inner = (w - 4) as usize;
         buffer.set_string(
             x + 2,

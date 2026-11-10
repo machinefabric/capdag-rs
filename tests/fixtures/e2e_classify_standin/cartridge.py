@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A stand-in for the model cartridge that answers `classify-en`.
 
-The cartridge `capdag new` scaffolds does no inference itself: it PEER-CALLS
+The cartridge `capdag dev new` scaffolds does no inference itself: it PEER-CALLS
 `classify-en`, and in a real install a BUNDLED model cartridge sitting beside the
 capdag binary answers. That is the whole point of the stub — own the domain
 logic, delegate the model.
@@ -9,12 +9,12 @@ logic, delegate the model.
 Neither of those is available to `cargo test`: a test build has no bundled
 cartridge tree, and a real model cartridge would download weights, want a GPU,
 and make the test non-hermetic. This provides the same CAP with a deterministic
-keyword rule instead of a model, and the e2e supplies it with `--dev-bins` — the
+keyword rule instead of a model, and the e2e supplies it with `--dev-bin` — the
 affordance that substitutes a local cartridge binary, so the host is assembled
 the way production assembles it with one participant swapped.
 
-It is NOT a dev cartridge and is never `dev-install`ed; the only dev cartridge in
-that test is the scaffolded one. What it proves is the wiring — that the peer
+It is NOT a dev cartridge and is never installed with `capdag dev install`; the
+only dev cartridge in that test is the scaffolded one. What it proves is the wiring — that the peer
 call routes, that arguments arrive addressed by media URN, and that progress the
 peer reports is forwarded — none of which depends on the answer coming from
 inference.

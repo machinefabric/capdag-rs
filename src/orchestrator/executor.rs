@@ -437,6 +437,15 @@ impl CollateralCause {
             ),
         }
     }
+
+    /// A person aborted the run (15.2 §Runs stop): everything still running
+    /// is cancelled as the user's own cancel.
+    pub fn aborted() -> Self {
+        Self {
+            class: crate::failure::AttributionClass::User,
+            detail: "aborted by the user".to_string(),
+        }
+    }
 }
 
 /// The signal that something has failed for good and what runs beside it is
@@ -892,7 +901,7 @@ impl CartridgeManager {
         self.registry_url.as_deref().ok_or_else(|| {
             ExecutionError::CartridgeDownloadFailed(format!(
                 "{context}: this build bakes no cartridge registry — registry installs and \
-                 downloads are disabled in dev builds (use --dev-bins or a bundled cartridge)"
+                 downloads are disabled in dev builds (use --dev-bin or a bundled cartridge)"
             ))
         })
     }
@@ -1045,7 +1054,8 @@ impl CartridgeManager {
 
     /// Registry suggestions for a cap URN (which cartridges provide it),
     /// resolved from the synced, signature-verified manifest — no download.
-    /// Powers `capdag resolve`.
+    /// What `capdag info` names as a cap's provider, and the cartridge
+    /// `capdag cartridge install` installs for a cap.
     pub async fn suggestions_for_cap(
         &self,
         cap_urn: &str,
@@ -1054,8 +1064,8 @@ impl CartridgeManager {
     }
 
     /// The synced registry's entry for a cartridge id in this manager's
-    /// channel, if any. Powers `capdag resolve`'s per-cartridge detail
-    /// (version, platforms, signed-binary presence).
+    /// channel, if any. `capdag cartridge install` asks it whether a name is a
+    /// cartridge id rather than a cap alias.
     pub async fn registry_cartridge(
         &self,
         cartridge_id: &str,
@@ -3093,7 +3103,13 @@ async fn run_step_chain(
             },
             other => CollateralCause::of(other),
         };
-        let reason = crate::bifaci::frame::CancelReason::collateral(cause.class, cause.detail);
+        // A person's abort is the user's own cancel, never the collateral of
+        // anything: the requests end CANCELLED, as an operator's cancel does.
+        let reason = if cause.class == crate::failure::AttributionClass::User {
+            crate::bifaci::frame::CancelReason::user(false)
+        } else {
+            crate::bifaci::frame::CancelReason::collateral(cause.class, cause.detail)
+        };
         let switch = switch.clone();
         let rids: Vec<MessageId> = invocations.iter().map(|(rid, _, _)| rid.clone()).collect();
         async move {
@@ -4075,8 +4091,8 @@ pub(crate) async fn discover_bundled_cartridges(
     Ok(out)
 }
 
-/// A bundled cartridge that declares a cap: what `capdag install` and
-/// `capdag find` report for it in place of a registry download.
+/// A bundled cartridge that declares a cap: what `capdag cartridge install`
+/// and `capdag info` report for it in place of a registry download.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BundledProvider {
     pub id: String,

@@ -52,8 +52,11 @@ pub mod media;
 pub mod model_storage;
 pub mod net_retry;
 pub mod orchestrator;
-// The terminal interface — only the CLI builds it.
-#[cfg(feature = "tui")]
+// The `capdag` command and its terminal interface — only the binary builds
+// them.
+#[cfg(feature = "cli")]
+pub mod cli;
+#[cfg(feature = "cli")]
 pub mod tui;
 pub mod pages;
 pub mod planner;
@@ -324,6 +327,9 @@ pub use orchestrator::{
     // Plan execution — the single ForEach/Collect-aware executor, shared by the
     // reference/CLI runtime and the engine.
     execute_plan, PlanInput,
+    // Stopping and aborting a run (15.2 §Runs stop): the control every caller
+    // of execute_plan keeps.
+    stop_runs, RunControl, RunAct, RunAsk, RunOutcome, RunPhase, ABORT_GRACE,
     // Mid-run argument state — the dispatch-journaled ledger execute_plan
     // reads and the engine's UpdateMachineRunArguments RPC writes.
     AppliedArgumentUpdate, ArgumentUpdate, ArgumentUpdateDisposition, ArgumentUpdateOutcome,

@@ -678,10 +678,12 @@
     "CapDAG.Bifaci.Flow",
     "CapDAG.Bifaci.Request",
     "CapDAG.Bifaci.Pools",
+    "CapDAG.Run.Control",
+    "CapDAG.Run.Step",
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 1588,
+  "declarations": 1925,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -1081,6 +1083,55 @@
       "rust_path": "exec::specificity",
       "lean_type": "CapDAG.Exec.WfCap → Nat",
       "source": "CapDAG/Exec.lean:328:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Control.admits",
+      "module": "CapDAG.Run.Control",
+      "rust_path": "run::control::admits",
+      "lean_type": "CapDAG.Run.Control.RunPhase → Bool",
+      "source": "CapDAG/Run/Control.lean:94:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Control.exitStatus",
+      "module": "CapDAG.Run.Control",
+      "rust_path": "run::control::exit_status",
+      "lean_type": "CapDAG.Run.Control.RunOutcome → Nat",
+      "source": "CapDAG/Run/Control.lean:137:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Control.joinOutcomes",
+      "module": "CapDAG.Run.Control",
+      "rust_path": "run::control::join_outcomes",
+      "lean_type": "CapDAG.Run.Control.RunOutcome → CapDAG.Run.Control.RunOutcome → CapDAG.Run.Control.RunOutcome",
+      "source": "CapDAG/Run/Control.lean:123:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Control.next",
+      "module": "CapDAG.Run.Control",
+      "rust_path": "run::control::next",
+      "lean_type": "CapDAG.Run.Control.RunPhase → CapDAG.Run.Control.RunAsk → CapDAG.Run.Control.RunNext",
+      "source": "CapDAG/Run/Control.lean:75:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Control.outcome",
+      "module": "CapDAG.Run.Control",
+      "rust_path": "run::control::outcome",
+      "lean_type": "CapDAG.Run.Control.RunPhase → Bool → Bool → CapDAG.Run.Control.RunOutcome",
+      "source": "CapDAG/Run/Control.lean:127:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Step.StepState.final",
+      "module": "CapDAG.Run.Step",
+      "rust_path": "run::step::step_state::r#final",
+      "lean_type": "CapDAG.Run.Step.StepState → Bool",
+      "source": "CapDAG/Run/Step.lean:58:1"
+    },
+    {
+      "lean_name": "CapDAG.Run.Step.on",
+      "module": "CapDAG.Run.Step",
+      "rust_path": "run::step::on",
+      "lean_type": "CapDAG.Run.Step.StepState → CapDAG.Run.Step.StepReport → Option CapDAG.Run.Step.StepState",
+      "source": "CapDAG/Run/Step.lean:64:1"
     },
     {
       "lean_name": "TaggedUrn.Exec.make",

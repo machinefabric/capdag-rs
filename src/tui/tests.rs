@@ -1,5 +1,5 @@
 //! The terminal interface's pictures, checked against what the uikit's own
-//! tests say a run's picture is, and against the geometry a drawing must
+//! tests say a plan's picture is, and against the geometry a drawing must
 //! keep whatever the scene.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::tui::canvas;
 use crate::tui::fixtures;
 use crate::tui::layout::{self, Arrangement, Layout, LayoutOptions, Lod};
-use crate::tui::scene::{run_scene, Scene};
+use crate::tui::scene::{plan_scene, Scene};
 use crate::tui::theme::{Appearance, ColorDepth, GlyphSet, Theme};
 
 fn planned(plan: &crate::orchestrator::PlanView) -> Scene {
-    run_scene(plan, &HashMap::new(), None).expect("fixture plans draw")
+    plan_scene(plan, &fixtures::cap_alias).expect("fixture plans draw")
 }
 
 fn edges_into<'a>(scene: &'a Scene, id: &str) -> Vec<(&'a str, &'a str)> {
@@ -76,12 +76,12 @@ fn test13031_zip_map_and_gather_draw_as_the_uikit_draws_them() {
         edges_into(&scene, "run-gather-both").iter().map(|e| e.0).collect::<Vec<_>>(),
         vec!["run-input-in_a", "run-input-in_b"]
     );
-    assert_eq!(scene.node_of_token("tok-zip").unwrap().id, "run-map-map", "a map's token resolves to its stack");
 }
 
-// TEST13032: the summarize-documents run draws its input stacks, the map's
-// stack with its "For each item" wire, the step cards with their policies,
-// and the argument edge from the second input named for the argument.
+// TEST13032: the summarize-documents plan draws its inputs, the map's card
+// with its "For each item" wire, the step cards with their caps' aliases and
+// their policies — a cap with no alias by its URN — and the argument edge
+// from the second input named for the argument.
 #[test]
 fn test13032_summarize_documents_draws_map_policy_and_argument_edge() {
     let scene = planned(&fixtures::summarize_documents());
@@ -91,8 +91,10 @@ fn test13032_summarize_documents_draws_map_policy_and_argument_edge() {
         vec![("run-map-map_doc", "For each item")]
     );
     let summarize = scene.node("run-step-step_summarize").unwrap();
-    assert!(summarize.subtitle.ends_with("retry 2"), "{}", summarize.subtitle);
-    assert!(summarize.subtitle.starts_with("summarize-en"), "{}", summarize.subtitle);
+    assert_eq!(summarize.title, "Summarize");
+    assert_eq!(summarize.subtitle, "summarize · retry 2");
+    let extract = scene.node("run-step-step_extract").unwrap();
+    assert!(extract.subtitle.starts_with("cap:"), "a cap no alias names is named by its URN: {}", extract.subtitle);
     assert_eq!(
         edges_into(&scene, "run-step-step_summarize"),
         vec![("run-input-in_purpose", "for"), ("run-value-step_extract", "")]
@@ -100,11 +102,7 @@ fn test13032_summarize_documents_draws_map_policy_and_argument_edge() {
 }
 
 fn options(lod: Lod, arrangement: Arrangement) -> LayoutOptions {
-    LayoutOptions {
-        lod,
-        arrangement,
-        chip_width: 0,
-    }
+    LayoutOptions { lod, arrangement }
 }
 
 fn arrangements() -> Vec<Arrangement> {
@@ -155,9 +153,9 @@ fn test13033_layout_geometry_holds_for_every_fixture() {
                     let to = laid.node(&edge.to).unwrap();
                     let first = edge.points[0];
                     let last = *edge.points.last().unwrap();
-                    assert_eq!(first, (from.card.right(), from.out_row), "{name} {lod:?} {arrangement:?} {}: starts right of its source", edge.id);
-                    assert_eq!(last.0, to.card.x - 1, "{name} {lod:?} {arrangement:?} {}: ends left of its target", edge.id);
-                    assert!(last.1 >= to.card.y && last.1 < to.card.bottom(), "{name} {lod:?} {arrangement:?} {}: enters within its target's rows", edge.id);
+                    assert_eq!(first, (from.rect.right(), from.out_row), "{name} {lod:?} {arrangement:?} {}: starts right of its source", edge.id);
+                    assert_eq!(last.0, to.rect.x - 1, "{name} {lod:?} {arrangement:?} {}: ends left of its target", edge.id);
+                    assert!(last.1 >= to.rect.y && last.1 < to.rect.bottom(), "{name} {lod:?} {arrangement:?} {}: enters within its target's rows", edge.id);
                     assert!(to.column > from.column, "{name}: {} goes forward", edge.id);
                     for pair in edge.points.windows(2) {
                         assert!(pair[0].0 == pair[1].0 || pair[0].1 == pair[1].1, "{name} {lod:?} {}: orthogonal", edge.id);
@@ -220,7 +218,7 @@ fn test13034_edges_of_different_sources_only_cross() {
 }
 
 fn theme() -> Theme {
-    Theme::new(Appearance::Dark, ColorDepth::None, GlyphSet::Unicode, false)
+    Theme::new(Appearance::Dark, ColorDepth::None, GlyphSet::Unicode)
 }
 
 // TEST13035: the whole picture of every fixture renders at every level of
@@ -279,14 +277,8 @@ fn test13037_fit_wraps_into_bands_before_losing_detail() {
         let scene = planned(&plan);
         let row = layout::layout(&scene, &options(Lod::Full, Arrangement::Rows)).unwrap();
         // Room for one row exactly: one row it is.
-        let fitted = layout::fit(
-            &scene,
-            row.width,
-            row.height,
-            &[Arrangement::Rows, Arrangement::Wrapped { width: row.width }],
-            0,
-        )
-        .unwrap();
+        let fitted = layout::fit(&scene, row.width, row.height, &[Arrangement::Rows, Arrangement::Wrapped { width: row.width }])
+            .unwrap();
         assert_eq!((fitted.lod, fitted.arrangement), (Lod::Full, Arrangement::Rows), "{name}");
 
         let width = row.width - 1;
@@ -297,7 +289,7 @@ fn test13037_fit_wraps_into_bands_before_losing_detail() {
             continue;
         }
         wrapped_somewhere = true;
-        let fitted = layout::fit(&scene, width, 1000, &[Arrangement::Rows, bands], 0).unwrap();
+        let fitted = layout::fit(&scene, width, 1000, &[Arrangement::Rows, bands]).unwrap();
         assert_eq!(fitted.lod, Lod::Full, "{name}: whole cards fit in bands of {width}");
         assert_eq!(fitted.arrangement, bands, "{name}");
         assert!(fitted.width <= width, "{name}");

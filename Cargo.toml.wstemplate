@@ -1,7 +1,6 @@
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-atty = "0.2"
 ciborium = "0.2"
 crossbeam-channel = "0.5"
 dirs = "5.0"
@@ -92,9 +91,19 @@ default-features = false
 features = ["png"]
 optional = true
 
-# The terminal interface (tui/ module): machines and their runs drawn as
-# graphs. Optional — only the CLI binary enables `tui`; a host embedding the
-# library (the engine) never compiles a terminal stack.
+# The command line (cli/ module) and its terminal interface (tui/ module):
+# the inline view of a running machine, the pickers, the graph view and the
+# machine editor. Optional — only the `capdag` binary enables `cli`; a host
+# embedding the library (the engine, a cartridge) never compiles any of it.
+[dependencies.clap]
+version = "4.5"
+features = ["derive", "wrap_help"]
+optional = true
+
+[dependencies.strsim]
+version = "0.11"
+optional = true
+
 [dependencies.ratatui]
 version = "0.30"
 optional = true
@@ -118,7 +127,12 @@ optional = true
 
 [features]
 capture = ["dep:ffmpeg-bundle", "dep:image"]
-tui = [
+# The capdag command: a capture-capable host (it resolves device references
+# for the machines it runs) with its terminal interface.
+cli = [
+    "capture",
+    "dep:clap",
+    "dep:strsim",
     "dep:ratatui",
     "dep:crossterm",
     "dep:futures-util",
@@ -135,21 +149,19 @@ tui = [
 [[bin]]
 name = "capdag"
 path = "src/bin/capdag.rs"
-# The CLI is a capture-capable host (it resolves device references for
-# machines it runs) with a terminal interface — built by the workspace build
-# tool, which passes both features.
-required-features = ["capture", "tui"]
+# Built by the workspace build tool, which passes the feature.
+required-features = ["cli"]
 
 [[test]]
 name = "dev_cartridge_e2e"
 # Exercises the built CLI binary (CARGO_BIN_EXE_capdag), which itself
-# requires the capture and tui features.
-required-features = ["capture", "tui"]
+# requires the cli feature.
+required-features = ["cli"]
 
 [[test]]
 name = "tui_session"
-# Drives the terminal run view end to end on the test cartridge.
-required-features = ["tui"]
+# Drives the terminal interface end to end on the test cartridge.
+required-features = ["cli"]
 
 [dev-dependencies]
 # Signing the self-update tests' fixture releases.

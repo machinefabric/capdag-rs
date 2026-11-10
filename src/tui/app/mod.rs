@@ -9,16 +9,14 @@
 //! changed are written. Everything turned on is turned off again when the
 //! [`Tui`] is dropped — on a panic too, and around a suspend (Ctrl-Z).
 //!
-//! The surfaces: [`run`] (a machine's runs, live), [`plan`] (the planner's
-//! candidates), [`edit`] (a machine, edited structurally).
+//! The surfaces: [`edit`] (a machine, drawn as its graph and edited
+//! structurally — or only looked at, read-only, by `capdag view`). A running
+//! machine is watched inline instead (`crate::cli::live`), in the normal
+//! scrollback.
 
-pub mod dock;
 pub mod edit;
 pub mod graph;
 pub mod palette;
-pub mod plan;
-pub mod preview;
-pub mod run;
 pub mod source;
 
 use std::io::{self, Stdout, Write};
@@ -38,19 +36,17 @@ use ratatui::{Frame, Terminal};
 
 use crate::tui::theme::{Appearance, ColorDepth, GlyphSet, Theme};
 
-/// How the interface looks and moves, as the command line chose.
+/// How the interface looks, as the command line chose.
 #[derive(Debug, Clone, Copy)]
 pub struct TuiSettings {
     pub appearance: Appearance,
     pub glyphs: GlyphSet,
     pub depth: ColorDepth,
-    /// Whether anything animates.
-    pub motion: bool,
 }
 
 impl TuiSettings {
     pub fn theme(&self) -> Theme {
-        Theme::new(self.appearance, self.depth, self.glyphs, self.motion)
+        Theme::new(self.appearance, self.depth, self.glyphs)
     }
 }
 
@@ -59,8 +55,8 @@ impl TuiSettings {
 pub enum TuiError {
     #[error("the terminal: {0}")]
     Terminal(#[from] io::Error),
-    /// Something the run said, or something drawn from it, contradicts the
-    /// plan: a defect upstream, never drawn around.
+    /// What is drawn contradicts what it is drawn from: a defect upstream,
+    /// never drawn around.
     #[error("{0}")]
     Inconsistent(String),
 }
@@ -231,67 +227,6 @@ impl Display for HeadlessDisplay {
     }
 }
 
-/// Copy `text` to the system clipboard through the terminal (OSC 52), which
-/// works over ssh and inside tmux (with `set-clipboard on`) alike.
-pub fn copy_to_clipboard(text: &str) -> io::Result<()> {
-    use std::io::Write;
-    let encoded = base64_encode(text.as_bytes());
-    let mut stdout = io::stdout();
-    write!(stdout, "\x1b]52;c;{encoded}\x07")?;
-    stdout.flush()
-}
-
-fn base64_encode(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(TABLE[(n >> 18) as usize & 63] as char);
-        out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
-    }
-    out
-}
-
-/// Open `path` with the system's handler for it — or, with `reveal`, show it
-/// in the file manager. A system without one is an error the caller shows.
-pub fn open_path(path: &std::path::Path, reveal: bool) -> io::Result<()> {
-    let mut command = if cfg!(target_os = "macos") {
-        let mut c = std::process::Command::new("open");
-        if reveal {
-            c.arg("-R");
-        }
-        c.arg(path);
-        c
-    } else if cfg!(windows) {
-        let mut c = std::process::Command::new("explorer");
-        if reveal {
-            c.arg(format!("/select,{}", path.display()));
-        } else {
-            c.arg(path);
-        }
-        c
-    } else {
-        // xdg-open has no "reveal": the folder holding the file is opened.
-        let target = if reveal {
-            path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.to_path_buf())
-        } else {
-            path.to_path_buf()
-        };
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(target);
-        c
-    };
-    command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
-}
-
 /// The smallest terminal the surfaces draw in.
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 18;
@@ -311,20 +246,4 @@ pub fn too_small(frame: &mut Frame, theme: &Theme) -> bool {
         .style(theme.chrome());
     frame.render_widget(paragraph, area);
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // TEST13040: the clipboard's base64 is the standard alphabet with
-    // padding, exactly as the terminal decodes it.
-    #[test]
-    fn test13040_osc52_base64_is_standard() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"/out/report.txt"), "L291dC9yZXBvcnQudHh0");
-    }
 }

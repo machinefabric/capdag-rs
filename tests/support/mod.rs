@@ -465,8 +465,16 @@ impl Machines {
             capdag::RunArgumentLedger::new(&strand.plan, cap_arguments)
                 .unwrap_or_else(|e| panic!("the argument values are refused: {e}")),
         );
-        let result =
-            execute_plan(&strand.plan, runtime, initial_inputs, flags, ledger, callbacks).await?;
+        let result = execute_plan(
+            &strand.plan,
+            runtime,
+            initial_inputs,
+            flags,
+            ledger,
+            callbacks,
+            Arc::new(capdag::RunControl::new()),
+        )
+        .await?;
 
         // What the CLI runtime persisted, read back: one file for a single
         // value, one per item for a sequence.

@@ -3372,6 +3372,900 @@
     ]
   },
   {
+    "lean_name": "CapDAG.Run.Control.RunAct.cancel.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      61,
+      3
+    ],
+    "end": [
+      62,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.ctorElim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      55,
+      1
+    ],
+    "end": [
+      67,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.ctorIdx",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.finish.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      65,
+      3
+    ],
+    "end": [
+      66,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.kill.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      63,
+      3
+    ],
+    "end": [
+      64,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.none.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      57,
+      3
+    ],
+    "end": [
+      58,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.ofNat",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAct.stop.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      59,
+      3
+    ],
+    "end": [
+      60,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.abort.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      47,
+      3
+    ],
+    "end": [
+      48,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.ctorElim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      41,
+      1
+    ],
+    "end": [
+      53,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.ctorIdx",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.drained.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      49,
+      3
+    ],
+    "end": [
+      50,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.graceOver.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      51,
+      3
+    ],
+    "end": [
+      52,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.interrupt.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      43,
+      3
+    ],
+    "end": [
+      44,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.ofNat",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunAsk.stop.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      45,
+      3
+    ],
+    "end": [
+      46,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.aborted.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      111,
+      3
+    ],
+    "end": [
+      112,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.completed.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      103,
+      3
+    ],
+    "end": [
+      104,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.ctorElim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      101,
+      1
+    ],
+    "end": [
+      113,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.ctorIdx",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.failed.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      109,
+      3
+    ],
+    "end": [
+      110,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.ofNat",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.rank",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      115,
+      1
+    ],
+    "end": [
+      121,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.stopped.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      107,
+      3
+    ],
+    "end": [
+      108,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunOutcome.tolerated.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      105,
+      3
+    ],
+    "end": [
+      106,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.aborting.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      35,
+      3
+    ],
+    "end": [
+      36,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.ctorElim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      29,
+      1
+    ],
+    "end": [
+      39,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.ctorIdx",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.ended.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      37,
+      3
+    ],
+    "end": [
+      38,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.ofNat",
+    "file": "CapDAG/Run/Control.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.running.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      31,
+      3
+    ],
+    "end": [
+      32,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.RunPhase.stopping.elim",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      33,
+      3
+    ],
+    "end": [
+      34,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.admits",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      94,
+      1
+    ],
+    "end": [
+      97,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.exitStatus",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      137,
+      1
+    ],
+    "end": [
+      145,
+      20
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunAct",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      67,
+      18
+    ],
+    "end": [
+      67,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunAsk",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      53,
+      18
+    ],
+    "end": [
+      53,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunNext",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      73,
+      18
+    ],
+    "end": [
+      73,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunNext.decEq",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      73,
+      18
+    ],
+    "end": [
+      73,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunOutcome",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      113,
+      18
+    ],
+    "end": [
+      113,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instDecidableEqRunPhase",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      39,
+      18
+    ],
+    "end": [
+      39,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunAct",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      67,
+      12
+    ],
+    "end": [
+      67,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunAct.repr",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      67,
+      12
+    ],
+    "end": [
+      67,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunAsk",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      53,
+      12
+    ],
+    "end": [
+      53,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunAsk.repr",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      53,
+      12
+    ],
+    "end": [
+      53,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunNext",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      73,
+      12
+    ],
+    "end": [
+      73,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunNext.repr",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      73,
+      12
+    ],
+    "end": [
+      73,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunOutcome",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      113,
+      12
+    ],
+    "end": [
+      113,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunOutcome.repr",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      113,
+      12
+    ],
+    "end": [
+      113,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunPhase",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      39,
+      12
+    ],
+    "end": [
+      39,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.instReprRunPhase.repr",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      39,
+      12
+    ],
+    "end": [
+      39,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.joinOutcomes",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      123,
+      1
+    ],
+    "end": [
+      125,
+      35
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.next",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      75,
+      1
+    ],
+    "end": [
+      92,
+      33
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Control.outcome",
+    "file": "CapDAG/Run/Control.lean",
+    "start": [
+      127,
+      1
+    ],
+    "end": [
+      135,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.ctorElim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      41,
+      1
+    ],
+    "end": [
+      56,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.ctorIdx",
+    "file": "CapDAG/Run/Step.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.failed.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      49,
+      3
+    ],
+    "end": [
+      50,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.progress.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      43,
+      3
+    ],
+    "end": [
+      44,
+      31
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.runEnded.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      51,
+      3
+    ],
+    "end": [
+      55,
+      40
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.skipped.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      45,
+      3
+    ],
+    "end": [
+      46,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepReport.tolerated.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      47,
+      3
+    ],
+    "end": [
+      48,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.cancelled.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      37,
+      3
+    ],
+    "end": [
+      38,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.ctorElim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      20,
+      1
+    ],
+    "end": [
+      39,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.ctorIdx",
+    "file": "CapDAG/Run/Step.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.done.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      26,
+      3
+    ],
+    "end": [
+      27,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.failed.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      32,
+      3
+    ],
+    "end": [
+      33,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.final",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      58,
+      1
+    ],
+    "end": [
+      62,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.notRun.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      34,
+      3
+    ],
+    "end": [
+      36,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.ofNat",
+    "file": "CapDAG/Run/Step.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.running.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      24,
+      3
+    ],
+    "end": [
+      25,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.skipped.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      28,
+      3
+    ],
+    "end": [
+      29,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.tolerated.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      30,
+      3
+    ],
+    "end": [
+      31,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.StepState.waiting.elim",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      22,
+      3
+    ],
+    "end": [
+      23,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instDecidableEqStepReport",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      56,
+      18
+    ],
+    "end": [
+      56,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instDecidableEqStepReport.decEq",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      56,
+      18
+    ],
+    "end": [
+      56,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instDecidableEqStepState",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      39,
+      18
+    ],
+    "end": [
+      39,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instReprStepReport",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      56,
+      12
+    ],
+    "end": [
+      56,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instReprStepReport.repr",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      56,
+      12
+    ],
+    "end": [
+      56,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instReprStepState",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      39,
+      12
+    ],
+    "end": [
+      39,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.instReprStepState.repr",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      39,
+      12
+    ],
+    "end": [
+      39,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Run.Step.on",
+    "file": "CapDAG/Run/Step.lean",
+    "start": [
+      64,
+      1
+    ],
+    "end": [
+      84,
+      17
+    ]
+  },
+  {
     "lean_name": "CapDAG.betterKey",
     "file": "CapDAG/Ranking.lean",
     "start": [

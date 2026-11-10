@@ -4,9 +4,8 @@
 //! Zoom in a terminal is the level of detail ([`Lod`]): whole cards, small
 //! cards, one line per node, one cell per node. Unless one is chosen, the
 //! view picks the richest level at which the whole scene fits. The viewport
-//! follows the run's subject — what failed, else what runs, else the first
-//! node — until it is moved by hand; `c` returns to the subject and `f` to
-//! fitting.
+//! follows its subject — the first node drawn failed, else the first node —
+//! until it is moved by hand; `c` returns to the subject and `f` to fitting.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::buffer::Buffer;
@@ -73,19 +72,13 @@ impl Default for GraphView {
     }
 }
 
-/// The node the viewport opens on: the first that failed, else the first
-/// running, else the first in reading order (the uikit's `_openOnSubject`).
+/// The node the viewport opens on: the first drawn failed, else the first
+/// in reading order (the uikit's `_openOnSubject`).
 pub fn subject(scene: &Scene, layout: &Layout) -> Option<String> {
     let ordered = layout::reading_order(layout);
-    let state_of = |id: &str| scene.node(id).map(|n| n.state);
     ordered
         .iter()
-        .find(|id| state_of(id) == Some(NodeState::Failed))
-        .or_else(|| {
-            ordered
-                .iter()
-                .find(|id| matches!(state_of(id), Some(NodeState::Active(_)) | Some(NodeState::Queued)))
-        })
+        .find(|id| scene.node(id).is_some_and(|n| n.state == NodeState::Failed))
         .or_else(|| ordered.first())
         .cloned()
 }
@@ -124,28 +117,14 @@ impl GraphView {
     }
 
     /// Lay out `scene` for `area` and draw it.
-    pub fn draw(
-        &mut self,
-        buffer: &mut Buffer,
-        area: Area,
-        scene: &Scene,
-        theme: &Theme,
-        frame: usize,
-        chip_width: i32,
-    ) -> Result<(), LayoutError> {
+    pub fn draw(&mut self, buffer: &mut Buffer, area: Area, scene: &Scene, theme: &Theme) -> Result<(), LayoutError> {
         self.area = area;
         let arrangements = self.arrangements(area);
         let laid = match self.lod {
-            None => layout::fit(scene, area.width as i32, area.height as i32, &arrangements, chip_width)?,
+            None => layout::fit(scene, area.width as i32, area.height as i32, &arrangements)?,
             // A chosen level is panned around, so only the width decides
             // between the arrangements.
-            Some(lod) => layout::fit_width(
-                scene,
-                lod,
-                area.width as i32,
-                &arrangements,
-                if matches!(lod, Lod::Full | Lod::Compact) { chip_width } else { 0 },
-            )?,
+            Some(lod) => layout::fit_width(scene, lod, area.width as i32, &arrangements)?,
         };
         if self.focus.as_ref().is_some_and(|f| laid.node(f).is_none()) {
             self.focus = None;
@@ -159,8 +138,6 @@ impl GraphView {
         self.origin = clamp_origin(&laid, area, self.origin);
         let overlay = Overlay {
             focused: self.focus.clone(),
-            focused_edge: None,
-            frame,
         };
         let mut surface = Surface {
             buffer,

@@ -1,20 +1,20 @@
 //! End-to-end test of the `capdag` cartridge-development flow:
-//! `new` → `dev-install` → run → edit → `dev-install` (update) → run.
+//! `dev new` → `dev install` → `run` → edit → `dev install` (update) → `run`.
 //!
 //! This drives the REAL `capdag` binary and the REAL scaffolded Python cartridge
 //! through the full bifaci host, against the real fabric the run selected
 //! (`CDG_FABRIC_REGISTRY_URL`, else the one the build baked). A fabric exists
 //! only through its charter, verified against the MachineFabric roots the
 //! binary carries, so no local stand-in can be one. The custom cap is in no
-//! fabric, so `capdag <alias>` misses it and falls back to the locally
-//! dev-installed cartridge's own manifest (the local-manifest dev path).
+//! fabric, so `capdag run <alias>` misses it and falls back to the locally
+//! installed dev cartridge's own manifest (the local-manifest dev path).
 //!
 //! The scaffolded cartridge does no inference itself — it PEER-CALLS
 //! `classify-en`. In a real install that call is answered by a BUNDLED model
 //! cartridge sitting beside the capdag binary; a `cargo test` build has no
 //! bundled tree, and a real model cartridge would download weights and want a
 //! GPU, so neither is usable here. The test supplies a stand-in through
-//! `--dev-bins`, the same affordance a developer uses to substitute a local
+//! `--dev-bin`, the same affordance a developer uses to substitute a local
 //! cartridge binary — so the host is assembled exactly as production assembles
 //! it, with one participant swapped rather than the routing rules changed.
 //!
@@ -127,25 +127,24 @@ fn test8110_dev_cartridge_create_install_run_update() {
     let name = "e2e-tagger";
 
     // The stand-in for the model cartridge that answers `classify-en`. Passed
-    // with `--dev-bins` on every run of the tagger: it is standing in for a
-    // BUNDLED cartridge, not a dev-installed one, and `--dev-bins` is the
+    // with `--dev-bin` on every run of the tagger: it is standing in for a
+    // BUNDLED cartridge, not a dev cartridge, and `--dev-bin` is the
     // affordance that substitutes a local cartridge binary without changing how
     // the host resolves anything else.
     let classifier = crate_dir()
         .join("tests/fixtures/e2e_classify_standin/cartridge.py")
         .display()
         .to_string();
-    // `--dev-bins` consumes following non-flag tokens, so the cap alias must not
-    // trail it; the alias leads and the flag comes after.
-    let run_tagger: Vec<&str> = vec![name, "--dev-bins", &classifier];
+    let run_tagger: Vec<&str> = vec!["run", name, "--dev-bin", &classifier];
 
     // 1. Scaffold a new Python cartridge.
+    let project_path = projects.join(name);
     let (proj_out, ok, err) = run_capdag(
         &home,
-        &["new", name, "--python", "-o", projects.to_str().unwrap()],
+        &["dev", "new", project_path.to_str().unwrap(), "--lang", "python"],
         None,
     );
-    assert!(ok, "`new` failed: {err}");
+    assert!(ok, "`dev new` failed: {err}");
     let proj = PathBuf::from(&proj_out);
     assert!(
         proj.join("cartridge.py").is_file(),
@@ -155,10 +154,10 @@ fn test8110_dev_cartridge_create_install_run_update() {
     // 2. Install it under the local `dev` slug.
     let (_, ok, err) = run_capdag(
         &home,
-        &["dev-install", proj.to_str().unwrap()],
+        &["dev", "install", proj.to_str().unwrap()],
         None,
     );
-    assert!(ok, "`dev-install` failed: {err}");
+    assert!(ok, "`dev install` failed: {err}");
 
     // 3. Run the custom cap through the capdag host — it is NOT in the fabric,
     //    so this exercises the local-manifest dev path end to end, including the
@@ -178,7 +177,7 @@ fn test8110_dev_cartridge_create_install_run_update() {
     assert_eq!(out, "neutral", "neutral input before the edit");
 
     // 4. Edit the cartridge — shout the label instead of returning it plain —
-    //    then update the install by re-running dev-install.
+    //    then update the install by running `dev install` again.
     //
     //    The edit is on the OUTPUT rather than on the judgment, because the
     //    judgment is the peer's to make: this cartridge owns what it does with
@@ -195,10 +194,10 @@ fn test8110_dev_cartridge_create_install_run_update() {
 
     let (_, ok, err) = run_capdag(
         &home,
-        &["dev-install", proj.to_str().unwrap()],
+        &["dev", "install", proj.to_str().unwrap()],
         None,
     );
-    assert!(ok, "update `dev-install` failed: {err}");
+    assert!(ok, "update `dev install` failed: {err}");
 
     // 5. The same input now renders differently — the update took effect.
     let (out, _, err) = run_capdag(&home, &run_tagger, Some("the sky is blue"));

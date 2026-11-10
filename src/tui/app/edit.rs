@@ -9,6 +9,7 @@
 //! silent. The source pane edits the text directly; applying it is one
 //! transaction too. Saving writes the file atomically.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,11 +29,11 @@ use crate::tui::app::graph::{GraphAction, GraphView};
 use crate::tui::app::palette::{Command, Palette, PaletteResult};
 use crate::tui::app::source::SourceBuffer;
 use crate::tui::app::{too_small, Display, Tui, TuiError, TuiSettings};
-use crate::tui::edit::{DraftHeader, DraftValue, EditError, MachineDraft};
-use crate::tui::scene::{cap_short_label, machine_scene, DraftInfo, SceneError};
+use crate::tui::edit::{CapChoice, DraftHeader, DraftValue, EditError, MachineDraft};
+use crate::tui::scene::{machine_scene, DraftCap, DraftInfo, SceneError};
 use crate::tui::text;
 use crate::tui::theme::{Theme, Tone};
-use crate::{CapUrn, FabricRegistry, MachineSource, MediaUrn};
+use crate::{AliasTargetKind, CapUrn, FabricRegistry, MachineSource, MediaUrn};
 
 /// A cap the palette offers.
 #[derive(Debug, Clone)]
@@ -40,6 +41,8 @@ pub struct CatalogCap {
     /// Canonical.
     pub urn: String,
     pub title: String,
+    /// The fabric alias a person names it by, when it has one.
+    pub alias: Option<String>,
     /// What its main input takes.
     pub input: MediaUrn,
 }
@@ -55,8 +58,10 @@ impl CatalogCap {
         for cap in caps {
             let input = MediaUrn::from_string(cap.urn.in_spec())
                 .map_err(|e| format!("cap '{}' takes an invalid media URN: {e}", cap.urn))?;
+            let urn = cap.urn.to_string();
             out.push(CatalogCap {
-                urn: cap.urn.to_string(),
+                alias: registry.display_alias_for_urn(&urn),
+                urn,
                 title: cap.title.clone(),
                 input,
             });
@@ -92,8 +97,8 @@ pub enum EditorOutcome {
     Run(String),
 }
 
-/// What resolving `text` says of it: what each node holds, what each cap is
-/// called. An error is the resolver's diagnostic, said as it said it.
+/// What resolving `text` says of it: what each node holds, which cap each
+/// step runs. An error is the resolver's diagnostic, said as it said it.
 async fn resolve(
     text: &str,
     registry: Arc<FabricRegistry>,
@@ -101,7 +106,7 @@ async fn resolve(
     machine_id: Option<&str>,
     catalog: &[CatalogCap],
 ) -> Result<DraftInfo, String> {
-    let resolved = ResolvedNotation::resolve_from(text, registry, machines, machine_id)
+    let resolved = ResolvedNotation::resolve_from(text, registry.clone(), machines, machine_id)
         .await
         .map_err(|e| e.to_string())?;
     let payload = resolved.render_payload_json().map_err(|e| e.to_string())?;
@@ -119,16 +124,43 @@ async fn resolve(
         }
     }
     let draft = MachineDraft::parse(text).map_err(|e| e.to_string())?;
-    for header in &draft.headers {
-        if let DraftHeader::Cap { cap_urn, .. } = header {
-            // The text resolved, so its cap URNs parse.
-            let canonical = CapUrn::from_string(cap_urn).map_err(|e| e.to_string())?.to_string();
-            if let Some(cap) = catalog.iter().find(|c| c.urn == canonical) {
-                info.cap_titles.insert(cap_urn.clone(), cap.title.clone());
-            }
-        }
-    }
+    info.caps = step_caps(&draft, &registry, catalog).await;
     Ok(info)
+}
+
+/// The cap each step of `draft` runs, by the name it runs it by, each found
+/// on its own — so a draft that does not resolve as a whole still shows which
+/// of its steps name a cap and which name nothing. A header names its cap; any
+/// other name is the fabric's alias for one, or names nothing.
+async fn step_caps(draft: &MachineDraft, registry: &FabricRegistry, catalog: &[CatalogCap]) -> HashMap<String, DraftCap> {
+    let mut caps = HashMap::new();
+    for wiring in &draft.wirings {
+        let name = &wiring.cap_alias;
+        if caps.contains_key(name) {
+            continue;
+        }
+        let urn = match draft.headers.iter().find(|h| h.alias() == name) {
+            Some(DraftHeader::Cap { cap_urn, .. }) => match CapUrn::from_string(cap_urn) {
+                Ok(urn) => urn.to_string(),
+                Err(_) => continue,
+            },
+            Some(DraftHeader::Machine { .. }) => continue,
+            None => match registry.resolve_alias_typed(name, Some(AliasTargetKind::Cap)).await {
+                Ok(urn) => urn,
+                Err(_) => continue,
+            },
+        };
+        let known = catalog.iter().find(|c| c.urn == urn);
+        caps.insert(
+            name.clone(),
+            DraftCap {
+                title: known.map_or_else(|| name.clone(), |c| c.title.clone()),
+                alias: known.and_then(|c| c.alias.clone()).unwrap_or_else(|| name.clone()),
+                urn,
+            },
+        );
+    }
+    caps
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,7 +320,7 @@ struct Editor {
     source_dirty: bool,
     /// The selected source member of the focused step.
     selected_source: usize,
-    cap_palette: Option<(CapPurpose, Palette<String>)>,
+    cap_palette: Option<(CapPurpose, Palette<CapChoice>)>,
     name_prompt: Option<(NamePurpose, String)>,
     command_palette: Option<Palette<Action>>,
     toasts: Vec<(String, Tone, Instant)>,
@@ -330,15 +362,15 @@ impl Editor {
 
     /// The caps whose main input takes `media`; every cap when `media` is
     /// not known (an independent step, a replaced cap, an unresolved node).
-    fn caps_accepting(&self, media: Option<&MediaUrn>) -> Vec<Command<String>> {
+    fn caps_accepting(&self, media: Option<&MediaUrn>) -> Vec<Command<CapChoice>> {
         self.spec
             .catalog
             .iter()
             .filter(|cap| media.is_none_or(|m| cap.input.accepts(m).unwrap_or(false)))
             .map(|cap| Command {
                 name: cap.title.clone(),
-                keys: cap_short_label(&cap.urn).unwrap_or_default(),
-                action: cap.urn.clone(),
+                keys: cap.alias.clone().unwrap_or_default(),
+                action: CapChoice { urn: cap.urn.clone(), alias: cap.alias.clone() },
             })
             .collect()
     }
@@ -922,7 +954,7 @@ impl Editor {
         match machine_scene(&self.draft, &self.info) {
             Ok(scene) => self
                 .graph
-                .draw(frame.buffer_mut(), graph_area, &scene, &theme, 0, 0)
+                .draw(frame.buffer_mut(), graph_area, &scene, &theme)
                 .map_err(|e| TuiError::Inconsistent(format!("the machine cannot be laid out: {e}")))?,
             Err(SceneError::Empty) => {
                 let hint = if self.spec.read_only {
@@ -1077,14 +1109,28 @@ impl Editor {
                 let Some(wiring) = self.draft.wirings.get(w) else {
                     return;
                 };
-                let cap = self.draft.cap_of(w).ok().flatten();
-                let title = cap
-                    .and_then(|c| self.info.cap_titles.get(c).cloned())
-                    .unwrap_or_else(|| wiring.cap_alias.clone());
-                lines.push(bold(title, Tone::Ink));
-                match cap {
-                    Some(cap) => lines.push(plain(cap.to_string(), Tone::Muted)),
-                    None => lines.push(plain(format!("'{}' is an included machine", wiring.cap_alias), Tone::Muted)),
+                let machine = self
+                    .draft
+                    .headers
+                    .iter()
+                    .any(|h| h.alias() == wiring.cap_alias && matches!(h, DraftHeader::Machine { .. }));
+                match self.info.caps.get(&wiring.cap_alias) {
+                    _ if machine => {
+                        lines.push(bold(wiring.cap_alias.clone(), Tone::Ink));
+                        lines.push(plain(format!("'{}' is an included machine", wiring.cap_alias), Tone::Muted));
+                    }
+                    Some(cap) => {
+                        lines.push(bold(cap.title.clone(), Tone::Ink));
+                        lines.push(plain(cap.alias.clone(), Tone::Secondary));
+                        lines.push(plain(cap.urn.clone(), Tone::Muted));
+                    }
+                    None => {
+                        lines.push(bold(wiring.cap_alias.clone(), Tone::Ink));
+                        lines.push(plain(
+                            format!("'{}' names no cap: no header declares it and the fabric has no such alias", wiring.cap_alias),
+                            Tone::Danger,
+                        ));
+                    }
                 }
                 let policy = wiring.policy.to_notation();
                 if !policy.is_empty() {
@@ -1206,7 +1252,10 @@ where
     } else {
         match resolve(&text, spec.registry.clone(), spec.machines.as_ref(), spec.machine_id.as_deref(), &spec.catalog).await {
             Ok(info) => (info, None),
-            Err(why) => (DraftInfo::default(), Some(why)),
+            Err(why) => {
+                let caps = step_caps(&draft, &spec.registry, &spec.catalog).await;
+                (DraftInfo { caps, ..DraftInfo::default() }, Some(why))
+            }
         }
     };
     let (results, mut verdicts) = mpsc::unbounded_channel();
