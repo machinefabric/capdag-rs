@@ -2,20 +2,20 @@
 //!
 //! This module backs three developer commands and the local-manifest run path:
 //!
-//! - [`scaffold_cartridge`] — `capdag new <name> --<language>`: write a fresh,
+//! - [`scaffold_cartridge`] — `capdag dev new <path> --lang <language>`: write a fresh,
 //!   runnable cartridge project (one custom cap, one Op that peer-calls a
 //!   model, one manifest) into a new directory, in any language the vendored
 //!   canonical stubs cover. The stubs are the SAME bytes in every capdag
 //!   implementation (see `stubs_generated`), so the project you get does not
 //!   depend on which capdag binary you ran.
-//! - [`stage_dev_cartridge`] — `capdag dev-install <project-dir>`: read the
+//! - [`stage_dev_cartridge`] — `capdag dev install <project-dir>`: read the
 //!   project's manifest, then copy it under the per-user cartridge root's
 //!   reserved `dev` slug so the capdag host (and any other host pointed at that
 //!   root) discovers it. Re-running overwrites the same version directory — the
 //!   update step of the edit/reinstall loop.
 //! - [`find_dev_cap_by_alias`] + [`check_no_fabric_conflict`] — the local-manifest
-//!   run path: when `capdag <alias>` names a cap the fabric does NOT define, we
-//!   fall back to a locally dev-installed cartridge's OWN manifest and run that
+//!   run path: when `capdag run <alias>` names a cap the fabric does NOT define, we
+//!   fall back to a locally installed dev cartridge's OWN manifest and run that
 //!   cap through the full bifaci host — **as long as the cap does not conflict
 //!   with the fabric** (no alias of it already means a different cap upstream).
 //!   A dev cap never needs to be published to be developed and run locally.
@@ -94,7 +94,7 @@ impl std::fmt::Display for DevError {
                 f,
                 "no cartridge entry found in '{}'. Looked for {}. A compiled cartridge \
                  must be BUILT before it is installed — the host launches the binary, \
-                 not the sources. Create the project with `capdag new`.",
+                 not the sources. Create the project with `capdag dev new`.",
                 p.display(),
                 stub_entry_candidates_description(p)
             ),
@@ -140,7 +140,7 @@ impl std::fmt::Display for DevError {
             ),
             DevError::NotDev { registry_url } => write!(
                 f,
-                "this project declares registry_url='{registry_url}' — `dev-install` only \
+                "this project declares registry_url='{registry_url}' — `capdag dev install` only \
                  installs DEV cartridges (registry_url must be null). Publish it through the \
                  cartridge registry instead, or set registry_url to null for local development."
             ),
@@ -166,7 +166,7 @@ fn io_err(context: &str, e: std::io::Error) -> DevError {
 }
 
 // ---------------------------------------------------------------------------
-// Scaffold — `capdag new <name> --python`
+// Scaffold — `capdag dev new <path> --lang <language>`
 // ---------------------------------------------------------------------------
 
 /// Validate a cartridge project name: a path-safe, lowercase identifier
@@ -184,23 +184,23 @@ pub fn valid_cartridge_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// Every language `capdag new` can scaffold, from the vendored canonical stubs.
+/// Every language `capdag dev new` can scaffold, from the vendored canonical stubs.
 ///
 /// The list is the contract's, in its order — a mirror that offered a subset
-/// would silently make `capdag new --rust` mean different things depending on
+/// would silently make `capdag dev new --lang rust` mean different things depending on
 /// which capdag binary you happened to run.
 pub fn stub_languages() -> &'static [stubs_generated::StubLanguage] {
     stubs_generated::STUB_LANGUAGES
 }
 
-/// Look a language up by its id (`python`) or its flag (`--python`).
+/// Look a language up by its id (`python`).
 ///
 /// Returns `None` for anything else; the caller turns that into an error that
 /// lists what IS available, which is the only useful thing to say.
 pub fn stub_language(selector: &str) -> Option<&'static stubs_generated::StubLanguage> {
     stubs_generated::STUB_LANGUAGES
         .iter()
-        .find(|l| l.id == selector || l.flag == selector)
+        .find(|l| l.id == selector)
 }
 
 /// Substitute the project name into a stub's text.
@@ -344,9 +344,9 @@ pub fn read_entry_manifest(entry: &Path) -> Result<CapManifest, DevError> {
 
 /// The project name a scaffolded directory carries: its own directory name.
 ///
-/// `capdag new <name>` creates `<parent>/<name>`, and every rendered path is
-/// seeded from that name, so the directory IS the name. Reading it back is how
-/// `dev-install` knows what a compiled entry is called without being told.
+/// `capdag dev new <path>` creates the directory `<path>`, its last part the name,
+/// and every rendered path is seeded from that name, so the directory IS the
+/// name. Reading it back is how `capdag dev install` knows what a compiled entry is called without being told.
 fn project_name(project_dir: &Path) -> Result<&str, DevError> {
     project_dir
         .file_name()
@@ -391,7 +391,7 @@ pub fn project_entry(project_dir: &Path) -> Result<PathBuf, DevError> {
 }
 
 // ---------------------------------------------------------------------------
-// dev-install — stage a project under the `dev` slug.
+// dev install — stage a project under the `dev` slug.
 // ---------------------------------------------------------------------------
 
 /// The install version directory for a dev cartridge under `user_cartridge_dir`:
@@ -514,7 +514,7 @@ fn is_ignored_project_entry(name: &str) -> bool {
         // Build trees. A compiled cartridge's intermediates are gigabytes of
         // object files and dependency sources that the host never reads — only
         // the linked entry matters, and `stage_dev_cartridge` copies that
-        // explicitly after this walk. Without these, `dev-install` on a Rust
+        // explicitly after this walk. Without these, `dev install` on a Rust
         // project would copy its whole `target/`.
         | "target" | ".build" | ".swiftpm" | "node_modules"
     ) || name.ends_with(".pyc")
@@ -552,7 +552,7 @@ fn copy_project_tree(src: &Path, dst: &Path) -> Result<(), DevError> {
 // Local-manifest run path — resolve a dev cap by alias, guard against conflict.
 // ---------------------------------------------------------------------------
 
-/// Scan the dev-installed cartridges under `user_cartridge_dir/dev/…` and return
+/// Scan the dev cartridges under `user_cartridge_dir/dev/…` and return
 /// the cap whose declared `aliases` contain `alias`, along with the version
 /// directory it was found in. Reads each dev cartridge's manifest by running its
 /// entry's `manifest` subcommand. Returns `Ok(None)` when no dev cartridge
@@ -940,7 +940,7 @@ mod tests {
         assert!(text.contains("invalid cap definition") && text.contains("RULE21"), "{text}");
     }
 
-    // TEST7157: dev-install refuses a PUBLISHED manifest. `registry_url` non-null
+    // TEST7157: `dev install` refuses a PUBLISHED manifest. `registry_url` non-null
     // means the cartridge belongs to a registry, and staging it under the dev
     // slug would put a published identity in a slot reserved for local work.
     #[cfg(unix)]
@@ -1009,7 +1009,7 @@ mod tests {
     // TEST7160: the vendored stub contract is IDENTICAL to the canonical
     // source.
     //
-    // This is the whole promise of `capdag new`: the same command from any
+    // This is the whole promise of `capdag dev new`: the same command from any
     // capdag binary writes the same project. Every mirror's copy is generated
     // from this one source, so a difference here means the reference itself was
     // vendored from a different commit than the stub repo currently holds —
@@ -1297,7 +1297,6 @@ mod tests {
             let spec = languages.get(vendored.id).unwrap_or_else(|| {
                 panic!("vendored language {} is not in the canonical contract", vendored.id)
             });
-            assert_eq!(spec["flag"].as_str(), Some(vendored.flag), "{}", vendored.id);
             assert_eq!(spec["entry"].as_str(), Some(vendored.entry), "{}", vendored.id);
             let declared = spec["files"]
                 .as_array()

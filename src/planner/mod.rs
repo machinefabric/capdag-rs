@@ -78,7 +78,7 @@ pub use plan_space::{
     PlanOutcome, PlanProfile, PlanRequest, RankPolicy, SearchDirection, SourceCardinality,
     SourceSpec, TargetSpec,
 };
-pub use viz::{plans_to_dot, plans_to_mermaid};
+pub use viz::{plans_to_dot, plans_to_mermaid, DiagramNames};
 
 // =============================================================================
 // Error Type

@@ -218,6 +218,69 @@ fn canonical_strand_node_names(
         .collect()
 }
 
+/// The names the aliased form gives the nodes of `strand`: each node is named
+/// by its media's display alias (`pdf`, `page-text`), in the order the
+/// canonical walk first meets the nodes (`canonical` holds the canonical names,
+/// whose numbers give that order). A media with no alias is named by its
+/// extension tag, else `value`. A name taken already — by an earlier node, a
+/// node of an earlier strand, or a cap token of the wiring — is numbered on:
+/// `page`, `page_2`, `page_3`.
+fn aliased_strand_node_names(
+    strand: &crate::machine::graph::MachineStrand,
+    registry: &FabricRegistry,
+    canonical: &[String],
+    edge_tokens: &[String],
+    earlier: &[StrandPlan],
+) -> Vec<String> {
+    let mut taken: std::collections::HashSet<String> = earlier
+        .iter()
+        .flat_map(|plan| plan.node_names.iter().chain(plan.edge_tokens.iter()))
+        .chain(edge_tokens.iter())
+        .cloned()
+        .collect();
+    // Visit the nodes in canonical order: `n<i>`, by `i`.
+    let mut order: Vec<usize> = (0..canonical.len()).collect();
+    order.sort_by_key(|&id| {
+        canonical[id]
+            .trim_start_matches('n')
+            .parse::<usize>()
+            .expect("canonical node names are n<i>")
+    });
+    let mut names: Vec<String> = vec![String::new(); canonical.len()];
+    for id in order {
+        let media = strand.node_urn(id as crate::machine::NodeId);
+        let base = registry
+            .display_alias_for_urn(&media.to_string())
+            .or_else(|| media.get_tag("ext").map(str::to_string))
+            .map(|name| node_identifier(&name))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "value".to_string());
+        let mut name = base.clone();
+        let mut n = 2usize;
+        while taken.contains(&name) {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        taken.insert(name.clone());
+        names[id] = name;
+    }
+    names
+}
+
+/// `name` as a node identifier of the notation: `(ALPHA | "_") (ALNUM | "_" |
+/// "-")*`. Characters outside it become `-`; a leading digit or `-` is
+/// prefixed with `_`.
+fn node_identifier(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    if out.starts_with(|c: char| c.is_ascii_digit() || c == '-') {
+        out.insert(0, '_');
+    }
+    out
+}
+
 impl Machine {
     /// The names canonical notation gives this machine's nodes, strand by
     /// strand: what [`Machine::to_machine_notation`] writes for each node.
@@ -261,7 +324,13 @@ fn build_serialization_plan(machine: &Machine, rendering: CapRendering<'_>) -> S
             }
             next_alias += 1;
         }
-        let node_names = canonical_strand_node_names(strand, &mut next_node);
+        let node_names = match &rendering {
+            CapRendering::CanonicalUrn => canonical_strand_node_names(strand, &mut next_node),
+            CapRendering::Aliased(registry) => {
+                let canonical = canonical_strand_node_names(strand, &mut next_node);
+                aliased_strand_node_names(strand, registry, &canonical, &edge_tokens, &strand_plans)
+            }
+        };
         strand_plans.push(StrandPlan {
             edge_tokens,
             needs_header,
@@ -945,6 +1014,45 @@ mod tests {
             m1.is_equivalent(&m2),
             "aliased serialize → parse must preserve strict equivalence"
         );
+    }
+
+    // TEST20104: the aliased form names each node by its media's alias — by its
+    // extension where the media has none — never `n<i>`, and still re-parses to
+    // the same machine.
+    #[test]
+    fn test20104_aliased_serialization_names_nodes_by_media_alias() {
+        use crate::fabric::alias::StoredAlias;
+        let registry = registry_with(vec![extract_cap_def(), embed_cap_def()]);
+        registry.insert_cached_alias_for_test(StoredAlias {
+            name: "extract-pdf".to_string(),
+            target: "cap:extract;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;plain-text\"".to_string(),
+            version: 1,
+        });
+        registry.insert_cached_alias_for_test(StoredAlias {
+            name: "pdf".to_string(),
+            target: "media:document;ext=pdf".to_string(),
+            version: 1,
+        });
+
+        let m1 = Machine::from_strand(&pdf_to_vec_strand(), &registry).unwrap();
+        let aliased = m1
+            .to_machine_notation_aliased(&registry, NotationFormat::Bracketed)
+            .unwrap();
+
+        assert!(
+            aliased.contains("(pdf) -> extract-pdf ->") || aliased.contains("=pdf) -> extract-pdf ->"),
+            "the PDF node is named by its media alias, got: {aliased}"
+        );
+        assert!(
+            aliased.contains("txt)"),
+            "the text node, whose media has no alias, is named by its extension, got: {aliased}"
+        );
+        assert!(
+            !aliased.contains("n0") && !aliased.contains("n1"),
+            "no node keeps a canonical n<i> name, got: {aliased}"
+        );
+        let m2 = Machine::from_string(&aliased, &registry).expect("aliased notation must re-parse");
+        assert!(m1.is_equivalent(&m2), "aliased serialize → parse keeps the machine");
     }
 
     // TEST1175: Serializing an empty machine produces an empty string.

@@ -8,7 +8,7 @@
 //! %1 is not a valid Win32 application
 //! ```
 //!
-//! `capdag dev-install` therefore could not read a Python project's manifest,
+//! `capdag dev install` therefore could not read a Python project's manifest,
 //! and no scaffolded Python cartridge could be launched on the platform at all.
 //! Naming the interpreter is what the shebang was doing; doing it here does it
 //! on both platforms.

@@ -178,14 +178,24 @@ fn plan(name: &str, mut nodes: Vec<PlanViewNode>, edges: Vec<PlanViewEdge>) -> P
 }
 
 const PDF: &str = "media:document;ext=pdf";
-const PAGE_TEXT: &str = "media:enc=utf-8;ext=txt;page;plain-text";
-const PLAIN: &str = "media:enc=utf-8;ext=txt;plain-text";
-const CRITERION: &str = "media:criterion;enc=utf-8";
-const TEXT: &str = "media:enc=utf-8;text";
-const REPORT: &str = "media:enc=utf-8;report";
+const PAGE_TEXT: &str = "media:enc=utf8;ext=txt;page;plain-text";
+const PLAIN: &str = "media:enc=utf8;ext=txt;plain-text";
+const CRITERION: &str = "media:criterion;enc=utf8";
+const TEXT: &str = "media:enc=utf8;text";
+const REPORT: &str = "media:enc=utf8;report";
 const ROWS: &str = "media:fmt=csv;rows";
-const DISBIND: &str = r#"cap:in="media:document;ext=pdf";disbind-pdf;out="media:enc=utf-8;ext=txt;page;plain-text""#;
-const SUMMARIZE: &str = r#"cap:in="media:enc=utf-8";summarize-en;out="media:enc=utf-8;ext=txt;plain-text""#;
+const DISBIND: &str = r#"cap:in="media:document;ext=pdf";disbind-pdf;out="media:enc=utf8;ext=txt;page;plain-text""#;
+const SUMMARIZE: &str = r#"cap:in="media:enc=utf8";summarize-en;out="media:enc=utf8;ext=txt;plain-text""#;
+
+/// A fabric's names for the fixtures' caps: the summarizer has the alias
+/// `summarize`; every other cap has none, and is named by its URN.
+pub fn cap_alias(urn: &str) -> String {
+    if urn == SUMMARIZE {
+        "summarize".to_string()
+    } else {
+        urn.to_string()
+    }
+}
 
 /// The uikit's run fixture: `[doc -> extract{index-range="1-40"} -> text]
 /// [(text, for=purpose) -> summarize -> summary]`, run once per document.
@@ -193,7 +203,7 @@ pub fn summarize_documents() -> PlanView {
     let mut extract = step("step_extract", "tok-extract-0001", DISBIND, "Extract text", Some("text"), PAGE_TEXT, "Page text", Some("map_doc"));
     if let PlanViewKind::Step(s) = &mut extract.kind {
         s.constants.push(PlanViewConstant {
-            arg_urn: "media:enc=utf-8;index-range".to_string(),
+            arg_urn: "media:enc=utf8;index-range".to_string(),
             arg_name: "index-range".to_string(),
             value_json: "\"1-40\"".to_string(),
         });
@@ -241,7 +251,7 @@ pub fn compare() -> PlanView {
         ],
         vec![
             direct("in_path", "compare"),
-            arg("in_bench", "compare", "benchmark", "media:enc=utf-8;text;benchmark"),
+            arg("in_bench", "compare", "benchmark", "media:enc=utf8;text;benchmark"),
             direct("compare", "residuals"),
             direct("residuals", "tabulate"),
             direct("compare", "out_report"),
@@ -272,7 +282,7 @@ pub fn zip() -> PlanView {
             iteration("map", "a"),
             iteration("map", "b"),
             direct("a", "pair"),
-            arg("b", "pair", "other", "media:enc=utf-8;text;other"),
+            arg("b", "pair", "other", "media:enc=utf8;text;other"),
             collection("in_a", "both"),
             collection("in_b", "both"),
             direct("both", "count"),
@@ -353,7 +363,7 @@ pub fn converge() -> PlanView {
             input("in_pdf", "pdf", PDF, "PDF", false),
             input("in_png", "png", "media:ext=png;image", "PNG image", false),
             step("extract", "tok-extract", DISBIND, "Extract PDF text", Some("page_text"), PAGE_TEXT, "Page Text", None),
-            step("ocr", "tok-ocr", "cap:ocr-gguf", "OCR", Some("digitized"), "media:digitized-text;enc=utf-8;ext=txt;plain-text", "Digitized text", None),
+            step("ocr", "tok-ocr", "cap:ocr-gguf", "OCR", Some("digitized"), "media:digitized-text;enc=utf8;ext=txt;plain-text", "Digitized text", None),
             gather("both", &["extract", "ocr"], TEXT, "Text"),
             step("concat", "tok-concat", "cap:concat-text", "Concatenate", None, PLAIN, "Plain Text", None),
             output("out", "plain", "concat", PLAIN, "Plain Text"),

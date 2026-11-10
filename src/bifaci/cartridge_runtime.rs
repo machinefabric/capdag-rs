@@ -5818,7 +5818,7 @@ impl CartridgeRuntime {
         let cli_args = &args[2..];
 
         // Check if stdin is piped (binary streaming mode)
-        let stdin_is_piped = !atty::is(atty::Stream::Stdin);
+        let stdin_is_piped = !std::io::IsTerminal::is_terminal(&std::io::stdin());
         let cap_accepts_stdin = cap.accepts_stdin();
 
         // Priority: CLI args > stdin (args take precedence)

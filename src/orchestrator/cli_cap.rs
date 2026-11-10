@@ -1,6 +1,6 @@
 //! Single-cap CLI execution helpers.
 //!
-//! `capdag <alias-or-cap-urn> …` runs ONE cap as a Unix-style tool, with the
+//! `capdag run <alias-or-cap-urn> …` runs ONE cap as a Unix-style tool, with the
 //! cap's OWN declared interface — exactly as if the cartridge were invoked
 //! directly:
 //!
@@ -98,8 +98,8 @@ fn arg_invocation_form(arg: &CapArg) -> String {
 
 /// One rendered option line: how it's passed, its media URN, its description,
 /// plus a trailing qualifier (default value / optional / sequence).
-fn render_option_line(arg: &CapArg) -> String {
-    let mut line = format!("  {}  ({})", arg_invocation_form(arg), arg.media_urn);
+fn render_option_line(arg: &CapArg, names: &InterfaceNames<'_>) -> String {
+    let mut line = format!("  {}  ({})", arg_invocation_form(arg), names.media_with_urn(&arg.media_urn));
     if let Some(description) = arg
         .arg_description
         .as_deref()
@@ -118,6 +118,28 @@ fn render_option_line(arg: &CapArg) -> String {
     line
 }
 
+/// How a cap's interface names what it shows: the cap by its alias, media by
+/// theirs, and URNs only when asked for.
+pub struct InterfaceNames<'a> {
+    /// The cap, as a person names it.
+    pub cap: String,
+    /// A media URN, as a person names it.
+    pub media: &'a dyn Fn(&str) -> String,
+    /// Show the URNs beside the names.
+    pub urns: bool,
+}
+
+impl InterfaceNames<'_> {
+    fn media_with_urn(&self, urn: &str) -> String {
+        let name = (self.media)(urn);
+        if self.urns && name != urn {
+            format!("{name} = {urn}")
+        } else {
+            name
+        }
+    }
+}
+
 /// Render a cap's declared interface for humans — the presentation the CLI
 /// (and every other front-end) uses, structured by argument ROLE rather than
 /// as a flat arg list:
@@ -129,7 +151,7 @@ fn render_option_line(arg: &CapArg) -> String {
 /// - **Required options** — non-main args that are required and defaultless:
 ///   these MUST be supplied on every invocation.
 /// - **Options** — the remaining non-main args, with their default values.
-pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
+pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<String, String> {
     let in_spec = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
         format!(
             "cap {} in= URN '{}' is not a valid media URN: {e}",
@@ -139,9 +161,13 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
     })?;
 
     let mut out = String::new();
-    out.push_str(&format!("{}\n", cap.urn));
-    if !cap.title.is_empty() {
-        out.push_str(&format!("{}\n", cap.title));
+    if cap.title.is_empty() {
+        out.push_str(&format!("{}\n", names.cap));
+    } else {
+        out.push_str(&format!("{} — {}\n", names.cap, cap.title));
+    }
+    if names.urns {
+        out.push_str(&format!("{}\n", cap.urn));
     }
     let aliases = cap.get_aliases();
     if !aliases.is_empty() {
@@ -158,7 +184,7 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
 
     out.push_str("\nInput (piped stdin, or input file path(s)):\n");
     for arg in &main_inputs {
-        let mut line = format!("  {}", arg.stream_urn());
+        let mut line = format!("  {}", names.media_with_urn(&arg.stream_urn().to_string()));
         if let Some(description) = arg
             .arg_description
             .as_deref()
@@ -188,7 +214,7 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
     if !required.is_empty() {
         out.push_str("\nRequired options (must be supplied):\n");
         for arg in &required {
-            out.push_str(&render_option_line(arg));
+            out.push_str(&render_option_line(arg, names));
             out.push('\n');
         }
     }
@@ -196,7 +222,7 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
     if !optional.is_empty() {
         out.push_str("\nOptions:\n");
         for arg in &optional {
-            out.push_str(&render_option_line(arg));
+            out.push_str(&render_option_line(arg, names));
             out.push('\n');
         }
     }
@@ -213,7 +239,7 @@ pub fn render_cap_interface(cap: &Cap) -> Result<String, String> {
         out.push_str(&format!(
             "\nOutput{}: {}{}{}\n",
             if is_main { String::new() } else { format!(" `{}`", output.name) },
-            output.media_urn,
+            names.media_with_urn(&output.media_urn),
             if output.is_sequence { " [sequence]" } else { "" },
             if output.optional { " [may not fire]" } else { "" },
         ));
@@ -320,6 +346,7 @@ pub fn map_invocation(
     cap: &Cap,
     tokens: &[String],
     explicit_pairs: &[(String, String)],
+    names: &InterfaceNames<'_>,
 ) -> Result<CapInvocation, String> {
     let non_stdin_args: Vec<&CapArg> = cap
         .get_args()
@@ -413,12 +440,12 @@ pub fn map_invocation(
         .filter(|arg| {
             arg.required && arg.default_value.is_none() && !supplied.contains(&arg.media_urn)
         })
-        .map(|arg| render_option_line(arg))
+        .map(|arg| render_option_line(arg, names))
         .collect();
     if !missing.is_empty() {
         return Err(format!(
-            "cap {} is missing required options:\n{}",
-            cap.urn,
+            "{} is missing required options:\n{}",
+            names.cap,
             missing.join("\n")
         ));
     }
@@ -525,6 +552,15 @@ mod tests {
             default_value: default,
             metadata: None,
         }
+    }
+
+    /// Names that show every media type by its URN, as a cap with no fabric
+    /// to name it by is shown.
+    fn urn_names() -> InterfaceNames<'static> {
+        fn same(urn: &str) -> String {
+            urn.to_string()
+        }
+        InterfaceNames { cap: "summarize".to_string(), media: &same, urns: false }
     }
 
     fn test_cap() -> Cap {
@@ -657,6 +693,7 @@ mod tests {
                 "doc.pdf".to_string(),
             ],
             &[],
+            &urn_names(),
         )
         .unwrap();
         assert_eq!(
@@ -683,12 +720,13 @@ mod tests {
                 "doc.pdf".to_string(),
             ],
             &[],
+            &urn_names(),
         )
         .unwrap();
         assert_eq!(invocation, eq_form);
 
         // Unknown flag: hard error listing the cap's flags and media URNs.
-        let err = map_invocation(&cap, &["--bogus".to_string(), "v".to_string()], &[]).unwrap_err();
+        let err = map_invocation(&cap, &["--bogus".to_string(), "v".to_string()], &[], &urn_names()).unwrap_err();
         assert!(err.contains("no arg with CLI flag '--bogus'"), "{err}");
         assert!(err.contains("--model-spec"), "{err}");
 
@@ -704,6 +742,7 @@ mod tests {
                 "media:model-spec;enc=utf8".to_string(),
                 format!("@{}", file.display()),
             )],
+            &urn_names(),
         )
         .unwrap();
         assert_eq!(invocation.cap_arguments[0].0, "media:enc=utf8;model-spec");
@@ -712,7 +751,7 @@ mod tests {
         // Missing required defaultless arg fails pre-flight naming the flag;
         // the optional defaulted `--budget` and the optional positional are
         // NOT demanded.
-        let err = map_invocation(&cap, &[], &[]).unwrap_err();
+        let err = map_invocation(&cap, &[], &[], &urn_names()).unwrap_err();
         assert!(err.contains("missing required options"), "{err}");
         assert!(err.contains("--model-spec"), "{err}");
         assert!(
@@ -729,7 +768,7 @@ mod tests {
         );
 
         // A flag missing its value is a hard error, not a silent empty.
-        let err = map_invocation(&cap, &["--model-spec".to_string()], &[]).unwrap_err();
+        let err = map_invocation(&cap, &["--model-spec".to_string()], &[], &urn_names()).unwrap_err();
         assert!(err.contains("requires a value"), "{err}");
     }
 

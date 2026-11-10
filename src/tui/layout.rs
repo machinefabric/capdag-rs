@@ -4,7 +4,7 @@
 //!
 //! 1. **Columns.** A node's column is the longest path into it — the uikit's
 //!    rule (`_layerPlacement`), so a machine has the same columns on the
-//!    desktop and in a terminal. The run's outputs sit in the last column.
+//!    desktop and in a terminal. The outputs sit in the last column.
 //! 2. **Long edges** get a one-row slot in every column they pass through,
 //!    so they run between nodes, never across them.
 //! 3. **Order within columns.** Barycentre sweeps, down then up, keeping the
@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::tui::scene::{NodeRole, Scene, SceneNode};
+use crate::tui::scene::{Scene, SceneNode};
 use crate::tui::text;
 
 /// How much of each node is drawn — the terminal's zoom.
@@ -32,11 +32,11 @@ use crate::tui::text;
 pub enum Lod {
     /// One cell per node: the overview.
     Dot,
-    /// One line per node: mark, title, state.
+    /// One line per node: icon, title, mark.
     Glyph,
-    /// A small card: title and state.
+    /// A small card: title and mark.
     Compact,
-    /// The whole card: title, subtitle, what became of it, its ports.
+    /// The whole card: title, subtitle, and the line under it.
     Full,
 }
 
@@ -88,9 +88,6 @@ pub enum Arrangement {
 pub struct LayoutOptions {
     pub lod: Lod,
     pub arrangement: Arrangement,
-    /// Columns reserved where a step's edge leaves it for its flow chip; 0
-    /// when the scene has no flow to show.
-    pub chip_width: i32,
 }
 
 /// A rectangle of cells.
@@ -117,13 +114,11 @@ impl Rect {
     }
 }
 
-/// A node where it sits. `rect` is the whole footprint, the back cards of a
-/// stack included; `card` is the front card.
+/// A node where it sits.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedNode {
     pub id: String,
     pub rect: Rect,
-    pub card: Rect,
     pub column: usize,
     pub band: usize,
     /// The row edges leave it from.
@@ -145,8 +140,6 @@ pub struct RoutedEdge {
     pub nets: Vec<usize>,
     /// Where the label starts, and how many columns it may take.
     pub label_at: Option<(i32, i32, i32)>,
-    /// Where the flow chip starts, and how many columns it may take.
-    pub chip_at: Option<(i32, i32, i32)>,
 }
 
 /// A laid-out scene.
@@ -171,7 +164,7 @@ impl Layout {
 pub enum LayoutError {
     #[error("edge '{edge}' joins '{node}', which is not in the scene")]
     UnknownNode { edge: String, node: String },
-    #[error("edge '{0}' runs backwards against the columns; a run's picture has no cycles")]
+    #[error("edge '{0}' runs backwards against the columns; a machine's picture has no cycles")]
     Backward(String),
     #[error("no arrangement was given to fit the scene in")]
     NoArrangement,
@@ -180,8 +173,7 @@ pub enum LayoutError {
 /// The columns of a card's side borders and padding.
 const CARD_CHROME: i32 = 4;
 
-/// How big a node is at `lod`: its front card, and how many rows its edges
-/// need on each side.
+/// How big a node is at `lod`, given how many edges enter and leave it.
 fn card_size(node: &SceneNode, lod: Lod, ins: usize, outs: usize) -> (i32, i32) {
     let title_width = text::width(&node.title) as i32 + 2; // icon and space
     match lod {
@@ -191,17 +183,10 @@ fn card_size(node: &SceneNode, lod: Lod, ins: usize, outs: usize) -> (i32, i32) 
             if let Some(meta) = &node.meta {
                 inner = inner.max(text::width(meta) as i32);
             }
-            for port in &node.ports {
-                let value = port.value.as_deref().map(text::width).unwrap_or(1) as i32;
-                inner = inner.max(2 + text::width(&port.name) as i32 + 2 + value.min(14));
-            }
             let inner = inner.clamp(16, 32);
             let mut h = 2 + 2; // borders, title, subtitle
             if node.meta.is_some() {
                 h += 1;
-            }
-            if !node.ports.is_empty() {
-                h += 1 + node.ports.len().min(PORT_ROWS) as i32;
             }
             // Every edge in or out takes its own interior row.
             let needed = ins.max(outs) as i32 + 2;
@@ -219,9 +204,6 @@ fn card_size(node: &SceneNode, lod: Lod, ins: usize, outs: usize) -> (i32, i32) 
     }
 }
 
-/// How many argument rows a full card shows before it says how many more.
-pub const PORT_ROWS: usize = 6;
-
 /// One thing placed in a column: a node, or the slot a long edge passes
 /// through.
 #[derive(Debug, Clone)]
@@ -232,10 +214,6 @@ struct Element {
     column: usize,
     w: i32,
     h: i32,
-    /// Footprint offset of the front card (a stack's back cards sit up and
-    /// to the right of it).
-    stack_rise: i32,
-    stack_shift: i32,
     y: i32,
 }
 
@@ -306,17 +284,13 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
     let mut element_of_node = vec![0usize; n];
     for (i, node) in scene.nodes.iter().enumerate() {
         let (w, h) = card_size(node, lod, ins[i], outs[i]);
-        let stacked = node.stack.is_some() && matches!(lod, Lod::Full | Lod::Compact);
-        let (rise, shift) = if stacked { (1, 1) } else { (0, 0) };
         element_of_node[i] = elements.len();
         elements.push(Element {
             key: node.id.clone(),
             node: Some(i),
             column: column[i],
-            w: w + shift,
-            h: h + rise,
-            stack_rise: rise,
-            stack_shift: shift,
+            w,
+            h,
             y: 0,
         });
     }
@@ -331,8 +305,6 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 column: c,
                 w: 1,
                 h: 1,
-                stack_rise: 0,
-                stack_shift: 0,
                 y: 0,
             });
             hops.push(Hop {
@@ -473,11 +445,12 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
         Lod::Glyph => 1,
         Lod::Dot => 0,
     };
-    // Where an element's connections meet it: its out-row offset from its top.
+    // Where an element's connections meet it: its out-row offset from its
+    // top — a card's title row, inside its border.
     let anchor = |el: &Element| -> i32 {
         match el.node {
             None => 0,
-            Some(_) => el.stack_rise + if el.h - el.stack_rise >= 3 { 1 } else { 0 },
+            Some(_) => i32::from(el.h >= 3),
         }
     };
     // Pack every column from the top.
@@ -526,11 +499,10 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
             }
         }
     }
-    // Leave a row above everything for the badges over nodes.
+    // The topmost element starts the picture's first row.
     let min_y = elements.iter().map(|e| e.y).min().unwrap_or(0);
-    let top_margin = if lod == Lod::Full { 1 } else { 0 };
     for e in &mut elements {
-        e.y = e.y - min_y + top_margin;
+        e.y -= min_y;
     }
 
     // ── 5. channels and columns ──
@@ -550,18 +522,16 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 }
             }
             Some(_) => {
-                let card_top = element.y + element.stack_rise;
-                let card_h = element.h - element.stack_rise;
                 // A card is entered between its borders; a one-line node on
                 // any of its rows.
-                let interior: Vec<i32> = if card_h >= 3 && matches!(lod, Lod::Full | Lod::Compact) {
-                    (card_top + 1..card_top + card_h - 1).collect()
+                let interior: Vec<i32> = if element.h >= 3 && matches!(lod, Lod::Full | Lod::Compact) {
+                    (element.y + 1..element.y + element.h - 1).collect()
                 } else {
-                    (card_top..card_top + card_h).collect()
+                    (element.y..element.y + element.h).collect()
                 };
                 if interior.len() >= incoming.len() {
                     // Centre the run of rows on the anchor where it fits.
-                    let start = (anchor(element) - element.stack_rise - 1).max(0) as usize;
+                    let start = (anchor(element) - 1).max(0) as usize;
                     let start = start.min(interior.len() - incoming.len().max(1).min(interior.len()));
                     for (k, h) in incoming.iter().enumerate() {
                         in_row.insert(*h, interior[(start + k).min(interior.len() - 1)]);
@@ -593,19 +563,6 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 .min(24)
         })
         .collect();
-    let chip_room = |c: usize| -> i32 {
-        let steps_leave = hops.iter().any(|h| {
-            elements[h.from].column == c
-                && elements[h.from]
-                    .node
-                    .is_some_and(|i| scene.nodes[i].role == NodeRole::Step)
-        });
-        if options.chip_width > 0 && steps_leave {
-            options.chip_width + 1
-        } else {
-            0
-        }
-    };
     let min_channel = match lod {
         Lod::Dot => 3,
         Lod::Glyph => 4,
@@ -627,9 +584,9 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 }
             }
             band_of_column[c] = band;
-            // An estimate of the channel: tracks are not known yet, labels and
-            // chips are.
-            x += column_width[c] + 2 + chip_room(c) + label_width[c] + 4;
+            // An estimate of the channel: tracks are not known yet, labels
+            // are.
+            x += column_width[c] + 2 + label_width[c] + 4;
         }
     }
     let bands = band_of_column.iter().copied().max().unwrap_or(0) + 1;
@@ -745,7 +702,7 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 return 0;
             }
             let label = if label_width[c] > 0 { label_width[c] + 3 } else { 0 };
-            (2 + chip_room(c) + tracks_in_channel[c] + exit_lanes_in_channel[c] + label + 2).max(min_channel)
+            (2 + tracks_in_channel[c] + exit_lanes_in_channel[c] + label + 2).max(min_channel)
         })
         .collect();
 
@@ -811,17 +768,9 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
         let el = &elements[element_of_node[i]];
         let x = column_x[el.column];
         let y = el.y + band_shift(el.column);
-        let rect = Rect { x, y, w: el.w, h: el.h };
-        let card = Rect {
-            x,
-            y: y + el.stack_rise,
-            w: el.w - el.stack_shift,
-            h: el.h - el.stack_rise,
-        };
         placed_nodes.push(PlacedNode {
             id: node.id.clone(),
-            rect,
-            card,
+            rect: Rect { x, y, w: el.w, h: el.h },
             column: el.column,
             band: band_of_column[el.column],
             out_row: y + anchor(el),
@@ -837,7 +786,6 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
         let mut points: Vec<(i32, i32)> = Vec::new();
         let mut nets: Vec<usize> = Vec::new();
         let mut label_at = None;
-        let mut chip_at = None;
         let push = |points: &mut Vec<(i32, i32)>, nets: &mut Vec<usize>, p: (i32, i32), net: usize| {
             if let Some(&last) = points.last() {
                 if last == p {
@@ -853,8 +801,7 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
             let to = &elements[hop.to];
             let c = from.column;
             let start_y = from.y + anchor(from) + band_shift(c);
-            let start_x = column_x[c] + if from.node.is_some() { from.w - from.stack_shift } else { column_width[c] };
-            let chip = chip_room(c);
+            let start_x = column_x[c] + if from.node.is_some() { from.w } else { column_width[c] };
             let channel_start = column_x[c] + column_width[c];
             let (channel, index) = net_of_element[&hop.from];
             // The whole of an edge is one net: past its first channel it runs
@@ -865,9 +812,6 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
             };
             if k == 0 {
                 points.push((start_x, start_y));
-                if chip > 0 {
-                    chip_at = Some((channel_start + 1, start_y - 1, options.chip_width));
-                }
             } else if from.node.is_none() {
                 // Through a slot: across its column on its row.
                 push(&mut points, &mut nets, (column_x[c] + column_width[c] - 1, start_y), id);
@@ -875,7 +819,7 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
             let target_x = column_x[to.column] - 1;
             let target_y = in_row[&h] + band_shift(to.column);
             if crosses(&hop) {
-                let exit_x = channel_start + 1 + chip + tracks_in_channel[c] + exit_lane[&h];
+                let exit_x = channel_start + 1 + tracks_in_channel[c] + exit_lane[&h];
                 let highway = highway_row[&h];
                 let lane_x = gutter_lane[&h];
                 push(&mut points, &mut nets, (exit_x, start_y), id);
@@ -892,7 +836,7 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
                 }
                 continue;
             }
-            let track_x = channel_start + 1 + chip + nets_by_channel[channel][index].track as i32;
+            let track_x = channel_start + 1 + nets_by_channel[channel][index].track as i32;
             push(&mut points, &mut nets, (track_x, start_y), id);
             push(&mut points, &mut nets, (track_x, target_y), id);
             if to.node.is_some() {
@@ -911,7 +855,6 @@ pub fn layout(scene: &Scene, options: &LayoutOptions) -> Result<Layout, LayoutEr
             points,
             nets,
             label_at,
-            chip_at,
         });
     }
 
@@ -997,24 +940,11 @@ fn fit_in_order(elements: &[(i32, i32)], desired: &[(f64, f64)], gap: i32) -> Ve
 /// fits. More detail is worth more than a preferred arrangement: a machine
 /// too wide for one row of cards is wrapped into bands of cards before it
 /// is shrunk to lines.
-pub fn fit(
-    scene: &Scene,
-    width: i32,
-    height: i32,
-    arrangements: &[Arrangement],
-    chip_width: i32,
-) -> Result<Layout, LayoutError> {
+pub fn fit(scene: &Scene, width: i32, height: i32, arrangements: &[Arrangement]) -> Result<Layout, LayoutError> {
     let mut last = None;
     for lod in Lod::ALL {
         for &arrangement in arrangements {
-            let laid = layout(
-                scene,
-                &LayoutOptions {
-                    lod,
-                    arrangement,
-                    chip_width: if matches!(lod, Lod::Full | Lod::Compact) { chip_width } else { 0 },
-                },
-            )?;
+            let laid = layout(scene, &LayoutOptions { lod, arrangement })?;
             if laid.width <= width && laid.height <= height {
                 return Ok(laid);
             }
@@ -1026,16 +956,10 @@ pub fn fit(
 
 /// The scene at `lod`, in the first of `arrangements` that fits `width`;
 /// in the last when none does.
-pub fn fit_width(
-    scene: &Scene,
-    lod: Lod,
-    width: i32,
-    arrangements: &[Arrangement],
-    chip_width: i32,
-) -> Result<Layout, LayoutError> {
+pub fn fit_width(scene: &Scene, lod: Lod, width: i32, arrangements: &[Arrangement]) -> Result<Layout, LayoutError> {
     let mut last = None;
     for &arrangement in arrangements {
-        let laid = layout(scene, &LayoutOptions { lod, arrangement, chip_width })?;
+        let laid = layout(scene, &LayoutOptions { lod, arrangement })?;
         if laid.width <= width {
             return Ok(laid);
         }

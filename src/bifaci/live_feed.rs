@@ -641,6 +641,10 @@ pub enum StopInputsError {
     /// or it was torn down): the stop cannot be delivered.
     #[error("no running host carries the live input")]
     NoHost,
+    /// The run was already stopped, aborted or over: there is nothing a stop
+    /// could still do to it (15.2 §Runs stop).
+    #[error("the run is not running: it was already stopped, aborted or is over")]
+    NotRunning,
 }
 
 /// Stop the given feed-bearing requests and await the evidence that each has

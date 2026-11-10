@@ -22,35 +22,8 @@ use crate::orchestrator::machine_plan::StrandPlan;
 use crate::orchestrator::observe::{RunKey, RunObserver};
 use crate::orchestrator::run_arguments::RunArgumentLedger;
 use crate::planner::ExecutionNodeType;
-use crate::{AttributionClass, ExecutionError};
-
-/// How a run ended, least to most severe: a process's exit status is the
-/// worst over everything it ran.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum RunEnd {
-    /// Every output was produced, or was reported not produced by a branch
-    /// that did not fire.
-    Completed,
-    /// Outputs were written, and at least one step failed under a policy
-    /// that tolerates it.
-    Tolerated,
-    /// A step failed and nothing tolerated it.
-    Failed,
-    /// The user cancelled.
-    Cancelled,
-}
-
-impl RunEnd {
-    /// The CLI's exit status for it (18.1 §Exit status).
-    pub fn exit_code(self) -> i32 {
-        match self {
-            RunEnd::Completed => 0,
-            RunEnd::Tolerated => 3,
-            RunEnd::Failed => 1,
-            RunEnd::Cancelled => 130,
-        }
-    }
-}
+use crate::orchestrator::run_control::RunControl;
+use crate::ExecutionError;
 
 /// One strand of one run, planned: its plan, what each input slot is given
 /// and whether it is a sequence, and the values of the arguments the machine
@@ -75,14 +48,16 @@ pub struct StrandHandle {
 }
 
 /// Start one strand of one run on its own scope of `runtime`, every signal it
-/// gives reported to `observer` under `key`. A run whose observer was lost
-/// while it spoke failed: what it said is not known.
+/// gives reported to `observer` under `key`, stopped and aborted through
+/// `control` (15.2 §Runs stop). A run whose observer was lost while it spoke
+/// failed: what it said is not known.
 pub fn spawn_strand(
     runtime: &Arc<CliRuntime>,
     observer: &RunObserver,
     key: RunKey,
     planned: PlannedStrand,
     on_transient: Option<TransientSink>,
+    control: Arc<RunControl>,
 ) -> Result<StrandHandle, (StrandPlan, ExecutionError)> {
     let ledger = match RunArgumentLedger::new(&planned.strand.plan, planned.cap_arguments) {
         Ok(ledger) => Arc::new(ledger),
@@ -107,6 +82,7 @@ pub fn spawn_strand(
             is_sequence,
             run_ledger,
             observer.callbacks(key),
+            control,
         )
         .await;
         if observer.lost() {
@@ -145,18 +121,45 @@ pub enum EmittedOutput {
     NotProduced,
 }
 
-/// A finished strand, reported: how it ended, the lines the CLI says on
-/// stderr about it (in order), and what became of each output.
-#[derive(Debug, Clone)]
+/// Something a finished strand did other than simply complete, as data: the
+/// command line says it in its own words, naming steps by their caps' aliases.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrandNote {
+    /// An output was not produced: the branch that makes it did not fire.
+    NotProduced { output: String, media_urn: String },
+    /// A step did not run: a required input of it was absent. `item` is the
+    /// map item it was in; `absent` names what was absent, as the machine
+    /// names it.
+    Skipped { cap_urn: String, item: Option<usize>, absent: Vec<String> },
+    /// A step failed and was run again, and the attempt after it completed.
+    Retried { cap_urn: String, item: Option<usize>, attempt: usize, failure: StepFailure },
+    /// A step failed for good and its policy tolerated that.
+    Tolerated { cap_urn: String, item: Option<usize>, failure: StepFailure, earlier_attempts: usize },
+}
+
+/// A finished strand, reported: the failure that ended it, whether a step's
+/// policy tolerated a failure, what did not simply complete, and what became
+/// of each output.
+#[derive(Debug)]
 pub struct StrandReport {
-    pub end: RunEnd,
-    pub notes: Vec<String>,
+    pub failure: Option<StrandFailure>,
+    pub tolerated: bool,
+    pub notes: Vec<StrandNote>,
     /// By plan `Output` node id. Empty when the strand failed.
     pub outputs: BTreeMap<String, EmittedOutput>,
 }
 
+/// Why a strand did not complete.
+#[derive(Debug)]
+pub enum StrandFailure {
+    /// The run failed, or was aborted: the error it ended with.
+    Run(ExecutionError),
+    /// What the run produced could not be written.
+    Emit(String),
+}
+
 /// Write what a finished strand produced, by the pipe discipline, to `stdout`
-/// and the output directory, and say what did not simply complete: the
+/// and the output directory, and report what did not simply complete: the
 /// failure that ended it, outputs that were not produced, steps skipped,
 /// attempted again or tolerated. Whatever the run persisted and did not turn
 /// into an output — everything, when it failed — is removed: nothing of a run
@@ -179,22 +182,15 @@ fn emit_strand(
     target: &EmitTarget,
     stdout: &mut dyn Write,
 ) -> StrandReport {
-    let mut notes: Vec<String> = Vec::new();
+    let failed = |failure: StrandFailure, notes: Vec<StrandNote>, outputs| StrandReport {
+        failure: Some(failure),
+        tolerated: false,
+        notes,
+        outputs,
+    };
     let result = match result {
         Ok(result) => result,
-        Err(e) => {
-            notes.push(e.to_string());
-            let end = if e.attribution_class() == AttributionClass::User {
-                RunEnd::Cancelled
-            } else {
-                RunEnd::Failed
-            };
-            return StrandReport {
-                end,
-                notes,
-                outputs: BTreeMap::new(),
-            };
-        }
+        Err(e) => return failed(StrandFailure::Run(e), Vec::new(), BTreeMap::new()),
     };
     let options = EmitOptions {
         output_dir: target.output_dir.clone(),
@@ -204,15 +200,9 @@ fn emit_strand(
     };
     let written = match emit_terminals_by_output(&result, &options, stdout) {
         Ok(written) => written,
-        Err(e) => {
-            notes.push(e);
-            return StrandReport {
-                end: RunEnd::Failed,
-                notes,
-                outputs: BTreeMap::new(),
-            };
-        }
+        Err(e) => return failed(StrandFailure::Emit(e), Vec::new(), BTreeMap::new()),
     };
+    let mut notes: Vec<StrandNote> = Vec::new();
     let mut outputs: BTreeMap<String, EmittedOutput> = BTreeMap::new();
     for (node, path) in written {
         match outputs.entry(node).or_insert_with(|| EmittedOutput::Files(Vec::new())) {
@@ -232,33 +222,23 @@ fn emit_strand(
             None => {
                 // Every output of a plan is one the notation named.
                 let Some(name) = output_names.get(terminal.output_node_id()) else {
-                    notes.push(format!(
-                        "internal error: the run reports output '{}', which its plan does not name",
-                        terminal.output_node_id()
-                    ));
-                    return StrandReport {
-                        end: RunEnd::Failed,
+                    return failed(
+                        StrandFailure::Emit(format!(
+                            "the run reports output '{}', which its plan does not name",
+                            terminal.output_node_id()
+                        )),
                         notes,
                         outputs,
-                    };
+                    );
                 };
-                notes.push(format!("Not produced: output '{name}' ({})", terminal.media_urn()));
+                notes.push(StrandNote::NotProduced {
+                    output: name.clone(),
+                    media_urn: terminal.media_urn().to_string(),
+                });
                 outputs.insert(terminal.output_node_id().to_string(), EmittedOutput::NotProduced);
             }
         }
     }
-    let describe = |failure: &StepFailure| {
-        format!(
-            "[{}{}] {}",
-            failure.class,
-            failure
-                .code
-                .as_deref()
-                .map(|code| format!("/{code}"))
-                .unwrap_or_default(),
-            failure.message
-        )
-    };
     // A value is named as the machine named it. An item of a map is named
     // by the sequence it is an item of.
     let name_of = |node: &String| -> String {
@@ -274,45 +254,38 @@ fn emit_strand(
         }
     };
     for report in &result.steps {
-        let run = report
-            .body
-            .as_ref()
-            .map(|body| format!(" (item {})", body.body_index))
-            .unwrap_or_default();
+        let item = report.body.as_ref().map(|body| body.body_index);
         match &report.outcome {
-            StepOutcome::Skipped { absent } => notes.push(format!(
-                "Skipped: step {}{run} — it needs {}, which was not produced",
-                report.cap_urn,
-                absent.iter().map(name_of).collect::<Vec<_>>().join(", ")
-            )),
+            StepOutcome::Skipped { absent } => notes.push(StrandNote::Skipped {
+                cap_urn: report.cap_urn.clone(),
+                item,
+                absent: absent.iter().map(name_of).collect(),
+            }),
             StepOutcome::Completed { failed_attempts } => {
                 for (attempt, failure) in failed_attempts.iter().enumerate() {
-                    notes.push(format!(
-                        "Attempted again: step {}{run}, attempt {} failed {}",
-                        report.cap_urn,
-                        attempt + 1,
-                        describe(failure)
-                    ));
+                    notes.push(StrandNote::Retried {
+                        cap_urn: report.cap_urn.clone(),
+                        item,
+                        attempt: attempt + 1,
+                        failure: failure.clone(),
+                    });
                 }
             }
             StepOutcome::FailedTolerated {
                 failure,
                 failed_attempts,
-            } => notes.push(format!(
-                "Tolerated failure: step {}{run} {}{}",
-                report.cap_urn,
-                describe(failure),
-                if failed_attempts.is_empty() {
-                    String::new()
-                } else {
-                    format!(" (after {} earlier attempt(s))", failed_attempts.len())
-                }
-            )),
+            } => notes.push(StrandNote::Tolerated {
+                cap_urn: report.cap_urn.clone(),
+                item,
+                failure: failure.clone(),
+                earlier_attempts: failed_attempts.len(),
+            }),
         }
     }
-    let end = match result.verdict {
-        RunVerdict::Completed => RunEnd::Completed,
-        RunVerdict::CompletedWithToleratedFailures => RunEnd::Tolerated,
-    };
-    StrandReport { end, notes, outputs }
+    StrandReport {
+        failure: None,
+        tolerated: result.verdict == RunVerdict::CompletedWithToleratedFailures,
+        notes,
+        outputs,
+    }
 }

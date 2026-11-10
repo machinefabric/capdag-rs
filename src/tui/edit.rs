@@ -34,12 +34,19 @@ pub enum EditError {
     RewireConstant,
     #[error("this step takes no main output to rewire")]
     NoMainOutput,
-    #[error("step {0} runs '{1}', which no header names")]
-    MissingHeader(usize, String),
     #[error("'{0}' is not a cap URN: {1}")]
     InvalidCap(String, String),
     #[error("'{0}' is not a node name")]
     BadName(String),
+}
+
+/// A cap a step is set to run: its URN, and the fabric alias a person names
+/// it by, when it has one. A cap with an alias is written by it, as every
+/// machine the command line writes is; one without is given a header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapChoice {
+    pub urn: String,
+    pub alias: Option<String>,
 }
 
 /// A header: the cap or the machine an alias names.
@@ -270,20 +277,11 @@ impl MachineDraft {
             .expect("an unbounded range has a free name")
     }
 
-    /// The cap URN step `wiring` runs, when it runs a cap (not a machine).
-    pub fn cap_of(&self, wiring: usize) -> Result<Option<&str>, EditError> {
-        let w = self.wirings.get(wiring).ok_or(EditError::NoWiring(wiring))?;
-        match self.headers.iter().find(|h| h.alias() == w.cap_alias) {
-            Some(DraftHeader::Cap { cap_urn, .. }) => Ok(Some(cap_urn.as_str())),
-            Some(DraftHeader::Machine { .. }) => Ok(None),
-            None => Err(EditError::MissingHeader(wiring, w.cap_alias.clone())),
-        }
-    }
-
-    /// The alias of the header naming `cap_urn` — an equivalent cap, read as
-    /// a parsed URN — minting one when none does.
-    fn ensure_header(&mut self, cap_urn: &str) -> Result<String, EditError> {
-        let wanted = CapUrn::from_string(cap_urn).map_err(|e| EditError::InvalidCap(cap_urn.to_string(), e.to_string()))?;
+    /// The name a step runs `cap` by: the alias of a header naming an
+    /// equivalent cap (read as a parsed URN); else the cap's fabric alias,
+    /// unless a header claims that name; else a header minted for it.
+    fn name_cap(&mut self, cap: &CapChoice) -> Result<String, EditError> {
+        let wanted = CapUrn::from_string(&cap.urn).map_err(|e| EditError::InvalidCap(cap.urn.clone(), e.to_string()))?;
         for header in &self.headers {
             if let DraftHeader::Cap { alias, cap_urn: existing } = header {
                 let parsed = CapUrn::from_string(existing)
@@ -291,6 +289,11 @@ impl MachineDraft {
                 if parsed.is_equivalent(&wanted) {
                     return Ok(alias.clone());
                 }
+            }
+        }
+        if let Some(alias) = &cap.alias {
+            if !self.headers.iter().any(|h| h.alias() == alias) {
+                return Ok(alias.clone());
             }
         }
         let alias = self.fresh_name("edge_");
@@ -312,23 +315,23 @@ impl MachineDraft {
     }
 
     /// A new step reading `source` into a fresh node.
-    pub fn connect(&mut self, source: &str, cap_urn: &str) -> Result<(), EditError> {
-        let alias = self.ensure_header(cap_urn)?;
+    pub fn connect(&mut self, source: &str, cap: &CapChoice) -> Result<(), EditError> {
+        let alias = self.name_cap(cap)?;
         let target = self.fresh_name("n");
         self.wirings.push(DraftWiring::plain(source, &alias, &target));
         Ok(())
     }
 
     /// A new step reading `source` into `target`.
-    pub fn connect_to(&mut self, source: &str, target: &str, cap_urn: &str) -> Result<(), EditError> {
-        let alias = self.ensure_header(cap_urn)?;
+    pub fn connect_to(&mut self, source: &str, target: &str, cap: &CapChoice) -> Result<(), EditError> {
+        let alias = self.name_cap(cap)?;
         self.wirings.push(DraftWiring::plain(source, &alias, target));
         Ok(())
     }
 
     /// A new step of its own: a fresh input into a fresh output.
-    pub fn create_strand(&mut self, cap_urn: &str) -> Result<(), EditError> {
-        let alias = self.ensure_header(cap_urn)?;
+    pub fn create_strand(&mut self, cap: &CapChoice) -> Result<(), EditError> {
+        let alias = self.name_cap(cap)?;
         let source = self.fresh_name("n");
         let mut with_source = self.clone();
         with_source.wirings.push(DraftWiring::plain(&source, &alias, &source));
@@ -351,7 +354,7 @@ impl MachineDraft {
     /// Insert a step before member `source_index` of step `wiring`:
     /// `[src -> new -> mid]`, and the member — still naming the arg it names
     /// — reads `mid`.
-    pub fn insert_cap(&mut self, wiring: usize, source_index: usize, cap_urn: &str) -> Result<(), EditError> {
+    pub fn insert_cap(&mut self, wiring: usize, source_index: usize, cap: &CapChoice) -> Result<(), EditError> {
         let mid = self.fresh_name("n");
         let member = self
             .wiring_mut(wiring)?
@@ -362,7 +365,7 @@ impl MachineDraft {
         let DraftValue::Node(upstream) = member.value else {
             return Err(EditError::InsertBeforeConstant);
         };
-        let alias = self.ensure_header(cap_urn)?;
+        let alias = self.name_cap(cap)?;
         self.wiring_mut(wiring)?.sources[source_index].value = DraftValue::Node(mid.clone());
         self.wirings.insert(wiring, DraftWiring::plain(&upstream, &alias, &mid));
         Ok(())
@@ -465,15 +468,15 @@ impl MachineDraft {
         Ok(())
     }
 
-    /// Step `wiring` runs `cap_urn` instead.
-    pub fn set_cap(&mut self, wiring: usize, cap_urn: &str) -> Result<(), EditError> {
+    /// Step `wiring` runs `cap` instead.
+    pub fn set_cap(&mut self, wiring: usize, cap: &CapChoice) -> Result<(), EditError> {
         let previous = self
             .wirings
             .get(wiring)
             .ok_or(EditError::NoWiring(wiring))?
             .cap_alias
             .clone();
-        let alias = self.ensure_header(cap_urn)?;
+        let alias = self.name_cap(cap)?;
         self.wirings[wiring].cap_alias = alias;
         self.drop_orphan_header(&previous);
         Ok(())
@@ -500,12 +503,17 @@ fn check_name(name: &str) -> Result<(), EditError> {
 mod tests {
     use super::*;
 
-    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf-8;ext=txt""#;
-    const SUMMARIZE: &str = r#"cap:in="media:enc=utf-8";summarize;out="media:enc=utf-8;summary""#;
-    const TRANSLATE: &str = r#"cap:in="media:enc=utf-8";translate;out="media:enc=utf-8;translated""#;
+    const EXTRACT: &str = r#"cap:in="media:document;ext=pdf";extract;out="media:enc=utf8;ext=txt""#;
+    const SUMMARIZE: &str = r#"cap:in="media:enc=utf8";summarize;out="media:enc=utf8;summary""#;
+    const TRANSLATE: &str = r#"cap:in="media:enc=utf8";translate;out="media:enc=utf8;translated""#;
 
     fn draft(text: &str) -> MachineDraft {
         MachineDraft::parse(text).unwrap_or_else(|e| panic!("{e}: {text}"))
+    }
+
+    /// A cap no fabric alias names.
+    fn unaliased(urn: &str) -> CapChoice {
+        CapChoice { urn: urn.to_string(), alias: None }
     }
 
     // TEST13060: a draft written back is notation the parser reads as the
@@ -534,7 +542,7 @@ mod tests {
     fn test13061_structural_operations_rewrite_the_draft() {
         let base = format!("[extract {EXTRACT}][summarize {SUMMARIZE}][doc -> extract -> text][text -> summarize -> summary]");
         let mut d = draft(&base);
-        d.insert_cap(1, 0, TRANSLATE).unwrap();
+        d.insert_cap(1, 0, &unaliased(TRANSLATE)).unwrap();
         // [doc -> extract -> text][text -> edge_0 -> n0][n0 -> summarize -> summary]
         assert_eq!(d.wirings.len(), 3);
         assert_eq!(d.wirings[1].source_nodes(), vec!["text"]);
@@ -546,7 +554,7 @@ mod tests {
         assert_eq!(d.wirings[1].source_nodes(), vec!["text"], "summarize reads extract's output again");
         assert!(!d.headers.iter().any(|h| h.alias() == "edge_0"), "the header nothing uses is gone");
 
-        d.set_cap(1, EXTRACT).unwrap();
+        d.set_cap(1, &unaliased(EXTRACT)).unwrap();
         assert_eq!(d.wirings[1].cap_alias, "extract", "an equivalent header is reused");
         assert!(!d.headers.iter().any(|h| h.alias() == "summarize"), "the replaced header is dropped");
 
@@ -567,5 +575,29 @@ mod tests {
         assert_eq!(d.fresh_name("n"), "n3");
         let aliased = draft(&format!("[edge_0 {EXTRACT}][n0 -> edge_0 -> n1]"));
         assert_eq!(aliased.fresh_name("edge_"), "edge_1", "an alias is a taken name too");
+    }
+
+    // TEST20151: a cap chosen for a step is written by its fabric alias, with
+    // no header, as every machine the command line writes is; a header naming
+    // an equivalent cap is still reused, and a header that claims the alias's
+    // name for another cap leaves the chosen one a header of its own.
+    #[test]
+    fn test20151_a_chosen_cap_is_written_by_its_alias() {
+        let summarize = CapChoice { urn: SUMMARIZE.to_string(), alias: Some("summarize".to_string()) };
+
+        let mut d = draft(&format!("[extract {EXTRACT}][doc -> extract -> text]"));
+        d.connect("text", &summarize).unwrap();
+        assert_eq!(d.wirings[1].cap_alias, "summarize");
+        assert_eq!(d.headers.len(), 1, "no header is added for a cap the fabric names");
+        assert!(d.to_notation().contains("[text -> summarize -> n0]"), "{}", d.to_notation());
+
+        let mut headed = draft(&format!("[sum {SUMMARIZE}][doc -> sum -> text]"));
+        headed.connect("text", &summarize).unwrap();
+        assert_eq!(headed.wirings[1].cap_alias, "sum", "the file's own header for the same cap is reused");
+
+        let mut claimed = draft(&format!("[summarize {TRANSLATE}][doc -> summarize -> text]"));
+        claimed.connect("text", &summarize).unwrap();
+        assert_eq!(claimed.wirings[1].cap_alias, "edge_0", "the header's name is not the fabric's here");
+        assert!(claimed.headers.iter().any(|h| h == &DraftHeader::Cap { alias: "edge_0".to_string(), cap_urn: CapUrn::from_string(SUMMARIZE).unwrap().to_string() }));
     }
 }
