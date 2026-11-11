@@ -20,7 +20,7 @@ use super::names;
 use super::term::emit_record;
 use crate::fabric::registry::FabricRegistry;
 use crate::planner as p;
-use crate::MediaUrn;
+use crate::{CapUrn, MediaUrn};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -139,9 +139,12 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         return Err(CliError::failed(format!("no machine makes {target_names} of {what}"))
             .hint(format!("see what it can become: capdag plan {}", args.files.join(" "))));
     }
+    // Reading the bundled cartridges verifies each of them: once per command,
+    // not once per machine.
+    let bundled = super::cartridge::bundled_caps().await?;
     let mut machines = Vec::with_capacity(outcome.candidates.len());
     for candidate in &outcome.candidates {
-        machines.push(describe(&registry, candidate).await?);
+        machines.push(describe(&registry, &bundled, candidate).await?);
     }
     let chosen: Option<usize> = match args.pick {
         Some(n) if n >= 1 && n <= machines.len() => Some(n - 1),
@@ -450,7 +453,9 @@ impl Planned {
     }
 }
 
-async fn describe(registry: &Arc<FabricRegistry>, candidate: &p::PlanCandidate) -> CliResult<Planned> {
+/// A planned machine as it is shown: `bundled` is every cap the cartridges
+/// bundled with capdag provide.
+async fn describe(registry: &Arc<FabricRegistry>, bundled: &[CapUrn], candidate: &p::PlanCandidate) -> CliResult<Planned> {
     let machine = crate::machine::parse_machine_async(&candidate.notation, registry)
         .await
         .map_err(|e| CliError::failed("a planned machine could not be read back").context(e.to_string()))?;
@@ -458,7 +463,6 @@ async fn describe(registry: &Arc<FabricRegistry>, candidate: &p::PlanCandidate) 
         .map_err(|e| CliError::failed("a planned machine could not be written in alias form").context(e))?;
     let mut model = false;
     let mut downloads = false;
-    let bundled = super::cartridge::bundled_caps().await?;
     for strand in machine.strands() {
         for edge in strand.edges() {
             if let Ok(cap) = registry.get_cap(&edge.cap_urn.to_string()).await {

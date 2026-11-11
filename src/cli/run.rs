@@ -232,6 +232,12 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         Target::Cap { dev_dir, .. } => dev_dir.clone(),
         Target::Machine { .. } => None,
     };
+    if ctx.term.json {
+        // Under --json stdout is records only: every result is written as a
+        // file, a single value too, and the files are named in each run's
+        // `run_finished` record rather than listed.
+        return execute(ctx, &registry, &args, runs, dev_dir, false, &mut std::io::sink()).await;
+    }
     execute(ctx, &registry, &args, runs, dev_dir, single_scalar, &mut std::io::stdout()).await
 }
 
