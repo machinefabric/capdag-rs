@@ -943,6 +943,8 @@ mod tests {
     // TEST7157: `dev install` refuses a PUBLISHED manifest. `registry_url` non-null
     // means the cartridge belongs to a registry, and staging it under the dev
     // slug would put a published identity in a slot reserved for local work.
+    // The refusal names the registry and the command that refused, and says
+    // what to do instead.
     #[cfg(unix)]
     #[test]
     fn test7157_dev_install_rejects_published_manifest() {
@@ -952,11 +954,34 @@ mod tests {
         write_stub_entry(&project, "pub", "pub-cap", "cap:effect=none;pub");
         let entry = project_entry(&project).unwrap();
         let mut manifest = read_entry_manifest(&entry).unwrap();
-        manifest.registry_url = Some("https://cartridges.example.com/v1/manifest".to_string());
-        assert!(matches!(
-            stage_dev_cartridge(&project, &manifest, &root.join("c"), 7),
-            Err(DevError::NotDev { .. })
-        ));
+        let registry = "https://cartridges.example.com/v1/manifest";
+        manifest.registry_url = Some(registry.to_string());
+        let err = stage_dev_cartridge(&project, &manifest, &root.join("c"), 7)
+            .expect_err("a published manifest must be refused");
+        assert!(matches!(err, DevError::NotDev { .. }), "{err}");
+        let text = err.to_string();
+        assert!(text.contains(registry), "{text}");
+        assert!(text.contains("`capdag dev install`"), "{text}");
+        assert!(text.contains("set registry_url to null"), "{text}");
+        assert!(!root.join("c").exists(), "nothing was staged");
+    }
+
+    // TEST7166: a project with no cartridge entry is refused. The error names
+    // the project, every entry that would have been taken — each language's,
+    // under the project's name — and the command that makes a project.
+    #[test]
+    fn test7166_a_project_with_no_entry_is_refused_naming_each_entry_and_dev_new() {
+        let root = temp_root("noentry");
+        let project = root.join("tagger");
+        fs::create_dir_all(&project).unwrap();
+        let err = project_entry(&project).expect_err("a project with no entry must be refused");
+        assert!(matches!(err, DevError::NoEntry(ref named) if named == &project), "{err}");
+        let text = err.to_string();
+        assert!(text.contains(&project.display().to_string()), "{text}");
+        for language in stub_languages() {
+            assert!(text.contains(&stub_entry(language, "tagger")), "{} is not named: {text}", language.display);
+        }
+        assert!(text.contains("`capdag dev new`"), "{text}");
     }
 
     // TEST7158: the fabric-conflict guard — a dev cap whose alias the fabric maps
