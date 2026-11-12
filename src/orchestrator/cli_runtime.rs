@@ -394,9 +394,10 @@ impl CliHost {
                     rt.fabric_manifest_version,
                 )
                 .await?;
-                for (_, _, groups) in &bundled {
-                    self.bundled_caps
-                        .extend(groups.iter().flat_map(|g| g.caps.iter().map(|c| c.urn.clone())));
+                for cartridge in &bundled {
+                    self.bundled_caps.extend(
+                        cartridge.cap_groups.iter().flat_map(|g| g.caps.iter().map(|c| c.urn.clone())),
+                    );
                 }
                 resolved.extend(bundled);
             }
@@ -437,7 +438,7 @@ impl CliHost {
         }
 
         // Host only cartridges not already hosted (dedup by binary path).
-        resolved.retain(|(path, _, _)| !self.registered_paths.contains(path));
+        resolved.retain(|cartridge| !self.registered_paths.contains(&cartridge.entry_point));
 
         // Build the bootstrap context on first use. `ExecutionContext::new` creates the
         // switch and starts its background frame pump, so RelayNotify capability updates
@@ -464,8 +465,8 @@ impl CliHost {
         }
 
         if !resolved.is_empty() {
-            for (path, _, _) in &resolved {
-                self.registered_paths.insert(path.clone());
+            for cartridge in &resolved {
+                self.registered_paths.insert(cartridge.entry_point.clone());
             }
             self.ctx
                 .as_mut()

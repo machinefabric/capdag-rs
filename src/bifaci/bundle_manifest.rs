@@ -25,7 +25,23 @@
 //! ```
 //!
 //! It is produced at the END of a build, after every platform signing step, so
-//! there is no ordering problem left to have. It is verified by
+//! there is no ordering problem left to have.
+//!
+//! # What a host learns from it, and when it checks the bytes
+//!
+//! Each entry records, under the signature, everything discovery decides from:
+//! the cartridge's directory hash, the fabric manifest version it was built
+//! against, and the cap groups it advertises in its HELLO (recorded by the
+//! build, which starts each cartridge once to ask). So discovering a bundle
+//! reads one signed file: it neither hashes a cartridge nor starts one, and a
+//! command that lists or plans pays for no cartridge it does not run.
+//!
+//! The bytes are checked when they matter, which is when a host starts a
+//! cartridge: its directory is hashed and held to the recorded value each time
+//! it is spawned, and a cartridge that was changed is refused there, by name
+//! ([`verify_content`]). Checking at the spawn rather than at discovery also
+//! closes the gap between the two, during which a checked cartridge could be
+//! replaced before it ran. It is verified by
 //! [`mg_srel::verify_manifest`] — the same function that
 //! verifies a cartridge registry's manifest — against the roots baked into the
 //! build. Bundled and registry cartridges are therefore proven by one chain,
@@ -47,7 +63,7 @@ use serde::{Deserialize, Serialize};
 /// The `format` every bundle manifest carries. A manifest without exactly this
 /// is refused rather than interpreted: the shape is the contract between the
 /// build that writes it and the runtime that reads it.
-pub const BUNDLE_MANIFEST_FORMAT: &str = "capdag.bundle/v1";
+pub const BUNDLE_MANIFEST_FORMAT: &str = "capdag.bundle/v2";
 
 /// The manifest's file name, inside the bundled-cartridges root.
 pub const BUNDLE_MANIFEST_FILE: &str = "bundle.json";
@@ -60,7 +76,7 @@ pub const BUNDLE_MANIFEST_FILE: &str = "bundle.json";
 pub const BUNDLE_MANIFEST_SIG_FILE: &str = "bundle.json.sig";
 
 /// One cartridge a build ships.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BundledCartridge {
     pub name: String,
     pub version: String,
@@ -74,10 +90,21 @@ pub struct BundledCartridge {
     /// `cartridge.json` is excluded by that function, which is what lets a
     /// build write the manifest without changing what the manifest attests.
     pub sha256: String,
+    /// The fabric manifest version the cartridge was built against.
+    ///
+    /// Its `cartridge.json` states it too, but that file is outside the hash;
+    /// recorded here it is signed, and a host pinned to another version
+    /// refuses the cartridge without starting it.
+    pub fabric_manifest_version: u32,
+    /// The cap groups the cartridge advertises in its HELLO, as the build read
+    /// them by starting it. Discovery takes them from here instead of starting
+    /// every bundled cartridge to ask again; they are a function of the bytes
+    /// [`Self::sha256`] covers, which are checked before the cartridge runs.
+    pub cap_groups: Vec<crate::CapGroup>,
 }
 
 /// What a build ships beside its executable.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BundleManifest {
     pub format: String,
     /// The signing environment this bundle was built for. Checked against the
@@ -162,10 +189,22 @@ pub enum BundleError {
     )]
     NotListed { name: String, version: String },
     #[error(
-        "{name} {version} does not match the bundle manifest: recorded {expected}, on disk \
-         {actual}"
+        "the bundle manifest records {name} {version} for the '{recorded}' channel, and this \
+         cartridge is on the '{found}' channel"
+    )]
+    WrongChannel {
+        name: String,
+        version: String,
+        recorded: String,
+        found: String,
+    },
+    #[error(
+        "the bundled cartridge {name} {version} was changed after its build recorded it, so it \
+         is not started: its directory {dir} hashes to {actual}, and the build's signed bundle \
+         manifest records {expected}. Reinstall the application it is bundled with"
     )]
     ContentMismatch {
+        dir: PathBuf,
         name: String,
         version: String,
         expected: String,
@@ -238,14 +277,40 @@ impl BundleProof {
         Self::Refused(reason.into())
     }
 
-    /// Hold one bundled cartridge to what this proof allows.
-    pub fn check(&self, name: &str, version: &str, version_dir: &Path) -> Result<(), String> {
+    /// What this proof records about one bundled cartridge, which discovery
+    /// takes its caps and its fabric manifest version from.
+    ///
+    /// Reads nothing on disk. The cartridge's bytes are held to the recorded
+    /// hash when a host starts it ([`verify_content`]), not here.
+    pub fn admit(&self, name: &str, version: &str, channel: &str) -> Result<&BundledCartridge, String> {
         match self {
-            Self::Verified(manifest) => {
-                verify_cartridge(manifest, name, version, version_dir).map_err(|e| e.to_string())
-            }
+            Self::Verified(manifest) => manifest.admit(name, version, channel).map_err(|e| e.to_string()),
             Self::Refused(reason) => Err(reason.clone()),
         }
+    }
+}
+
+impl BundleManifest {
+    /// The entry for one bundled cartridge, held to the channel it is on.
+    ///
+    /// Unlisted, or listed at another version, is a cartridge the build did
+    /// not record — a stale copy left from an earlier build among them. Listed
+    /// for the other channel is a manifest vouching for an artefact it did not
+    /// describe.
+    pub fn admit(&self, name: &str, version: &str, channel: &str) -> Result<&BundledCartridge, BundleError> {
+        let entry = self.entry(name, version).ok_or_else(|| BundleError::NotListed {
+            name: name.to_string(),
+            version: version.to_string(),
+        })?;
+        if entry.channel != channel {
+            return Err(BundleError::WrongChannel {
+                name: name.to_string(),
+                version: version.to_string(),
+                recorded: entry.channel.clone(),
+                found: channel.to_string(),
+            });
+        }
+        Ok(entry)
     }
 }
 
@@ -287,73 +352,99 @@ pub fn load_verified(
     // first and verifying second would mean acting on an attacker's document
     // for as long as it took to decide not to.
     mg_srel::verify_manifest(&envelope, &manifest_bytes, trust, now_unix)?;
+    parse_verified(&manifest_bytes, &manifest_path, &trust.label)
+}
 
-    let manifest: BundleManifest =
-        serde_json::from_slice(&manifest_bytes).map_err(|e| BundleError::Malformed {
-            path: manifest_path,
-            reason: e.to_string(),
-        })?;
-    if manifest.format != BUNDLE_MANIFEST_FORMAT {
-        return Err(BundleError::UnsupportedFormat {
-            found: manifest.format,
-        });
+/// The document a verified signature covers, held to this format and this
+/// build's environment.
+///
+/// The format is read first and on its own, so a manifest in another format
+/// is refused for being one, rather than as a document that fails to parse.
+fn parse_verified(bytes: &[u8], path: &Path, build_environment: &str) -> Result<BundleManifest, BundleError> {
+    #[derive(Deserialize)]
+    struct Format {
+        format: String,
     }
+    let Format { format } = serde_json::from_slice(bytes).map_err(|e| BundleError::Malformed {
+        path: path.to_path_buf(),
+        reason: e.to_string(),
+    })?;
+    if format != BUNDLE_MANIFEST_FORMAT {
+        return Err(BundleError::UnsupportedFormat { found: format });
+    }
+    let manifest: BundleManifest = serde_json::from_slice(bytes).map_err(|e| BundleError::Malformed {
+        path: path.to_path_buf(),
+        reason: e.to_string(),
+    })?;
     // The certificate chain already pinned the environment; this pins what the
     // manifest SAYS to the same value, so a manifest signed for one
     // environment cannot claim to describe another.
-    if manifest.environment != trust.label {
+    if manifest.environment != build_environment {
         return Err(BundleError::WrongEnvironment {
             manifest: manifest.environment,
-            build: trust.label.clone(),
+            build: build_environment.to_string(),
         });
+    }
+    // The recorded caps cross from the cartridge that advertised them to every
+    // host that reads them here, so they are held to the definition rules as
+    // an advertised manifest is (`CapManifest::from_advertised`).
+    for cartridge in &manifest.cartridges {
+        for cap in cartridge.cap_groups.iter().flat_map(|group| group.caps.iter()) {
+            crate::cap::validation::validate_cap_definition(cap).map_err(|e| BundleError::Malformed {
+                path: path.to_path_buf(),
+                reason: format!("{} {}: {e}", cartridge.name, cartridge.version),
+            })?;
+        }
     }
     Ok(manifest)
 }
 
-/// Hold one bundled cartridge's directory to what the manifest recorded.
-pub fn verify_cartridge(
-    manifest: &BundleManifest,
-    name: &str,
-    version: &str,
-    version_dir: &Path,
-) -> Result<(), BundleError> {
-    let entry = manifest
-        .entry(name, version)
-        .ok_or_else(|| BundleError::NotListed {
-            name: name.to_string(),
-            version: version.to_string(),
-        })?;
+/// Hold a bundled cartridge's directory to the hash its build recorded.
+///
+/// A host calls this each time it starts a bundled cartridge, which is the
+/// moment the bytes are about to run.
+pub fn verify_content(name: &str, version: &str, version_dir: &Path, recorded: &str) -> Result<(), BundleError> {
     let actual = super::cartridge_json::hash_cartridge_directory(version_dir).map_err(|source| {
         BundleError::Unreadable {
             path: version_dir.to_path_buf(),
             source,
         }
     })?;
-    if actual != entry.sha256 {
+    if actual != recorded {
         return Err(BundleError::ContentMismatch {
+            dir: version_dir.to_path_buf(),
             name: name.to_string(),
             version: version.to_string(),
-            expected: entry.sha256.clone(),
+            expected: recorded.to_string(),
             actual,
         });
     }
     Ok(())
 }
 
+/// A cartridge a build staged, and what it advertised when the build started it.
+#[derive(Debug, Clone)]
+pub struct StagedCartridge {
+    pub dir: PathBuf,
+    pub fabric_manifest_version: u32,
+    pub cap_groups: Vec<crate::CapGroup>,
+}
+
 /// Build a manifest by hashing every cartridge directory a build staged.
 ///
-/// `staged` maps `(name, version, channel)` to the directory that holds it.
-/// Used by the build tooling; kept here so the thing that WRITES the manifest
-/// and the thing that CHECKS it hash the same way by construction.
+/// `staged` maps `(name, version, channel)` to the cartridge. Used by the
+/// build tooling (`capdag dev bundle-manifest`); kept here so the thing that
+/// WRITES the manifest and the thing that CHECKS it hash the same way by
+/// construction.
 pub fn manifest_for(
     environment: &str,
-    staged: &BTreeMap<(String, String, String), PathBuf>,
+    staged: &BTreeMap<(String, String, String), StagedCartridge>,
 ) -> Result<BundleManifest, BundleError> {
     let mut cartridges = Vec::new();
-    for ((name, version, channel), dir) in staged {
-        let sha256 = super::cartridge_json::hash_cartridge_directory(dir).map_err(|source| {
+    for ((name, version, channel), cartridge) in staged {
+        let sha256 = super::cartridge_json::hash_cartridge_directory(&cartridge.dir).map_err(|source| {
             BundleError::Unreadable {
-                path: dir.clone(),
+                path: cartridge.dir.clone(),
                 source,
             }
         })?;
@@ -362,6 +453,8 @@ pub fn manifest_for(
             version: version.clone(),
             channel: channel.clone(),
             sha256,
+            fabric_manifest_version: cartridge.fabric_manifest_version,
+            cap_groups: cartridge.cap_groups.clone(),
         });
     }
     Ok(BundleManifest::new(environment, cartridges))

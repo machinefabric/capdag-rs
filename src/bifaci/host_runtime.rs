@@ -215,6 +215,10 @@ pub struct RegisteredDirSpec {
     pub registry_url: Option<String>,
     pub version: String,
     pub cap_groups: Vec<crate::bifaci::manifest::CapGroup>,
+    /// For a bundled cartridge, the directory hash its build's signed bundle
+    /// manifest records ([`crate::DiscoveredCartridge::Directory`]'s
+    /// `bundle_sha256`); `None` for an installed or dev one.
+    pub bundle_sha256: Option<String>,
 }
 
 /// Commands that can be sent to the host runtime from external code.
@@ -346,6 +350,13 @@ pub enum AsyncHostError {
 
     #[error("Handshake failed: {0}")]
     Handshake(String),
+
+    /// The host will not start this cartridge, and says why: a bundled
+    /// cartridge whose directory no longer matches its build's signed bundle
+    /// manifest. The request that would have started it is answered with this
+    /// reason; the host, and every other cartridge on it, go on.
+    #[error("{0}")]
+    CartridgeRefused(String),
 
     #[error("Host is closed")]
     Closed,
@@ -482,6 +493,10 @@ struct ManagedCartridge {
     /// When set, identity hashing uses the full directory tree.
     /// When None, this is a legacy probe-based registration (cartridges path).
     cartridge_dir: Option<PathBuf>,
+    /// For a bundled cartridge, the directory hash its build's signed bundle
+    /// manifest records. The directory is held to it each time the cartridge
+    /// is started, and a cartridge that was changed is refused there.
+    bundle_sha256: Option<String>,
     /// Child process handle (None for attached cartridges).
     process: Option<tokio::process::Child>,
     /// Channel to write frames to this cartridge's stdin.
@@ -594,6 +609,7 @@ impl ManagedCartridge {
         Self {
             path,
             cartridge_dir: None,
+            bundle_sha256: None,
             process: None,
             writer_tx: None,
             manifest: Vec::new(),
@@ -644,9 +660,16 @@ impl ManagedCartridge {
         registry_url: Option<String>,
         version: String,
         cap_groups: Vec<crate::bifaci::manifest::CapGroup>,
+        bundle_sha256: Option<String>,
     ) -> Self {
+        // A bundled cartridge's identity is the hash its build recorded; its
+        // directory is held to it when the cartridge is started, not here.
+        let identity_sha256 = match &bundle_sha256 {
+            Some(recorded) => Ok(recorded.clone()),
+            None => crate::bifaci::cartridge_json::hash_cartridge_directory(&cartridge_dir),
+        };
         let (installed_identity, hello_failed) =
-            match crate::bifaci::cartridge_json::hash_cartridge_directory(&cartridge_dir) {
+            match identity_sha256 {
                 Ok(sha256) => (
                     Some(InstalledCartridgeRecord {
                         registry_url: registry_url.clone(),
@@ -718,6 +741,7 @@ impl ManagedCartridge {
         Self {
             path: entry_point,
             cartridge_dir: Some(cartridge_dir),
+            bundle_sha256,
             process: None,
             writer_tx: None,
             manifest: Vec::new(),
@@ -757,6 +781,7 @@ impl ManagedCartridge {
         Self {
             path: PathBuf::new(),
             cartridge_dir: None,
+            bundle_sha256: None,
             process: None,
             writer_tx: None,
             manifest,
@@ -1422,7 +1447,10 @@ impl CartridgeHostRuntime {
     /// Register a directory-based cartridge for on-demand spawning.
     ///
     /// The `version_dir` must contain a valid `cartridge.json` with an entry point.
-    /// Identity is computed from the directory tree hash. `channel`
+    /// Identity is computed from the directory tree hash, or, for a bundled
+    /// cartridge, is `bundle_sha256`: the hash its build's signed bundle
+    /// manifest records, which the directory is held to each time the
+    /// cartridge is started. `channel`
     /// and `registry_url` must come from `cartridge.json` (the host
     /// has already validated the three-place rule before calling
     /// this); they propagate through `InstalledCartridgeRecord` to
@@ -1437,6 +1465,7 @@ impl CartridgeHostRuntime {
         registry_url: Option<&str>,
         version: &str,
         cap_groups: &[crate::bifaci::manifest::CapGroup],
+        bundle_sha256: Option<&str>,
     ) {
         let cartridge_idx = self.cartridges.len();
         let cartridge = ManagedCartridge::new_registered_dir(
@@ -1447,6 +1476,7 @@ impl CartridgeHostRuntime {
             registry_url.map(|s| s.to_string()),
             version.to_string(),
             cap_groups.to_vec(),
+            bundle_sha256.map(str::to_string),
         );
         let urns = cartridge.cap_urns();
         self.cartridges.push(cartridge);
@@ -1849,6 +1879,22 @@ impl CartridgeHostRuntime {
                     // per-cartridge attachment state — including freshly
                     // recorded failures — to the engine's RelaySwitch.
                     self.rebuild_capabilities(Some(outbound_tx));
+                    if let Err(AsyncHostError::CartridgeRefused(why)) = &spawn_outcome {
+                        // A cartridge the host will not start is a deployment
+                        // problem — Environment. Its request is told why, by
+                        // the cartridge's name; it has already left dispatch
+                        // with that reason recorded against it.
+                        let mut err = Frame::err(
+                            frame.id.clone(),
+                            "CARTRIDGE_REFUSED",
+                            crate::failure::AttributionClass::Environment,
+                            why,
+                            None,
+                        );
+                        err.routing_id = frame.routing_id.clone();
+                        outbound_tx.send(err).map_err(|_| AsyncHostError::SendError)?;
+                        return Ok(());
+                    }
                     spawn_outcome?;
                 }
 
@@ -3050,6 +3096,7 @@ impl CartridgeHostRuntime {
                 spec.registry_url.as_deref(),
                 &spec.version,
                 &spec.cap_groups,
+                spec.bundle_sha256.as_deref(),
             );
         }
 
@@ -3090,6 +3137,30 @@ impl CartridgeHostRuntime {
                 "Cartridge {} has no binary path — cannot spawn",
                 cartridge_idx
             )));
+        }
+
+        // A bundled cartridge is held to the hash its build recorded each time
+        // it is started: discovery took its caps from the signed manifest and
+        // read none of its bytes, so this is where a changed bundle is caught,
+        // just before the bytes run. A refusal is permanent for this host.
+        if let (Some(recorded), Some(version_dir)) = (&cartridge.bundle_sha256, &cartridge.cartridge_dir) {
+            let (recorded, version_dir) = (recorded.clone(), version_dir.clone());
+            let (name, version) = cartridge
+                .installed_cartridge_record()
+                .map(|record| (record.id, record.version))
+                .expect("a directory-registered cartridge always carries its identity");
+            let verdict = tokio::task::spawn_blocking(move || {
+                crate::bifaci::bundle_manifest::verify_content(&name, &version, &version_dir, &recorded)
+            })
+            .await
+            .map_err(|e| AsyncHostError::Protocol(format!("the bundled-cartridge check did not finish: {e}")))?;
+            if let Err(refusal) = verdict {
+                let msg = refusal.to_string();
+                tracing::error!(target: "host_runtime", error = %msg, "[CartridgeHostRuntime] bundled cartridge refused");
+                self.cartridges[cartridge_idx]
+                    .record_attachment_error(CartridgeAttachmentErrorKind::Misplaced, msg.clone());
+                return Err(AsyncHostError::CartridgeRefused(msg));
+            }
         }
 
         // Through the launcher: a dev cartridge's entry may be a script, and
@@ -3621,15 +3692,19 @@ impl CartridgeHostRuntime {
                     protocol_stragglers_total: cartridge.protocol_stragglers_total,
                     protocol_overruns_total: cartridge.protocol_overruns_total,
                 };
-                // A cartridge whose HELLO failed (e.g. a binary of another protocol
-                // version, hard-rejected by the version check) stays IN the inventory with
-                // an attachment error — never silently absent. It carries no
-                // cap_groups, so it is never routable.
+                // A cartridge that failed to attach — its HELLO failed (e.g. a binary
+                // of another protocol version, hard-rejected by the version check), or
+                // the host refused to start it — stays IN the inventory with an
+                // attachment error, never silently absent. It carries no cap_groups,
+                // so it is never routable. The reason recorded against it is the one
+                // advertised; only a cartridge with none recorded is reported as a
+                // failed handshake.
                 if cartridge.hello_failed {
+                    let recorded = base.attachment_error.clone();
                     return Some(InstalledCartridgeRecord {
                         runtime_stats: Some(stats),
                         cap_groups: Vec::new(),
-                        attachment_error: Some(CartridgeAttachmentError {
+                        attachment_error: recorded.or_else(|| Some(CartridgeAttachmentError {
                             kind: CartridgeAttachmentErrorKind::HandshakeFailed,
                             message: cartridge
                                 .last_death_message
@@ -3642,7 +3717,7 @@ impl CartridgeHostRuntime {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs() as i64)
                                 .unwrap_or(0),
-                        }),
+                        })),
                         ..base
                     });
                 }
@@ -4665,6 +4740,7 @@ mod tests {
             None,
             "0.0.1",
             &cap_groups_from_urns(&["cap:in=\"media:void\";test;out=\"media:void\""]),
+            None,
         );
 
         // Create relay pipe pair
@@ -4714,6 +4790,129 @@ mod tests {
         );
 
         send_handle.await.unwrap();
+    }
+
+    /// What a host did with one REQ for a bundled cartridge: the ERR it
+    /// answered the request with (code, message), if any; how its run ended;
+    /// and the cartridge's record afterwards.
+    struct BundledStart {
+        answered: Option<(String, String)>,
+        run: Result<(), String>,
+        record: InstalledCartridgeRecord,
+        advertised: InstalledCartridgeRecord,
+    }
+
+    /// Register a bundled cartridge whose entry point cannot be started, held
+    /// to `recorded`, send one REQ for its cap, and answer what the host did.
+    async fn start_bundled(recorded: impl Fn(&std::path::Path) -> String) -> BundledStart {
+        let cartridge_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            cartridge_dir.path().join("cartridge.json"),
+            r#"{"name":"cart","version":"1.0.0","channel":"release","registry_url":null,"entry":"bin","installed_at":"2026-01-01T00:00:00Z","installed_from":"bundle"}"#,
+        )
+        .unwrap();
+        let entry_point = cartridge_dir.path().join("bin");
+        std::fs::write(&entry_point, b"not an executable").unwrap();
+        let recorded = recorded(cartridge_dir.path());
+
+        let mut runtime = policed_host();
+        runtime.register_cartridge_dir(
+            &entry_point,
+            cartridge_dir.path(),
+            "cart",
+            crate::bifaci::cartridge_repo::CartridgeChannel::Release,
+            None,
+            "1.0.0",
+            &cap_groups_from_urns(&["cap:in=\"media:void\";test;out=\"media:void\""]),
+            Some(&recorded),
+        );
+        // Registration takes the recorded hash as the cartridge's identity
+        // rather than hashing the directory.
+        assert_eq!(runtime.cartridges[0].installed_cartridge_record().unwrap().sha256, recorded);
+
+        let (relay_rt_read, relay_eng_write) = crate::bifaci::local_socket::UnixStream::pair().unwrap();
+        let (relay_eng_read, relay_rt_write) = crate::bifaci::local_socket::UnixStream::pair().unwrap();
+        let (rt_read_half, _) = relay_rt_read.into_split();
+        let (_, rt_write_half) = relay_rt_write.into_split();
+        let (_, eng_write_half) = relay_eng_write.into_split();
+        let (eng_read_half, _) = relay_eng_read.into_split();
+        let req_id = MessageId::new_uuid();
+        let engine = {
+            let req_id = req_id.clone();
+            tokio::spawn(async move {
+                let mut seq = SeqAssigner::new();
+                let mut writer = FrameWriter::new(eng_write_half);
+                let mut reader = FrameReader::new(eng_read_half);
+                let mut req = Frame::req(req_id.clone(), "cap:in=\"media:void\";test;out=\"media:void\"", vec![], "text/plain");
+                req.routing_id = Some(MessageId::Uint(1));
+                seq.assign(&mut req);
+                writer.write(&req).await.unwrap();
+                seq.remove(&FlowKey::from_frame(&req));
+                // Until the host answers this request with an ERR, or closes
+                // the relay. Dropping the writer then closes it from this side.
+                while let Ok(Some(frame)) = reader.read().await {
+                    if frame.frame_type == FrameType::Err && frame.id == req_id {
+                        return Some((
+                            frame.error_code().unwrap_or_default().to_string(),
+                            frame.error_message().unwrap_or_default().to_string(),
+                        ));
+                    }
+                }
+                None
+            })
+        };
+        let run = runtime
+            .run(rt_read_half, rt_write_half, || vec![])
+            .await
+            .map_err(|e| e.to_string());
+        let answered = engine.await.unwrap();
+        let record = runtime.cartridges[0].installed_cartridge_record().unwrap();
+        let advertised = runtime
+            .build_installed_cartridge_identities()
+            .into_iter()
+            .next()
+            .expect("the cartridge stays in the inventory");
+        BundledStart { answered, run, record, advertised }
+    }
+
+    // TEST1962: a host holds a bundled cartridge to its recorded hash when it
+    // starts it, and refuses a changed one by name, without starting it: the
+    // request is answered with why, and the host goes on.
+    //
+    // Discovery no longer hashes a bundled cartridge (TEST1931), so this is
+    // the check that catches a changed bundle. The entry point cannot be
+    // started: a host that skipped the check would fail at the spawn instead,
+    // which is what the unchanged case shows.
+    #[tokio::test]
+    async fn test1962_a_changed_bundled_cartridge_is_refused_when_started() {
+        let changed = start_bundled(|_| "f".repeat(64)).await;
+        let (code, message) = changed.answered.expect("the request must be answered with why it was refused");
+        assert_eq!(code, "CARTRIDGE_REFUSED");
+        assert!(
+            message.contains("the bundled cartridge cart 1.0.0 was changed after its build recorded it"),
+            "the refusal must name the cartridge and say its bundle changed: {message}"
+        );
+        assert!(changed.run.is_ok(), "a refused cartridge must not take the host down: {:?}", changed.run);
+        let error = changed.record.attachment_error.expect("the refusal is recorded against the cartridge");
+        assert_eq!(error.kind, CartridgeAttachmentErrorKind::Misplaced);
+        assert!(error.message.contains("was changed after its build recorded it"), "{}", error.message);
+        // What the host advertises carries the same reason, so the engine and
+        // whatever shows its inventory say why, not that a handshake failed.
+        let advertised = changed.advertised.attachment_error.expect("the inventory says why it is refused");
+        assert_eq!(advertised.kind, CartridgeAttachmentErrorKind::Misplaced, "{}", advertised.message);
+        assert!(advertised.message.contains("was changed after its build recorded it"), "{}", advertised.message);
+        assert!(changed.advertised.cap_groups.is_empty(), "a refused cartridge is not routable");
+
+        // Unchanged: the check passes and the host goes on to start it, which
+        // fails here only because the fixture is not a program.
+        let unchanged =
+            start_bundled(|dir| crate::bifaci::cartridge_json::hash_cartridge_directory(dir).unwrap()).await;
+        assert!(unchanged.answered.is_none(), "an unchanged cartridge must pass the check: {:?}", unchanged.answered);
+        let said = unchanged.run.expect_err("the fixture cannot be started");
+        assert!(
+            said.to_lowercase().contains("spawn") || said.contains("permission") || said.contains("Exec"),
+            "an unchanged cartridge must be started: {said}"
+        );
     }
 
     // TEST416: Attach cartridge performs HELLO handshake, extracts manifest, updates capabilities
@@ -6917,6 +7116,7 @@ mod tests {
                     cap_groups: cap_groups_from_urns(&[
                         "cap:in=\"media:void\";held;out=\"media:void\"",
                     ]),
+                    bundle_sha256: None,
                 }],
                 Vec::new(),
                 &tx,
@@ -6964,6 +7164,7 @@ mod tests {
             None,
             "1.0.0",
             &[],
+            None,
         );
 
         // Healthy (never spawned): advertised without an attachment error.
@@ -7055,6 +7256,7 @@ mod tests {
             None,
             "1.0.0",
             &[],
+            None,
         );
 
         // No heartbeat round-trip yet: the reading must be ABSENT, never a
@@ -7156,6 +7358,7 @@ mod tests {
             None,
             "1.0.0",
             &cap_groups_from_urns(&["cap:in=\"media:void\";out=\"media:void\";retiring"]),
+            None,
         );
         // Pretend it started: retirement only has to make a decision about a
         // LIVE process.
@@ -7228,6 +7431,7 @@ mod tests {
             cap_groups: cap_groups_from_urns(&[
                 "cap:in=\"media:void\";out=\"media:void\";retiring",
             ]),
+            bundle_sha256: None,
         };
 
         // Busy, so the outage puts it into a drain rather than killing it.
@@ -7352,6 +7556,7 @@ mod tests {
                         cap_groups: cap_groups_from_urns(&[
                             "cap:in=\"media:void\";late;out=\"media:void\"",
                         ]),
+                        bundle_sha256: None,
                     }],
                     Vec::new(),
                 )

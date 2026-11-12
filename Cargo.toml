@@ -161,10 +161,12 @@ tempfile = "3.10"
 tokio = { version = "1.0", features = ["test-util"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# build.rs parses MFR_BUNDLED_CARTRIDGE_HASHES (a JSON map) to codegen the baked
-# bundled-cartridge hash table. serde_json only — no other build-time deps.
-[build-dependencies]
-serde_json = "1.0"
+# A debug build hashes a bundled cartridge's directory each time it starts
+# one, against its build's signed bundle manifest. Unoptimised, SHA-256 runs
+# at a few tens of MB/s, which put seconds in front of every debug run; the
+# hash is the same bytes either way.
+[profile.dev.package.sha2]
+opt-level = 3
 
 [package]
 authors = ["https://github.com/machinefabric"]
