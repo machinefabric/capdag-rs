@@ -240,8 +240,11 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
     if !ctx.term.json {
         eprintln!("Installing {cartridge_id}…");
     }
-    let path = manager.get_cartridge_path(&cartridge_id).await.map_err(|e| {
-        CliError::failed(format!("{cartridge_id} could not be installed")).context(e.to_string())
+    let path = manager.get_cartridge_path(&cartridge_id).await.map_err(|e| match e.refused_cartridge() {
+        // An install this capdag does not use is replaced only when the
+        // person removes it: installing never overwrites one silently.
+        Some((id, dir)) => super::run::refused_cartridge(id, dir, &e),
+        None => CliError::failed(format!("{cartridge_id} could not be installed")).context(e.to_string()),
     })?;
     if ctx.term.json {
         emit_record(&serde_json::json!({

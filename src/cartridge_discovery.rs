@@ -95,6 +95,183 @@ pub enum DiscoveredCartridge {
     },
 }
 
+/// What a host holds a cartridge to before it attaches it, from what the
+/// cartridge's `cartridge.json` says: the part of a host's identity that
+/// [`refusal`] reads.
+#[derive(Debug, Clone, Copy)]
+pub struct AttachTerms<'a> {
+    pub channel: CartridgeChannel,
+    pub fabric_manifest_version: u32,
+    /// What proves a cartridge that says it was bundled; see
+    /// [`DiscoveryIdentity::bundle`].
+    pub bundle: &'a crate::bifaci::bundle_manifest::BundleProof,
+}
+
+impl DiscoveryIdentity {
+    /// The terms this host attaches cartridges on.
+    pub fn attach_terms(&self) -> AttachTerms<'_> {
+        AttachTerms {
+            channel: self.channel,
+            fabric_manifest_version: self.fabric_manifest_version,
+            bundle: &self.bundle,
+        }
+    }
+}
+
+/// Why a host does not attach a cartridge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub kind: CartridgeAttachmentErrorKind,
+    pub message: String,
+}
+
+impl Refusal {
+    /// The refusal as the attachment error a roster carries.
+    pub fn at(self, detected_at_unix_seconds: i64) -> CartridgeAttachmentError {
+        CartridgeAttachmentError {
+            kind: self.kind,
+            message: self.message,
+            detected_at_unix_seconds,
+        }
+    }
+}
+
+/// Why a cartridge whose `cartridge.json` reads as `cj`, installed in
+/// `version_dir`, is not attached under `terms`; `None` when it may be.
+///
+/// The one rule every host decides by: discovery's roster (what
+/// `capdag cartridge list`, the engine and the daemon show) and the command
+/// line's run, which attaches the installed cartridge a cap needs, both call
+/// it, so a cartridge one of them refuses is never run by the other.
+pub fn refusal(cj: &CartridgeJson, version_dir: &Path, terms: &AttachTerms<'_>) -> Option<Refusal> {
+    if cj.channel != terms.channel {
+        return Some(Refusal {
+            kind: CartridgeAttachmentErrorKind::Misplaced,
+            message: format!(
+                "Channel mismatch: cartridge declares '{}' but host is pinned to '{}'. Release and nightly artefacts must not mix.",
+                cj.channel, terms.channel
+            ),
+        });
+    }
+
+    // NO registry pin: the host's baked registry does NOT restrict which
+    // registries' cartridges are attached. A cartridge that records its
+    // folder's anchor (checked when its cartridge.json was read, against a
+    // charter that verified — and so an https anchor MachineFabric
+    // chartered) from any registry present on disk is accepted; whether its
+    // version is actually LISTED upstream is the verdict layer's call.
+
+    if cj.fabric_manifest_version != terms.fabric_manifest_version {
+        let ours = terms.fabric_manifest_version;
+        // What to do differs by where the cartridge came from, told as every
+        // host tells it: `installed_from: bundle` is the one provenance with
+        // meaning, and otherwise a registry_url is a registry install and
+        // none a dev cartridge. A bundled one means the build that bundled it
+        // is wrong; a registry install is replaced from its registry, which a
+        // host reading this manifest installs for it; a dev cartridge is
+        // rebuilt.
+        let bundled = cj.installed_from == Some(crate::bifaci::cartridge_json::CartridgeInstallSource::Bundle);
+        let remedy = if bundled {
+            "The build that bundled it is inconsistent: its bundle holds a cartridge for another fabric manifest.".to_string()
+        } else if cj.registry_url.is_some() {
+            "Remove it and install it again from its registry.".to_string()
+        } else {
+            format!("Rebuild it with MFR_FABRIC_MANIFEST_VERSION={ours} and install it again.")
+        };
+        return Some(Refusal {
+            kind: CartridgeAttachmentErrorKind::FabricManifestVersionMismatch,
+            message: format!(
+                "{} {} was installed for fabric manifest {}, and this host reads fabric manifest {ours}. {remedy}",
+                cj.name, cj.version, cj.fabric_manifest_version
+            ),
+        });
+    }
+
+    // Bundled-cartridge integrity. A cartridge marked `installed_from: bundle`
+    // is shipped INSIDE this build (the engine/daemon/capdag-CLI's own
+    // bundled-cartridges/ tree), not user-installed, and has no upstream
+    // registry to verify against — so it needs its own integrity proof.
+    //
+    // ONE mechanism, on every platform: the build's signed bundle manifest,
+    // verified against the roots this build bakes, by the same chain
+    // verifier a registry manifest goes through. The proof was established
+    // once when this discovery started (see `BundleProof`); here it is
+    // applied to the cartridge in hand.
+    //
+    // This used to be platform-split, and macOS had no check of ours at
+    // all — the manifest is produced at the END of a build, after every
+    // platform signing step, which is what removed the ordering problem
+    // that split existed for. Apple's signature still matters, and it is
+    // what stops the operating system warning a user; it is not what
+    // decides whether code runs here.
+    if cj.installed_from == Some(crate::bifaci::cartridge_json::CartridgeInstallSource::Bundle) {
+        if let Err(reason) = terms.bundle.check(&cj.name, &cj.version, version_dir) {
+            return Some(Refusal {
+                kind: CartridgeAttachmentErrorKind::Misplaced,
+                message: format!("bundled cartridge integrity check failed: {reason}"),
+            });
+        }
+    }
+
+    None
+}
+
+/// Why a cartridge whose `cartridge.json` could not be read in the registry
+/// folder `folder_slug` is not attached. A slug mismatch (its declared
+/// `registry_url` is not this folder's anchor — a registry-defined url placed
+/// under `dev/`, or a cartridge hand-copied between registry folders) is a
+/// bad install context, distinct from an unreadable or garbage
+/// `cartridge.json`.
+pub fn unreadable(error: &crate::bifaci::cartridge_json::CartridgeJsonError, folder_slug: &str) -> Refusal {
+    let kind = match error {
+        crate::bifaci::cartridge_json::CartridgeJsonError::RegistryFolderMismatch { .. } => {
+            CartridgeAttachmentErrorKind::Misplaced
+        }
+        _ => CartridgeAttachmentErrorKind::ManifestInvalid,
+    };
+    Refusal {
+        kind,
+        message: format!("cartridge.json failed to load in the registry folder '{folder_slug}': {error}"),
+    }
+}
+
+/// The newest of a cartridge's installed version directories, by their
+/// names: dotted numbers compare as numbers (`1.174.0` is newer than
+/// `1.99.0`), anything else as text. Every host attaches this one and only
+/// this one, so what a roster shows for a cartridge is what a run uses.
+pub fn newest_version_dir(version_dirs: &[PathBuf]) -> Option<&PathBuf> {
+    fn name(dir: &Path) -> String {
+        dir.file_name().unwrap_or_default().to_string_lossy().into_owned()
+    }
+    version_dirs
+        .iter()
+        .max_by(|a, b| compare_versions(&name(a), &name(b)))
+}
+
+/// Order two version strings: part by dotted part, numerically where both
+/// parts are numbers, as text otherwise; a version that runs out of parts
+/// first is the older.
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut left = a.split('.');
+    let mut right = b.split('.');
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(x), Ok(y)) => x.cmp(&y),
+                    _ => x.cmp(y),
+                };
+                if order != std::cmp::Ordering::Equal {
+                    return order;
+                }
+            }
+        }
+    }
+}
+
 /// Current wall-clock time as Unix seconds, for stamping
 /// `CartridgeAttachmentError.detected_at_unix_seconds`. A pre-epoch clock
 /// returns 0 (display-ordering only).
@@ -300,21 +477,7 @@ async fn scan_channel_root(
             continue;
         }
 
-        // Prefer the newest version (lexical-descending on the version folder name).
-        version_dirs.sort_by(|a, b| {
-            let va = a
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let vb = b
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            vb.cmp(&va)
-        });
-        let version_dir = &version_dirs[0];
+        let version_dir = newest_version_dir(&version_dirs).expect("checked non-empty above");
 
         let path_derived_name = name_dir
             .file_name()
@@ -359,18 +522,6 @@ async fn scan_channel_root(
         let cj = match CartridgeJson::read_from_dir(version_dir, opened) {
             Ok(cj) => cj,
             Err(e) => {
-                // A slug mismatch (declared registry_url doesn't hash to this
-                // folder — e.g. a registry-defined url placed under `dev/`, or a
-                // cartridge hand-copied between registry slugs) is a bad
-                // INSTALL CONTEXT, distinct from an unreadable/garbage
-                // cartridge.json (ManifestInvalid). Both are surfaced + logged,
-                // never hosted.
-                let kind = match &e {
-                    crate::bifaci::cartridge_json::CartridgeJsonError::RegistryFolderMismatch {
-                        ..
-                    } => CartridgeAttachmentErrorKind::Misplaced,
-                    _ => CartridgeAttachmentErrorKind::ManifestInvalid,
-                };
                 error!(dir = %version_dir.display(), folder = %opened.slug(), error = %e, "cartridge.json invalid or mis-placed — surfacing as incompatible");
                 discovered.push(DiscoveredCartridge::Incompatible {
                     version_dir: version_dir.clone(),
@@ -378,99 +529,23 @@ async fn scan_channel_root(
                     channel: identity.channel,
                     registry_url: identity.registry_url.clone(),
                     version: path_derived_version.clone(),
-                    error: CartridgeAttachmentError {
-                        kind,
-                        message: format!(
-                            "cartridge.json failed to load in the registry folder '{}': {}",
-                            opened.slug(), e
-                        ),
-                        detected_at_unix_seconds: detected_at,
-                    },
+                    error: unreadable(&e, opened.slug()).at(detected_at),
                 });
                 continue;
             }
         };
 
-        if cj.channel != identity.channel {
+        if let Some(refused) = refusal(&cj, version_dir, &identity.attach_terms()) {
+            error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %refused.message, "cartridge refused — surfacing as incompatible");
             discovered.push(DiscoveredCartridge::Incompatible {
                 version_dir: version_dir.clone(),
                 id: cj.name.clone(),
                 channel: cj.channel,
                 registry_url: cj.registry_url.clone(),
                 version: cj.version.clone(),
-                error: CartridgeAttachmentError {
-                    kind: CartridgeAttachmentErrorKind::Misplaced,
-                    message: format!(
-                        "Channel mismatch: cartridge declares '{}' but host is pinned to '{}'. Release and nightly artefacts must not mix.",
-                        cj.channel, identity.channel
-                    ),
-                    detected_at_unix_seconds: detected_at,
-                },
+                error: refused.at(detected_at),
             });
             continue;
-        }
-
-        // NO registry pin: the host's baked registry does NOT restrict which
-        // registries' cartridges are discovered. A cartridge that records its
-        // folder's anchor (validated above, against a charter that verified —
-        // and so an https anchor MachineFabric chartered) from any registry
-        // present on disk is accepted; whether its version is actually LISTED
-        // upstream is the verdict layer's call, applied after discovery.
-
-        if cj.fabric_manifest_version != identity.fabric_manifest_version {
-            discovered.push(DiscoveredCartridge::Incompatible {
-                version_dir: version_dir.clone(),
-                id: cj.name.clone(),
-                channel: cj.channel,
-                registry_url: cj.registry_url.clone(),
-                version: cj.version.clone(),
-                error: CartridgeAttachmentError {
-                    kind: CartridgeAttachmentErrorKind::FabricManifestVersionMismatch,
-                    message: format!(
-                        "Cartridge built against fabric manifest version {}, but host is pinned to {}. Rebuild the cartridge with MFR_FABRIC_MANIFEST_VERSION={}.",
-                        cj.fabric_manifest_version, identity.fabric_manifest_version, identity.fabric_manifest_version
-                    ),
-                    detected_at_unix_seconds: detected_at,
-                },
-            });
-            continue;
-        }
-
-        // Bundled-cartridge integrity. A cartridge marked `installed_from: bundle`
-        // is shipped INSIDE this build (the engine/daemon/capdag-CLI's own
-        // bundled-cartridges/ tree), not user-installed, and has no upstream
-        // registry to verify against — so it needs its own integrity proof.
-        //
-        // ONE mechanism, on every platform: the build's signed bundle manifest,
-        // verified against the roots this build bakes, by the same chain
-        // verifier a registry manifest goes through. The proof was established
-        // once when this discovery started (see `BundleProof`); here it is
-        // applied to the cartridge in hand.
-        //
-        // This used to be platform-split, and macOS had no check of ours at
-        // all — the manifest is produced at the END of a build, after every
-        // platform signing step, which is what removed the ordering problem
-        // that split existed for. Apple's signature still matters, and it is
-        // what stops the operating system warning a user; it is not what
-        // decides whether code runs here.
-        if cj.installed_from == Some(crate::bifaci::cartridge_json::CartridgeInstallSource::Bundle)
-        {
-            if let Err(reason) = identity.bundle.check(&cj.name, &cj.version, version_dir) {
-                error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %reason, "bundled cartridge is not proven by this build's signed bundle manifest — surfacing as incompatible");
-                discovered.push(DiscoveredCartridge::Incompatible {
-                    version_dir: version_dir.clone(),
-                    id: cj.name.clone(),
-                    channel: cj.channel,
-                    registry_url: cj.registry_url.clone(),
-                    version: cj.version.clone(),
-                    error: CartridgeAttachmentError {
-                        kind: CartridgeAttachmentErrorKind::Misplaced,
-                        message: format!("bundled cartridge integrity check failed: {reason}"),
-                        detected_at_unix_seconds: detected_at,
-                    },
-                });
-                continue;
-            }
         }
 
         let entry_point = cj.resolve_entry_point(version_dir);
@@ -714,6 +789,95 @@ mod tests {
             &out,
             CartridgeAttachmentErrorKind::FabricManifestVersionMismatch,
         );
+    }
+
+    // TEST1907: a cartridge's installed version is its newest, dotted numbers
+    // compared as numbers: 1.174.414 is newer than 1.99.0, though it sorts
+    // before it as text. Discovery shows that version, and a run uses it.
+    #[tokio::test]
+    async fn test1907_the_newest_version_is_chosen_by_number_not_text() {
+        let dirs: Vec<PathBuf> = ["1.99.0", "1.174.414", "1.9.12", "1.174.9"]
+            .iter()
+            .map(|v| PathBuf::from("cart").join(v))
+            .collect();
+        assert_eq!(
+            newest_version_dir(&dirs),
+            Some(&PathBuf::from("cart").join("1.174.414"))
+        );
+        assert_eq!(newest_version_dir(&[]), None);
+
+        let root = tempdir().unwrap();
+        for (version, manifest) in [("1.99.0", 1), ("1.174.414", 999)] {
+            let json = format!(
+                r#"{{"name":"cart","version":"{version}","channel":"nightly","registry_url":null,"entry":"cart","installed_at":"2024-01-01T00:00:00Z","fabric_manifest_version":{manifest}}}"#
+            );
+            install_fixture(root.path(), "dev", "nightly", "cart", version, Some(&json), "cart");
+        }
+        let out = discover_cartridges(root.path(), &nightly_dev_identity())
+            .await
+            .unwrap();
+        // 1.174.414 is the one shown, and it is stamped for another manifest,
+        // so the cartridge is refused rather than 1.99.0 being probed.
+        let [DiscoveredCartridge::Incompatible { version, error, .. }] = out.as_slice() else {
+            panic!("expected the newest version, refused; got {out:?}");
+        };
+        assert_eq!(version, "1.174.414");
+        assert_eq!(error.kind, CartridgeAttachmentErrorKind::FabricManifestVersionMismatch);
+    }
+
+    // TEST1908: a cartridge stamped for another fabric manifest is refused
+    // naming it, its version, its manifest and the host's, with the remedy
+    // that fits where it came from: a registry install is installed again, a
+    // dev cartridge rebuilt, and a bundled one means the build is wrong.
+    #[test]
+    fn test1908_a_manifest_refusal_names_both_manifests_and_the_remedy() {
+        use crate::bifaci::cartridge_json::CartridgeInstallSource;
+        let not_a_bundle = crate::bifaci::bundle_manifest::BundleProof::none("no bundle here");
+        let terms = AttachTerms {
+            channel: CartridgeChannel::Release,
+            fabric_manifest_version: 13,
+            bundle: &not_a_bundle,
+        };
+        let stamped = |from: Option<CartridgeInstallSource>, registry: Option<&str>, manifest: u32| CartridgeJson {
+            name: "imagecartridge".to_string(),
+            version: "1.174.414".to_string(),
+            channel: CartridgeChannel::Release,
+            registry_url: registry.map(str::to_string),
+            entry: "imagecartridge".to_string(),
+            installed_at: "2024-01-01T00:00:00Z".to_string(),
+            installed_from: from,
+            source_url: String::new(),
+            package_sha256: String::new(),
+            package_size: 0,
+            fabric_manifest_version: manifest,
+        };
+        let dir = Path::new("imagecartridge/1.174.414");
+        let registry = Some(ANCHOR);
+
+        assert_eq!(
+            refusal(&stamped(Some(CartridgeInstallSource::Registry), registry, 13), dir, &terms),
+            None
+        );
+
+        let refused = |from, registry| {
+            refusal(&stamped(from, registry, 12), dir, &terms).expect("stamped for 12, refused by a host at 13")
+        };
+        let installed = refused(Some(CartridgeInstallSource::Registry), registry);
+        assert_eq!(installed.kind, CartridgeAttachmentErrorKind::FabricManifestVersionMismatch);
+        assert_eq!(
+            installed.message,
+            "imagecartridge 1.174.414 was installed for fabric manifest 12, and this host reads \
+             fabric manifest 13. Remove it and install it again from its registry."
+        );
+        // Provenance other than `bundle` carries no meaning: a registry_url
+        // is what makes it a registry install.
+        assert_eq!(refused(None, registry), installed);
+        let rebuild = "Rebuild it with MFR_FABRIC_MANIFEST_VERSION=13 and install it again.";
+        assert!(refused(Some(CartridgeInstallSource::Dev), None).message.ends_with(rebuild));
+        assert!(refused(None, None).message.ends_with(rebuild));
+        assert!(refused(Some(CartridgeInstallSource::Bundle), registry)
+            .message
+            .ends_with("its bundle holds a cartridge for another fabric manifest."));
     }
 
     // TEST0120: Registry url under dev slug is rejected

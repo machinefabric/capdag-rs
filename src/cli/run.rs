@@ -1226,6 +1226,9 @@ fn report_failure(registry: &FabricRegistry, strand: &StrandPlan, report: &Stran
 /// A run's failure, named by the step's alias and what its cartridge said.
 /// With `verbose`, the URNs behind the names are said too.
 pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &ExecutionError, verbose: bool) -> CliError {
+    if let Some((id, dir)) = error.refused_cartridge() {
+        return refused_cartridge(id, dir, error);
+    }
     let step = error
         .step_token_id()
         .and_then(|token| {
@@ -1272,6 +1275,20 @@ pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &Execution
         (_, None) => cli.hint("run it again with -v; if it fails the same way, report it"),
     };
     cli
+}
+
+/// An installed cartridge the run needs, and does not use: which one, why,
+/// and the commands that replace it with the one the registry has for this
+/// capdag.
+pub fn refused_cartridge(id: &str, dir: &Path, error: &ExecutionError) -> CliError {
+    let reason = match error {
+        ExecutionError::StepFailed { source, .. } => source.to_string(),
+        other => other.to_string(),
+    };
+    CliError::failed(format!("the installed {id} cannot be used"))
+        .context(one_line(&reason))
+        .context(format!("it is in {}", dir.display()))
+        .hint(format!("replace it with the registry's: capdag cartridge remove {id} && capdag cartridge install {id}"))
 }
 
 /// A failure's declared identity: `[class/CODE]`, or `[class]` with no code.

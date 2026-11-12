@@ -200,6 +200,17 @@ pub enum ExecutionError {
     #[error("Cartridge download failed: {0}")]
     CartridgeDownloadFailed(String),
 
+    /// The installed cartridge a cap needs is one this host does not attach,
+    /// by the rule every host decides by
+    /// ([`crate::cartridge_discovery::refusal`]): it is never run, and never
+    /// quietly installed over.
+    #[error("the installed cartridge {cartridge_id} at {} is not used: {reason}", version_dir.display())]
+    CartridgeRefused {
+        cartridge_id: String,
+        version_dir: PathBuf,
+        reason: String,
+    },
+
     /// A cap invocation failed. `code`/`class` carry the failure identity
     /// DECLARED at the emit source (docs/failure-taxonomy.md) — read from the
     /// ERR frame, never re-derived from message text. Engine-detected
@@ -326,6 +337,7 @@ impl ExecutionError {
             ExecutionError::ZipLengthMismatch { .. } => AttributionClass::Input,
             ExecutionError::CartridgeNotFound { .. }
             | ExecutionError::CartridgeDownloadFailed(_)
+            | ExecutionError::CartridgeRefused { .. }
             | ExecutionError::CartridgeUnavailable { .. }
             | ExecutionError::FabricRegistryError(_) => AttributionClass::Environment,
             ExecutionError::NoIncomingData { .. }
@@ -364,6 +376,18 @@ impl ExecutionError {
             ExecutionError::StepFailed { source, .. } => source.failure_reason(),
             ExecutionError::CartridgeExecutionFailed { details, .. } => details.clone(),
             other => other.to_string(),
+        }
+    }
+
+    /// The installed cartridge this failure refused, and where it is, when
+    /// that is what it is.
+    pub fn refused_cartridge(&self) -> Option<(&str, &Path)> {
+        match self {
+            ExecutionError::StepFailed { source, .. } => source.refused_cartridge(),
+            ExecutionError::CartridgeRefused { cartridge_id, version_dir, .. } => {
+                Some((cartridge_id, version_dir))
+            }
+            _ => None,
         }
     }
 
@@ -1150,7 +1174,7 @@ impl CartridgeManager {
             .join(cartridge_id);
         if name_dir.is_dir() {
             if let Some(entry_point) =
-                self.find_latest_installed_entry_point(&name_dir, &folder, &registry_url)
+                self.installed_entry_point(cartridge_id, &name_dir, &folder, &registry_url)?
             {
                 // Re-verify the installed binary against the registry's
                 // signed manifest on every use — a post-install tamper of
@@ -1198,84 +1222,68 @@ impl CartridgeManager {
         self.download_cartridge(cartridge_id).await
     }
 
-    /// Find the entry point of the latest installed version in a cartridge name directory.
-    /// `folder` is the registry folder the caller reached through (the one
-    /// `self.registry_url`'s charter names); the per-version cartridge.json is
-    /// validated against it via the charter rule.
-    fn find_latest_installed_entry_point(
+    /// The entry point of a cartridge's installed version, or `None` when no
+    /// version is installed. `folder` is the registry folder the caller reached
+    /// through (the one `self.registry_url`'s charter names); the version's
+    /// cartridge.json is read against it via the charter rule.
+    ///
+    /// The installed version is the newest one, chosen and held to the rule
+    /// exactly as discovery holds it ([`crate::cartridge_discovery`]): a
+    /// version that the roster shows refused — stamped for another fabric
+    /// manifest, another channel, or unreadable — is refused here too, naming
+    /// it and why. It is not run, and it is not quietly installed over: the
+    /// person decides to replace it.
+    fn installed_entry_point(
         &self,
+        cartridge_id: &str,
         name_dir: &Path,
         folder: &crate::bifaci::charter::RegistryFolder,
         registry_url: &str,
-    ) -> Option<PathBuf> {
-        let mut versions: Vec<(String, PathBuf)> = Vec::new();
+    ) -> Result<Option<PathBuf>, ExecutionError> {
+        use crate::cartridge_discovery::{newest_version_dir, refusal, unreadable, AttachTerms};
 
-        for entry in fs::read_dir(name_dir).ok()? {
-            let entry = entry.ok()?;
-            let version_dir = entry.path();
-            if !version_dir.is_dir() {
-                continue;
-            }
-            match crate::bifaci::cartridge_json::CartridgeJson::read_from_dir(&version_dir, folder) {
-                Ok(cj) => {
-                    // Hard mismatch — never run a cartridge from a different
-                    // channel even if it landed under our channel's tree.
-                    if cj.channel != self.channel {
-                        tracing::warn!(
-                            "Skipping cartridge at {:?}: cartridge.json channel '{}' \
-                             does not match orchestrator channel '{}'",
-                            version_dir,
-                            cj.channel,
-                            self.channel
-                        );
-                        continue;
-                    }
-                    // Three-place rule: cartridge.json's registry_url
-                    // must match the orchestrator's. The slug check
-                    // inside read_from_dir only proves folder ⇔ json
-                    // agreement; here we check json ⇔ orchestrator's
-                    // configured registry. Mismatches are skipped, not
-                    // deleted — a stale install from a previously
-                    // configured registry is a user-visible state, not
-                    // garbage.
-                    if cj.registry_url.as_deref() != Some(registry_url) {
-                        tracing::warn!(
-                            "Skipping cartridge at {:?}: cartridge.json registry_url={:?} \
-                             does not match orchestrator registry_url='{}'",
-                            version_dir,
-                            cj.registry_url,
-                            registry_url
-                        );
-                        continue;
-                    }
-                    let entry_point = cj.resolve_entry_point(&version_dir);
-                    versions.push((cj.version, entry_point));
-                }
-                Err(_) => continue,
+        let mut version_dirs: Vec<PathBuf> = Vec::new();
+        for entry in fs::read_dir(name_dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                version_dirs.push(path);
             }
         }
+        let Some(version_dir) = newest_version_dir(&version_dirs) else {
+            return Ok(None);
+        };
+        let refused = |reason: String| ExecutionError::CartridgeRefused {
+            cartridge_id: cartridge_id.to_string(),
+            version_dir: version_dir.clone(),
+            reason,
+        };
 
-        if versions.is_empty() {
-            return None;
+        let cj = crate::bifaci::cartridge_json::CartridgeJson::read_from_dir(version_dir, folder)
+            .map_err(|e| refused(unreadable(&e, folder.slug()).message))?;
+        // Nothing in a registry's folder was put there by a build, so a
+        // cartridge there that says it was bundled is refused for that.
+        let not_a_bundle = crate::bifaci::bundle_manifest::BundleProof::none(
+            "the installed-cartridges directory is not a build's bundle, so nothing here \
+             can vouch for a cartridge that says it was bundled",
+        );
+        let terms = AttachTerms {
+            channel: self.channel,
+            fabric_manifest_version: self.fabric_manifest_version,
+            bundle: &not_a_bundle,
+        };
+        if let Some(refusal) = refusal(&cj, version_dir, &terms) {
+            return Err(refused(refusal.message));
         }
-
-        // Sort by version descending (latest first)
-        versions.sort_by(|a, b| {
-            let parts_a: Vec<u32> = a.0.split('.').filter_map(|p| p.parse().ok()).collect();
-            let parts_b: Vec<u32> = b.0.split('.').filter_map(|p| p.parse().ok()).collect();
-            let max_len = parts_a.len().max(parts_b.len());
-            for i in 0..max_len {
-                let na = parts_a.get(i).copied().unwrap_or(0);
-                let nb = parts_b.get(i).copied().unwrap_or(0);
-                match nb.cmp(&na) {
-                    std::cmp::Ordering::Equal => continue,
-                    other => return other,
-                }
-            }
-            std::cmp::Ordering::Equal
-        });
-
-        Some(versions.into_iter().next()?.1)
+        // Three-place rule: cartridge.json's registry_url must be the
+        // registry this manager installs from. `read_from_dir` proves only
+        // folder ⇔ json; this proves json ⇔ manager.
+        if cj.registry_url.as_deref() != Some(registry_url) {
+            return Err(refused(format!(
+                "its cartridge.json records the registry {:?}, and this host installs from '{registry_url}'",
+                cj.registry_url
+            )));
+        }
+        Ok(Some(cj.resolve_entry_point(version_dir)))
     }
 
     /// The manifest `binary` entry for a cartridge's host-platform build,
