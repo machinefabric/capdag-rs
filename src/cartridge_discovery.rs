@@ -236,40 +236,18 @@ pub fn unreadable(error: &crate::bifaci::cartridge_json::CartridgeJsonError, fol
 }
 
 /// The newest of a cartridge's installed version directories, by their
-/// names: dotted numbers compare as numbers (`1.174.0` is newer than
-/// `1.99.0`), anything else as text. Every host attaches this one and only
-/// this one, so what a roster shows for a cartridge is what a run uses.
+/// names, in the order the registry gives versions
+/// ([`crate::bifaci::cartridge_repo::compare_versions`]: dotted numbers
+/// compared as numbers, so `1.174.0` is newer than `1.99.0`). Every host
+/// attaches this one and only this one, so what a roster shows for a
+/// cartridge is what a run uses.
 pub fn newest_version_dir(version_dirs: &[PathBuf]) -> Option<&PathBuf> {
     fn name(dir: &Path) -> String {
         dir.file_name().unwrap_or_default().to_string_lossy().into_owned()
     }
     version_dirs
         .iter()
-        .max_by(|a, b| compare_versions(&name(a), &name(b)))
-}
-
-/// Order two version strings: part by dotted part, numerically where both
-/// parts are numbers, as text otherwise; a version that runs out of parts
-/// first is the older.
-fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let mut left = a.split('.');
-    let mut right = b.split('.');
-    loop {
-        match (left.next(), right.next()) {
-            (None, None) => return std::cmp::Ordering::Equal,
-            (None, Some(_)) => return std::cmp::Ordering::Less,
-            (Some(_), None) => return std::cmp::Ordering::Greater,
-            (Some(x), Some(y)) => {
-                let order = match (x.parse::<u64>(), y.parse::<u64>()) {
-                    (Ok(x), Ok(y)) => x.cmp(&y),
-                    _ => x.cmp(y),
-                };
-                if order != std::cmp::Ordering::Equal {
-                    return order;
-                }
-            }
-        }
-    }
+        .max_by(|a, b| crate::bifaci::cartridge_repo::compare_versions(&name(a), &name(b)))
 }
 
 /// Current wall-clock time as Unix seconds, for stamping

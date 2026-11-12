@@ -1391,6 +1391,30 @@ pub struct CartridgeRepoServer {
     registry_url: String,
 }
 
+/// Order two cartridge version strings by their dotted numeric parts; a
+/// missing part counts as 0 and a part that is not a number is skipped. The
+/// one order cartridge versions have: the registry's latest, and the
+/// installed version a host attaches
+/// ([`crate::cartridge_discovery::newest_version_dir`]).
+pub(crate) fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let parts_a: Vec<u32> = a.split('.').filter_map(|p| p.parse().ok()).collect();
+    let parts_b: Vec<u32> = b.split('.').filter_map(|p| p.parse().ok()).collect();
+
+    let max_len = parts_a.len().max(parts_b.len());
+
+    for i in 0..max_len {
+        let num_a = parts_a.get(i).copied().unwrap_or(0);
+        let num_b = parts_b.get(i).copied().unwrap_or(0);
+
+        match num_a.cmp(&num_b) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+
+    std::cmp::Ordering::Equal
+}
+
 impl CartridgeRepoServer {
     /// Create a new server instance from a v5.0 channel-partitioned
     /// registry, tagged with the URL it was fetched from. The URL is
@@ -1514,26 +1538,6 @@ impl CartridgeRepoServer {
         Ok(())
     }
 
-    /// Compare semantic version strings
-    fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-        let parts_a: Vec<u32> = a.split('.').filter_map(|p| p.parse().ok()).collect();
-        let parts_b: Vec<u32> = b.split('.').filter_map(|p| p.parse().ok()).collect();
-
-        let max_len = parts_a.len().max(parts_b.len());
-
-        for i in 0..max_len {
-            let num_a = parts_a.get(i).copied().unwrap_or(0);
-            let num_b = parts_b.get(i).copied().unwrap_or(0);
-
-            match num_a.cmp(&num_b) {
-                std::cmp::Ordering::Equal => continue,
-                other => return other,
-            }
-        }
-
-        std::cmp::Ordering::Equal
-    }
-
     /// Walk both channels and emit a `(channel, id, entry)` tuple for
     /// every cartridge entry, in iteration order. Used by the
     /// transform/search/lookup helpers.
@@ -1578,7 +1582,7 @@ impl CartridgeRepoServer {
         Self::validate_version_data(id, latest_version, version_data)?;
 
         let mut available_versions: Vec<String> = entry.versions.keys().cloned().collect();
-        available_versions.sort_by(|a, b| Self::compare_versions(b, a));
+        available_versions.sort_by(|a, b| compare_versions(b, a));
 
         Ok(CartridgeInfo {
             id: id.to_string(),
