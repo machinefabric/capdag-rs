@@ -106,8 +106,8 @@ pub use fabric_manifest_version::FABRIC_MANIFEST_VERSION;
 // manifests against the baked root public keys.
 pub use bifaci::bundle_manifest::{
     manifest_for as bundle_manifest_for, manifest_paths as bundle_manifest_paths, BundleError,
-    BundleManifest, BundleProof, BundledCartridge, BUNDLE_MANIFEST_FILE, BUNDLE_MANIFEST_FORMAT,
-    BUNDLE_MANIFEST_SIG_FILE,
+    BundleManifest, BundleProof, BundledCartridge, StagedCartridge, BUNDLE_MANIFEST_FILE,
+    BUNDLE_MANIFEST_FORMAT, BUNDLE_MANIFEST_SIG_FILE,
 };
 pub use bifaci::registry_verdict::{
     ChainFailureReason, RegistryRemedy, RegistryVerdict, RegistryVerdictError,
@@ -337,6 +337,8 @@ pub use orchestrator::{
     map_progress,
     plan_to_resolved_graph,
     run_dag_on_context,
+    // A cartridge a host is given, for `ExecutionContext::add_cartridge_host`.
+    HostableCartridge,
     // Run-flow correlation — the protocol joined to a run's steps, shared by
     // every host that draws a run (the engine and the CLI).
     join_flow_states, FlowRecorder, FlowScopeGuard, RunFlowRegistry, RunFlowState, RunStreamFlow,

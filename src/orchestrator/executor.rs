@@ -985,18 +985,7 @@ impl CartridgeManager {
     pub async fn resolve_cartridges(
         &self,
         cap_urns: &[&str],
-    ) -> Result<
-        Vec<(
-            PathBuf,
-            Option<(
-                String,
-                String,
-                crate::bifaci::cartridge_repo::CartridgeChannel,
-            )>,
-            Vec<crate::bifaci::manifest::CapGroup>,
-        )>,
-        ExecutionError,
-    > {
+    ) -> Result<Vec<HostableCartridge>, ExecutionError> {
         // Collect unique cartridge binaries needed for the DAG
         let mut cartridge_paths: HashSet<PathBuf> = HashSet::new();
 
@@ -1026,15 +1015,7 @@ impl CartridgeManager {
         // ever started that way: with a bundled cartridge ahead of it, or a
         // second registry cartridge after it, a registry cap waited 15 s for
         // an advertisement that never came.
-        let mut result: Vec<(
-            PathBuf,
-            Option<(
-                String,
-                String,
-                crate::bifaci::cartridge_repo::CartridgeChannel,
-            )>,
-            Vec<crate::bifaci::manifest::CapGroup>,
-        )> = Vec::with_capacity(cartridge_paths.len());
+        let mut result: Vec<HostableCartridge> = Vec::with_capacity(cartridge_paths.len());
         for path in cartridge_paths {
             if let Some(manifest) = self.dev_cartridges.get(&path) {
                 let identity = Some((
@@ -1042,10 +1023,20 @@ impl CartridgeManager {
                     manifest.version.clone(),
                     manifest.channel,
                 ));
-                result.push((path, identity, manifest.cap_groups.clone()));
+                result.push(HostableCartridge {
+                    entry_point: path,
+                    identity,
+                    cap_groups: manifest.cap_groups.clone(),
+                    bundle_sha256: None,
+                });
             } else {
                 let manifest = self.discover_manifest(&path).await?;
-                result.push((path, None, manifest.cap_groups));
+                result.push(HostableCartridge {
+                    entry_point: path,
+                    identity: None,
+                    cap_groups: manifest.cap_groups,
+                    bundle_sha256: None,
+                });
             }
         }
 
@@ -1714,15 +1705,7 @@ impl ExecutionContext {
     /// The ExecutionContext manages cleanup of these resources.
     pub async fn add_cartridge_host(
         &mut self,
-        cartridges: Vec<(
-            PathBuf,
-            Option<(
-                String,
-                String,
-                crate::bifaci::cartridge_repo::CartridgeChannel,
-            )>,
-            Vec<crate::bifaci::manifest::CapGroup>,
-        )>,
+        cartridges: Vec<HostableCartridge>,
     ) -> Result<usize, ExecutionError> {
         // Create socket pairs:
         //   switch_sock <-> slave_ext_sock (switch to slave)
@@ -1752,7 +1735,7 @@ impl ExecutionContext {
         // binaries (no installer wrote it) and present for installed
         // ones. Anywhere else fails hard — we never silently guess.
         let mut host = CartridgeHostRuntime::new();
-        for (path, manifest_identity, cap_groups) in &cartridges {
+        for HostableCartridge { entry_point: path, identity: manifest_identity, cap_groups, bundle_sha256 } in &cartridges {
             let version_dir = path.parent().ok_or_else(|| {
                 ExecutionError::HostError(format!(
                     "cartridge binary {} has no parent directory",
@@ -1798,14 +1781,29 @@ impl ExecutionContext {
                         e
                     ))
                 })?;
-                host.register_cartridge(
-                    path,
-                    &provenance.name,
-                    &provenance.version,
-                    provenance.channel,
-                    provenance.registry_url.as_deref(),
-                    cap_groups,
-                );
+                match bundle_sha256 {
+                    // A bundled cartridge is registered by its directory, so
+                    // the host holds that directory to the hash its build
+                    // recorded each time it starts the cartridge.
+                    Some(recorded) => host.register_cartridge_dir(
+                        path,
+                        version_dir,
+                        &provenance.name,
+                        provenance.channel,
+                        provenance.registry_url.as_deref(),
+                        &provenance.version,
+                        cap_groups,
+                        Some(recorded),
+                    ),
+                    None => host.register_cartridge(
+                        path,
+                        &provenance.name,
+                        &provenance.version,
+                        provenance.channel,
+                        provenance.registry_url.as_deref(),
+                        cap_groups,
+                    ),
+                }
             } else {
                 // Dev binary (no cartridge.json on disk). Identity comes from the
                 // manifest the cartridge reported during the pre-registration HELLO
@@ -1817,6 +1815,12 @@ impl ExecutionContext {
                         path.display()
                     ))
                 })?;
+                if bundle_sha256.is_some() {
+                    return Err(ExecutionError::HostError(format!(
+                        "bundled cartridge {} has no cartridge.json beside it",
+                        path.display()
+                    )));
+                }
                 host.register_cartridge(path, name, version, *channel, None, cap_groups);
             }
         }
@@ -1878,7 +1882,7 @@ impl ExecutionContext {
         let host_id: String = {
             let mut paths: Vec<String> = cartridges
                 .iter()
-                .map(|(path, _, _)| path.display().to_string())
+                .map(|cartridge| cartridge.entry_point.display().to_string())
                 .collect();
             paths.sort();
             format!("cartridge-host:{}", paths.join("|"))
@@ -4013,17 +4017,23 @@ pub(crate) fn segment_activity_timeout(graph: &ResolvedGraph) -> u64 {
         .unwrap_or(DEFAULT_ACTIVITY_TIMEOUT_SECS)
 }
 
-/// One hostable cartridge: its entry-point binary, optional installed identity
-/// `(id, version, channel)` (absent for dev binaries), and the cap groups it serves.
-pub(crate) type HostableCartridge = (
-    PathBuf,
-    Option<(
+/// One cartridge a host is given: its entry point, its identity (a dev
+/// binary's from its HELLO, a bundled cartridge's from discovery; `None` for a
+/// registry install, whose `cartridge.json` states it), the cap groups it
+/// serves, and, for a bundled
+/// cartridge, the directory hash its build's signed bundle manifest records,
+/// which the host holds the directory to each time it starts it.
+#[derive(Debug, Clone)]
+pub struct HostableCartridge {
+    pub entry_point: PathBuf,
+    pub identity: Option<(
         String,
         String,
         crate::bifaci::cartridge_repo::CartridgeChannel,
     )>,
-    Vec<crate::bifaci::manifest::CapGroup>,
-);
+    pub cap_groups: Vec<crate::bifaci::manifest::CapGroup>,
+    pub bundle_sha256: Option<String>,
+}
 
 /// Discover the host's BUNDLED cartridges (shipped beside the executor, e.g. the capdag
 /// CLI's own `bundled-cartridges/` tree) as hostable cartridges. Uses the shared
@@ -4071,9 +4081,15 @@ pub(crate) async fn discover_bundled_cartridges(
                 channel: cart_channel,
                 version,
                 cap_groups,
+                bundle_sha256,
                 ..
             } => {
-                out.push((entry_point, Some((id, version, cart_channel)), cap_groups));
+                out.push(HostableCartridge {
+                    entry_point,
+                    identity: Some((id, version, cart_channel)),
+                    cap_groups,
+                    bundle_sha256,
+                });
             }
             crate::cartridge_discovery::DiscoveredCartridge::Incompatible {
                 id,
@@ -4121,15 +4137,17 @@ pub async fn bundled_providers_of(
     .await?;
     Ok(found
         .into_iter()
-        .filter(|(_, _, groups)| {
-            groups
+        .filter(|cartridge| {
+            cartridge
+                .cap_groups
                 .iter()
                 .any(|group| group.caps.iter().any(|cap| cap.urn.is_equivalent(cap_urn)))
         })
-        .map(|(entry_point, identity, _)| {
-            let (id, version, _) = identity
+        .map(|cartridge| {
+            let (id, version, _) = cartridge
+                .identity
                 .expect("discovery gives every hostable bundled cartridge its identity");
-            BundledProvider { id, version, entry_point }
+            BundledProvider { id, version, entry_point: cartridge.entry_point }
         })
         .collect())
 }
@@ -4226,10 +4244,11 @@ pub async fn bundled_cartridge_adapter_groups(
     )
     .await?
     .into_iter()
-    .map(|(_, identity, groups)| {
-        let (id, version, _) = identity
+    .map(|cartridge| {
+        let (id, version, _) = cartridge
+            .identity
             .expect("discovery gives every hostable bundled cartridge its identity");
-        (id, version, groups)
+        (id, version, cartridge.cap_groups)
     })
     .collect();
     found.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));

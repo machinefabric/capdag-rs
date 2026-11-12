@@ -104,7 +104,7 @@ pub use executor::{
     map_progress, run_dag_on_context, BundledProvider, CapProgressFn, CartridgeAdapterGroups,
     RefusedAdapterGroup,
     CapStepProgressFn, CartridgeManager, CollateralCause, DagOutput, ExecutionContext,
-    ExecutionError, ProgressMapper, RunCancel,
+    ExecutionError, HostableCartridge, ProgressMapper, RunCancel,
 };
 
 pub use stream_io::{

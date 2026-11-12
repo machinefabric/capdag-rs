@@ -61,7 +61,7 @@ pub async fn bundled_caps() -> CliResult<Vec<CapUrn>> {
     .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
     Ok(found
         .into_iter()
-        .flat_map(|(_, _, groups)| groups.into_iter().flat_map(|g| g.caps.into_iter().map(|c| c.urn)))
+        .flat_map(|cartridge| cartridge.cap_groups.into_iter().flat_map(|g| g.caps.into_iter().map(|c| c.urn)))
         .collect())
 }
 

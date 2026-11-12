@@ -2,7 +2,9 @@
 //!
 //! The on-disk scan + identity validation + HELLO probe that classifies each
 //! installed cartridge version directory as attachable (`Directory`) or
-//! `Incompatible`. This is the single source of truth used by BOTH:
+//! `Incompatible`. A bundled cartridge is not probed: its build's signed
+//! bundle manifest records what the probe would learn, and its bytes are held
+//! to that manifest when a host starts it. This is the single source of truth used by BOTH:
 //!
 //! - the engine, for the bundled `bundled-cartridges/` tree next to its binary, and
 //! - `unifloom-daemon`, for the user-installed cartridge tree.
@@ -68,8 +70,9 @@ pub struct DiscoveryIdentity {
 
 /// A discovered cartridge version directory, classified.
 ///
-/// - `Directory` — passed every identity check and its HELLO probe succeeded.
-///   Its caps will be registered for dispatch.
+/// - `Directory` — passed every identity check, and its caps are known: from
+///   its HELLO probe, or, for a bundled cartridge, from its build's signed
+///   bundle manifest. Its caps will be registered for dispatch.
 /// - `Incompatible` — found on disk but failed a check. NOT spawned, caps never
 ///   enter the dispatch graph; surfaced with a structured `attachment_error` so
 ///   the UI can render the reason. This is the uniform surface for every
@@ -84,6 +87,14 @@ pub enum DiscoveredCartridge {
         registry_url: Option<String>,
         version: String,
         cap_groups: Vec<CapGroup>,
+        /// For a bundled cartridge, the directory hash its build's signed
+        /// bundle manifest records; `None` for an installed or dev one.
+        ///
+        /// Discovery does not hash a bundled cartridge. A host holds its
+        /// directory to this value each time it starts the cartridge
+        /// ([`crate::bifaci::bundle_manifest::verify_content`]), and refuses to
+        /// start one that was changed.
+        bundle_sha256: Option<String>,
     },
     Incompatible {
         version_dir: PathBuf,
@@ -436,27 +447,43 @@ async fn scan_channel_root(
             continue;
         }
 
-        // Bundled-cartridge integrity. A cartridge marked `installed_from: bundle`
-        // is shipped INSIDE this build (the engine/daemon/capdag-CLI's own
+        // A bundled cartridge. A cartridge marked `installed_from: bundle` is
+        // shipped INSIDE this build (the engine/daemon/capdag-CLI's own
         // bundled-cartridges/ tree), not user-installed, and has no upstream
-        // registry to verify against — so it needs its own integrity proof.
+        // registry to verify against — so the build's signed bundle manifest
+        // is what proves it, on every platform. The proof was established once
+        // when this discovery started (see `BundleProof`); here it is applied
+        // to the cartridge in hand.
         //
-        // ONE mechanism, on every platform: the build's signed bundle manifest,
-        // verified against the roots this build bakes, by the same chain
-        // verifier a registry manifest goes through. The proof was established
-        // once when this discovery started (see `BundleProof`); here it is
-        // applied to the cartridge in hand.
-        //
-        // This used to be platform-split, and macOS had no check of ours at
-        // all — the manifest is produced at the END of a build, after every
-        // platform signing step, which is what removed the ordering problem
-        // that split existed for. Apple's signature still matters, and it is
-        // what stops the operating system warning a user; it is not what
-        // decides whether code runs here.
+        // The manifest records what a probe would learn — the caps the
+        // cartridge advertises, and the fabric manifest version it was built
+        // against — so a bundled cartridge is neither started nor hashed here.
+        // Its bytes are held to the recorded hash when a host starts it, which
+        // is when they are about to run.
         if cj.installed_from == Some(crate::bifaci::cartridge_json::CartridgeInstallSource::Bundle)
         {
-            if let Err(reason) = identity.bundle.check(&cj.name, &cj.version, version_dir) {
-                error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %reason, "bundled cartridge is not proven by this build's signed bundle manifest — surfacing as incompatible");
+            let recorded = match identity.bundle.admit(&cj.name, &cj.version, cj.channel.as_str()) {
+                Ok(recorded) => recorded,
+                Err(reason) => {
+                    error!(cartridge = %version_dir.display(), name = %cj.name, version = %cj.version, reason = %reason, "bundled cartridge is not proven by this build's signed bundle manifest — surfacing as incompatible");
+                    discovered.push(DiscoveredCartridge::Incompatible {
+                        version_dir: version_dir.clone(),
+                        id: cj.name.clone(),
+                        channel: cj.channel,
+                        registry_url: cj.registry_url.clone(),
+                        version: cj.version.clone(),
+                        error: CartridgeAttachmentError {
+                            kind: CartridgeAttachmentErrorKind::Misplaced,
+                            message: format!("bundled cartridge integrity check failed: {reason}"),
+                            detected_at_unix_seconds: detected_at,
+                        },
+                    });
+                    continue;
+                }
+            };
+            // cartridge.json is outside the hash; the signed record is what is
+            // believed about the fabric the cartridge was built against.
+            if recorded.fabric_manifest_version != identity.fabric_manifest_version {
                 discovered.push(DiscoveredCartridge::Incompatible {
                     version_dir: version_dir.clone(),
                     id: cj.name.clone(),
@@ -464,13 +491,27 @@ async fn scan_channel_root(
                     registry_url: cj.registry_url.clone(),
                     version: cj.version.clone(),
                     error: CartridgeAttachmentError {
-                        kind: CartridgeAttachmentErrorKind::Misplaced,
-                        message: format!("bundled cartridge integrity check failed: {reason}"),
+                        kind: CartridgeAttachmentErrorKind::FabricManifestVersionMismatch,
+                        message: format!(
+                            "Bundled cartridge built against fabric manifest version {}, as its build's signed bundle manifest records, but host is pinned to {}. Rebuild the bundle with MFR_FABRIC_MANIFEST_VERSION={}.",
+                            recorded.fabric_manifest_version, identity.fabric_manifest_version, identity.fabric_manifest_version
+                        ),
                         detected_at_unix_seconds: detected_at,
                     },
                 });
                 continue;
             }
+            discovered.push(DiscoveredCartridge::Directory {
+                entry_point: cj.resolve_entry_point(version_dir),
+                version_dir: version_dir.clone(),
+                id: cj.name,
+                channel: cj.channel,
+                registry_url: cj.registry_url,
+                version: cj.version,
+                cap_groups: recorded.cap_groups.clone(),
+                bundle_sha256: Some(recorded.sha256.clone()),
+            });
+            continue;
         }
 
         let entry_point = cj.resolve_entry_point(version_dir);
@@ -484,6 +525,7 @@ async fn scan_channel_root(
                     registry_url: cj.registry_url,
                     version: cj.version,
                     cap_groups,
+                    bundle_sha256: None,
                 });
             }
             Err(e) => {
@@ -958,77 +1000,135 @@ mod tests {
         }
     }
 
-    // TEST1928: a bundled cartridge the manifest records passes, and one it
-    // records differently does not.
-    //
-    // The other half of TEST1878, and the one that proves the gate is a real
-    // check rather than a refusal of everything: the same tree, the same
-    // cartridge, and the only difference is what the build recorded about it.
-    // A gate that always said no would pass TEST1878 alone.
-    #[tokio::test]
-    async fn test1928_a_bundled_cartridge_passes_exactly_when_the_manifest_records_it() {
-        use crate::bifaci::bundle_manifest::{BundleManifest, BundledCartridge};
+    /// The cap groups a build recorded for the fixture cartridge: one cap,
+    /// which discovery must hand back as recorded.
+    fn recorded_cap_groups() -> Vec<CapGroup> {
+        let identity = crate::CapUrn::from_string(crate::standard::caps::CAP_IDENTITY).unwrap();
+        vec![CapGroup {
+            name: "cart".to_string(),
+            caps: vec![crate::Cap::new(identity, "Identity".to_string(), vec!["identity".to_string()])],
+            adapter_urns: Vec::new(),
+        }]
+    }
 
-        let root = tempdir().unwrap();
-        install_fixture(
-            root.path(),
+    /// A manifest recording the fixture cartridge at `sha256`, built for
+    /// fabric manifest version `fabric_manifest_version`.
+    fn recorded(sha256: String, fabric_manifest_version: u32) -> crate::bifaci::bundle_manifest::BundleManifest {
+        crate::bifaci::bundle_manifest::BundleManifest::new(
             "dev",
-            "nightly",
-            "cart",
-            "1.0.0",
-            Some(bundled_cartridge_json()),
-            "cart",
-        );
-        let version_dir = root
-            .path()
+            vec![crate::bifaci::bundle_manifest::BundledCartridge {
+                name: "cart".to_string(),
+                version: "1.0.0".to_string(),
+                channel: "nightly".to_string(),
+                sha256,
+                fabric_manifest_version,
+                cap_groups: recorded_cap_groups(),
+            }],
+        )
+    }
+
+    /// Lay down the bundled fixture cartridge with an entry point that cannot
+    /// be started on any platform: marked executable, as an installed entry
+    /// point must be, and not a program. A discovery that started it would
+    /// end at HandshakeFailed.
+    fn install_unstartable_bundled(root: &Path) -> PathBuf {
+        let dir = root
             .join("dev")
             .join(format!("v{}", crate::CARTRIDGE_REGISTRY_VERSION))
             .join("nightly")
             .join("cart")
             .join("1.0.0");
-        let recorded =
-            crate::bifaci::cartridge_json::hash_cartridge_directory(&version_dir).unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("cartridge.json"), bundled_cartridge_json()).unwrap();
+        fs::write(dir.join("cart"), b"not a program").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.join("cart"), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        dir
+    }
 
-        let listed = |sha256: String| {
-            bundled_identity(BundleManifest::new(
-                "dev",
-                vec![BundledCartridge {
-                    name: "cart".to_string(),
-                    version: "1.0.0".to_string(),
-                    channel: "nightly".to_string(),
-                    sha256,
-                }],
-            ))
-        };
+    // TEST1928: a bundled cartridge is admitted exactly when the manifest
+    // records it, and refused, before anything runs, when it does not.
+    //
+    // The other half of TEST1878, and the one that proves the gate is a real
+    // check rather than a refusal of everything: the same tree, the same
+    // cartridge, and the only difference is what the build recorded about it.
+    #[tokio::test]
+    async fn test1928_a_bundled_cartridge_passes_exactly_when_the_manifest_records_it() {
+        let root = tempdir().unwrap();
+        install_unstartable_bundled(root.path());
 
-        // Recorded as it is on disk: it gets past the gate. It still ends at
-        // the HELLO probe, because the fixture's "entry point" is not a
-        // cartridge — what matters is that the failure is no longer the
-        // integrity one.
-        let out = discover_cartridges(root.path(), &listed(recorded.clone()))
+        let out = discover_cartridges(root.path(), &bundled_identity(recorded("a".repeat(64), 1)))
             .await
             .unwrap();
         assert_eq!(out.len(), 1);
-        if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
-            assert!(
-                !error.message.contains("bundled cartridge integrity"),
-                "a cartridge the manifest records must get past the integrity gate: {}",
-                error.message
-            );
-        }
+        assert!(
+            matches!(&out[0], DiscoveredCartridge::Directory { .. }),
+            "a recorded bundled cartridge must be admitted: {:?}",
+            out[0]
+        );
 
-        // Recorded as something else — the cartridge was changed after the
-        // build recorded it.
-        let out = discover_cartridges(root.path(), &listed("f".repeat(64)))
-            .await
-            .unwrap();
+        // Recorded under another name: this build ships a cartridge it did not
+        // record.
+        let mut other = recorded("a".repeat(64), 1);
+        other.cartridges[0].name = "other".to_string();
+        let out = discover_cartridges(root.path(), &bundled_identity(other)).await.unwrap();
         expect_incompatible(&out, CartridgeAttachmentErrorKind::Misplaced);
         if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
             assert!(
                 error.message.contains("bundled cartridge integrity"),
-                "a cartridge that differs from the manifest must be refused: {}",
+                "a cartridge the manifest does not record must be refused: {}",
                 error.message
             );
+        }
+    }
+
+    // TEST1931: discovering a bundle neither starts nor hashes a cartridge:
+    // its caps and its content hash are the ones the signed manifest records.
+    //
+    // The entry point cannot be started, so a discovery that probed it would
+    // report HandshakeFailed; and the recorded hash is not the directory's, so
+    // a discovery that hashed it would refuse it. The hash is held to the
+    // directory when a host starts the cartridge (TEST1932's half).
+    #[tokio::test]
+    async fn test1931_bundled_discovery_reads_the_manifest_and_starts_nothing() {
+        let root = tempdir().unwrap();
+        let dir = install_unstartable_bundled(root.path());
+
+        let out = discover_cartridges(root.path(), &bundled_identity(recorded("f".repeat(64), 1)))
+            .await
+            .unwrap();
+        match &out[..] {
+            [DiscoveredCartridge::Directory { cap_groups, bundle_sha256, version_dir, entry_point, .. }] => {
+                assert_eq!(cap_groups, &recorded_cap_groups(), "the caps must be the recorded ones");
+                assert_eq!(bundle_sha256.as_deref(), Some("f".repeat(64).as_str()));
+                assert_eq!(version_dir, &dir);
+                assert_eq!(entry_point, &dir.join("cart"));
+            }
+            other => panic!("expected the bundled cartridge admitted from its manifest, got {other:?}"),
+        }
+    }
+
+    // TEST1932: a bundled cartridge whose build recorded another fabric
+    // manifest version is refused as built for another fabric, without being
+    // started.
+    //
+    // Its cartridge.json says the host's version; the signed record says
+    // otherwise, and the signed record is what discovery believes, since
+    // cartridge.json is outside the hash.
+    #[tokio::test]
+    async fn test1932_a_bundled_cartridge_built_for_another_fabric_is_refused_unstarted() {
+        let root = tempdir().unwrap();
+        install_unstartable_bundled(root.path());
+
+        let out = discover_cartridges(root.path(), &bundled_identity(recorded("a".repeat(64), 2)))
+            .await
+            .unwrap();
+        expect_incompatible(&out, CartridgeAttachmentErrorKind::FabricManifestVersionMismatch);
+        if let DiscoveredCartridge::Incompatible { error, .. } = &out[0] {
+            assert!(error.message.contains("fabric manifest version 2"), "{}", error.message);
         }
     }
 }

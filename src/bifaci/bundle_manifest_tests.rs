@@ -173,50 +173,116 @@ fn cartridge_dir(root: &std::path::Path, contents: &[(&str, &str)]) -> std::path
     dir
 }
 
-/// TEST1924: a bundled cartridge is held to the bytes the manifest recorded.
+/// One entry as a build records it.
+fn entry(name: &str, version: &str, channel: &str, sha256: String) -> BundledCartridge {
+    BundledCartridge {
+        name: name.to_string(),
+        version: version.to_string(),
+        channel: channel.to_string(),
+        sha256,
+        fabric_manifest_version: 1,
+        cap_groups: Vec::new(),
+    }
+}
+
+/// TEST1924: a bundled cartridge is held to the bytes the manifest recorded,
+/// and the refusal says which cartridge was changed and where.
 ///
 /// The manifest is built here rather than loaded, because what is under test is
-/// the CHECK. Three ways to fail it, and each is a different thing that went
-/// wrong: the cartridge was changed after the build recorded it, the build
-/// shipped something it never recorded, or a stale copy of another version was
-/// left behind.
+/// the CHECK. The message is what a user reads when a host refuses to start the
+/// cartridge, so it must name the cartridge and say that its bundle changed.
 #[test]
 fn test1924_a_bundled_cartridge_must_match_what_the_manifest_recorded() {
     let root = tempdir().expect("a scratch directory");
     let dir = cartridge_dir(root.path(), &[("cart", "the entry point")]);
     let recorded = crate::bifaci::cartridge_json::hash_cartridge_directory(&dir).expect("hash it");
 
-    let manifest = BundleManifest::new(
-        "prod",
-        vec![BundledCartridge {
-            name: "cart".to_string(),
-            version: "1.0.0".to_string(),
-            channel: "release".to_string(),
-            sha256: recorded.clone(),
-        }],
-    );
-    verify_cartridge(&manifest, "cart", "1.0.0", &dir).expect("an unchanged cartridge passes");
+    verify_content("cart", "1.0.0", &dir, &recorded).expect("an unchanged cartridge passes");
 
     // Changed after the build recorded it.
     fs::write(dir.join("cart"), "something else").expect("tamper");
-    let why = verify_cartridge(&manifest, "cart", "1.0.0", &dir)
+    let why = verify_content("cart", "1.0.0", &dir, &recorded)
         .expect_err("a changed cartridge must be refused");
     assert!(
         matches!(why, BundleError::ContentMismatch { ref expected, .. } if *expected == recorded),
         "the refusal must name what was recorded, said: {why}"
     );
+    let said = why.to_string();
+    assert!(said.contains("the bundled cartridge cart 1.0.0 was changed"), "{said}");
+    assert!(said.contains(&dir.display().to_string()), "the refusal must say where: {said}");
+    assert!(said.contains("is not started"), "{said}");
 
-    // Shipped but never recorded.
-    let why = verify_cartridge(&manifest, "other", "1.0.0", &dir)
-        .expect_err("a cartridge the manifest does not list must be refused");
-    assert!(matches!(why, BundleError::NotListed { .. }), "{why}");
+    // A file added beside the entry point is a change too.
+    fs::write(dir.join("cart"), "the entry point").expect("restore");
+    verify_content("cart", "1.0.0", &dir, &recorded).expect("restored, it passes again");
+    fs::write(dir.join("extra.dylib"), "planted").expect("plant a file");
+    assert!(matches!(
+        verify_content("cart", "1.0.0", &dir, &recorded),
+        Err(BundleError::ContentMismatch { .. })
+    ));
+}
 
+/// TEST1929: the manifest admits exactly the cartridges it records, on the
+/// channel it records them for, without reading a byte of them.
+///
+/// Admission is what discovery does instead of hashing and starting each
+/// cartridge, so it must refuse everything the old check refused that does not
+/// need the bytes: a cartridge never recorded, a stale copy of another version,
+/// and one recorded for the other channel.
+#[test]
+fn test1929_the_manifest_admits_only_what_it_records() {
+    let manifest = BundleManifest::new("prod", vec![entry("cart", "1.0.0", "release", "a".repeat(64))]);
+
+    let admitted = manifest.admit("cart", "1.0.0", "release").expect("a recorded cartridge is admitted");
+    assert_eq!(admitted.sha256, "a".repeat(64));
+
+    assert!(matches!(manifest.admit("other", "1.0.0", "release"), Err(BundleError::NotListed { .. })));
     // The right cartridge at the wrong version — a stale copy from an earlier
     // build, which a bare per-binary signature would have accepted because it
     // was validly signed once.
-    let why = verify_cartridge(&manifest, "cart", "0.9.0", &dir)
-        .expect_err("a version the manifest does not list must be refused");
-    assert!(matches!(why, BundleError::NotListed { .. }), "{why}");
+    assert!(matches!(manifest.admit("cart", "0.9.0", "release"), Err(BundleError::NotListed { .. })));
+    // A manifest vouches for one channel's artefact, never the other's.
+    assert!(matches!(manifest.admit("cart", "1.0.0", "nightly"), Err(BundleError::WrongChannel { .. })));
+
+    // A root that proves nothing admits nothing, and says why.
+    let none = BundleProof::none("not a build's bundle");
+    assert_eq!(none.admit("cart", "1.0.0", "release").unwrap_err(), "not a build's bundle");
+}
+
+/// TEST1930: a verified document is believed only in this format, for this
+/// environment, with caps that pass the definition rules.
+///
+/// No earlier format is read: a v1 manifest records no caps and no fabric
+/// manifest version, so a host reading one would have to start every cartridge
+/// to learn them, which is what v2 exists to stop.
+#[test]
+fn test1930_a_verified_document_is_held_to_the_format_and_the_rules() {
+    let path = std::path::Path::new("bundle.json");
+    let good = BundleManifest::new("prod", vec![entry("cart", "1.0.0", "release", "a".repeat(64))]);
+    let bytes = good.to_bytes().unwrap();
+    assert_eq!(parse_verified(&bytes, path, "prod").expect("a v2 manifest parses"), good);
+
+    let v1 = br#"{"format":"capdag.bundle/v1","environment":"prod","cartridges":[{"name":"cart","version":"1.0.0","channel":"release","sha256":"aa"}]}"#;
+    assert!(
+        matches!(parse_verified(v1, path, "prod"), Err(BundleError::UnsupportedFormat { ref found }) if found == "capdag.bundle/v1"),
+        "a v1 manifest must be refused for its format"
+    );
+
+    assert!(matches!(parse_verified(&bytes, path, "staging"), Err(BundleError::WrongEnvironment { .. })));
+
+    // A recorded cap that breaks the definition rules (RULE21: an out= that
+    // is not void needs its main output) is refused as an advertised one
+    // would be.
+    let urn = crate::CapUrn::from_string(r#"cap:in="media:enc=utf8";test;out="media:enc=utf8;fmt=json;record""#).unwrap();
+    let broken_cap = crate::Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
+    let mut broken = good.clone();
+    broken.cartridges[0].cap_groups =
+        vec![crate::CapGroup { name: "g".to_string(), caps: vec![broken_cap], adapter_urns: Vec::new() }];
+    let broken = broken.to_bytes().unwrap();
+    assert!(
+        matches!(parse_verified(&broken, path, "prod"), Err(BundleError::Malformed { .. })),
+        "a recorded cap that fails the definition rules must be refused"
+    );
 }
 
 /// TEST1925: `cartridge.json` is outside the hash, so writing the manifest
@@ -252,35 +318,15 @@ fn test1926_a_manifest_is_written_in_a_stable_order() {
     let one = BundleManifest::new(
         "prod",
         vec![
-            BundledCartridge {
-                name: "zeta".into(),
-                version: "1.0.0".into(),
-                channel: "release".into(),
-                sha256: "a".repeat(64),
-            },
-            BundledCartridge {
-                name: "alpha".into(),
-                version: "2.0.0".into(),
-                channel: "release".into(),
-                sha256: "b".repeat(64),
-            },
+            entry("zeta", "1.0.0", "release", "a".repeat(64)),
+            entry("alpha", "2.0.0", "release", "b".repeat(64)),
         ],
     );
     let other = BundleManifest::new(
         "prod",
         vec![
-            BundledCartridge {
-                name: "alpha".into(),
-                version: "2.0.0".into(),
-                channel: "release".into(),
-                sha256: "b".repeat(64),
-            },
-            BundledCartridge {
-                name: "zeta".into(),
-                version: "1.0.0".into(),
-                channel: "release".into(),
-                sha256: "a".repeat(64),
-            },
+            entry("alpha", "2.0.0", "release", "b".repeat(64)),
+            entry("zeta", "1.0.0", "release", "a".repeat(64)),
         ],
     );
     assert_eq!(one.to_bytes().unwrap(), other.to_bytes().unwrap());
