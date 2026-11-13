@@ -453,10 +453,10 @@ async fn test7184_validation_rules_prove_or_disprove_a_refinement() {
     assert_eq!(media("prose.txt", "hello\n").await.unwrap(), vec!["media:enc=utf8;ext=txt;plain-text"]);
 
     let broken = FabricRegistry::new_for_test();
-    broken.insert_cached_media_def_for_test(script("media:enc=utf8;ext=txt;plain-text;broken", "(("));
+    broken.insert_cached_media_def_for_test(script("media:broken;enc=utf8;ext=txt;plain-text", "(("));
     let path = write(&dir, "x.txt", "x");
     let err = detect_file_media(&path, &broken, &NoAdapters, &NoInvoker, &ValueAdapterRegistry::new())
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("media:enc=utf8;ext=txt;plain-text;broken"), "{err}");
+    assert!(err.to_string().contains("media:broken;enc=utf8;ext=txt;plain-text"), "{err}");
 }

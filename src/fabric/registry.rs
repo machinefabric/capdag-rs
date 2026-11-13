@@ -2247,15 +2247,19 @@ impl FabricRegistry {
             let m = self.manifest.lock().map_err(|e| {
                 FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
             })?;
-            m.media
-                .iter()
-                .filter(|(urn, _)| {
-                    crate::MediaUrn::from_string(urn)
-                        .map(|u| u.get_tag("ext").is_some())
-                        .unwrap_or(false)
-                })
-                .map(|(urn, defver)| (urn.clone(), *defver))
-                .collect()
+            let mut file_urns = Vec::new();
+            for (urn, defver) in m.media.iter() {
+                let parsed = crate::MediaUrn::from_string(urn).map_err(|e| {
+                    FabricRegistryError::FileTypes(format!(
+                        "manifest v{} names '{urn}' as a media definition, and it is no media URN: {e}",
+                        self.manifest_version
+                    ))
+                })?;
+                if parsed.get_tag("ext").is_some() {
+                    file_urns.push((urn.clone(), *defver));
+                }
+            }
+            file_urns
         };
         let mut defs: Vec<StoredMediaDef> = Vec::with_capacity(file_urns.len());
         let mut missing: Vec<(String, u32)> = Vec::new();
