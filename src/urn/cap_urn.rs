@@ -824,6 +824,25 @@ impl CapUrn {
         crate::formal::exec::dispatch(self.formal.clone(), request.formal.clone())
     }
 
+    /// The position in `candidates` of the cap the proved ranking chooses to
+    /// serve `request` (`CapDAG.Exec.select`): among the candidates that serve
+    /// it, the one whose ranking key is least, and of equal keys the first.
+    /// `None` when none serves it.
+    pub fn select(candidates: &[CapUrn], request: &CapUrn) -> Option<usize> {
+        let chosen = crate::formal::exec::select(
+            candidates.iter().map(|c| c.formal.clone()).collect(),
+            request.formal.clone(),
+        )?;
+        // The model returns the cap it chose; it is the first candidate that
+        // serves the request with the chosen cap's key, since the model keeps
+        // the first of equal keys.
+        let key = crate::formal::exec::ranking_key(chosen, request.formal.clone());
+        candidates.iter().position(|c| {
+            c.is_dispatchable(request)
+                && crate::formal::exec::ranking_key(c.formal.clone(), request.formal.clone()) == key
+        })
+    }
+
     /// Whether this candidate COULD serve `request`: not guaranteed, not
     /// excluded. For exploring what the fabric might do — never for routing a
     /// call, which must be served.

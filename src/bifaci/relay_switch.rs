@@ -56,6 +56,9 @@
 use crate::bifaci::frame::{CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
 use crate::bifaci::io::{identity_nonce, CborError, FrameReader, FrameWriter};
 use crate::bifaci::local_socket::{OwnedReadHalf, OwnedWriteHalf, UnixStream};
+use crate::bifaci::peer_hold::{
+    Arrived, Holds, PeerHoldBound, PeerProvider, PeerRefusal, Released, Settlement,
+};
 use crate::cap::registry::FabricRegistry;
 use crate::planner::live_cap_fab::{LiveCapFab, ReachableTargetInfo, Strand};
 use crate::urn::media_urn::MediaUrn;
@@ -671,10 +674,13 @@ pub struct RelaySwitch {
     aggregate_capabilities_tx: tokio::sync::watch::Sender<Vec<u8>>,
     /// Negotiated limits (minimum across all masters)
     negotiated_limits: RwLock<Limits>,
-    /// Channel receiver for frames from master reader tasks (Mutex for exclusive receive)
-    frame_rx: Mutex<mpsc::UnboundedReceiver<(usize, Result<Frame, CborError>)>>,
+    /// Channel receiver for frames from master reader tasks, and for the
+    /// end of bringing a held peer request's provider (Mutex for exclusive
+    /// receive): one stream, handled in order, so a held request's replay is
+    /// ordered with every frame its caller sends after.
+    frame_rx: Mutex<mpsc::UnboundedReceiver<Inbound>>,
     /// Channel sender for spawning new reader tasks (stored for add_master)
-    frame_tx: mpsc::UnboundedSender<(usize, Result<Frame, CborError>)>,
+    frame_tx: mpsc::UnboundedSender<Inbound>,
     /// XID counter for assigning unique routing IDs (RelaySwitch assigns on first arrival)
     xid_counter: AtomicU64,
     /// Precomputed capability graph for path finding and reachability queries
@@ -749,6 +755,25 @@ pub struct RelaySwitch {
     /// without one; sent to each master before anything else, and to every
     /// master on each change ([`RelaySwitch::set_policy`]).
     policy: std::sync::Mutex<crate::bifaci::policy::HostPolicy>,
+    /// What brings a provider for a peer request no master serves, and the
+    /// requests held while it does ([`RelaySwitch::set_peer_provider`]).
+    /// Unset: such a request is refused with NO_HANDLER.
+    peer_providing: std::sync::OnceLock<PeerProviding>,
+}
+
+/// One item of the switch's inbound stream.
+enum Inbound {
+    /// A frame from a master, or the end of its connection.
+    Frame(usize, Result<Frame, CborError>),
+    /// Bringing the provider of held peer request `rid` ended.
+    Settled(MessageId, Settlement),
+}
+
+/// A switch's [`PeerProvider`] and the requests held while it brings one.
+struct PeerProviding {
+    provider: Arc<dyn PeerProvider>,
+    switch: std::sync::Weak<RelaySwitch>,
+    holds: std::sync::Mutex<Holds>,
 }
 
 impl std::fmt::Debug for RelaySwitch {
@@ -1072,7 +1097,7 @@ impl RelaySwitch {
                 loop {
                     match reader.read().await {
                         Ok(Some(frame)) => {
-                            if tx.send((master_idx, Ok(frame))).is_err() {
+                            if tx.send(Inbound::Frame(master_idx, Ok(frame))).is_err() {
                                 tracing::warn!(
                                     "[RelaySwitch] master {} reader: frame_tx closed",
                                     master_idx
@@ -1085,7 +1110,7 @@ impl RelaySwitch {
                                 "[RelaySwitch] master {} reader: socket closed (EOF)",
                                 master_idx
                             );
-                            let _ = tx.send((master_idx, Err(CborError::UnexpectedEof)));
+                            let _ = tx.send(Inbound::Frame(master_idx, Err(CborError::UnexpectedEof)));
                             break;
                         }
                         Err(e) => {
@@ -1094,7 +1119,7 @@ impl RelaySwitch {
                                 master_idx,
                                 e
                             );
-                            let _ = tx.send((master_idx, Err(e)));
+                            let _ = tx.send(Inbound::Frame(master_idx, Err(e)));
                             break;
                         }
                     }
@@ -1145,6 +1170,7 @@ impl RelaySwitch {
             pending_identity_probes_rx: std::sync::Mutex::new(Some(probes_rx)),
             add_master_lock: tokio::sync::Mutex::new(()),
             policy: std::sync::Mutex::new(policy),
+            peer_providing: std::sync::OnceLock::new(),
         };
 
         let initial_inventories = {
@@ -3185,7 +3211,7 @@ impl RelaySwitch {
             loop {
                 match reader.read().await {
                     Ok(Some(frame)) => {
-                        if tx.send((master_idx, Ok(frame))).is_err() {
+                        if tx.send(Inbound::Frame(master_idx, Ok(frame))).is_err() {
                             tracing::warn!(
                                 "[RelaySwitch] master {} reader: frame_tx closed",
                                 master_idx
@@ -3198,7 +3224,7 @@ impl RelaySwitch {
                             "[RelaySwitch] master {} reader: socket closed (EOF)",
                             master_idx
                         );
-                        let _ = tx.send((master_idx, Err(CborError::UnexpectedEof)));
+                        let _ = tx.send(Inbound::Frame(master_idx, Err(CborError::UnexpectedEof)));
                         break;
                     }
                     Err(e) => {
@@ -3207,7 +3233,7 @@ impl RelaySwitch {
                             master_idx,
                             e
                         );
-                        let _ = tx.send((master_idx, Err(e)));
+                        let _ = tx.send(Inbound::Frame(master_idx, Err(e)));
                         break;
                     }
                 }
@@ -3533,26 +3559,15 @@ impl RelaySwitch {
     /// Peer requests (cartridge → cartridge) are handled internally and not returned.
     pub async fn read_from_masters(&self) -> Result<Option<Frame>, RelaySwitchError> {
         loop {
-            // Hold lock through handle_master_frame — see read_from_masters_timeout comment.
+            // Hold lock through handle_inbound — see read_from_masters_timeout comment.
             let mut rx = self.frame_rx.lock().await;
-            let frame_result = rx.recv().await;
-
-            match frame_result {
-                Some((master_idx, Ok(frame))) => {
-                    let handle_result = self.handle_master_frame(master_idx, frame).await;
-                    drop(rx);
-                    if let Some(result_frame) = handle_result? {
-                        return Ok(Some(result_frame));
-                    }
-                }
-                Some((master_idx, Err(_e))) => {
-                    drop(rx);
-                    self.handle_master_death(master_idx).await?;
-                }
-                None => {
-                    drop(rx);
-                    return Ok(None);
-                }
+            let Some(item) = rx.recv().await else {
+                return Ok(None);
+            };
+            let handled = self.handle_inbound(item).await;
+            drop(rx);
+            if let Some(frame) = handled? {
+                return Ok(Some(frame));
             }
         }
     }
@@ -3563,34 +3578,20 @@ impl RelaySwitch {
     /// Returns Ok(None) if no frame was available or the frame was handled internally.
     /// Use this in tokio::select! loops for concurrent frame processing.
     pub async fn pump_one(&self) -> Result<Option<Frame>, RelaySwitchError> {
-        // Hold lock through handle_master_frame — see read_from_masters_timeout comment.
+        // Hold lock through handle_inbound — see read_from_masters_timeout comment.
         let mut rx = self.frame_rx.lock().await;
-        let frame_result = rx.try_recv();
-
-        match frame_result {
-            Ok((master_idx, Ok(frame))) => {
-                let handle_result = self.handle_master_frame(master_idx, frame).await;
+        match rx.try_recv() {
+            Ok(item) => {
+                let handled = self.handle_inbound(item).await;
                 drop(rx);
-                if let Some(result_frame) = handle_result? {
-                    return Ok(Some(result_frame));
-                }
-                Ok(None)
+                handled
             }
-            Ok((master_idx, Err(_e))) => {
-                drop(rx);
-                self.handle_master_death(master_idx).await?;
-                Ok(None)
-            }
-            Err(mpsc::error::TryRecvError::Empty) => {
-                // No frames available
-                Ok(None)
-            }
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                // All reader tasks have exited
-                Err(RelaySwitchError::Protocol(
-                    "All masters disconnected".to_string(),
-                ))
-            }
+            // No frames available
+            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+            // All reader tasks have exited
+            Err(mpsc::error::TryRecvError::Disconnected) => Err(RelaySwitchError::Protocol(
+                "All masters disconnected".to_string(),
+            )),
         }
     }
 
@@ -3615,11 +3616,8 @@ impl RelaySwitch {
             // frame can be dequeued by a second pump before the first pump
             // finishes inserting the REQ's routing entries.
             let mut rx = self.frame_rx.lock().await;
-            let frame_result = tokio::time::timeout(remaining, rx.recv()).await;
-            // Extract the frame data, then drop the lock before async I/O
-            let action = match frame_result {
-                Ok(Some((master_idx, Ok(frame)))) => Some((master_idx, Ok(frame))),
-                Ok(Some((master_idx, Err(e)))) => Some((master_idx, Err(e))),
+            let item = match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(item)) => item,
                 Ok(None) => {
                     drop(rx);
                     return Err(RelaySwitchError::Protocol(
@@ -3631,23 +3629,30 @@ impl RelaySwitch {
                     return Ok(None); // Timeout
                 }
             };
-            // Process the frame while still holding the lock — this serializes
+            // Process the item while still holding the lock — this serializes
             // handle_master_frame so routing table mutations from a REQ are
             // visible before the next recv can return its continuation frames.
-            if let Some((master_idx, result)) = action {
-                match result {
-                    Ok(frame) => {
-                        let handle_result = self.handle_master_frame(master_idx, frame).await;
-                        drop(rx);
-                        if let Some(result_frame) = handle_result? {
-                            return Ok(Some(result_frame));
-                        }
-                    }
-                    Err(_e) => {
-                        drop(rx);
-                        self.handle_master_death(master_idx).await?;
-                    }
-                }
+            let handled = self.handle_inbound(item).await;
+            drop(rx);
+            if let Some(frame) = handled? {
+                return Ok(Some(frame));
+            }
+        }
+    }
+
+    /// One item of the inbound stream: a master's frame, its connection's
+    /// end, or the end of bringing a held request's provider. Called with
+    /// the receive lock held, so items are handled one at a time, in order.
+    async fn handle_inbound(&self, item: Inbound) -> Result<Option<Frame>, RelaySwitchError> {
+        match item {
+            Inbound::Frame(master_idx, Ok(frame)) => self.handle_master_frame(master_idx, frame).await,
+            Inbound::Frame(master_idx, Err(_e)) => {
+                self.handle_master_death(master_idx).await?;
+                Ok(None)
+            }
+            Inbound::Settled(rid, settlement) => {
+                self.release_held_request(&rid, settlement).await?;
+                Ok(None)
             }
         }
     }
@@ -3830,6 +3835,271 @@ impl RelaySwitch {
             .map(|(idx, registered_cap, _, _)| (*idx, registered_cap.clone()))
     }
 
+    /// Bring a provider for the peer requests no master serves, holding each
+    /// while it does, within `bound` (14.2 §Peer requests no master serves).
+    /// Set once, before the switch routes anything that may need it; a second
+    /// provider is refused.
+    pub fn set_peer_provider(
+        self: &Arc<Self>,
+        provider: Arc<dyn PeerProvider>,
+        bound: PeerHoldBound,
+    ) -> Result<(), RelaySwitchError> {
+        self.peer_providing
+            .set(PeerProviding {
+                provider,
+                switch: Arc::downgrade(self),
+                holds: std::sync::Mutex::new(Holds::new(bound)),
+            })
+            .map_err(|_| {
+                RelaySwitchError::Protocol(
+                    "this switch already has a peer provider".to_string(),
+                )
+            })
+    }
+
+    /// Hold peer REQ `frame` and start bringing the provider of its cap. The
+    /// end of bringing it arrives on the inbound stream
+    /// ([`Inbound::Settled`]), in order with every frame the caller sends.
+    async fn hold_peer_request(
+        &self,
+        providing: &PeerProviding,
+        source_idx: usize,
+        frame: Frame,
+    ) -> Result<Option<Frame>, RelaySwitchError> {
+        let rid = frame.id.clone();
+        let cap_urn = frame.cap.clone().expect("a REQ names its cap");
+        let held = providing
+            .holds
+            .lock()
+            .expect("peer holds mutex poisoned")
+            .hold(source_idx, frame);
+        if let Err(mut err) = held {
+            warn!(cap = %cap_urn, rid = ?rid, "[RelaySwitch] peer REQ is more than a hold keeps — refused");
+            let _ = self.write_to_master_idx_raw(source_idx, &mut err).await;
+            return Ok(None);
+        }
+        info!(
+            cap = %cap_urn, rid = ?rid, from_master = source_idx,
+            "[RelaySwitch] no master serves the peer REQ — held while its provider is brought"
+        );
+        let deadline = providing
+            .holds
+            .lock()
+            .expect("peer holds mutex poisoned")
+            .bound()
+            .deadline;
+        let provider = providing.provider.clone();
+        let switch = providing.switch.clone();
+        let tx = self.frame_tx.clone();
+        tokio::spawn(async move {
+            let settlement = bring_provider(provider, switch, &cap_urn, deadline).await;
+            // A closed stream is a switch that is gone: nobody is left to answer.
+            let _ = tx.send(Inbound::Settled(rid, settlement));
+        });
+        Ok(None)
+    }
+
+    /// A frame from master `source_idx` for one of the requests it made that
+    /// is held: kept, or the end of the request. `Err(frame)` when the frame
+    /// is not for a held request.
+    async fn arrive_for_held_request(
+        &self,
+        source_idx: usize,
+        frame: Frame,
+    ) -> Result<Result<(), Frame>, RelaySwitchError> {
+        let Some(providing) = self.peer_providing.get() else {
+            return Ok(Err(frame));
+        };
+        let arrived = {
+            let mut holds = providing.holds.lock().expect("peer holds mutex poisoned");
+            if !holds.is_held(source_idx, &frame.id) {
+                return Ok(Err(frame));
+            }
+            holds.arrive(frame)
+        };
+        match arrived {
+            Arrived::Kept => {}
+            Arrived::Overflowed(request, refusal) => {
+                warn!(
+                    cap = %request.cap_urn, kept = request.frames.len(),
+                    "[RelaySwitch] held peer request sent more than its hold keeps — ended"
+                );
+                let rid = request.frames[0].id.clone();
+                let mut err = refusal.err_frame(&rid, &request.xid);
+                let _ = self.write_to_master_idx_raw(source_idx, &mut err).await;
+            }
+            Arrived::Cancelled(request, mut err) => {
+                info!(cap = %request.cap_urn, "[RelaySwitch] held peer request cancelled by its caller");
+                let _ = self.write_to_master_idx_raw(source_idx, &mut err).await;
+            }
+        }
+        Ok(Ok(()))
+    }
+
+    /// Bringing held request `rid`'s provider ended: replay its frames, in
+    /// the order they came, or answer its caller with why not.
+    async fn release_held_request(
+        &self,
+        rid: &MessageId,
+        settlement: Settlement,
+    ) -> Result<(), RelaySwitchError> {
+        let providing = self
+            .peer_providing
+            .get()
+            .expect("only a switch with a peer provider holds requests");
+        let released = providing
+            .holds
+            .lock()
+            .expect("peer holds mutex poisoned")
+            .settle(rid, settlement);
+        match released {
+            // Cancelled, overflowed, or its caller's master died meanwhile.
+            None => Ok(()),
+            Some(Released::Fail(request, mut err)) => {
+                warn!(cap = %request.cap_urn, "[RelaySwitch] held peer request's provider was not brought — ended");
+                let _ = self.write_to_master_idx_raw(request.source_idx, &mut err).await;
+                Ok(())
+            }
+            Some(Released::Replay(request)) => {
+                info!(cap = %request.cap_urn, frames = request.frames.len(), "[RelaySwitch] held peer request replayed");
+                let source_idx = request.source_idx;
+                let mut frames = request.frames.into_iter();
+                let req = frames.next().expect("a held request holds its REQ first");
+                self.route_peer_request(source_idx, req, true).await?;
+                for frame in frames {
+                    // A peer request's own frames are routed internally; none
+                    // is ever handed to the engine.
+                    self.handle_master_frame(source_idx, frame).await?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Route peer REQ `frame` from master `source_idx`, already given its
+    /// routing id: to the master that serves its cap; or, when none does, held
+    /// while the switch's [`PeerProvider`] brings one, or refused with
+    /// NO_HANDLER — as the model decides (`formal/CapDAG/Bifaci/Hold.lean`).
+    /// `replayed` is a REQ that was held before: it is never held again.
+    async fn route_peer_request(
+        &self,
+        source_idx: usize,
+        mut frame: Frame,
+        replayed: bool,
+    ) -> Result<Option<Frame>, RelaySwitchError> {
+        let cap_urn = frame.cap.clone().ok_or_else(|| {
+            RelaySwitchError::Protocol("REQ frame missing cap URN".to_string())
+        })?;
+        let cap_urn = &cap_urn;
+        let xid = frame
+            .routing_id
+            .clone()
+            .expect("a peer REQ is given its routing id before it is routed");
+
+        // Find destination master (no preference for peer requests)
+        let route = self.find_route_for_cap(cap_urn, None).await;
+        if route.is_none() {
+            if let Some(providing) = self.peer_providing.get() {
+                if crate::bifaci::peer_hold::holds(true, replayed) {
+                    return self.hold_peer_request(providing, source_idx, frame).await;
+                }
+            }
+            // No handler registered for this cap. Rather than returning
+            // Err(NoHandler) — which the pump logs and discards, leaving
+            // the caller hanging until the 120s activity timeout — send
+            // an ERR frame immediately back to the source master so the
+            // peer call fails fast with a clear error. Stamp the
+            // synthetic XID assigned above so the receiving cartridge
+            // host runtime accepts it (path-C invariant).
+            tracing::warn!(
+                "[RelaySwitch] NO_HANDLER for peer REQ cap='{}' rid={:?} from_master={} — sending ERR to caller",
+                cap_urn, frame.id, source_idx
+            );
+            // No master serving this cap is a deployment/manifest
+            // mismatch — Environment (docs/failure-taxonomy.md).
+            let mut err_frame = Frame::err(
+                frame.id.clone(),
+                "NO_HANDLER",
+                crate::failure::AttributionClass::Environment,
+                &if replayed {
+                    format!(
+                        "No handler found for cap: {cap_urn} — its provider was brought, \
+                         and no master serves it even so"
+                    )
+                } else {
+                    format!("No handler found for cap: {}", cap_urn)
+                },
+                None,
+            );
+            err_frame.routing_id = Some(xid.clone());
+            let _ = self
+                .write_to_master_idx_raw(source_idx, &mut err_frame)
+                .await;
+            return Ok(None);
+        }
+        let (dest_idx, _registered_cap) = route.unwrap();
+
+        let rid = frame.id.clone();
+        let key = (xid.clone(), rid.clone());
+
+        // Register the peer request and link it under its parent for
+        // the cancel cascade — one table write guard (L7). The ledger
+        // seed is read BEFORE taking the guard (it awaits the master
+        // table's own lock).
+        let initial_credit = self.master_initial_credit(dest_idx).await;
+        {
+            let mut requests = self.requests.write().await;
+            requests
+                .register(
+                    key.clone(),
+                    RequestState::new(
+                        RoutingEntry {
+                            source_master_idx: Some(source_idx),
+                            destination_master_idx: dest_idx,
+                        },
+                        Some(source_idx),
+                        None,
+                        true,
+                        initial_credit,
+                    )
+                    .with_cap_urn(frame.cap.clone()),
+                )
+                .map_err(RelaySwitchError::Protocol)?;
+
+            // Track parent→child for cancel cascade
+            if let Some(parent_rid) = frame
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("parent_rid"))
+                .and_then(|v| match v {
+                    ciborium::Value::Bytes(bytes) if bytes.len() == 16 => {
+                        let mut arr = [0u8; 16];
+                        arr.copy_from_slice(bytes);
+                        Some(MessageId::Uuid(arr))
+                    }
+                    ciborium::Value::Integer(i) => {
+                        let n: i128 = (*i).into();
+                        Some(MessageId::Uint(n as u64))
+                    }
+                    _ => None,
+                })
+            {
+                // Find parent's XID from its RID
+                if let Some(parent_xid) = requests.xid_for_rid(&parent_rid) {
+                    let parent_key = (parent_xid, parent_rid);
+                    requests.link_child(&parent_key, key.clone());
+                }
+            }
+        }
+
+        // Forward to destination with XID
+        self.write_initial_request(&key, dest_idx, &mut frame)
+            .await?;
+
+        // Do NOT return to engine (internal routing)
+        Ok(None)
+    }
+
     /// Handle a frame arriving from a master (cartridge → engine direction).
     ///
     /// Returns Some(frame) if the frame should be forwarded to the engine.
@@ -3839,11 +4109,31 @@ impl RelaySwitch {
         source_idx: usize,
         mut frame: Frame,
     ) -> Result<Option<Frame>, RelaySwitchError> {
+        // A frame a cartridge sends for its own peer request that is held
+        // (its argument streams, its grants, its cancel) is the hold's: kept
+        // to be replayed after the REQ, or the request's end.
+        let for_own_request = match frame.frame_type {
+            FrameType::StreamStart
+            | FrameType::Chunk
+            | FrameType::StreamEnd
+            | FrameType::End
+            | FrameType::Err
+            | FrameType::Log
+            | FrameType::Credit => frame.routing_id.is_none(),
+            FrameType::Cancel | FrameType::CloseStream => true,
+            _ => false,
+        };
+        if for_own_request {
+            match self.arrive_for_held_request(source_idx, frame).await? {
+                Ok(()) => return Ok(None),
+                Err(not_held) => frame = not_held,
+            }
+        }
         match frame.frame_type {
             FrameType::Req => {
-                let cap_urn = frame.cap.as_ref().ok_or_else(|| {
-                    RelaySwitchError::Protocol("REQ frame missing cap URN".to_string())
-                })?;
+                if frame.cap.is_none() {
+                    return Err(RelaySwitchError::Protocol("REQ frame missing cap URN".to_string()));
+                }
 
                 // Validate XID-absence and assign XID FIRST, before any
                 // dispatch-failure paths: every frame the switch emits
@@ -3859,98 +4149,9 @@ impl RelaySwitch {
                     ));
                 }
                 let xid = MessageId::Uint(self.xid_counter.fetch_add(1, Ordering::SeqCst) + 1);
-                frame.routing_id = Some(xid.clone());
+                frame.routing_id = Some(xid);
 
-                // Find destination master (no preference for peer requests)
-                let route = self.find_route_for_cap(cap_urn, None).await;
-                if route.is_none() {
-                    // No handler registered for this cap. Rather than returning
-                    // Err(NoHandler) — which the pump logs and discards, leaving
-                    // the caller hanging until the 120s activity timeout — send
-                    // an ERR frame immediately back to the source master so the
-                    // peer call fails fast with a clear error. Stamp the
-                    // synthetic XID assigned above so the receiving cartridge
-                    // host runtime accepts it (path-C invariant).
-                    tracing::warn!(
-                        "[RelaySwitch] NO_HANDLER for peer REQ cap='{}' rid={:?} from_master={} — sending ERR to caller",
-                        cap_urn, frame.id, source_idx
-                    );
-                    // No master serving this cap is a deployment/manifest
-                    // mismatch — Environment (docs/failure-taxonomy.md).
-                    let mut err_frame = Frame::err(
-                        frame.id.clone(),
-                        "NO_HANDLER",
-                        crate::failure::AttributionClass::Environment,
-                        &format!("No handler found for cap: {}", cap_urn),
-                        None,
-                    );
-                    err_frame.routing_id = Some(xid.clone());
-                    let _ = self
-                        .write_to_master_idx_raw(source_idx, &mut err_frame)
-                        .await;
-                    return Ok(None);
-                }
-                let (dest_idx, _registered_cap) = route.unwrap();
-
-                let rid = frame.id.clone();
-                let key = (xid.clone(), rid.clone());
-
-                // Register the peer request and link it under its parent for
-                // the cancel cascade — one table write guard (L7). The ledger
-                // seed is read BEFORE taking the guard (it awaits the master
-                // table's own lock).
-                let initial_credit = self.master_initial_credit(dest_idx).await;
-                {
-                    let mut requests = self.requests.write().await;
-                    requests
-                        .register(
-                            key.clone(),
-                            RequestState::new(
-                                RoutingEntry {
-                                    source_master_idx: Some(source_idx),
-                                    destination_master_idx: dest_idx,
-                                },
-                                Some(source_idx),
-                                None,
-                                true,
-                                initial_credit,
-                            )
-                            .with_cap_urn(frame.cap.clone()),
-                        )
-                        .map_err(RelaySwitchError::Protocol)?;
-
-                    // Track parent→child for cancel cascade
-                    if let Some(parent_rid) = frame
-                        .meta
-                        .as_ref()
-                        .and_then(|m| m.get("parent_rid"))
-                        .and_then(|v| match v {
-                            ciborium::Value::Bytes(bytes) if bytes.len() == 16 => {
-                                let mut arr = [0u8; 16];
-                                arr.copy_from_slice(bytes);
-                                Some(MessageId::Uuid(arr))
-                            }
-                            ciborium::Value::Integer(i) => {
-                                let n: i128 = (*i).into();
-                                Some(MessageId::Uint(n as u64))
-                            }
-                            _ => None,
-                        })
-                    {
-                        // Find parent's XID from its RID
-                        if let Some(parent_xid) = requests.xid_for_rid(&parent_rid) {
-                            let parent_key = (parent_xid, parent_rid);
-                            requests.link_child(&parent_key, key.clone());
-                        }
-                    }
-                }
-
-                // Forward to destination with XID
-                self.write_initial_request(&key, dest_idx, &mut frame)
-                    .await?;
-
-                // Do NOT return to engine (internal routing)
-                Ok(None)
+                self.route_peer_request(source_idx, frame, false).await
             }
 
             FrameType::StreamStart
@@ -4304,6 +4505,18 @@ impl RelaySwitch {
             }
         }
 
+        // The requests it held for its cartridges have nobody left to answer.
+        if let Some(providing) = self.peer_providing.get() {
+            let forgotten = providing
+                .holds
+                .lock()
+                .expect("peer holds mutex poisoned")
+                .forget_source(master_idx);
+            if forgotten > 0 {
+                warn!(master_idx, forgotten, "[RelaySwitch] held peer requests of a dead master dropped");
+            }
+        }
+
         if !was_healthy {
             return Ok(()); // Already handled
         }
@@ -4644,6 +4857,68 @@ impl Drop for RelaySwitch {
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
+
+/// Bring the provider of `cap_urn` for a held request, within `deadline`:
+/// find it, wait for it to be ready, then for a master to serve the cap.
+/// Bringing it goes on past the deadline — only the wait ends.
+async fn bring_provider(
+    provider: Arc<dyn PeerProvider>,
+    switch: std::sync::Weak<RelaySwitch>,
+    cap_urn: &str,
+    deadline: std::time::Duration,
+) -> Settlement {
+    let started = Instant::now();
+    let provision = match tokio::time::timeout(deadline, provider.provision(cap_urn)).await {
+        Err(_) => {
+            return Settlement::Expired(PeerRefusal {
+                code: crate::bifaci::peer_hold::PEER_PROVIDER_TIMEOUT.to_string(),
+                class: crate::failure::AttributionClass::Environment,
+                message: format!(
+                    "no cartridge providing {cap_urn} was found within {} s",
+                    deadline.as_secs()
+                ),
+            })
+        }
+        Ok(Err(refusal)) => return Settlement::Refused(refusal),
+        Ok(Ok(provision)) => provision,
+    };
+    let on_expiry = provision.on_expiry;
+    let ready = tokio::spawn(provision.ready);
+    let remaining = deadline.saturating_sub(started.elapsed());
+    let served = tokio::time::timeout(remaining, async move {
+        match ready.await {
+            Ok(Ok(())) => {}
+            Ok(Err(refusal)) => return Err(refusal),
+            Err(join) => {
+                return Err(PeerRefusal {
+                    code: "PEER_PROVIDER_FAILED".to_string(),
+                    class: crate::failure::AttributionClass::Internal,
+                    message: format!("bringing the provider of {cap_urn} stopped: {join}"),
+                })
+            }
+        }
+        loop {
+            let Some(switch) = switch.upgrade() else {
+                return Err(PeerRefusal {
+                    code: "PEER_PROVIDER_FAILED".to_string(),
+                    class: crate::failure::AttributionClass::Internal,
+                    message: "the relay switch closed while the provider was brought".to_string(),
+                });
+            };
+            if switch.find_route_for_cap(cap_urn, None).await.is_some() {
+                return Ok(());
+            }
+            drop(switch);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    match served {
+        Ok(Ok(())) => Settlement::Provided,
+        Ok(Err(refusal)) => Settlement::Refused(refusal),
+        Err(_) => Settlement::Expired(on_expiry),
+    }
+}
 
 /// Parse capabilities payload from RelayNotify.
 /// RelayNotify contains a JSON object with capability URNs and installed cartridge identities.

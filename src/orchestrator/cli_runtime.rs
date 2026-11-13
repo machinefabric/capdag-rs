@@ -34,12 +34,14 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
+use crate::bifaci::peer_hold::{PeerProvider, PeerProvision, PeerRefusal};
 use crate::bifaci::protocol_trace::ProtocolTraceSink;
 use crate::bifaci::relay_switch::RelaySwitch;
 use crate::cap::registry::FabricRegistry;
 use crate::orchestrator::execute_plan::{EngineRuntime, MapFailurePolicy};
 use crate::orchestrator::executor::{
     discover_bundled_cartridges, segment_activity_timeout, CartridgeManager, ExecutionContext,
+    PeerSource,
 };
 use crate::orchestrator::observe::RunKey;
 use crate::orchestrator::run_flow::{FlowRecorder, FlowScopeGuard, RunFlowRegistry};
@@ -55,13 +57,8 @@ pub const CLI_UNSCOPED_FLOW: &str = "cli";
 /// shared cartridge host is constructed lazily on first segment and torn down when the
 /// runtime is dropped.
 pub struct CliRuntime {
-    cartridge_dir: PathBuf,
-    registry_url: Option<String>,
-    channel: CartridgeChannel,
-    fabric_manifest_version: u32,
-    dev_binaries: Vec<PathBuf>,
-    bundled_cartridges_dir: Option<PathBuf>,
-    fabric_registry: Arc<FabricRegistry>,
+    /// Where its cartridges come from.
+    sources: Arc<CartridgeSources>,
     /// Optional per-segment protocol trace. When set, the shared `run_segment` samples
     /// the switch's L8 snapshot live (250ms) and once at teardown, appending one JSONL
     /// line per sample — the CLI's `--trace` and the scenario harness's
@@ -78,8 +75,10 @@ pub struct CliRuntime {
     parts: crate::orchestrator::cli_writer::PartFiles,
     /// The long-lived in-process cartridge host, built on demand. Behind a mutex for
     /// interior mutability under the `&self` trait hooks; the lock is held only while
-    /// registering newly-needed cartridges, never across segment execution.
-    host: Mutex<CliHost>,
+    /// registering newly-needed cartridges, never across segment execution. Shared
+    /// with the switch's [`CliPeerProvider`], which hosts the cartridges peer calls
+    /// need, by a weak reference: the runtime owns it.
+    host: Arc<Mutex<CliHost>>,
     /// Taps of HOST-opened live feeds, for the stop-input control (15.2 §Runs
     /// Stop). The rids of FEED-BEARING requests (cartridge-side taps) are in
     /// `run_flows`. First Ctrl-C in `capdag run` closes both and the machine
@@ -97,6 +96,33 @@ pub struct CliRuntime {
     /// ([`CliRuntime::with_transient_root`]).
     transient_root: Option<PathBuf>,
 }
+
+/// Where a [`CliRuntime`]'s cartridges come from: dev binaries, its registry
+/// (installed, or installed when a run needs them), and the bundle beside the
+/// binary.
+struct CartridgeSources {
+    cartridge_dir: PathBuf,
+    registry_url: Option<String>,
+    channel: CartridgeChannel,
+    fabric_manifest_version: u32,
+    dev_binaries: Vec<PathBuf>,
+    bundled_cartridges_dir: Option<PathBuf>,
+    fabric_registry: Arc<FabricRegistry>,
+}
+
+/// How long and how much a peer request is held while the cartridge serving its
+/// cap is installed and hosted (14.2 §Peer requests no master serves). The
+/// deadline is under the 120 s a step may go without a word
+/// (`DEFAULT_ACTIVITY_TIMEOUT_SECS`): the calling cartridge says nothing while its
+/// peer call is held, and a hold that outlived its step would end as that step's
+/// inactivity rather than as what it is. A held call keeps what its caller can
+/// send before the first credit grant — at the default limits, 32 chunks of
+/// 256 KiB per argument stream — with room to spare.
+pub const CLI_PEER_HOLD: crate::bifaci::peer_hold::PeerHoldBound = crate::bifaci::peer_hold::PeerHoldBound {
+    frames: 4096,
+    bytes: 64 * 1024 * 1024,
+    deadline: std::time::Duration::from_secs(100),
+};
 
 /// Lazily-initialised shared host state. `ctx` owns the switch, the host tasks, and
 /// their cleanup handles for the runtime's whole lifetime; per-segment execution builds
@@ -133,25 +159,27 @@ impl CliRuntime {
         let unscoped_flow = FlowScopeGuard::new(CLI_UNSCOPED_FLOW.to_string(), run_flows.clone());
         let unscoped_recorder = unscoped_flow.recorder();
         Self {
-            cartridge_dir,
-            registry_url,
-            channel,
-            fabric_manifest_version,
-            dev_binaries,
-            bundled_cartridges_dir,
-            fabric_registry,
+            sources: Arc::new(CartridgeSources {
+                cartridge_dir,
+                registry_url,
+                channel,
+                fabric_manifest_version,
+                dev_binaries,
+                bundled_cartridges_dir,
+                fabric_registry,
+            }),
             trace_sink,
             persist_dir,
             writer_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             parts: Default::default(),
-            host: Mutex::new(CliHost {
+            host: Arc::new(Mutex::new(CliHost {
                 ctx: None,
                 manager: None,
                 registered_caps: HashSet::new(),
                 registered_paths: HashSet::new(),
                 bundled_registered: false,
                 bundled_caps: Vec::new(),
-            }),
+            })),
             host_taps: std::sync::Mutex::new(Vec::new()),
             run_flows,
             _unscoped_flow: unscoped_flow,
@@ -355,6 +383,65 @@ impl EngineRuntime for CliRunScope {
 }
 
 impl CliHost {
+    /// The cartridge manager, made — and its registry synced and verified — the
+    /// first time a cap is not the bundle's. A run of bundled caps asks no
+    /// registry anything, so it runs where none can be reached.
+    async fn manager(&mut self, sources: &CartridgeSources) -> Result<&CartridgeManager, ExecutionError> {
+        if self.manager.is_none() {
+            let mut manager = CartridgeManager::new(
+                sources.cartridge_dir.clone(),
+                sources.registry_url.clone(),
+                sources.channel,
+                sources.fabric_manifest_version,
+                sources.dev_binaries.clone(),
+                crate::bifaci::trust::content_trust(),
+                sources.fabric_registry.config().anchor.clone(),
+                crate::bifaci::trust::charter_trust(),
+            );
+            manager.init().await?;
+            self.manager = Some(manager);
+        }
+        Ok(self.manager.as_ref().expect("made immediately above"))
+    }
+
+    /// Host the cartridge that provides a peer call's cap: install it first
+    /// when it comes from the registry and is not installed, as a run installs
+    /// its own cap's cartridge. A cartridge already hosted is not hosted again.
+    async fn host_peer_provider(
+        &mut self,
+        sources: &CartridgeSources,
+        source: &PeerSource,
+        cap_urn: &str,
+    ) -> Result<(), PeerRefusal> {
+        let path = match source {
+            PeerSource::Dev(path) => path.clone(),
+            PeerSource::Registry(id) => {
+                let manager = self.manager(sources).await.map_err(|e| registry_unreadable(cap_urn, &e))?;
+                manager
+                    .get_cartridge_path(id)
+                    .await
+                    .map_err(|e| install_failed(id, cap_urn, &e))?
+            }
+        };
+        if self.registered_paths.contains(&path) {
+            return Ok(());
+        }
+        let manager = self.manager(sources).await.map_err(|e| registry_unreadable(cap_urn, &e))?;
+        let cartridge = manager
+            .hostable(path.clone())
+            .await
+            .map_err(|e| start_failed(source, cap_urn, &e))?;
+        let ctx = self
+            .ctx
+            .as_mut()
+            .expect("a peer call reaches the provider only through this host's switch");
+        ctx.add_cartridge_host(vec![cartridge])
+            .await
+            .map_err(|e| start_failed(source, cap_urn, &e))?;
+        self.registered_paths.insert(path);
+        Ok(())
+    }
+
     /// Whether a bundled cartridge declares `cap_urn` itself. A cap URN that does
     /// not parse is not the bundle's; the registry resolution names it.
     fn bundle_provides(&self, cap_urn: &str) -> bool {
@@ -373,6 +460,7 @@ impl CliHost {
         graph: &ResolvedGraph,
         rt: &CliRuntime,
     ) -> Result<(), ExecutionError> {
+        let sources = &rt.sources;
         let cap_urns: Vec<&str> = graph.steps.iter().map(|step| step.cap_urn.as_str()).collect();
 
         // Fast path: every cap this segment needs is already hosted. This is the hot
@@ -386,12 +474,12 @@ impl CliHost {
         // beside the dev/registry cartridges this segment resolves.
         let mut resolved = Vec::new();
         if !self.bundled_registered {
-            if let Some(dir) = &rt.bundled_cartridges_dir {
+            if let Some(dir) = &sources.bundled_cartridges_dir {
                 let bundled = discover_bundled_cartridges(
                     dir,
-                    rt.channel,
-                    rt.registry_url.as_deref(),
-                    rt.fabric_manifest_version,
+                    sources.channel,
+                    sources.registry_url.as_deref(),
+                    sources.fabric_manifest_version,
                 )
                 .await?;
                 for cartridge in &bundled {
@@ -419,21 +507,7 @@ impl CliHost {
         // made only when a cap is not the bundle's. A segment of bundled caps
         // asks no registry anything, so it runs where none can be reached.
         if !unbundled.is_empty() {
-            if self.manager.is_none() {
-                let mut manager = CartridgeManager::new(
-                    rt.cartridge_dir.clone(),
-                    rt.registry_url.clone(),
-                    rt.channel,
-                    rt.fabric_manifest_version,
-                    rt.dev_binaries.clone(),
-                    crate::bifaci::trust::content_trust(),
-                    rt.fabric_registry.config().anchor.clone(),
-                    crate::bifaci::trust::charter_trust(),
-                );
-                manager.init().await?;
-                self.manager = Some(manager);
-            }
-            let manager = self.manager.as_ref().expect("made immediately above");
+            let manager = self.manager(sources).await?;
             resolved.extend(manager.resolve_cartridges(&unbundled).await?);
         }
 
@@ -447,7 +521,7 @@ impl CliHost {
             // The command line is the operator's own tool: the person running it
             // decides for themselves, so its cartridges are under `full`.
             let ctx = ExecutionContext::new(
-                rt.fabric_registry.clone(),
+                sources.fabric_registry.clone(),
                 crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full),
             )
             .await?;
@@ -461,6 +535,17 @@ impl CliHost {
                     flows.accumulate_termination(summary)
                 }))
                 .await;
+            // A cartridge's peer call to a cap no hosted cartridge serves brings
+            // the cartridge that does, by the rule this run follows for its own.
+            ctx.switch()
+                .set_peer_provider(
+                    Arc::new(CliPeerProvider {
+                        host: Arc::downgrade(&rt.host),
+                        sources: rt.sources.clone(),
+                    }),
+                    CLI_PEER_HOLD,
+                )
+                .map_err(|e| ExecutionError::HostError(format!("the run's switch: {e}")))?;
             self.ctx = Some(ctx);
         }
 
@@ -553,7 +638,7 @@ impl EngineRuntime for CliRuntime {
     }
 
     fn fabric_registry(&self) -> Arc<FabricRegistry> {
-        self.fabric_registry.clone()
+        self.sources.fabric_registry.clone()
     }
 
     async fn map_failure_policy(&self) -> Result<MapFailurePolicy, ExecutionError> {
@@ -563,15 +648,154 @@ impl EngineRuntime for CliRuntime {
     }
 }
 
-impl Drop for CliRuntime {
+/// What brings the cartridge a peer call needs, for the run's switch: the rule
+/// a run follows for its own cap's cartridge — a dev cartridge it was given,
+/// else the registry's, installed when it is not installed — applied to the
+/// cap the peer call named.
+struct CliPeerProvider {
+    host: std::sync::Weak<Mutex<CliHost>>,
+    sources: Arc<CartridgeSources>,
+}
+
+#[async_trait]
+impl PeerProvider for CliPeerProvider {
+    async fn provision(&self, cap_urn: &str) -> Result<PeerProvision, PeerRefusal> {
+        let host = self.host.upgrade().ok_or_else(|| run_over(cap_urn))?;
+        let source = {
+            let mut host = host.lock().await;
+            let manager = host
+                .manager(&self.sources)
+                .await
+                .map_err(|e| registry_unreadable(cap_urn, &e))?;
+            manager
+                .peer_provider_of(cap_urn)
+                .await
+                .map_err(|e| not_provided(cap_urn, &e))?
+        };
+        let on_expiry = not_ready_in_time(&source, cap_urn, CLI_PEER_HOLD.deadline);
+        let weak = self.host.clone();
+        let sources = self.sources.clone();
+        let cap_urn = cap_urn.to_string();
+        Ok(PeerProvision {
+            ready: Box::pin(async move {
+                let host = weak.upgrade().ok_or_else(|| run_over(&cap_urn))?;
+                let mut host = host.lock().await;
+                host.host_peer_provider(&sources, &source, &cap_urn).await
+            }),
+            on_expiry,
+        })
+    }
+}
+
+/// The refusals a held peer call ends with. Each names what is missing and the
+/// command that brings it outside a run: the calling cartridge's failure shows
+/// it as the reason its step failed.
+fn refusal(code: &str, class: crate::failure::AttributionClass, message: String) -> PeerRefusal {
+    PeerRefusal { code: code.to_string(), class, message }
+}
+
+fn run_over(cap_urn: &str) -> PeerRefusal {
+    refusal(
+        "PEER_PROVIDER_FAILED",
+        crate::failure::AttributionClass::Internal,
+        format!("the run ended before a cartridge providing {cap_urn} was started"),
+    )
+}
+
+fn registry_unreadable(cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
+    refusal(
+        "CARTRIDGE_REGISTRY_UNAVAILABLE",
+        crate::failure::AttributionClass::Environment,
+        format!(
+            "no cartridge this run hosts provides {cap_urn}, and the cartridge registry \
+             could not be read to find one: {error}"
+        ),
+    )
+}
+
+fn not_provided(cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
+    match error {
+        ExecutionError::CartridgeNotFound { .. } => refusal(
+            "NO_HANDLER",
+            crate::failure::AttributionClass::Environment,
+            format!("no cartridge — bundled, installed or in the registry — provides {cap_urn}"),
+        ),
+        other => refusal(
+            "PEER_PROVIDER_FAILED",
+            crate::failure::AttributionClass::Internal,
+            format!("finding the cartridge that provides {cap_urn} failed: {other}"),
+        ),
+    }
+}
+
+fn install_failed(id: &str, cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
+    if let Some((refused, dir)) = error.refused_cartridge() {
+        return refusal(
+            "CARTRIDGE_REFUSED",
+            crate::failure::AttributionClass::Environment,
+            format!(
+                "the installed {refused} in {}, which provides {cap_urn}, cannot be used: {}; \
+                 replace it with: capdag cartridge remove {refused} && capdag cartridge install {refused}",
+                dir.display(),
+                error.failure_reason()
+            ),
+        );
+    }
+    refusal(
+        "CARTRIDGE_INSTALL_FAILED",
+        crate::failure::AttributionClass::Environment,
+        format!(
+            "{id} provides {cap_urn} and is not installed, and installing it failed: {error}; \
+             install it with: capdag cartridge install {id}"
+        ),
+    )
+}
+
+fn start_failed(source: &PeerSource, cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
+    refusal(
+        "CARTRIDGE_UNAVAILABLE",
+        error.attribution_class(),
+        format!("{}, which provides {cap_urn}, could not be started: {error}", provider_name(source)),
+    )
+}
+
+fn not_ready_in_time(source: &PeerSource, cap_urn: &str, deadline: std::time::Duration) -> PeerRefusal {
+    let message = match source {
+        PeerSource::Registry(id) => format!(
+            "{id}, which provides {cap_urn}, was not installed and started within {} s; \
+             install it with: capdag cartridge install {id}, then run this again",
+            deadline.as_secs()
+        ),
+        PeerSource::Dev(path) => format!(
+            "the dev cartridge {}, which provides {cap_urn}, was not started within {} s",
+            path.display(),
+            deadline.as_secs()
+        ),
+    };
+    refusal(
+        crate::bifaci::peer_hold::PEER_PROVIDER_TIMEOUT,
+        crate::failure::AttributionClass::Environment,
+        message,
+    )
+}
+
+fn provider_name(source: &PeerSource) -> String {
+    match source {
+        PeerSource::Registry(id) => id.clone(),
+        PeerSource::Dev(path) => format!("the dev cartridge {}", path.display()),
+    }
+}
+
+impl Drop for CliHost {
     /// Tear down the long-lived in-process cartridge host. `ExecutionContext` has no
     /// `Drop`, so aborting its host tasks — which kills the cartridge child processes —
     /// must be explicit here, or every `CliRuntime` (one per CLI run / per scenario
-    /// test) would leak its cartridge processes. `get_mut` needs no lock (we hold
-    /// `&mut self`), and `shutdown()` is synchronous (it only aborts task handles), so
-    /// it is safe to call from `drop`.
+    /// test) would leak its cartridge processes. It runs when the last holder lets
+    /// go: the runtime, or a peer provider still hosting a cartridge when the
+    /// runtime went. `shutdown()` is synchronous (it only aborts task handles), so it
+    /// is safe to call from `drop`.
     fn drop(&mut self) {
-        if let Some(ctx) = self.host.get_mut().ctx.take() {
+        if let Some(ctx) = self.ctx.take() {
             let _ = ctx.shutdown();
         }
     }

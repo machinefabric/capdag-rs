@@ -48,6 +48,42 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Arrival",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bound",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Bound",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Bringing",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Fate",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Held",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted",
+    "kind": "type",
+    "rust_path": "bifaci::hold::Unrouted",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Pools.Arrival",
     "kind": "type",
     "rust_path": "bifaci::pools::Arrival",
@@ -292,6 +328,30 @@
     "kind": "function",
     "rust_path": "bifaci::flow::reorder::start",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.initial",
+    "kind": "function",
+    "rust_path": "bifaci::hold::held::initial",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.arrive",
+    "kind": "function",
+    "rust_path": "bifaci::hold::arrive",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.fateOf",
+    "kind": "function",
+    "rust_path": "bifaci::hold::fate_of",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.whenUnrouted",
+    "kind": "function",
+    "rust_path": "bifaci::hold::when_unrouted",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Bifaci.Pools.State.admit",
@@ -844,6 +904,108 @@
     "kind": "field",
     "rust_path": "bifaci::flow::Reorder.held",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.keep",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Arrival::Keep",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.keep.held",
+    "kind": "field",
+    "rust_path": "bifaci::hold::Arrival::Keep.held",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.overflow",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Arrival::Overflow",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.cancel",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Arrival::Cancel",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bound.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Bound",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bound.frames",
+    "kind": "field",
+    "rust_path": "bifaci::hold::Bound.frames",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bound.bytes",
+    "kind": "field",
+    "rust_path": "bifaci::hold::Bound.bytes",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.provided",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Bringing::Provided",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.refused",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Bringing::Refused",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.expired",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Bringing::Expired",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.replay",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Fate::Replay",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.fail",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Fate::Fail",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Held",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.frames",
+    "kind": "field",
+    "rust_path": "bifaci::hold::Held.frames",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.bytes",
+    "kind": "field",
+    "rust_path": "bifaci::hold::Held.bytes",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.hold",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Unrouted::Hold",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.refuse",
+    "kind": "constructor",
+    "rust_path": "bifaci::hold::Unrouted::Refuse",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Bifaci.Pools.Arrival.admitted",
