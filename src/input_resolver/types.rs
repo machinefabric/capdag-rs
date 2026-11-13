@@ -210,6 +210,15 @@ pub enum InputResolverError {
 
     /// Symlink cycle detected
     SymlinkCycle { path: PathBuf },
+
+    /// The file has no extension to tell its type from
+    NoExtension(PathBuf),
+
+    /// The fabric declares no file media type for the file's extension
+    UnknownExtension { path: PathBuf, extension: String },
+
+    /// The fabric's file media types could not be loaded
+    FabricUnavailable { path: PathBuf, reason: String },
 }
 
 impl fmt::Display for InputResolverError {
@@ -244,6 +253,21 @@ impl fmt::Display for InputResolverError {
             InputResolverError::SymlinkCycle { path } => {
                 write!(f, "Symlink cycle detected at: {}", path.display())
             }
+            InputResolverError::NoExtension(path) => {
+                write!(f, "{} has no extension to tell its type from", path.display())
+            }
+            InputResolverError::UnknownExtension { path, extension } => write!(
+                f,
+                "the fabric declares no file type for the extension .{} of {}",
+                extension,
+                path.display()
+            ),
+            InputResolverError::FabricUnavailable { path, reason } => write!(
+                f,
+                "the type of {} cannot be told: {}",
+                path.display(),
+                reason
+            ),
         }
     }
 }
