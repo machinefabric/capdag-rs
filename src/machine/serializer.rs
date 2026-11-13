@@ -655,8 +655,12 @@ fn emit_strand_json(
         let title = fabric_registry
             .get_cached_media_def(&urn_str)
             .map(|spec| spec.title)
-            .ok_or_else(|| MachineAbstractionError::UncachedMediaDef {
-                media_urn: urn_str.clone(),
+            .map_err(|e| {
+                MachineAbstractionError::from_lookup(&urn_str, e, || {
+                    MachineAbstractionError::UncachedMediaDef {
+                        media_urn: urn_str.clone(),
+                    }
+                })
             })?;
         write!(
             json,
@@ -681,10 +685,10 @@ fn emit_strand_json(
             json.push(',');
         }
         let cap_urn_str = edge.cap_urn.to_string();
-        let definition = fabric_registry.get_cached_cap(&cap_urn_str).ok_or_else(|| {
-            MachineAbstractionError::UncachedCap {
+        let definition = fabric_registry.get_cached_cap(&cap_urn_str).map_err(|e| {
+            MachineAbstractionError::from_lookup(&cap_urn_str, e, || MachineAbstractionError::UncachedCap {
                 cap_urn: cap_urn_str.clone(),
-            }
+            })
         })?;
         let cap_title = definition.title.clone();
         // Which binding feeds the cap's main input and which output is its

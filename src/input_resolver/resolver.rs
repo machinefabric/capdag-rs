@@ -53,9 +53,12 @@ pub fn discriminate_candidates_by_validation(
     candidate_urns
         .iter()
         .filter(|urn| {
+            // A candidate is eliminated only by the rules its spec states;
+            // with no spec at hand (absent, refused or not fetched yet) there
+            // is nothing to eliminate it by, so it stays a candidate.
             let spec = match fabric_registry.get_cached_media_def(urn) {
-                Some(spec) => spec,
-                None => return true, // No spec in cache → cannot eliminate
+                Ok(spec) => spec,
+                Err(_) => return true,
             };
 
             let validation = match &spec.validation {

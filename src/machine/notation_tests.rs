@@ -151,7 +151,12 @@ fn media_def(urn: &str, validation: Option<MediaValidation>, schema: Option<serd
 /// allowed words, tags that are strings, and references of at most twelve
 /// bytes.
 pub(super) fn registry() -> FabricRegistry {
-    let registry = FabricRegistry::new_for_test();
+    registry_configured(crate::fabric::registry::RegistryConfig::default())
+}
+
+/// `registry()`, reading the fabric `config` names.
+fn registry_configured(config: crate::fabric::registry::RegistryConfig) -> FabricRegistry {
+    let registry = FabricRegistry::new_for_test_with_config(config);
     registry.add_caps_to_cache(vec![compare_cap(), fetch_cap(), publish_cap(), mean_cap(), score_cap()]);
     registry.insert_cached_media_def_for_test(media_def(
         WINDOW,
@@ -464,6 +469,39 @@ fn test12738_a_constant_is_bound_and_validated() {
     assert!(!equivalent("[(path, window=20) -> compare -> r]", "[path -> compare -> r]"));
 }
 
+// TEST7176: a constant whose arg's media definition is in the registry, and
+// whose fetch the registry refused, is reported as the refusal — the URL, the
+// status and the manifest version — not as a definition that is not
+// available.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test7176_a_constant_whose_definition_was_refused_reports_the_refusal() {
+    use crate::fabric::registry::{FabricRegistryError, FetchCause, RegistryConfig};
+    use crate::fabric::stub_registry::{Answer, StubRegistry};
+
+    let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+    let registry = registry_configured(RegistryConfig::new().with_anchor(stub.anchor.clone()));
+    registry.pin_media_def_for_test(BENCHMARK, 1);
+    let error = parse_machine(&format!("{HEADERS}[(path, benchmark=[1, 2]) -> compare -> result]"), &registry)
+        .unwrap_err();
+    let text = error.to_string();
+    match error {
+        MachineParseError::Resolution(MachineAbstractionError::DefinitionUnavailable { urn, error }) => {
+            assert_eq!(urn, BENCHMARK);
+            match error {
+                FabricRegistryError::FetchFailed(refusal) => {
+                    assert_eq!(refusal.cause, FetchCause::Status(403));
+                    assert_eq!(refusal.manifest_version, 1);
+                    assert_eq!(stub.requests_for(stub.path_of(&refusal.url)), 1);
+                }
+                other => panic!("expected the refused fetch, got {other:?}"),
+            }
+        }
+        other => panic!("expected the definition to be unavailable, got {other}"),
+    }
+    assert!(!text.contains("not available"), "{text}");
+    assert!(text.contains("refused") && text.contains("403"), "{text}");
+}
+
 // TEST12739: the outputs a wiring takes. An unnamed target takes the step's
 // main output, a named one the output of that name; one that is not taken is
 // discarded; a sink takes none and a source is given nothing.
@@ -719,7 +757,7 @@ fn test12742_a_machine_reference_needs_a_source() {
 fn test12743_render_payload_carries_names_constants_and_outputs() {
     let registry = registry();
     for urn in [SERIES, COMPARISON, RESIDUALS] {
-        if registry.get_cached_media_def(urn).is_none() {
+        if registry.get_cached_media_def(urn).is_err() {
             registry.insert_cached_media_def_for_test(media_def(urn, None, None));
         }
     }

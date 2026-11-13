@@ -38,7 +38,9 @@ pub fn media(registry: &FabricRegistry, media: &MediaUrn) -> String {
     let urn = media.to_string();
     registry
         .display_alias_for_urn(&urn)
-        .or_else(|| registry.get_cached_media_def(&urn).map(|def| def.title))
+        // A name is a label: with no title at hand, for whatever reason, the
+        // URN itself names the type.
+        .or_else(|| registry.get_cached_media_def(&urn).ok().map(|def| def.title))
         .unwrap_or(urn)
 }
 

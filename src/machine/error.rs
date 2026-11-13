@@ -49,6 +49,17 @@ pub enum MachineAbstractionError {
     #[error("cap URN '{cap_urn}' is not in the cap registry cache")]
     UnknownCap { cap_urn: String },
 
+    /// A definition the machine needs — a cap, a media def, a cap alias — is
+    /// in the registry and could not be had from it: its fetch was refused
+    /// or got no answer, or it is not fetched yet. `error` says which, with
+    /// the URL, the status and the fabric manifest version where a fetch
+    /// failed. Never raised for a definition the registry does not hold.
+    #[error("the definition of '{urn}' could not be had from the registry: {error}")]
+    DefinitionUnavailable {
+        urn: String,
+        error: crate::fabric::registry::FabricRegistryError,
+    },
+
     /// A source URN does not conform to any of the cap's input
     /// argument media URNs. The source has no valid slot to be
     /// assigned to.
@@ -528,6 +539,26 @@ pub enum MachineParseError {
 
     #[error(transparent)]
     Resolution(#[from] MachineAbstractionError),
+}
+
+impl MachineAbstractionError {
+    /// What a registry lookup of the definition of `urn` that came back
+    /// empty-handed means for a machine: `absent` when the registry's answer
+    /// is that it holds no such definition, else `DefinitionUnavailable`
+    /// carrying what kept it.
+    pub(crate) fn from_lookup(
+        urn: &str,
+        error: crate::fabric::registry::FabricRegistryError,
+        absent: impl FnOnce() -> Self,
+    ) -> Self {
+        match error {
+            crate::fabric::registry::FabricRegistryError::NotFound(_) => absent(),
+            error => Self::DefinitionUnavailable {
+                urn: urn.to_string(),
+                error,
+            },
+        }
+    }
 }
 
 #[cfg(test)]

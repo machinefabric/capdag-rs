@@ -29,7 +29,7 @@ fn registry() -> Arc<capdag::FabricRegistry> {
     let registry = testcartridge_registry(TAG, Vec::new());
     for cap in testcartridge_caps(TAG) {
         for urn in [cap.urn.in_spec().to_string(), cap.urn.out_spec().to_string()] {
-            if registry.get_cached_media_def(&urn).is_some() {
+            if registry.get_cached_media_def(&urn).is_ok() {
                 continue;
             }
             registry.insert_cached_media_def_for_test(capdag::StoredMediaDef {

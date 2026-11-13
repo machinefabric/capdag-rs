@@ -77,9 +77,7 @@ pub fn steps_to_resolved_graph(
         };
         let cap = registry
             .get_cached_cap(cap_urn)
-            .ok_or_else(|| ParseOrchestrationError::CapNotFound {
-                cap_urn: cap_urn.clone(),
-            })?;
+            .map_err(|e| ParseOrchestrationError::from_cap_lookup(cap_urn, e))?;
 
         // The streams the step is sent, in the order the plan wires them.
         let mut inputs: Vec<StepInput> = Vec::new();
@@ -166,9 +164,7 @@ pub fn steps_to_resolved_graph(
                 }) => output_media_urn.clone(),
                 Some(ExecutionNodeType::Cap { cap_urn, .. }) => registry
                     .get_cached_cap(cap_urn)
-                    .ok_or_else(|| ParseOrchestrationError::CapNotFound {
-                        cap_urn: cap_urn.clone(),
-                    })?
+                    .map_err(|e| ParseOrchestrationError::from_cap_lookup(cap_urn, e))?
                     .urn
                     .out_spec()
                     .to_string(),

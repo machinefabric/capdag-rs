@@ -86,6 +86,14 @@ pub enum ValidationError {
         media_urn: String,
         location: String,
     },
+    /// A referenced media URN is in the registry and its definition could
+    /// not be had from it: the fetch was refused or got no answer.
+    MediaUrnUnavailable {
+        cap_urn: String,
+        media_urn: String,
+        location: String,
+        error: String,
+    },
 }
 
 impl fmt::Display for ValidationError {
@@ -211,6 +219,16 @@ impl fmt::Display for ValidationError {
                     cap_urn, media_urn, location
                 )
             }
+            ValidationError::MediaUrnUnavailable {
+                cap_urn,
+                media_urn,
+                location,
+                error,
+            } => write!(
+                f,
+                "Cap '{}' references media URN '{}' in {}, whose definition could not be had from the registry: {}",
+                cap_urn, media_urn, location, error
+            ),
         }
     }
 }
@@ -2071,12 +2089,23 @@ pub async fn validate_media_urn_references(
 
     // Validate each media URN using the single resolution path
     for (location, media_urn) in urns_to_check {
-        if let Err(_) = crate::media::spec::resolve_media_urn(&media_urn, registry).await {
-            return Err(ValidationError::UnresolvableMediaUrn {
-                cap_urn: cap_urn.clone(),
-                media_urn,
-                location: location.to_string(),
-            });
+        match crate::media::spec::resolve_media_urn(&media_urn, registry).await {
+            Ok(_) => {}
+            Err(crate::media::spec::MediaDefError::Unavailable { error, .. }) => {
+                return Err(ValidationError::MediaUrnUnavailable {
+                    cap_urn: cap_urn.clone(),
+                    media_urn,
+                    location: location.to_string(),
+                    error,
+                });
+            }
+            Err(_) => {
+                return Err(ValidationError::UnresolvableMediaUrn {
+                    cap_urn: cap_urn.clone(),
+                    media_urn,
+                    location: location.to_string(),
+                });
+            }
         }
     }
 

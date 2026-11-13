@@ -15,3 +15,5 @@
 pub mod alias;
 pub mod dim;
 pub mod registry;
+#[cfg(test)]
+pub(crate) mod stub_registry;

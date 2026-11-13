@@ -277,11 +277,7 @@ fn strand_output_name(
     let Some(output_urn) = output_urn else {
         return Ok(None);
     };
-    let cap = registry
-        .get_cached_cap(&cap_urn.to_string())
-        .ok_or_else(|| MachineAbstractionError::UnknownCap {
-            cap_urn: cap_urn.to_string(),
-        })?;
+    let cap = cap_definition(registry, &cap_urn)?;
     let main = cap.main_output().map(|main| main.media_urn.clone());
     match cap.output_by_urn(&output_urn.to_string()) {
         Some(output) if Some(&output.media_urn) != main.as_ref() => Ok(Some(output.name.clone())),
@@ -373,11 +369,7 @@ fn resolve_wirings(
     let mut node_is_sequence = vec![false; nodes.len()];
     let mut wiring_outputs: Vec<Vec<EdgeOutput>> = Vec::with_capacity(wirings.len());
     for wiring in wirings {
-        let cap = registry
-            .get_cached_cap(&wiring.cap_urn.to_string())
-            .ok_or_else(|| MachineAbstractionError::UnknownCap {
-                cap_urn: wiring.cap_urn.to_string(),
-            })?;
+        let cap = cap_definition(registry, &wiring.cap_urn)?;
         let mut outputs: Vec<EdgeOutput> = Vec::with_capacity(wiring.targets.len());
         for (name, node) in &wiring.targets {
             let output = match name {
@@ -430,11 +422,7 @@ fn resolve_wirings(
     let mut bound: Vec<(&PreInternedWiring, Vec<EdgeAssignmentBinding>, Vec<EdgeOutput>, bool)> =
         Vec::with_capacity(wirings.len());
     for (wiring, outputs) in wirings.iter().zip(wiring_outputs) {
-        let cap = registry
-            .get_cached_cap(&wiring.cap_urn.to_string())
-            .ok_or_else(|| MachineAbstractionError::UnknownCap {
-                cap_urn: wiring.cap_urn.to_string(),
-            })?;
+        let cap = cap_definition(registry, &wiring.cap_urn)?;
         let cap_in_spec = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
             MachineAbstractionError::RuntimeMediaInference {
                 strand_index,
@@ -807,6 +795,18 @@ fn resolve_wirings(
     ))
 }
 
+/// The definition of `cap_urn`: `UnknownCap` when the registry holds no such
+/// cap, and what kept it when it could not be had.
+fn cap_definition(
+    registry: &FabricRegistry,
+    cap_urn: &CapUrn,
+) -> Result<crate::Cap, MachineAbstractionError> {
+    let urn = cap_urn.to_string();
+    registry.get_cached_cap(&urn).map_err(|e| {
+        MachineAbstractionError::from_lookup(&urn, e, || MachineAbstractionError::UnknownCap { cap_urn: urn.clone() })
+    })
+}
+
 /// Hold a constant to the validation of the arg it is bound to: the rules and
 /// the schema the arg's media definition declares. A constant is a value like
 /// any other the arg is given; it is known when the machine is resolved, so
@@ -826,12 +826,16 @@ fn check_constant(
         reason,
     };
     // Without the definition there is nothing to hold the constant to, and a
-    // constant nobody checked is not bound.
-    let definition = registry.get_cached_media_def(&arg.media_urn).ok_or_else(|| {
-        refused(format!(
-            "the media definition of '{}' is not available, so the constant cannot be validated",
-            arg.media_urn
-        ))
+    // constant nobody checked is not bound. The constant is refused only when
+    // the registry holds no such definition; one that could not be fetched is
+    // reported as what kept it.
+    let definition = registry.get_cached_media_def(&arg.media_urn).map_err(|e| {
+        MachineAbstractionError::from_lookup(&arg.media_urn, e, || {
+            refused(format!(
+                "the media definition of '{}' is not available, so the constant cannot be validated",
+                arg.media_urn
+            ))
+        })
     })?;
     if let Some(validation) = &definition.validation {
         match validation.violation(value) {

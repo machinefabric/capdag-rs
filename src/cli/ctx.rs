@@ -9,7 +9,7 @@ use tokio::sync::OnceCell;
 use super::error::{CliError, CliResult};
 use super::term::Term;
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig};
+use crate::fabric::registry::{FabricRegistry, FabricRegistryError, FetchCause, RegistryConfig};
 
 /// Distribution channel of this build. `MFR_CARTRIDGE_CHANNEL` is set by the
 /// workspace build for every cargo invocation: a release build orchestrates
@@ -87,6 +87,38 @@ impl Ctx {
     }
 }
 
+/// A registry lookup, by a name the user gave, that did not give its
+/// definition: `Ok` when the registry has nothing of that name and kind (it
+/// does not hold it, or the name is not one such a definition can have) — the
+/// caller says what that means where it asked — and the registry's own
+/// failure, as itself, when it could not be asked: a refused fetch, one that
+/// got no answer, a lookup made offline.
+pub fn nothing_by_that_name(error: FabricRegistryError) -> CliResult<()> {
+    match error {
+        FabricRegistryError::NotFound(_)
+        | FabricRegistryError::ValidationError(_)
+        | FabricRegistryError::ParseError(_) => Ok(()),
+        error => Err(registry_failure(error)),
+    }
+}
+
+/// The registry could not give a definition: said as itself — for a failed
+/// fetch, what was fetched, the URL, the status or what happened, and the
+/// fabric manifest version.
+pub fn registry_failure(error: FabricRegistryError) -> CliError {
+    let hint = match &error {
+        FabricRegistryError::FetchFailed(failure) => match failure.cause {
+            FetchCause::Status(_) => "the registry refused the request: run the command again; if it keeps refusing, report it",
+            FetchCause::TimedOut | FetchCause::DeadlineElapsed(_) | FetchCause::Transport(_) => {
+                "check the connection, then run the command again"
+            }
+        },
+        FabricRegistryError::NetworkBlocked(_) => "it is not cached: run the command without --offline once",
+        _ => "run the command again; if it keeps failing, report it",
+    };
+    CliError::failed(error.to_string()).hint(hint)
+}
+
 /// The fabric's host, for saying where it is.
 fn host_of(anchor: &str) -> &str {
     anchor
@@ -99,7 +131,25 @@ fn host_of(anchor: &str) -> &str {
 fn fabric_unreachable(anchor: &str, error: &FabricRegistryError, offline: bool) -> CliError {
     let host = host_of(anchor);
     match error {
-        FabricRegistryError::Charter(detail) | FabricRegistryError::HttpError(detail)
+        // The registry refused the manifest, or did not answer: say so as it
+        // is, with the URL, the status and the manifest version.
+        FabricRegistryError::FetchFailed(failure) => match &failure.cause {
+            FetchCause::Status(_) => CliError::failed(failure.to_string())
+                .context(format!("capdag reads its capabilities from {anchor}"))
+                .hint("the registry refused the request: run the command again; if it keeps refusing, report it"),
+            FetchCause::TimedOut | FetchCause::DeadlineElapsed(_) | FetchCause::Transport(_) => {
+                CliError::failed(failure.to_string())
+                    .context(format!("cannot reach {host}, and the fabric is not cached yet"))
+                    .hint(if offline {
+                        "connect once so capdag can cache the fabric; after that, --offline runs what is cached and bundled"
+                            .to_string()
+                    } else {
+                        "check the connection; once the fabric is cached, `capdag --offline` works without one"
+                            .to_string()
+                    })
+            }
+        },
+        FabricRegistryError::Charter(detail)
             if detail.contains("cannot reach") || detail.contains("error sending request") =>
         {
             CliError::failed(format!("cannot reach {host}, and the fabric is not cached yet"))

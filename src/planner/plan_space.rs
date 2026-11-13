@@ -485,6 +485,11 @@ pub enum PlanError {
     },
     /// No plan connects the sources to the target(s) under the policy.
     NoPlan { detail: String },
+    /// The definition of a cap in the graph is in the registry and could not
+    /// be had from it: its fetch was refused or got no answer, or it is not
+    /// fetched yet. `error` is the registry's account of it — the URL, the
+    /// status and the fabric manifest version where a fetch failed.
+    DefinitionUnavailable { cap_urn: String, error: String },
     /// An internal invariant was violated (a bug, surfaced not swallowed).
     Internal(String),
 }
@@ -506,6 +511,10 @@ impl std::fmt::Display for PlanError {
             PlanError::NoPlan { detail } => {
                 write!(f, "no plan connects the sources to the target(s): {detail}")
             }
+            PlanError::DefinitionUnavailable { cap_urn, error } => write!(
+                f,
+                "the definition of cap '{cap_urn}' could not be had from the registry: {error}"
+            ),
             PlanError::Internal(d) => write!(f, "planner internal error: {d}"),
         }
     }
