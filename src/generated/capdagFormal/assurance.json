@@ -4,7 +4,7 @@
   "provenance": {
     "lean_version": "4.34.1",
     "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
-    "lungo_version": "1.120.164",
+    "lungo_version": "1.126.0",
     "bir_version": 3,
     "runtime_abi": 3
   },
@@ -13,6 +13,126 @@
     "schema_version": 1
   },
   "specifications": [
+    {
+      "name": "CapDAG.Detect.Claimed",
+      "kind": "lungo.model",
+      "statement": "List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
+      "definition": "fun claims c => ∃ r, r ∈ claims ∧ TaggedUrn.refines r.urn c.urn.urn",
+      "package": "capdagFormal",
+      "fingerprint": "249af298f26b14507e0f8d7fc25030c5284b52e2d753d10b1fccab5861117784",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 72,
+          "column": 1
+        },
+        "end": {
+          "line": 75,
+          "column": 50
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.IsBase",
+      "kind": "lungo.model",
+      "statement": "List CapDAG.Detect.Candidate → CapDAG.Detect.Candidate → Prop",
+      "definition": "fun cs c => ∀ (o : CapDAG.Detect.Candidate), o ∈ cs → ¬CapDAG.Detect.Strictly c.urn.urn o.urn.urn",
+      "package": "capdagFormal",
+      "fingerprint": "9d5cb42a71b758ed98f59d6b0e75b7546d9c8c1a5ddbb94e96db4400ef79fe2a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 62,
+          "column": 1
+        },
+        "end": {
+          "line": 65,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.MostSpecific",
+      "kind": "lungo.model",
+      "statement": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Prop",
+      "definition": "fun us u => ∀ (t : TaggedUrn.Exec.Wf), t ∈ us → ¬CapDAG.Detect.Strictly t.urn u.urn",
+      "package": "capdagFormal",
+      "fingerprint": "121858f8139ae67c4a9fc47977c17e8decec246270316f70921daddd67e428e3",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 84,
+          "column": 1
+        },
+        "end": {
+          "line": 87,
+          "column": 35
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.Owned",
+      "kind": "lungo.model",
+      "statement": "List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
+      "definition": "fun owners c => ∃ o, o ∈ owners ∧ TaggedUrn.refines c.urn.urn o.urn",
+      "package": "capdagFormal",
+      "fingerprint": "8a10a685d786b29a3f6176fa55b16e4a81f892c0de2e954aff1e5e22ce24e8f8",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 67,
+          "column": 1
+        },
+        "end": {
+          "line": 70,
+          "column": 50
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.Stands",
+      "kind": "lungo.model",
+      "statement": "List CapDAG.Detect.Candidate → List TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
+      "definition": "fun cs owners claims c =>\n  c.rules ≠ CapDAG.Detect.Rules.unmet ∧\n    (CapDAG.Detect.Owned owners c → CapDAG.Detect.Claimed claims c) ∧\n      (¬CapDAG.Detect.Owned owners c → c.rules = CapDAG.Detect.Rules.met ∨ CapDAG.Detect.IsBase cs c)",
+      "package": "capdagFormal",
+      "fingerprint": "6d4d1fa80aeec229c02701e5e2f6642bbbc241e76cfd76874b3c244223aeba60",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 77,
+          "column": 1
+        },
+        "end": {
+          "line": 82,
+          "column": 54
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.Strictly",
+      "kind": "lungo.model",
+      "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
+      "definition": "fun a b => TaggedUrn.refines a b ∧ ¬TaggedUrn.refines b a",
+      "package": "capdagFormal",
+      "fingerprint": "40b122f9aef7763dddb2d7fa476c75043292436fc0f6efb654b0ad4577122da9",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 58,
+          "column": 1
+        },
+        "end": {
+          "line": 60,
+          "column": 83
+        }
+      }
+    },
     {
       "name": "CapDAG.Query.admits",
       "kind": "lungo.relation",
@@ -2586,6 +2706,274 @@
         "end": {
           "line": 19,
           "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.bases_stand",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.stands"
+      ],
+      "specifications": [],
+      "statement": "∀ (cs : List CapDAG.Detect.Candidate) (claims : List TaggedUrn.Exec.Wf) (c : CapDAG.Detect.Candidate),\n  CapDAG.Detect.IsBase cs c → c.rules ≠ CapDAG.Detect.Rules.unmet → CapDAG.Detect.stands cs [] claims c = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "89a6c8c94ee396ba253c54174f2480b83fcb0872bfb1abd98b0af70c6589aad6",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 297,
+          "column": 1
+        },
+        "end": {
+          "line": 305,
+          "column": 31
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.mostSpecific_antichain",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.mostSpecific"
+      ],
+      "specifications": [],
+      "statement": "∀ (us : List TaggedUrn.Exec.Wf) (u t : TaggedUrn.Exec.Wf),\n  t ∈ us → CapDAG.Detect.mostSpecific us u = true → ¬CapDAG.Detect.Strictly t.urn u.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "8d67020077b83549e8403da50ed988a4f335ea8a8c9b8b42c61b92acd937ddc6",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 307,
+          "column": 1
+        },
+        "end": {
+          "line": 311,
+          "column": 40
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.mostSpecific_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Detect.mostSpecific"
+      ],
+      "specifications": [
+        "CapDAG.Detect.MostSpecific"
+      ],
+      "statement": "∀ (us : List TaggedUrn.Exec.Wf) (u : TaggedUrn.Exec.Wf),\n  CapDAG.Detect.mostSpecific us u = true ↔ CapDAG.Detect.MostSpecific us u",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "c478e69d53db1c20f06b2b6baefcf9a7a13e8cd50e8682036c04f6d21d78effb",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 158,
+          "column": 1
+        },
+        "end": {
+          "line": 166,
+          "column": 58
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.primary_first",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.primary"
+      ],
+      "specifications": [],
+      "statement": "∀ (us : List TaggedUrn.Exec.Wf) (i : Nat) (u : TaggedUrn.Exec.Wf),\n  CapDAG.Detect.primary us = some i →\n    us[i]? = some u →\n      ∀ (j : Nat),\n        j < i → ∀ (v : TaggedUrn.Exec.Wf), us[j]? = some v → TaggedUrn.Exec.specificity v < TaggedUrn.Exec.specificity u",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "6a91971e53e99627673a3a78f1716a02867c6b93bce80003618aa701e2e8dcf3",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 264,
+          "column": 1
+        },
+        "end": {
+          "line": 278,
+          "column": 30
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.primary_maximal",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.primary"
+      ],
+      "specifications": [],
+      "statement": "∀ (us : List TaggedUrn.Exec.Wf) (i : Nat) (u : TaggedUrn.Exec.Wf),\n  CapDAG.Detect.primary us = some i →\n    us[i]? = some u → ∀ (v : TaggedUrn.Exec.Wf), v ∈ us → TaggedUrn.Exec.specificity v ≤ TaggedUrn.Exec.specificity u",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "6ecb557af1e3484bf733bcc7b9a88879fcd7e1bee6b3f283becc4a4d90856f09",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 248,
+          "column": 1
+        },
+        "end": {
+          "line": 262,
+          "column": 27
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.primary_member",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.primary"
+      ],
+      "specifications": [],
+      "statement": "∀ (us : List TaggedUrn.Exec.Wf), us ≠ [] → ∃ i u, CapDAG.Detect.primary us = some i ∧ us[i]? = some u",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "0080ba55d4f3b0d5dde4f9d954ab042dfac7cac8623d42cde0386fd27e3218dd",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 240,
+          "column": 1
+        },
+        "end": {
+          "line": 246,
+          "column": 42
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.stands_decides",
+      "relation": "lungo.decides",
+      "subjects": [
+        "CapDAG.Detect.stands"
+      ],
+      "specifications": [
+        "CapDAG.Detect.Stands"
+      ],
+      "statement": "∀ (cs : List CapDAG.Detect.Candidate) (owners claims : List TaggedUrn.Exec.Wf) (c : CapDAG.Detect.Candidate),\n  CapDAG.Detect.stands cs owners claims c = true ↔ CapDAG.Detect.Stands cs owners claims c",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "e30e48362ebb377adbff7e8df0f2436f863c4b88a00b2f2f14ca8a252ffb9094",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 132,
+          "column": 1
+        },
+        "end": {
+          "line": 152,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.unproven_refinement_falls",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Detect.stands"
+      ],
+      "specifications": [],
+      "statement": "∀ (cs : List CapDAG.Detect.Candidate) (owners claims : List TaggedUrn.Exec.Wf) (c o : CapDAG.Detect.Candidate),\n  o ∈ cs →\n    CapDAG.Detect.Strictly c.urn.urn o.urn.urn →\n      ¬CapDAG.Detect.Owned owners c →\n        c.rules ≠ CapDAG.Detect.Rules.met → CapDAG.Detect.stands cs owners claims c = false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "8b54eb6f55360db2c5274c008635d574fe9ca106fca6f026ae6d7620626f3fdb",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 282,
+          "column": 1
+        },
+        "end": {
+          "line": 295,
+          "column": 32
         }
       }
     },
@@ -6118,6 +6506,123 @@
         "end": {
           "line": 63,
           "column": 87
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.mostSpecific",
+      "module": "CapDAG.Detect",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Detect.mostSpecific_antichain",
+        "CapDAG.Detect.mostSpecific_decides"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 154,
+          "column": 1
+        },
+        "end": {
+          "line": 156,
+          "column": 36
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.primary",
+      "module": "CapDAG.Detect",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Detect.primary_first",
+        "CapDAG.Detect.primary_maximal",
+        "CapDAG.Detect.primary_member"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 176,
+          "column": 1
+        },
+        "end": {
+          "line": 178,
+          "column": 66
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Detect.stands",
+      "module": "CapDAG.Detect",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Detect.bases_stand",
+        "CapDAG.Detect.stands_decides",
+        "CapDAG.Detect.unproven_refinement_falls"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Detect.lean",
+        "start": {
+          "line": 106,
+          "column": 1
+        },
+        "end": {
+          "line": 113,
+          "column": 68
         }
       }
     },
