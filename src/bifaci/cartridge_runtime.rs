@@ -5828,7 +5828,8 @@ impl CartridgeRuntime {
             // but its value expands to multiple files, the runtime iterates
             // the handler once per file — a single process, N invocations,
             // outputs concatenated to stdout in glob-expansion order.
-            let raw_payload = self.build_payload_from_cli(&cap, cli_args)?;
+            let raw_payload =
+                self.build_payload_from_cli(&cap, cli_args, &mut Self::read_piped_stdin)?;
             let iterations = build_cli_foreach_iterations(&raw_payload, &cap)?;
             for per_iter_payload in iterations {
                 let payload = extract_effective_payload(
@@ -6104,10 +6105,17 @@ impl CartridgeRuntime {
     /// ```text
     /// [ { media_urn: "...", value: bytes }, ... ]
     /// ```
+    ///
+    /// `read_stdin` is the command's piped input: the cartridge's own
+    /// process passes [`Self::read_piped_stdin`]. It is a parameter so that
+    /// nothing but the cartridge's command line reads the process's stdin —
+    /// a test that read it waited forever whenever its runner handed it a
+    /// stdin that never closes.
     fn build_payload_from_cli(
         &self,
         cap: &Cap,
         cli_args: &[String],
+        read_stdin: &mut dyn FnMut() -> Result<Option<Vec<u8>>, RuntimeError>,
     ) -> Result<Vec<u8>, RuntimeError> {
         let mut arguments: Vec<CapArgumentValue> = Vec::new();
 
@@ -6120,7 +6128,7 @@ impl CartridgeRuntime {
         let mut stdin_cache: Option<Option<Vec<u8>>> = None;
         let mut stdin_source = || -> Result<Option<Vec<u8>>, RuntimeError> {
             if stdin_cache.is_none() {
-                stdin_cache = Some(Self::read_piped_stdin()?);
+                stdin_cache = Some(read_stdin()?);
             }
             Ok(stdin_cache.as_ref().unwrap().clone())
         };
@@ -10809,7 +10817,7 @@ mod tests {
         // Simulate CLI invocation: cartridge process /path/to/file.pdf
         let cli_args = vec![test_file.to_string_lossy().to_string()];
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
-        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args).unwrap();
+        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args, &mut || Ok(None)).unwrap();
 
         // Extract effective payload (simulates what run_cli_mode does)
         // This does file-path auto-conversion: path → bytes
@@ -11511,7 +11519,7 @@ mod tests {
         // Simulate full CLI invocation
         let cli_args = vec![test_file.to_string_lossy().to_string()];
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
-        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args).unwrap();
+        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args, &mut || Ok(None)).unwrap();
 
         // Extract effective payload (what run_cli_mode does)
         let payload = extract_effective_payload(
@@ -11711,7 +11719,7 @@ mod tests {
 
         let cli_args = vec!["test value".to_string()];
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
-        let payload = runtime.build_payload_from_cli(&cap, &cli_args).unwrap();
+        let payload = runtime.build_payload_from_cli(&cap, &cli_args, &mut || Ok(None)).unwrap();
 
         // Decode CBOR payload
         let cbor_value: ciborium::Value = ciborium::from_reader(&payload[..]).unwrap();
@@ -12149,7 +12157,7 @@ mod tests {
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
 
         // Build CBOR payload (what build_payload_from_cli does)
-        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args).unwrap();
+        let raw_payload = runtime.build_payload_from_cli(&cap, &cli_args, &mut || Ok(None)).unwrap();
 
         // Extract effective payload (what run_cli_mode does)
         // This does file-path auto-conversion and returns full CBOR array
@@ -12243,7 +12251,7 @@ mod tests {
         // CLI mode: pass file path as positional argument
         let cli_args = vec![test_file.to_string_lossy().to_string()];
         let cap = runtime.manifest.as_ref().unwrap().all_caps()[0].clone();
-        let payload = runtime.build_payload_from_cli(&cap, &cli_args).unwrap();
+        let payload = runtime.build_payload_from_cli(&cap, &cli_args, &mut || Ok(None)).unwrap();
 
         // Verify payload is CBOR array with file-path argument
         let cbor_val: ciborium::Value = ciborium::from_reader(&payload[..]).unwrap();
