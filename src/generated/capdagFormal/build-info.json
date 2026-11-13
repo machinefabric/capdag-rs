@@ -1,12 +1,12 @@
 {
-  "build_key": "aa3676d39a7d0b2d1e44371cea116729478a3d42bfacabe5654f3d9f870a6223",
+  "build_key": "25701d82330267b7b9e95b000f3147e852924446fddbe4490c34cfcaee6a1c6f",
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
   "adapter_version": 3,
-  "lungo_version": "1.120.164",
+  "lungo_version": "1.126.0",
   "runtime_abi": 3,
-  "worker_identity": "220c75476c1cb448ffb8272efd216c9332c7c8dd21e39d0b226a3e618bebbe57",
+  "worker_identity": "863f6dcb35972ec9a6e5acbb360ebe8502f41bd9700f137cfe0190ae9d020008",
   "input_digests": {
     "<package:lungo>/Lungo.lean": "907fc01dbbb840d774f0f22e2bf9af390d4ac57af2eca14b664034e2d13aba06",
     "<package:lungo>/Lungo/Async.lean": "5b5187ca9099ae0182b68f25078f48b8ae001497000392d662643e236c71642a",
@@ -22,7 +22,7 @@
     "<package:lungo>/Lungo/Spec/Model.lean": "5082edc39c7d67b908ab470ae61b6f97fa547b910dd0915b6f72b27ee54b90a7",
     "<package:lungo>/Lungo/Spec/State.lean": "a5a5aa8ccb208f06dd45005e5740c4e7096b1a7f8d484f6cc19d4835e816979e",
     "<package:lungo>/Lungo/Trace.lean": "f6f0735df8f533ef42e71cc5f5be73462fcac902c38f56f3d3411b28816a57bf",
-    "<package:lungo>/lakefile.toml": "97e0e471de3aaddef73988624b6126e1cf80b8c6f1f51ce3f3a8153d8c13d046",
+    "<package:lungo>/lakefile.toml": "d6a857de67de91b379d34e3ed2e497ff1adb9ab9b98bbc1520cc3edbe6274bbd",
     "<package:tagged_urn_formal>/TaggedUrn.lean": "cbc3ea3aff7c971572085e664a00de5ffddbff9d01a384747e1c350688607d4c",
     "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean": "20d93e3ff2482334a7288262c6fb229675e13696af5712dcec1af2f3fe6e4028",
     "<package:tagged_urn_formal>/TaggedUrn/Exec.lean": "d8eb4db6b96b06895cb2b0c89731f81c7335734d712960751e0921bdab0a737e",
@@ -39,6 +39,7 @@
     "CapDAG/Bifaci/Pools.lean": "d908a12c733e27c4801581bedae058898e702ea27ad9e597a28cd123a94c8ace",
     "CapDAG/Bifaci/Request.lean": "604c9ab7c41ee1d61431c2a4bcaafd172b8dc8db5d31bda2f47feb226024b674",
     "CapDAG/Cap.lean": "c191594b3fd6cbe30eaa17d7534087f3e6336c941c44cd1b2d5f2fb762d976ed",
+    "CapDAG/Detect.lean": "3164083da542785c8b9e365522c6f065b438f2da734128a233f71450e8dd8853",
     "CapDAG/Exec.lean": "c2febae2b84aef6588712fe88bd8266b2f84ba73f659113142b42f227e2bbfa2",
     "CapDAG/Query.lean": "34b70954d6515f24ac05517178d63ca6c0588ac9ab353b500756858ba5fba834",
     "CapDAG/Ranking.lean": "bc91e49b36aa687a2eaa72164ed4c9040e759b3a31f3a705b57932a584f8abf5",
@@ -54,15 +55,16 @@
   "project": ".",
   "link_directives": [],
   "output_digests": {
-    "assurance.json": "5c5e30a6db898fb9689ef5da8ee17607c47c7c999a1985abd6e0d4fd6ef11527",
-    "capdagFormal.rs": "994060150ceea8bd7e4c4b55dfa6b0f2ac7f388773aeabef9f8cb00b92545b78",
+    "assurance.json": "01ceffb38b304279f308c985ddf5f0f4ad4adad1882531e27845a636be7df27c",
+    "capdagFormal.rs": "2660afed4636fe91ff941462364fba1ea7d61ec27a669e8e6d223258addd0e40",
     "externs.json": "e94af184c3b3fe91b58486ee44423636715f0d3dc16b2031280c20f590b756a6",
-    "manifest.json": "cb5894efac1c0be10afd4bcb4d32ee49ea95ed48b224ad4cdd2f8ed236f0841f",
+    "manifest.json": "601b4fb86a2fd36f6190eaef55e7f834570b95f35215fa7d13552259a2c9d025",
     "modules/CapDAG-Bifaci-Credit.rs": "509dd16935fe684396c3804281cc985dc1e466ed0784c3aa0a30bcdf84a59824",
     "modules/CapDAG-Bifaci-Flow.rs": "5c20191f8f8f116824d971b856a391fcfacd6128327408cfa2b542a4bef2c7b8",
     "modules/CapDAG-Bifaci-Pools.rs": "b30857e93921d4e1c7e252ad01ee5bc19db44e6294859dd00186af6842c75082",
     "modules/CapDAG-Bifaci-Request.rs": "e0b8906920215b6b4137b17e53a10be8206c9f835b9367f786ad99056064e514",
     "modules/CapDAG-Cap.rs": "d49a9a321507600a519f50f9099fb341c520f7afbd0743e0804df8f307f3014c",
+    "modules/CapDAG-Detect.rs": "513391e65f781550e1378b310f437af9021c36ebea5fe7458e4a943e2edcf467",
     "modules/CapDAG-Exec.rs": "3b91c01196ff0b8c8fbcfe1ce02b607fdb5b3c5072fa57fc1efa4182cd472e51",
     "modules/CapDAG-Query.rs": "fd2e83dfcb3fbe5c55cf873600096270c634dea3e37d611df1b12e89a9aaab60",
     "modules/CapDAG-Ranking.rs": "6576939a41e7364678ef97aa8b1bec5eab9a6e09d6a552a9b051d3177a31c377",
@@ -100,8 +102,8 @@
     "modules/TaggedUrn-Exec.rs": "c4cefb5406f3aca5edee163cdfc6c1e785edce8381753f22a89a853510ab3ad0",
     "modules/TaggedUrn-Sorted.rs": "8d6c40c14595ec21f777cd818b666cfbb843eedaaccce41674994432c078d671",
     "modules/TaggedUrn-Urn.rs": "56fa9e5d567c6c66c22061218f93b2a5de3fb0f723da7037198234843ef32cf5",
-    "names.json": "bfd5dc7d9b6ba7a1619b8d6864ab05904245a67cbf84de56b9d6efcd8d871b18",
-    "sources.json": "41cf455c815a45e7d429b90c9213cfe2bfbf7b453cb55321d68748b3ab449609"
+    "names.json": "7834385641d1d316266e91c9a69a57487078b33cd1aeec15bcb59818ea5d850c",
+    "sources.json": "bc90d6eb932e6fb480ae7704e0a74f5a8b4a82412fe0ab21863f1432951c0e1d"
   },
   "platform_products": []
 }

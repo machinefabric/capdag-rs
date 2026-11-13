@@ -2,7 +2,7 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.120.164",
+  "generator_version": "1.126.0",
   "runtime_abi": 3,
   "modules": [
     "Init.Prelude",
@@ -680,10 +680,11 @@
     "CapDAG.Bifaci.Pools",
     "CapDAG.Run.Control",
     "CapDAG.Run.Step",
+    "CapDAG.Detect",
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 1925,
+  "declarations": 1979,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -950,6 +951,27 @@
       "rust_path": "bifaci::request::write",
       "lean_type": "Bool → CapDAG.Bifaci.Flow.FrameType → CapDAG.Bifaci.Request.Write",
       "source": "CapDAG/Bifaci/Request.lean:61:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.mostSpecific",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::most_specific",
+      "lean_type": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Bool",
+      "source": "CapDAG/Detect.lean:154:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.primary",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::primary",
+      "lean_type": "List TaggedUrn.Exec.Wf → Option Nat",
+      "source": "CapDAG/Detect.lean:176:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.stands",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::stands",
+      "lean_type": "List CapDAG.Detect.Candidate → List TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Bool",
+      "source": "CapDAG/Detect.lean:106:1"
     },
     {
       "lean_name": "CapDAG.Exec.accepts",
