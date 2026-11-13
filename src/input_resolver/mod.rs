@@ -21,6 +21,7 @@
 
 mod adapter;
 mod adapters;
+pub mod detection;
 mod os_filter;
 pub(crate) mod path_resolver;
 mod resolver;
@@ -30,16 +31,14 @@ pub mod value_adapter_registry;
 
 pub use types::{ContentStructure, InputItem, InputResolverError, ResolvedFile, ResolvedInputSet};
 
-pub use adapter::{
-    discriminate_by_cartridge_handlers, filter_by_handler_verdict, AdapterResult,
-    CartridgeAdapterInvoker, MAX_CONTENT_INSPECTION_BYTES,
+pub use adapter::{CartridgeAdapterInvoker, MAX_CONTENT_INSPECTION_BYTES};
+
+pub use detection::{
+    detect_file_media, extension_media, primary_media, AdapterSource, FileMedia, NoAdapters,
+    NoInvoker,
 };
 
-pub use resolver::{
-    detect_file_confirmed, detect_file_discriminated, detect_file_with_fabric_registry,
-    discriminate_candidates_by_validation, discriminate_file, refine_survivors, resolve_input,
-    resolve_inputs, resolve_inputs_confirmed, resolve_paths, FileDiscrimination,
-};
+pub use resolver::{resolve_file, resolve_input, resolve_inputs, resolve_paths, Detection};
 
 pub use path_resolver::resolve_directory;
 

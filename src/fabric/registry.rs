@@ -373,6 +373,13 @@ impl Manifest {
 // REGISTRY
 // =============================================================================
 
+/// Lower-case extension → the file media definitions that list it.
+type FileMediaIndex = HashMap<String, Vec<StoredMediaDef>>;
+
+/// How many file media definitions are fetched at once when the file media
+/// index loads on a cold cache.
+const FILE_MEDIA_FETCHES_AT_ONCE: usize = 16;
+
 #[derive(Debug)]
 pub struct FabricRegistry {
     client: reqwest::Client,
@@ -391,8 +398,12 @@ pub struct FabricRegistry {
     /// `dims/<sha>/<defver>.json` cache on disk and the fetch path, filtered
     /// to the pinned manifest's defvers.
     cached_dims: Arc<Mutex<HashMap<String, StoredDim>>>,
-    /// Lower-case extension → list of canonical media URNs.
-    extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// Lower-case extension → the file media definitions that list it,
+    /// loaded from the whole manifest when a file's type is first asked
+    /// (`file_media_for_extension`).
+    file_media: Arc<Mutex<Option<Arc<FileMediaIndex>>>>,
+    /// Held while the file media index loads, so it loads once.
+    file_media_loading: Arc<tokio::sync::Mutex<()>>,
     config: RegistryConfig,
     /// The registry's verified charter: its slug names `cache_dir`, and its
     /// locations are where everything is fetched from.
@@ -751,13 +762,11 @@ impl FabricRegistry {
             &mut cached_aliases_map,
             &mut cached_dims_map,
         );
-        let extension_index_map = Self::build_extension_index(&cached_specs_map);
 
         let cached_caps = Arc::new(Mutex::new(cached_caps_map));
         let cached_media_defs = Arc::new(Mutex::new(cached_specs_map));
         let cached_aliases = Arc::new(Mutex::new(cached_aliases_map));
         let cached_dims = Arc::new(Mutex::new(cached_dims_map));
-        let extension_index = Arc::new(Mutex::new(extension_index_map));
         let manifest_arc = Arc::new(Mutex::new(manifest));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
         let fetch_failures: FetchFailures = Arc::new(Mutex::new(HashMap::new()));
@@ -775,7 +784,6 @@ impl FabricRegistry {
                     Arc::clone(&cached_media_defs),
                     Arc::clone(&cached_aliases),
                     Arc::clone(&cached_dims),
-                    Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
                     Arc::clone(&fetch_failures),
@@ -795,7 +803,8 @@ impl FabricRegistry {
             cached_media_defs,
             cached_aliases,
             cached_dims,
-            extension_index,
+            file_media: Arc::new(Mutex::new(None)),
+            file_media_loading: Arc::new(tokio::sync::Mutex::new(())),
             config,
             charter: Arc::new(charter),
             locations,
@@ -930,7 +939,6 @@ impl FabricRegistry {
             &self.cached_caps,
             &self.cached_media_defs,
             &self.cached_dims,
-            &self.extension_index,
             &self.manifest,
             &self.offline_flag,
             &self.locations,
@@ -1598,7 +1606,6 @@ impl FabricRegistry {
         let cached_caps = Arc::clone(&self.cached_caps);
         let cached_media_defs = Arc::clone(&self.cached_media_defs);
         let cached_dims = Arc::clone(&self.cached_dims);
-        let extension_index = Arc::clone(&self.extension_index);
         let manifest = Arc::clone(&self.manifest);
         let offline_flag = Arc::clone(&self.offline_flag);
         let locations = self.locations.clone();
@@ -1631,7 +1638,6 @@ impl FabricRegistry {
                 &cached_caps,
                 &cached_media_defs,
                 &cached_dims,
-                &extension_index,
                 &manifest,
                 &offline_flag,
                 &locations,
@@ -1746,7 +1752,6 @@ impl FabricRegistry {
                 &self.cached_caps,
                 &self.cached_media_defs,
                 &self.cached_dims,
-                &self.extension_index,
                 &self.manifest,
                 &self.offline_flag,
                 &self.locations,
@@ -2010,7 +2015,6 @@ impl FabricRegistry {
             &self.cache_dir,
             &self.cached_media_defs,
             &self.cached_dims,
-            &self.extension_index,
             &self.manifest,
             self.manifest_version,
             &self.offline_flag,
@@ -2066,7 +2070,6 @@ impl FabricRegistry {
                 &self.cache_dir,
                 &self.cached_media_defs,
                 &self.cached_dims,
-                &self.extension_index,
                 &self.manifest,
                 self.manifest_version,
                 &self.offline_flag,
@@ -2214,44 +2217,139 @@ impl FabricRegistry {
         Ok(None)
     }
 
-    /// Returns all media URNs registered for the given file extension.
-    pub fn media_urns_for_extension(
+    /// The file media types a file with this extension can be: every
+    /// definition in the pinned manifest whose URN carries the `ext=`
+    /// file-type tag and whose `extensions` list the extension (any case),
+    /// in URN order. Empty when the fabric declares no file type for it.
+    ///
+    /// The first call loads every file media definition the manifest names
+    /// (those not cached yet are fetched at once, and kept in this manifest
+    /// version's cache); later calls answer from memory. A definition that
+    /// cannot be had fails the call, naming each one and why: an answer
+    /// from part of the fabric's file types would be a wrong answer.
+    pub async fn file_media_for_extension(
         &self,
         extension: &str,
-    ) -> Result<Vec<String>, FabricRegistryError> {
-        let ext_lower = extension.to_lowercase();
-        let index = self.extension_index.lock().map_err(|e| {
-            FabricRegistryError::CacheError(format!("Failed to lock extension index: {}", e))
-        })?;
-        index
-            .get(&ext_lower)
-            .cloned()
-            .map(|mut urns| {
-                // The index is populated from HashMap iteration and incremental
-                // fetches, so its per-extension order varies run to run. Every
-                // consumer that picks ONE candidate (extension detection, the
-                // discriminators) tie-breaks by position, so an unsorted answer
-                // makes detection nondeterministic across processes. Sort at
-                // the single read choke point.
-                urns.sort();
-                urns
-            })
-            .ok_or_else(|| {
-                FabricRegistryError::ExtensionNotFound(format!(
-                    "No media def registered for extension '{}'",
-                    extension
-                ))
-            })
+    ) -> Result<Vec<StoredMediaDef>, FabricRegistryError> {
+        let index = self.file_media_index().await?;
+        Ok(index.get(&extension.to_lowercase()).cloned().unwrap_or_default())
     }
 
-    /// Get all extension → URNs mappings.
-    pub fn get_extension_mappings(
-        &self,
-    ) -> Result<Vec<(String, Vec<String>)>, FabricRegistryError> {
-        let index = self.extension_index.lock().map_err(|e| {
-            FabricRegistryError::CacheError(format!("Failed to lock extension index: {}", e))
-        })?;
-        Ok(index.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    async fn file_media_index(&self) -> Result<Arc<FileMediaIndex>, FabricRegistryError> {
+        if let Some(index) = self.loaded_file_media() {
+            return Ok(index);
+        }
+        let _loading = self.file_media_loading.lock().await;
+        if let Some(index) = self.loaded_file_media() {
+            return Ok(index);
+        }
+        let file_urns: Vec<(String, u32)> = {
+            let m = self.manifest.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
+            })?;
+            m.media
+                .iter()
+                .filter(|(urn, _)| {
+                    crate::MediaUrn::from_string(urn)
+                        .map(|u| u.get_tag("ext").is_some())
+                        .unwrap_or(false)
+                })
+                .map(|(urn, defver)| (urn.clone(), *defver))
+                .collect()
+        };
+        let mut defs: Vec<StoredMediaDef> = Vec::with_capacity(file_urns.len());
+        let mut missing: Vec<(String, u32)> = Vec::new();
+        {
+            let cached = self.cached_media_defs.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock media cache: {}", e))
+            })?;
+            for (urn, defver) in file_urns {
+                match cached.get(&urn) {
+                    Some(def) => defs.push(def.clone()),
+                    None => missing.push((urn, defver)),
+                }
+            }
+        }
+        let mut failures: Vec<String> = Vec::new();
+        let mut fetches = tokio::task::JoinSet::new();
+        let gate = Arc::new(tokio::sync::Semaphore::new(FILE_MEDIA_FETCHES_AT_ONCE));
+        for (urn, defver) in missing {
+            let gate = Arc::clone(&gate);
+            let client = self.client.clone();
+            let cache_dir = self.cache_dir.clone();
+            let cached_media_defs = Arc::clone(&self.cached_media_defs);
+            let cached_dims = Arc::clone(&self.cached_dims);
+            let manifest = Arc::clone(&self.manifest);
+            let manifest_version = self.manifest_version;
+            let offline_flag = Arc::clone(&self.offline_flag);
+            let locations = self.locations.clone();
+            let cache_revision_tx = self.cache_revision_tx.clone();
+            fetches.spawn(async move {
+                let _turn = gate.acquire_owned().await.expect("the fetch gate is never closed");
+                let result = fetch_one_media_def(
+                    &client,
+                    &cache_dir,
+                    &cached_media_defs,
+                    &cached_dims,
+                    &manifest,
+                    manifest_version,
+                    &offline_flag,
+                    &locations,
+                    &cache_revision_tx,
+                    &urn,
+                    defver,
+                )
+                .await;
+                (urn, result)
+            });
+        }
+        while let Some(joined) = fetches.join_next().await {
+            match joined {
+                Ok((_, Ok(def))) => defs.push(def),
+                Ok((urn, Err(e))) => failures.push(format!("{urn}: {e}")),
+                Err(e) => failures.push(format!("a fetch did not finish: {e}")),
+            }
+        }
+        if !failures.is_empty() {
+            failures.sort();
+            return Err(FabricRegistryError::FileTypes(format!(
+                "{} of the {} file media types of manifest v{} could not be loaded, so no file's \
+                 type can be told from its extension: {}",
+                failures.len(),
+                failures.len() + defs.len(),
+                self.manifest_version,
+                failures.join("; ")
+            )));
+        }
+        let mut index = FileMediaIndex::new();
+        for def in defs {
+            for ext in &def.extensions {
+                index.entry(ext.to_lowercase()).or_default().push(def.clone());
+            }
+        }
+        for defs in index.values_mut() {
+            defs.sort_by(|a, b| a.urn.cmp(&b.urn));
+            defs.dedup_by(|a, b| a.urn == b.urn);
+        }
+        let index = Arc::new(index);
+        *self.file_media.lock().map_err(|e| {
+            FabricRegistryError::CacheError(format!("Failed to lock the file media index: {}", e))
+        })? = Some(Arc::clone(&index));
+        Ok(index)
+    }
+
+    fn loaded_file_media(&self) -> Option<Arc<FileMediaIndex>> {
+        self.file_media.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// Name a media definition in the manifest without caching it: a test
+    /// registry then fetches it from the registry's location when it is
+    /// first needed. Test helper.
+    pub fn list_media_in_manifest_for_test(&self, urn: &str, defver: u32) {
+        let normalized = normalize_media_urn(urn).expect("a test lists a valid media URN");
+        if let Ok(mut m) = self.manifest.lock() {
+            m.media.insert(normalized, defver);
+        }
     }
 
     /// Insert a media def into the in-memory cache. Test helper.
@@ -2285,15 +2383,6 @@ impl FabricRegistry {
         let spec_version = spec.version;
         if let Ok(mut cache) = self.cached_media_defs.lock() {
             cache.insert(normalized.clone(), spec.clone());
-        }
-        if let Ok(mut idx) = self.extension_index.lock() {
-            for ext in &spec.extensions {
-                let ext_lower = ext.to_lowercase();
-                let urns = idx.entry(ext_lower).or_default();
-                if !urns.contains(&spec.urn) {
-                    urns.push(spec.urn.clone());
-                }
-            }
         }
         if let Ok(mut m) = self.manifest.lock() {
             m.media.insert(normalized, spec_version);
@@ -2342,8 +2431,8 @@ impl FabricRegistry {
         if let Ok(mut g) = self.cached_dims.lock() {
             g.clear();
         }
-        if let Ok(mut g) = self.extension_index.lock() {
-            g.clear();
+        if let Ok(mut g) = self.file_media.lock() {
+            *g = None;
         }
         clear_cache_folder(&self.cache_dir)
     }
@@ -2418,18 +2507,6 @@ impl FabricRegistry {
         }
     }
 
-    fn build_extension_index(
-        specs: &HashMap<String, StoredMediaDef>,
-    ) -> HashMap<String, Vec<String>> {
-        let mut index: HashMap<String, Vec<String>> = HashMap::new();
-        for spec in specs.values() {
-            for ext in &spec.extensions {
-                let ext_lower = ext.to_lowercase();
-                index.entry(ext_lower).or_default().push(spec.urn.clone());
-            }
-        }
-        index
-    }
 
     // -------------------------------------------------------------------------
     // TEST HELPERS
@@ -2473,7 +2550,6 @@ impl FabricRegistry {
         let cached_media_defs = Arc::new(Mutex::new(HashMap::new()));
         let cached_aliases = Arc::new(Mutex::new(HashMap::new()));
         let cached_dims = Arc::new(Mutex::new(HashMap::new()));
-        let extension_index = Arc::new(Mutex::new(HashMap::new()));
         let manifest_arc = Arc::new(Mutex::new(Manifest::empty(manifest_version)));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
         let fetch_failures: FetchFailures = Arc::new(Mutex::new(HashMap::new()));
@@ -2492,7 +2568,6 @@ impl FabricRegistry {
                     Arc::clone(&cached_media_defs),
                     Arc::clone(&cached_aliases),
                     Arc::clone(&cached_dims),
-                    Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
                     Arc::clone(&fetch_failures),
@@ -2512,7 +2587,8 @@ impl FabricRegistry {
             cached_media_defs,
             cached_aliases,
             cached_dims,
-            extension_index,
+            file_media: Arc::new(Mutex::new(None)),
+            file_media_loading: Arc::new(tokio::sync::Mutex::new(())),
             config,
             charter: Arc::new(charter),
             locations,
@@ -3108,7 +3184,6 @@ async fn fetch_one_cap_atomic(
     cached_caps: &Arc<Mutex<HashMap<String, Cap>>>,
     cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
     cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
-    extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: &Arc<Mutex<Manifest>>,
     offline_flag: &Arc<AtomicBool>,
     locations: &FabricLocations,
@@ -3174,7 +3249,6 @@ async fn fetch_one_cap_atomic(
             cache_dir,
             cached_media_defs,
             cached_dims,
-            extension_index,
             manifest,
             manifest_version,
             offline_flag,
@@ -3241,7 +3315,6 @@ pub(crate) async fn fetch_one_media_def(
     cache_dir: &Path,
     cached_media_defs: &Arc<Mutex<HashMap<String, StoredMediaDef>>>,
     cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
-    extension_index: &Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: &Arc<Mutex<Manifest>>,
     manifest_version: u32,
     offline_flag: &Arc<AtomicBool>,
@@ -3299,15 +3372,6 @@ pub(crate) async fn fetch_one_media_def(
 
     if let Ok(mut cached) = cached_media_defs.lock() {
         cached.insert(normalized_urn.to_string(), spec.clone());
-    }
-    if let Ok(mut idx) = extension_index.lock() {
-        for ext in &spec.extensions {
-            let ext_lower = ext.to_lowercase();
-            let urns = idx.entry(ext_lower).or_default();
-            if !urns.contains(&spec.urn) {
-                urns.push(spec.urn.clone());
-            }
-        }
     }
     publish_cache_revision(cache_revision_tx);
     Ok(spec)
@@ -3475,7 +3539,6 @@ async fn run_fetch_consumer(
     cached_media_defs: Arc<Mutex<HashMap<String, StoredMediaDef>>>,
     cached_aliases: Arc<Mutex<HashMap<String, StoredAlias>>>,
     cached_dims: Arc<Mutex<HashMap<String, StoredDim>>>,
-    extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: Arc<Mutex<Manifest>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
     fetch_failures: FetchFailures,
@@ -3502,7 +3565,6 @@ async fn run_fetch_consumer(
                         &cached_caps,
                         &cached_media_defs,
                         &cached_dims,
-                        &extension_index,
                         &manifest,
                         &offline_flag,
                         &locations,
@@ -3546,7 +3608,6 @@ async fn run_fetch_consumer(
                         &cache_dir,
                         &cached_media_defs,
                         &cached_dims,
-                        &extension_index,
                         &manifest,
                         manifest_version,
                         &offline_flag,
@@ -3669,8 +3730,9 @@ pub enum FabricRegistryError {
     #[error("Charter: {0}")]
     Charter(String),
 
-    #[error("No media def registered for extension: {0}")]
-    ExtensionNotFound(String),
+    /// The fabric's file media types could not all be loaded.
+    #[error("{0}")]
+    FileTypes(String),
 }
 
 /// One fetch from the registry that brought back no body: what was being
@@ -4317,19 +4379,10 @@ mod parity_port_tests {
     // mirrors' test288/test289 are the same behavior under a different number
     // and are reconciled by number-alignment, not duplicated here.)
 
-    // TEST607: media_urns_for_extension returns error for unknown extension
-    #[test]
-    fn test607_media_urns_for_extension_unknown() {
-        let registry = FabricRegistry::new_for_test();
-        let err = registry
-            .media_urns_for_extension("zzzzunknown")
-            .unwrap_err();
-        assert!(format!("{err}").contains("zzzzunknown"));
-    }
-
-    // TEST608: media_urns_for_extension returns URNs after adding a spec with extensions
-    #[test]
-    fn test608_media_urns_for_extension_populated() {
+    // TEST607: file_media_for_extension answers no file type for an
+    // extension no definition of the manifest declares
+    #[tokio::test]
+    async fn test607_file_media_for_an_unknown_extension_is_none() {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_media_def_for_test(spec_with_ext(
             "media:document;ext=pdf",
@@ -4337,33 +4390,54 @@ mod parity_port_tests {
             "application/pdf",
             &["pdf"],
         ));
-        let urns = registry.media_urns_for_extension("pdf").unwrap();
-        assert!(!urns.is_empty());
-        assert!(urns.iter().any(|u| u.contains("pdf")));
-        let urns_upper = registry.media_urns_for_extension("PDF").unwrap();
-        assert_eq!(urns, urns_upper);
+        let defs = registry.file_media_for_extension("zzzzunknown").await.unwrap();
+        assert!(defs.is_empty(), "no definition declares .zzzzunknown, got {defs:?}");
     }
 
-    // TEST609: get_extension_mappings returns all registered extension→URN pairs.
-    #[test]
-    fn test609_get_extension_mappings() {
+    // TEST608: file_media_for_extension answers the file media definitions
+    // that list the extension, whatever its case
+    #[tokio::test]
+    async fn test608_file_media_for_extension_lists_the_declaring_definitions() {
         let registry = FabricRegistry::new_for_test();
         registry.insert_cached_media_def_for_test(spec_with_ext(
             "media:document;ext=pdf",
-            "PDF",
-            "application/octet-stream",
+            "PDF Document",
+            "application/pdf",
             &["pdf"],
         ));
+        let urns = |defs: Vec<StoredMediaDef>| defs.into_iter().map(|d| d.urn).collect::<Vec<_>>();
+        let lower = urns(registry.file_media_for_extension("pdf").await.unwrap());
+        assert_eq!(lower, vec!["media:document;ext=pdf".to_string()]);
+        let upper = urns(registry.file_media_for_extension("PDF").await.unwrap());
+        assert_eq!(lower, upper);
+    }
+
+    // TEST609: a definition that lists an extension but carries no `ext=`
+    // file-type tag is content, not a file type: it is never a file type of
+    // the extension, even when it is cached
+    #[tokio::test]
+    async fn test609_content_types_that_list_an_extension_are_no_file_types() {
+        let registry = FabricRegistry::new_for_test();
         registry.insert_cached_media_def_for_test(spec_with_ext(
-            "media:document;ext=epub",
-            "EPUB",
-            "application/octet-stream",
-            &["epub"],
+            "media:download-result;enc=utf8;fmt=json;record",
+            "Model Download Result",
+            "application/json",
+            &["json"],
         ));
-        let mappings = registry.get_extension_mappings().unwrap();
-        let exts: HashSet<String> = mappings.iter().map(|(e, _)| e.clone()).collect();
-        assert!(exts.contains("pdf"));
-        assert!(exts.contains("epub"));
+        registry.insert_cached_media_def_for_test(spec_with_ext(
+            "media:enc=utf8;ext=json;fmt=json",
+            "JSON File",
+            "application/json",
+            &["json"],
+        ));
+        let urns: Vec<String> = registry
+            .file_media_for_extension("json")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| d.urn)
+            .collect();
+        assert_eq!(urns, vec!["media:enc=utf8;ext=json;fmt=json".to_string()]);
     }
 
     // TEST610: get_cached_media_def answers NotFound for a media def the
