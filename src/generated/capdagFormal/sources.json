@@ -3384,6 +3384,138 @@
     ]
   },
   {
+    "lean_name": "CapDAG.Detect.Rules.ctorElim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      41,
+      1
+    ],
+    "end": [
+      49,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.ctorIdx",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.met.elim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      45,
+      3
+    ],
+    "end": [
+      46,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.ofNat",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.unmet.elim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      47,
+      3
+    ],
+    "end": [
+      48,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.unruled.elim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      43,
+      3
+    ],
+    "end": [
+      44,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instDecidableEqRules",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      49,
+      12
+    ],
+    "end": [
+      49,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instReprRules",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      49,
+      25
+    ],
+    "end": [
+      49,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instReprRules.repr",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      49,
+      25
+    ],
+    "end": [
+      49,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.mostSpecific",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      154,
+      1
+    ],
+    "end": [
+      156,
+      36
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.primary",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      176,
+      1
+    ],
+    "end": [
+      178,
+      66
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.stands",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      106,
+      1
+    ],
+    "end": [
+      113,
+      68
+    ]
+  },
+  {
     "lean_name": "CapDAG.Effect.ctorElim",
     "file": "CapDAG/Cap.lean",
     "start": [
@@ -5880,6 +6012,18 @@
     ]
   },
   {
+    "lean_name": "List.any",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      1894,
+      1
+    ],
+    "end": [
+      1908,
+      32
+    ]
+  },
+  {
     "lean_name": "List.appendTR",
     "file": "<lean>/Init/Data/List/Basic.lean",
     "start": [
@@ -7113,6 +7257,42 @@
     "end": [
       205,
       48
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.best",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      168,
+      1
+    ],
+    "end": [
+      174,
+      94
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.best.match_1.splitter",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.best.match_3.splitter",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.strictly",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      91,
+      1
+    ],
+    "end": [
+      92,
+      60
     ]
   },
   {

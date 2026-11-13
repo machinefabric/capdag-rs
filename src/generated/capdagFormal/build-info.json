@@ -1,5 +1,5 @@
 {
-  "build_key": "b4e4d5a922ce0e397bc489a71832ce364d8b99fa97fab0706190cc907d347a48",
+  "build_key": "030514d7943cc3dacec89bce7e1c949165f5269e9f094b3c3307cb4683ff7e71",
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
@@ -41,6 +41,7 @@
     "CapDAG/Bifaci/Pools.lean": "d908a12c733e27c4801581bedae058898e702ea27ad9e597a28cd123a94c8ace",
     "CapDAG/Bifaci/Request.lean": "604c9ab7c41ee1d61431c2a4bcaafd172b8dc8db5d31bda2f47feb226024b674",
     "CapDAG/Cap.lean": "c191594b3fd6cbe30eaa17d7534087f3e6336c941c44cd1b2d5f2fb762d976ed",
+    "CapDAG/Detect.lean": "3164083da542785c8b9e365522c6f065b438f2da734128a233f71450e8dd8853",
     "CapDAG/Exec.lean": "c2febae2b84aef6588712fe88bd8266b2f84ba73f659113142b42f227e2bbfa2",
     "CapDAG/Query.lean": "34b70954d6515f24ac05517178d63ca6c0588ac9ab353b500756858ba5fba834",
     "CapDAG/Ranking.lean": "bc91e49b36aa687a2eaa72164ed4c9040e759b3a31f3a705b57932a584f8abf5",
@@ -56,16 +57,17 @@
   "project": ".",
   "link_directives": [],
   "output_digests": {
-    "assurance.json": "aa97660f19bef50bf9b1b922dc4d173f4a88a44a903d26b333c98384481045e2",
-    "capdagFormal.rs": "22ce370a987dc1ce5ccc825429a00c5e2994fe8702fd6023d7ce5efcf7a5a048",
+    "assurance.json": "5c696d5f89c7085a7f93cba4edaedaba1a039f22e9af7bc3ec35cd19e3772708",
+    "capdagFormal.rs": "8a964858bd7e092b7773b75fb09cf307ba12a5751e09c7e5a1eb18b6e9fcbd7a",
     "externs.json": "e94af184c3b3fe91b58486ee44423636715f0d3dc16b2031280c20f590b756a6",
-    "manifest.json": "75df16d23d41dfd359b0ce180a779e87c0358991ed673a937665874c2c222848",
+    "manifest.json": "ec83702097cd77e63a67edc1c3c4ca36639db1d7eab75df8a57e3259590f555c",
     "modules/CapDAG-Bifaci-Credit.rs": "509dd16935fe684396c3804281cc985dc1e466ed0784c3aa0a30bcdf84a59824",
     "modules/CapDAG-Bifaci-Flow.rs": "5c20191f8f8f116824d971b856a391fcfacd6128327408cfa2b542a4bef2c7b8",
     "modules/CapDAG-Bifaci-Hold.rs": "d3b871c7f1ad0f8364f8dcde065558aac6ff96c6c5902cbef8acacaac16e0e19",
     "modules/CapDAG-Bifaci-Pools.rs": "b30857e93921d4e1c7e252ad01ee5bc19db44e6294859dd00186af6842c75082",
     "modules/CapDAG-Bifaci-Request.rs": "e0b8906920215b6b4137b17e53a10be8206c9f835b9367f786ad99056064e514",
     "modules/CapDAG-Cap.rs": "d49a9a321507600a519f50f9099fb341c520f7afbd0743e0804df8f307f3014c",
+    "modules/CapDAG-Detect.rs": "513391e65f781550e1378b310f437af9021c36ebea5fe7458e4a943e2edcf467",
     "modules/CapDAG-Exec.rs": "3b91c01196ff0b8c8fbcfe1ce02b607fdb5b3c5072fa57fc1efa4182cd472e51",
     "modules/CapDAG-Query.rs": "fd2e83dfcb3fbe5c55cf873600096270c634dea3e37d611df1b12e89a9aaab60",
     "modules/CapDAG-Ranking.rs": "6576939a41e7364678ef97aa8b1bec5eab9a6e09d6a552a9b051d3177a31c377",
@@ -103,8 +105,8 @@
     "modules/TaggedUrn-Exec.rs": "c4cefb5406f3aca5edee163cdfc6c1e785edce8381753f22a89a853510ab3ad0",
     "modules/TaggedUrn-Sorted.rs": "8d6c40c14595ec21f777cd818b666cfbb843eedaaccce41674994432c078d671",
     "modules/TaggedUrn-Urn.rs": "56fa9e5d567c6c66c22061218f93b2a5de3fb0f723da7037198234843ef32cf5",
-    "names.json": "cc1f4b4302adb3ae41fcf6a9b9215084bc5845c1d94c0a5d9307f683bd0eb0e5",
-    "sources.json": "5953713aba7c4d7305d10940165a5620230170346c5467a2f2d0f788ab87575d"
+    "names.json": "471b721135ba75809aba54ef4566c2fa7a6093d585502642b0dfc8695bb3d2a2",
+    "sources.json": "8f7f947dcc726e8613ec7f68d41bcb4be0eb82578f62aa7a9e22f81288f8cb73"
   },
   "platform_products": []
 }

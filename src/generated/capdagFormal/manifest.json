@@ -681,10 +681,11 @@
     "CapDAG.Bifaci.Hold",
     "CapDAG.Run.Control",
     "CapDAG.Run.Step",
+    "CapDAG.Detect",
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 2085,
+  "declarations": 2139,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -979,6 +980,27 @@
       "rust_path": "bifaci::request::write",
       "lean_type": "Bool → CapDAG.Bifaci.Flow.FrameType → CapDAG.Bifaci.Request.Write",
       "source": "CapDAG/Bifaci/Request.lean:61:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.mostSpecific",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::most_specific",
+      "lean_type": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Bool",
+      "source": "CapDAG/Detect.lean:154:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.primary",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::primary",
+      "lean_type": "List TaggedUrn.Exec.Wf → Option Nat",
+      "source": "CapDAG/Detect.lean:176:1"
+    },
+    {
+      "lean_name": "CapDAG.Detect.stands",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::stands",
+      "lean_type": "List CapDAG.Detect.Candidate → List TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Bool",
+      "source": "CapDAG/Detect.lean:106:1"
     },
     {
       "lean_name": "CapDAG.Exec.accepts",

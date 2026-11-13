@@ -150,6 +150,18 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Detect.Candidate",
+    "kind": "type",
+    "rust_path": "detect::Candidate",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules",
+    "kind": "type",
+    "rust_path": "detect::Rules",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Effect",
     "kind": "type",
     "rust_path": "Effect",
@@ -477,6 +489,24 @@
     "lean_name": "CapDAG.Bifaci.Request.write",
     "kind": "function",
     "rust_path": "bifaci::request::write",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.mostSpecific",
+    "kind": "function",
+    "rust_path": "detect::most_specific",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.primary",
+    "kind": "function",
+    "rust_path": "detect::primary",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.stands",
+    "kind": "function",
+    "rust_path": "detect::stands",
     "renamed": false
   },
   {
@@ -1371,6 +1401,42 @@
     "lean_name": "CapDAG.Bifaci.Request.Write.suppress",
     "kind": "constructor",
     "rust_path": "bifaci::request::Write::Suppress",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.Candidate.mk",
+    "kind": "constructor",
+    "rust_path": "detect::Candidate",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.Candidate.urn",
+    "kind": "field",
+    "rust_path": "detect::Candidate.urn",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.Candidate.rules",
+    "kind": "field",
+    "rust_path": "detect::Candidate.rules",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.unruled",
+    "kind": "constructor",
+    "rust_path": "detect::Rules::Unruled",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.met",
+    "kind": "constructor",
+    "rust_path": "detect::Rules::Met",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.unmet",
+    "kind": "constructor",
+    "rust_path": "detect::Rules::Unmet",
     "renamed": true
   },
   {
