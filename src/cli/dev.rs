@@ -64,7 +64,7 @@ pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
             println!("{hash}");
             Ok(Exit::Ok)
         }
-        Command::BundleManifest { root, environment } => bundle_manifest(&root, &environment),
+        Command::BundleManifest { root, environment } => bundle_manifest(&root, &environment).await,
     }
 }
 
@@ -138,15 +138,23 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
 }
 
 /// Record what a build ships: every cartridge staged under `root`, with the
-/// hash of its directory, in `bundle.json` there. The build signs it. A
-/// manifest listing nothing is refused: it would describe a bundle that
-/// verifies and hosts nothing.
-fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
+/// hash of its directory, the fabric manifest version it was built against,
+/// and the cap groups it advertises, in `bundle.json` there. The build signs
+/// it. Each cartridge is started once here, for its HELLO, so that no host has
+/// to start every bundled cartridge to learn its caps. A manifest listing
+/// nothing is refused: it would describe a bundle that verifies and hosts
+/// nothing.
+async fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
     if !root.is_dir() {
         return Err(CliError::usage(format!("--root {}: no such directory", root.display())));
     }
+    let mut dirs = std::collections::BTreeMap::new();
+    collect_staged(root, &mut dirs)?;
     let mut staged = std::collections::BTreeMap::new();
-    collect_staged(root, &mut staged)?;
+    for (key, dir) in dirs {
+        let cartridge = staged_cartridge(&dir).await?;
+        staged.insert(key, cartridge);
+    }
     if staged.is_empty() {
         return Err(CliError::failed(format!("{} holds no staged cartridges", root.display()))
             .context("a manifest listing nothing would describe a bundle that verifies and hosts nothing"));
@@ -170,6 +178,25 @@ fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult<Exit>
     // The path alone on stdout, for the build to capture what to sign.
     println!("{}", path.display());
     Ok(Exit::Ok)
+}
+
+/// A staged cartridge, as its `cartridge.json` and its HELLO describe it.
+async fn staged_cartridge(dir: &std::path::Path) -> CliResult<crate::StagedCartridge> {
+    let path = dir.join("cartridge.json");
+    let bytes = std::fs::read(&path)
+        .map_err(|e| CliError::failed(format!("{} could not be read", path.display())).context(e.to_string()))?;
+    let record: crate::CartridgeJson = serde_json::from_slice(&bytes)
+        .map_err(|e| CliError::failed(format!("{} is not a cartridge.json", path.display())).context(e.to_string()))?;
+    let entry = record.resolve_entry_point(dir);
+    let cap_groups = crate::probe_cartridge_cap_groups(&entry).await.map_err(|e| {
+        CliError::failed(format!("{} {} could not be asked for its caps", record.name, record.version))
+            .context(e.to_string())
+    })?;
+    Ok(crate::StagedCartridge {
+        dir: dir.to_path_buf(),
+        fabric_manifest_version: record.fabric_manifest_version,
+        cap_groups,
+    })
 }
 
 /// Every `{slug}/v{n}/{channel}/{name}/{version}/` directory under a staged
