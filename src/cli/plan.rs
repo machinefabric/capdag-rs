@@ -17,6 +17,7 @@ use super::error::{CliError, CliResult, Exit};
 use super::inputs;
 use super::live::ProgressChoice;
 use super::names;
+use super::inspect::Inspection;
 use super::term::emit_record;
 use crate::fabric::registry::FabricRegistry;
 use crate::planner as p;
@@ -84,15 +85,25 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         files.extend(inputs::expand(given)?);
     }
     files.sort();
-    // Files of one type are one sequence; each type is its own source.
+    // Files of one type are one sequence; each type is its own source. The
+    // cartridges started to tell what the files are stop when they are told:
+    // a plan run with `--run` starts its own.
+    let inspection = Inspection::new(super::run::inspection_runtime(ctx, &registry)?, registry.clone());
     let mut groups: Vec<(MediaUrn, usize)> = Vec::new();
     for file in &files {
-        let media = inputs::detect(file, &registry).await?;
+        let media = inputs::detect(file, &inspection).await?;
+        if ctx.term.json {
+            emit_record(&serde_json::json!({
+                "type": "input", "file": file.display().to_string(),
+                "alias": names::media(&registry, &media), "urn": media.to_string(),
+            }));
+        }
         match groups.iter_mut().find(|(m, _)| m.is_equivalent(&media).unwrap_or(false)) {
             Some((_, count)) => *count += 1,
             None => groups.push((media, 1)),
         }
     }
+    drop(inspection);
     let sources: Vec<p::SourceSpec> = groups
         .iter()
         .map(|(media, count)| if *count > 1 { p::SourceSpec::sequence(media.clone()) } else { p::SourceSpec::single(media.clone()) })

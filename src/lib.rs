@@ -413,6 +413,6 @@ pub use input_resolver::{
     detect_file_media, extension_media, primary_media, resolve_file, resolve_input,
     resolve_inputs, resolve_paths, AdapterSource, CartridgeAdapterInvoker, ContentStructure,
     Detection, FileMedia, InputItem, InputResolverError, MediaAdapterRegistry, NoAdapters,
-    NoInvoker, ResolvedFile, ResolvedInputSet, ValueAdapter, ValueAdapterRegistry,
-    ValueAdapterResult, MAX_CONTENT_INSPECTION_BYTES,
+    NoInvoker, RelaySwitchAdapterInvoker, ResolvedFile, ResolvedInputSet, ValueAdapter,
+    ValueAdapterRegistry, ValueAdapterResult, MAX_CONTENT_INSPECTION_BYTES,
 };

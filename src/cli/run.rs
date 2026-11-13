@@ -22,6 +22,7 @@ use std::time::Duration;
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
 use super::inputs;
+use super::inspect::Inspection;
 use super::live::{Key, ProgressChoice, Shower};
 use super::names;
 use super::watch::Watch;
@@ -198,10 +199,9 @@ struct PlannedRun {
 pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = ctx.registry().await?;
     let target = resolve_target(ctx, &registry, &args.target).await?;
-    let wants_help = args.rest.iter().any(|a| a == "--help" || a == "-h");
-    let (runs, single_scalar) = match &target {
-        Target::Cap { cap, .. } => {
-            if wants_help {
+    if args.rest.iter().any(|a| a == "--help" || a == "-h") {
+        return match &target {
+            Target::Cap { cap, .. } => {
                 let media = |urn: &str| names::media_urn(&registry, urn);
                 let interface = InterfaceNames { cap: names::cap(&registry, cap), media: &media, urns: ctx.term.verbosity >= 1 };
                 let text = render_cap_interface(cap, &interface).map_err(|e| {
@@ -212,33 +212,84 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                     "\nExample:\n  capdag run {} <input> [options] [-o <dir>]",
                     names::cap(&registry, cap)
                 );
-                return Ok(Exit::Ok);
+                Ok(Exit::Ok)
             }
-            let cap = narrow_if_abstract(ctx, &registry, cap.clone(), &args).await?;
+            Target::Machine { path, notation } => super::check::show(ctx, &registry, path, notation).await,
+        };
+    }
+    let dev_dir = match &target {
+        Target::Cap { dev_dir, .. } => dev_dir.clone(),
+        Target::Machine { .. } => None,
+    };
+    // One runtime for the command: a cartridge started to inspect an input is
+    // the one that runs on it.
+    let runtime = runtime(ctx, &registry, &args, dev_dir).await?;
+    let inspection = Inspection::new(runtime.clone(), registry.clone());
+    let (runs, single_scalar) = match &target {
+        Target::Cap { cap, .. } => {
+            let cap = narrow_if_abstract(ctx, &registry, cap.clone(), &args, &inspection).await?;
             let runs = plan_cap_runs(&registry, &cap, &args).await?;
             let single = runs.len() == 1;
             (runs, single)
         }
         Target::Machine { path, notation } => {
-            if wants_help {
-                return super::check::show(ctx, &registry, path, notation).await;
-            }
-            let runs = plan_machine_runs(&registry, path, notation, &args).await?;
+            let runs = plan_machine_runs(&registry, path, notation, &args, &inspection).await?;
             let single = runs.len() == 1 && runs[0].strands.len() == 1;
             (runs, single)
         }
-    };
-    let dev_dir = match &target {
-        Target::Cap { dev_dir, .. } => dev_dir.clone(),
-        Target::Machine { .. } => None,
     };
     if ctx.term.json {
         // Under --json stdout is records only: every result is written as a
         // file, a single value too, and the files are named in each run's
         // `run_finished` record rather than listed.
-        return execute(ctx, &registry, &args, runs, dev_dir, false, &mut std::io::sink()).await;
+        return execute(ctx, &registry, &args, runtime, runs, false, &mut std::io::sink()).await;
     }
-    execute(ctx, &registry, &args, runs, dev_dir, single_scalar, &mut std::io::stdout()).await
+    execute(ctx, &registry, &args, runtime, runs, single_scalar, &mut std::io::stdout()).await
+}
+
+/// The cartridge-hosting runtime of one command: its dev binaries, its trace,
+/// and where it writes what it makes.
+async fn runtime(
+    ctx: &Ctx,
+    registry: &Arc<FabricRegistry>,
+    args: &Args,
+    dev_dir: Option<PathBuf>,
+) -> CliResult<Arc<CliRuntime>> {
+    let mut dev_binaries = inputs::dev_binaries(&args.dev_bins)?;
+    dev_binaries.extend(dev_dir);
+    let trace = match &args.trace {
+        Some(path) => Some(crate::ProtocolTraceSink::open(&path.display().to_string()).await.map_err(|e| {
+            CliError::failed(format!("the trace file {} could not be opened", path.display())).context(e.to_string())
+        })?),
+        None => None,
+    };
+    new_runtime(ctx, registry, dev_binaries, trace, args.output.clone().unwrap_or_else(|| PathBuf::from(".")))
+}
+
+/// A runtime that only inspects files: it runs nothing, so it has no dev
+/// binaries, no trace and nowhere to write.
+pub fn inspection_runtime(ctx: &Ctx, registry: &Arc<FabricRegistry>) -> CliResult<Arc<CliRuntime>> {
+    new_runtime(ctx, registry, Vec::new(), None, PathBuf::from("."))
+}
+
+fn new_runtime(
+    ctx: &Ctx,
+    registry: &Arc<FabricRegistry>,
+    dev_binaries: Vec<PathBuf>,
+    trace: Option<Arc<crate::ProtocolTraceSink>>,
+    persist_dir: PathBuf,
+) -> CliResult<Arc<CliRuntime>> {
+    Ok(Arc::new(CliRuntime::new(
+        ctx::user_cartridge_dir()?,
+        if ctx.offline { None } else { ctx::BAKED_REGISTRY_URL.map(str::to_string) },
+        ctx::BUILD_CHANNEL,
+        crate::FABRIC_MANIFEST_VERSION,
+        dev_binaries,
+        ctx::bundled_cartridges_dir(),
+        registry.clone(),
+        trace,
+        persist_dir,
+    )))
 }
 
 /// Run one cap on one value, and return what it gave: how the model commands
@@ -284,8 +335,9 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
         trace: None,
         dev_bins: Vec::new(),
     };
+    let runtime = runtime(ctx, &registry, &args, None).await?;
     let mut value: Vec<u8> = Vec::new();
-    match execute(ctx, &registry, &args, vec![run], None, true, &mut value).await? {
+    match execute(ctx, &registry, &args, runtime, vec![run], true, &mut value).await? {
         Exit::Run(RunOutcome::Completed) => Ok(value),
         other => Err(CliError { exit: other, ..CliError::failed(format!("{alias} did not complete")) }),
     }
@@ -358,7 +410,13 @@ pub async fn unknown_cap(registry: &FabricRegistry, token: &str, what: &str) -> 
 
 /// A generic cap (`convert-image`) is narrowed to the concrete one for its
 /// input's type, and `--to`'s.
-async fn narrow_if_abstract(ctx: &Ctx, registry: &Arc<FabricRegistry>, cap: Cap, args: &Args) -> CliResult<Cap> {
+async fn narrow_if_abstract(
+    ctx: &Ctx,
+    registry: &Arc<FabricRegistry>,
+    cap: Cap,
+    args: &Args,
+    inspection: &Inspection,
+) -> CliResult<Cap> {
     let alias = names::cap(registry, &cap);
     if !cap.is_abstract() {
         if args.to.is_some() {
@@ -377,7 +435,7 @@ async fn narrow_if_abstract(ctx: &Ctx, registry: &Arc<FabricRegistry>, cap: Cap,
                 .context("piped input has no type to tell it by")
                 .hint(format!("capdag run {alias} <file> --to <type>"))
         })?;
-    let media = inputs::detect(&input, registry).await?;
+    let media = inputs::detect(&input, inspection).await?;
     let target = match &args.to {
         Some(to) => Some(super::plan::target_media(registry, to).await?),
         None => None,
@@ -598,6 +656,7 @@ async fn plan_machine_runs(
     path: &Path,
     notation: &str,
     args: &Args,
+    inspection: &Inspection,
 ) -> CliResult<Vec<PlannedRun>> {
     let label = path.display().to_string();
     let resolved = super::check::resolve(registry, path, notation).await?;
@@ -701,7 +760,7 @@ async fn plan_machine_runs(
     };
     let mut file_inputs: Vec<(String, PathBuf, Vec<u8>)> = Vec::with_capacity(files.len());
     for file in &files {
-        let media = inputs::detect(file, registry).await?;
+        let media = inputs::detect(file, inspection).await?;
         let name = closest(&media, &inputs::describe(file, &media, registry), Some(file))?;
         file_inputs.push((name, file.clone(), inputs::read(file)?));
     }
@@ -861,31 +920,12 @@ async fn execute(
     ctx: &Ctx,
     registry: &Arc<FabricRegistry>,
     args: &Args,
+    runtime: Arc<CliRuntime>,
     runs: Vec<PlannedRun>,
-    dev_dir: Option<PathBuf>,
     single_scalar: bool,
     out: &mut dyn std::io::Write,
 ) -> CliResult<Exit> {
-    let mut dev_binaries = inputs::dev_binaries(&args.dev_bins)?;
-    dev_binaries.extend(dev_dir);
-    let trace = match &args.trace {
-        Some(path) => Some(crate::ProtocolTraceSink::open(&path.display().to_string()).await.map_err(|e| {
-            CliError::failed(format!("the trace file {} could not be opened", path.display())).context(e.to_string())
-        })?),
-        None => None,
-    };
     let output_dir = args.output.clone();
-    let runtime = Arc::new(CliRuntime::new(
-        ctx::user_cartridge_dir()?,
-        if ctx.offline { None } else { ctx::BAKED_REGISTRY_URL.map(str::to_string) },
-        ctx::BUILD_CHANNEL,
-        crate::FABRIC_MANIFEST_VERSION,
-        dev_binaries,
-        ctx::bundled_cartridges_dir(),
-        registry.clone(),
-        trace,
-        output_dir.clone().unwrap_or_else(|| PathBuf::from(".")),
-    ));
     let control = Arc::new(RunControl::new());
     let (observer, mut events) = RunObserver::new();
     let mut watch = Watch::new(ctx.term.verbosity);

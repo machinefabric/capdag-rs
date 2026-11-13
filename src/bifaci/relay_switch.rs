@@ -1681,6 +1681,45 @@ impl RelaySwitch {
         }
     }
 
+    /// Wait until a healthy master reports the cartridge `cartridge_id`, so a
+    /// request can be addressed to it
+    /// ([`register_external_request_for_cartridge`](Self::register_external_request_for_cartridge)),
+    /// or until `timeout` elapses. Returns the master index on success, or
+    /// `None` on timeout.
+    ///
+    /// A cartridge appears in its master's inventory when the master
+    /// advertises it, which can be before the master passes its identity
+    /// probe; until it does, a request addressed to the cartridge is refused
+    /// as going to an unhealthy master. This waits for both.
+    pub async fn wait_for_cartridge(
+        &self,
+        cartridge_id: &str,
+        timeout: std::time::Duration,
+    ) -> Option<usize> {
+        let started = std::time::Instant::now();
+        loop {
+            {
+                let masters = self.masters.read().await;
+                for (idx, master) in masters.iter().enumerate() {
+                    if master.healthy.load(Ordering::SeqCst)
+                        && master
+                            .installed_cartridges
+                            .read()
+                            .await
+                            .iter()
+                            .any(|c| c.id == cartridge_id)
+                    {
+                        return Some(idx);
+                    }
+                }
+            }
+            if started.elapsed() >= timeout {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     /// True when:
     ///   1. The number of connected masters is at least
     ///      `expected_master_count` (declared via

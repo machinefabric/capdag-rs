@@ -19,6 +19,7 @@ pub mod graph;
 pub mod info;
 pub mod inline;
 pub mod inputs;
+pub mod inspect;
 pub mod live;
 pub mod model;
 pub mod names;
