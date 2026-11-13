@@ -3,6 +3,36 @@
 //! Registry for JSON Schema profiles. Downloads and caches schemas from profile URLs
 //! for validating data against media def type definitions.
 //! Uses a two-level cache: disk-based cached schemas and in-memory compiled schemas.
+//!
+//! # The cache on disk
+//!
+//! The disk cache is shared: every capdag process on a machine reads and
+//! writes it, and they run at once. It follows the fabric definition cache's
+//! rules ([`crate::fabric::cache`]):
+//!
+//! ```text
+//! <os cache>/capdag/profile_schemas/              the profile-schema cache
+//!   capdag-rs-<version>/<sha256 of URL>.json      one schema, as this library at <version> keeps it
+//! ```
+//!
+//! - **One folder per library and version.** The schemas are capdag's own,
+//!   versioned with it, and each capdag library compiles them with its own
+//!   JSON Schema validator. So this library at one version reads and writes
+//!   only its own folder, and never an entry another library, or another
+//!   version of it, wrote under other rules.
+//! - **An entry is replaced whole** ([`crate::cache_file`]): written to a
+//!   temporary file in its folder and renamed over the entry, so a reader sees
+//!   the old entry or the new one, never part of one.
+//! - **A corrupt entry is an error.** An entry that cannot be read, does not
+//!   parse, holds another profile URL than its name is the hash of, or holds a
+//!   schema that does not compile stops the registry from opening with an
+//!   error that names the file. An entry past its time to live is removed and
+//!   fetched again when it is next needed.
+//!
+//! Before this layout, every library and version kept its entries directly in
+//! `profile_schemas/`, named by the first 16 hex digits of the URL's hash. This
+//! library never reads those files; [`ProfileSchemaRegistry::clear_cache`]
+//! removes them.
 
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
@@ -10,12 +40,16 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const CACHE_DURATION_HOURS: u64 = 24 * 7; // Cache for 1 week
+
+/// The folder this library keeps its entries in, in the profile-schema cache
+/// folder: the library and its version.
+pub const PROFILE_CACHE_LIBRARY_FOLDER: &str = concat!("capdag-rs-", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
@@ -53,6 +87,9 @@ impl std::fmt::Debug for CompiledSchema {
 #[derive(Debug)]
 pub struct ProfileSchemaRegistry {
     client: reqwest::Client,
+    /// The profile-schema cache folder, `<os cache>/capdag/profile_schemas`.
+    cache_root: PathBuf,
+    /// This library's folder in it, [`PROFILE_CACHE_LIBRARY_FOLDER`].
     cache_dir: PathBuf,
     /// In-memory cache of compiled schemas
     compiled_schemas: Arc<Mutex<HashMap<String, Arc<CompiledSchema>>>>,
@@ -60,16 +97,23 @@ pub struct ProfileSchemaRegistry {
 }
 
 impl ProfileSchemaRegistry {
-    /// Create a new ProfileSchemaRegistry with standard schemas bundled
+    /// Create a registry over the profile-schema cache folder in the operating
+    /// system's cache folder, loading the entries this library keeps there.
     pub async fn new() -> Result<Self, ProfileSchemaError> {
-        let cache_dir = Self::get_cache_dir()?;
-        Self::new_with_cache_dir(cache_dir).await
+        let cache_root = Self::get_cache_root()?;
+        Self::new_with_cache_dir(cache_root).await
     }
 
-    /// Create a new ProfileSchemaRegistry with a custom cache directory
-    pub async fn new_with_cache_dir(cache_dir: PathBuf) -> Result<Self, ProfileSchemaError> {
+    /// Create a registry over the profile-schema cache folder `cache_root`:
+    /// its entries are kept in `cache_root/`[`PROFILE_CACHE_LIBRARY_FOLDER`],
+    /// and loaded from there now. A corrupt entry is an error naming its file.
+    pub async fn new_with_cache_dir(cache_root: PathBuf) -> Result<Self, ProfileSchemaError> {
+        let cache_dir = cache_root.join(PROFILE_CACHE_LIBRARY_FOLDER);
         fs::create_dir_all(&cache_dir).map_err(|e| {
-            ProfileSchemaError::CacheError(format!("Failed to create cache directory: {}", e))
+            ProfileSchemaError::CacheError(format!(
+                "failed to create the profile-schema cache folder {}: {e}",
+                cache_dir.display()
+            ))
         })?;
 
         let client = reqwest::Client::builder()
@@ -85,6 +129,7 @@ impl ProfileSchemaRegistry {
 
         Ok(Self {
             client,
+            cache_root,
             cache_dir,
             compiled_schemas,
             offline_flag: Arc::new(AtomicBool::new(false)),
@@ -96,78 +141,125 @@ impl ProfileSchemaRegistry {
         self.offline_flag.store(offline, Ordering::Relaxed);
     }
 
-    fn get_cache_dir() -> Result<PathBuf, ProfileSchemaError> {
+    fn get_cache_root() -> Result<PathBuf, ProfileSchemaError> {
         let cache_dir = dirs::cache_dir().ok_or_else(|| {
             ProfileSchemaError::CacheError("Could not determine cache directory".to_string())
         })?;
         Ok(cache_dir.join("capdag").join("profile_schemas"))
     }
 
-    fn cache_key(&self, profile_url: &str) -> String {
+    /// The name an entry for `profile_url` is kept under: the SHA-256 of the
+    /// URL, in hex, with `.json`.
+    fn entry_file_name(profile_url: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(profile_url.as_bytes());
-        format!("{:x}", hasher.finalize())
+        format!("{:x}.json", hasher.finalize())
     }
 
     fn cache_file_path(&self, profile_url: &str) -> PathBuf {
-        let key = self.cache_key(profile_url);
-        self.cache_dir.join(format!("{}.json", &key[..16]))
+        self.cache_dir.join(Self::entry_file_name(profile_url))
     }
 
+    /// The error for an entry that is there and is not what its name says.
+    fn corrupt(path: &Path, detail: &str) -> ProfileSchemaError {
+        ProfileSchemaError::CacheError(format!(
+            "the cached profile schema {} is corrupt: {detail}; remove the file",
+            path.display()
+        ))
+    }
+
+    /// Every entry in this library's folder, compiled, by profile URL. A
+    /// temporary file is not an entry and is passed over; an expired entry is
+    /// removed; anything else that is not a whole, valid entry is an error
+    /// naming its file.
     fn load_all_cached_schemas(
-        cache_dir: &PathBuf,
+        cache_dir: &Path,
     ) -> Result<HashMap<String, Arc<CompiledSchema>>, ProfileSchemaError> {
         let mut schemas = HashMap::new();
 
-        if !cache_dir.exists() {
-            return Ok(schemas);
-        }
-
-        for entry in fs::read_dir(cache_dir).map_err(|e| {
-            ProfileSchemaError::CacheError(format!("Failed to read cache directory: {}", e))
-        })? {
+        let listing = fs::read_dir(cache_dir).map_err(|e| {
+            ProfileSchemaError::CacheError(format!(
+                "failed to read the profile-schema cache folder {}: {e}",
+                cache_dir.display()
+            ))
+        })?;
+        for entry in listing {
             let entry = entry.map_err(|e| {
-                ProfileSchemaError::CacheError(format!("Failed to read cache entry: {}", e))
+                ProfileSchemaError::CacheError(format!(
+                    "failed to read the profile-schema cache folder {}: {e}",
+                    cache_dir.display()
+                ))
             })?;
-
             let path = entry.path();
-            if let Some(extension) = path.extension() {
-                if extension == "json" {
-                    let content = fs::read_to_string(&path).map_err(|e| {
-                        ProfileSchemaError::CacheError(format!(
-                            "Failed to read cache file {:?}: {}",
-                            path, e
-                        ))
-                    })?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Self::corrupt(&path, "its name is not an entry's name")
+            })?;
+            if crate::cache_file::is_temporary(name) {
+                continue;
+            }
+            if !name.ends_with(".json") || path.is_dir() {
+                return Err(Self::corrupt(
+                    &path,
+                    "it is not an entry: the folder holds only `<sha256 of URL>.json` files",
+                ));
+            }
 
-                    let cache_entry: CacheEntry = match serde_json::from_str(&content) {
-                        Ok(entry) => entry,
-                        Err(_) => continue, // Skip invalid cache files
-                    };
+            let content = match fs::read(&path) {
+                Ok(content) => content,
+                // A peer removed it (expired) between the listing and the read.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    return Err(ProfileSchemaError::CacheError(format!(
+                        "the cached profile schema {} cannot be read: {e}",
+                        path.display()
+                    )))
+                }
+            };
+            let cache_entry: CacheEntry = serde_json::from_slice(&content)
+                .map_err(|e| Self::corrupt(&path, &e.to_string()))?;
+            if Self::entry_file_name(&cache_entry.profile_url) != name {
+                return Err(Self::corrupt(
+                    &path,
+                    &format!(
+                        "it holds the schema of {}, whose entry is {}",
+                        cache_entry.profile_url,
+                        Self::entry_file_name(&cache_entry.profile_url)
+                    ),
+                ));
+            }
 
-                    if cache_entry.is_expired() {
-                        // Remove expired cache file
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-
-                    // Compile the schema
-                    if let Ok(compiled) = JSONSchema::compile(&cache_entry.schema_json) {
-                        schemas.insert(
-                            cache_entry.profile_url.clone(),
-                            Arc::new(CompiledSchema {
-                                compiled,
-                                source: cache_entry.schema_json,
-                            }),
-                        );
+            if cache_entry.is_expired() {
+                match fs::remove_file(&path) {
+                    Ok(()) => {}
+                    // A peer removed or replaced it first.
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(ProfileSchemaError::CacheError(format!(
+                            "failed to remove the expired cached profile schema {}: {e}",
+                            path.display()
+                        )))
                     }
                 }
+                continue;
             }
+
+            let compiled = JSONSchema::compile(&cache_entry.schema_json).map_err(|e| {
+                Self::corrupt(&path, &format!("its schema does not compile: {e}"))
+            })?;
+            schemas.insert(
+                cache_entry.profile_url.clone(),
+                Arc::new(CompiledSchema {
+                    compiled,
+                    source: cache_entry.schema_json,
+                }),
+            );
         }
 
         Ok(schemas)
     }
 
+    /// Put the entry for `profile_url` in this library's folder, whole.
     fn save_to_cache(
         &self,
         profile_url: &str,
@@ -184,15 +276,13 @@ impl ProfileSchemaRegistry {
             ttl_hours: CACHE_DURATION_HOURS,
         };
 
-        let content = serde_json::to_string_pretty(&cache_entry).map_err(|e| {
-            ProfileSchemaError::CacheError(format!("Failed to serialize cache entry: {}", e))
+        let content = serde_json::to_vec_pretty(&cache_entry).map_err(|e| {
+            ProfileSchemaError::CacheError(format!(
+                "failed to serialize the cached profile schema of {profile_url}: {e}"
+            ))
         })?;
-
-        fs::write(&cache_file, content).map_err(|e| {
-            ProfileSchemaError::CacheError(format!("Failed to write cache file: {}", e))
-        })?;
-
-        Ok(())
+        crate::cache_file::write_atomically(&cache_file, &content)
+            .map_err(|e| ProfileSchemaError::CacheError(e.to_string()))
     }
 
     /// Get a compiled schema for a profile URL.
@@ -214,8 +304,11 @@ impl ProfileSchemaRegistry {
                     source: schema_json.clone(),
                 });
 
-                // Save to disk cache
-                let _ = self.save_to_cache(profile_url, &schema_json);
+                // Save to disk cache. The schema is at hand either way; a cache
+                // that cannot be written is reported, not hidden.
+                if let Err(e) = self.save_to_cache(profile_url, &schema_json) {
+                    tracing::warn!("profile schema {profile_url} is not cached: {e}");
+                }
 
                 // Add to memory cache
                 if let Ok(mut schemas) = self.compiled_schemas.lock() {
@@ -351,28 +444,7 @@ impl ProfileSchemaRegistry {
         })?;
 
         // Persist to disk cache so subsequent process starts pick it up.
-        let cache_file = self.cache_file_path(profile_url);
-        let cache_entry = CacheEntry {
-            schema_json: schema_json.clone(),
-            profile_url: profile_url.to_string(),
-            cached_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            ttl_hours: CACHE_DURATION_HOURS,
-        };
-        let cache_content = serde_json::to_string_pretty(&cache_entry).map_err(|e| {
-            ProfileSchemaError::CacheError(format!(
-                "Failed to serialize schema for {}: {}",
-                profile_url, e
-            ))
-        })?;
-        fs::write(&cache_file, cache_content).map_err(|e| {
-            ProfileSchemaError::CacheError(format!(
-                "Failed to write schema cache for {}: {}",
-                profile_url, e
-            ))
-        })?;
+        self.save_to_cache(profile_url, &schema_json)?;
 
         let mut schemas = self
             .compiled_schemas
@@ -388,26 +460,56 @@ impl ProfileSchemaRegistry {
         Ok(())
     }
 
-    /// Clear all caches (memory and disk)
+    /// Clear all caches: the in-memory one, this library's folder on disk
+    /// (emptied, not removed), and the files the older layout kept directly
+    /// in the profile-schema cache folder. Other libraries' and versions'
+    /// folders are left to them. Nothing is read first, so this clears a cache
+    /// holding a corrupt entry; a file a peer removed first is not an error.
     pub fn clear_cache(&self) -> Result<(), ProfileSchemaError> {
-        // Clear in-memory cache
         {
             let mut schemas = self.compiled_schemas.lock().map_err(|e| {
                 ProfileSchemaError::CacheError(format!("Failed to lock cache: {}", e))
             })?;
             schemas.clear();
         }
+        Self::remove_files_in(&self.cache_dir)?;
+        Self::remove_files_in(&self.cache_root)
+    }
 
-        // Clear disk cache
-        if self.cache_dir.exists() {
-            fs::remove_dir_all(&self.cache_dir).map_err(|e| {
-                ProfileSchemaError::CacheError(format!("Failed to clear cache: {}", e))
+    /// Remove every file directly in `folder`, leaving its folders.
+    fn remove_files_in(folder: &Path) -> Result<(), ProfileSchemaError> {
+        let listing = match fs::read_dir(folder) {
+            Ok(listing) => listing,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(ProfileSchemaError::CacheError(format!(
+                    "failed to read the profile-schema cache folder {}: {e}",
+                    folder.display()
+                )))
+            }
+        };
+        for entry in listing {
+            let entry = entry.map_err(|e| {
+                ProfileSchemaError::CacheError(format!(
+                    "failed to read the profile-schema cache folder {}: {e}",
+                    folder.display()
+                ))
             })?;
-            fs::create_dir_all(&self.cache_dir).map_err(|e| {
-                ProfileSchemaError::CacheError(format!("Failed to recreate cache: {}", e))
-            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                continue;
+            }
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(ProfileSchemaError::CacheError(format!(
+                        "failed to remove {}: {e}",
+                        path.display()
+                    )))
+                }
+            }
         }
-
         Ok(())
     }
 }
@@ -742,5 +844,221 @@ mod tests {
         assert!(registry
             .validate_cached("https://example.com/unknown", &json!("anything"))
             .is_ok());
+    }
+
+    /// Every cache entry under `root`, at whatever depth the layout keeps
+    /// them: the `.json` files, leaving out temporary files (named from a
+    /// `.`). The tests find entries this way rather than by the registry's own
+    /// path helpers, so that they say what is on disk.
+    fn cached_entry_files(root: &std::path::Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut folders = vec![root.to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            for entry in fs::read_dir(&folder).expect("the cache folder is readable") {
+                let path = entry.expect("a cache folder entry").path();
+                let name = path.file_name().unwrap().to_string_lossy().to_string();
+                if path.is_dir() {
+                    folders.push(path);
+                } else if name.ends_with(".json") && !name.starts_with('.') {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    /// A string schema whose description is `size` copies of `marker`: large
+    /// enough that writing it in place takes long enough for a reader to open
+    /// it half-written.
+    fn large_string_schema(marker: char, size: usize) -> JsonValue {
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "string",
+            "description": std::iter::repeat(marker).take(size).collect::<String>(),
+        })
+    }
+
+    // TEST604: Processes loading the profile-schema cache while others replace
+    // the same entry never read part of an entry: every load succeeds and
+    // holds the schema whole, the old one or the new one.
+    #[test]
+    fn test604_concurrent_readers_never_read_a_torn_entry() {
+        const URL: &str = "https://capdag.com/schema/test604-large";
+        const SIZE: usize = 512 * 1024;
+        const WRITES: usize = 60;
+        let temp_dir = TempDir::new().expect("a temporary folder");
+        let root = temp_dir.path().to_path_buf();
+        let runtime = || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime")
+        };
+        runtime()
+            .block_on(ProfileSchemaRegistry::new_with_cache_dir(root.clone()))
+            .expect("the registry opens")
+            .insert_schema(URL, large_string_schema('a', SIZE))
+            .expect("the seed is written");
+
+        let writing = Arc::new(AtomicBool::new(true));
+        let writers: Vec<_> = ['b', 'c']
+            .into_iter()
+            .map(|marker| {
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    let registry = runtime()
+                        .block_on(ProfileSchemaRegistry::new_with_cache_dir(root))
+                        .expect("the writer's registry opens");
+                    for _ in 0..WRITES {
+                        registry
+                            .insert_schema(URL, large_string_schema(marker, SIZE))
+                            .expect("the entry is written");
+                    }
+                })
+            })
+            .collect();
+        let readers: Vec<_> = (0..3)
+            .map(|_| {
+                let root = root.clone();
+                let writing = Arc::clone(&writing);
+                std::thread::spawn(move || {
+                    let runtime = runtime();
+                    let mut loads = 0;
+                    while writing.load(Ordering::Relaxed) || loads == 0 {
+                        let registry = runtime
+                            .block_on(ProfileSchemaRegistry::new_with_cache_dir(root.clone()))
+                            .unwrap_or_else(|e| panic!("load {loads} failed: {e}"));
+                        assert!(
+                            registry.schema_exists(URL),
+                            "load {loads} lost the entry: it read part of it"
+                        );
+                        assert!(registry.validate_cached(URL, &json!("text")).is_ok());
+                        assert!(registry.validate_cached(URL, &json!(7)).is_err());
+                        loads += 1;
+                    }
+                    loads
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().expect("a writer panicked");
+        }
+        writing.store(false, Ordering::Relaxed);
+        for reader in readers {
+            let loads = reader.join().expect("a reader read a torn entry");
+            assert!(loads > 0);
+        }
+        let entries = cached_entry_files(&root);
+        assert_eq!(entries.len(), 1, "one entry, and no temporary file left: {entries:?}");
+    }
+
+    // TEST611: A cache entry that is there and does not parse is an error that
+    // names its file; the registry does not open over it as if it were absent.
+    #[tokio::test]
+    async fn test611_corrupt_entry_is_an_error_naming_its_file() {
+        let (registry, temp_dir) = create_empty_test_registry().await;
+        registry
+            .insert_schema(PROFILE_STR, schema_body(PROFILE_STR))
+            .expect("the entry is written");
+        drop(registry);
+        let entries = cached_entry_files(temp_dir.path());
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        fs::write(&entries[0], "{\"schema_json\": {\"type\": \"str").expect("the entry is cut short");
+
+        let err = ProfileSchemaRegistry::new_with_cache_dir(temp_dir.path().to_path_buf())
+            .await
+            .expect_err("a corrupt entry must stop the registry from opening");
+        let message = err.to_string();
+        assert!(
+            message.contains(&entries[0].display().to_string()),
+            "the error names the file: {message}"
+        );
+        assert!(message.contains("corrupt"), "{message}");
+    }
+
+    // TEST615: A cache entry that parses but is not the schema its file names
+    // (it holds another profile URL, or a body that does not compile) is an
+    // error naming its file.
+    #[tokio::test]
+    async fn test615_entry_not_matching_its_file_is_an_error() {
+        // Another profile URL than its file name says.
+        let (registry, temp_dir) = create_empty_test_registry().await;
+        registry
+            .insert_schema(PROFILE_STR, schema_body(PROFILE_STR))
+            .expect("str is written");
+        registry
+            .insert_schema(PROFILE_INT, schema_body(PROFILE_INT))
+            .expect("int is written");
+        drop(registry);
+        let entries = cached_entry_files(temp_dir.path());
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        let (int_entry, str_entry): (Vec<_>, Vec<_>) = entries.iter().partition(|path| {
+            fs::read_to_string(path).unwrap().contains(PROFILE_INT)
+        });
+        fs::copy(int_entry[0], str_entry[0]).expect("str's file now holds int");
+        let err = ProfileSchemaRegistry::new_with_cache_dir(temp_dir.path().to_path_buf())
+            .await
+            .expect_err("an entry holding another URL must stop the registry from opening");
+        assert!(
+            err.to_string().contains(&str_entry[0].display().to_string()),
+            "the error names the file: {err}"
+        );
+
+        // A body that does not compile.
+        let (registry, temp_dir) = create_empty_test_registry().await;
+        registry
+            .insert_schema(PROFILE_STR, schema_body(PROFILE_STR))
+            .expect("str is written");
+        drop(registry);
+        let entries = cached_entry_files(temp_dir.path());
+        let mut entry: JsonValue =
+            serde_json::from_str(&fs::read_to_string(&entries[0]).unwrap()).unwrap();
+        entry["schema_json"]["type"] = json!(99);
+        fs::write(&entries[0], serde_json::to_string(&entry).unwrap()).unwrap();
+        let err = ProfileSchemaRegistry::new_with_cache_dir(temp_dir.path().to_path_buf())
+            .await
+            .expect_err("a schema that does not compile must stop the registry from opening");
+        assert!(
+            err.to_string().contains(&entries[0].display().to_string()),
+            "the error names the file: {err}"
+        );
+    }
+
+    // TEST654: A library keeps its entries in its own folder,
+    // `<cache>/<library>-<version>/`, and reads no other: neither another
+    // library's or version's folder nor the older layout's files directly in
+    // the cache folder. Clearing the cache empties its own folder and removes
+    // the older layout's files, and leaves other folders alone.
+    #[tokio::test]
+    async fn test654_entries_live_in_the_library_version_folder() {
+        let temp_dir = TempDir::new().expect("a temporary folder");
+        let root = temp_dir.path();
+        let own = root.join(format!("capdag-rs-{}", env!("CARGO_PKG_VERSION")));
+        let other = root.join("capdag-go-0.0.1");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("not-read.json"), "not json").unwrap();
+        let legacy = root.join("0123456789abcdef.json");
+        fs::write(&legacy, "not json either").unwrap();
+        let legacy_temporary = root.join(".0123456789abcdef.json.1-0.tmp");
+        fs::write(&legacy_temporary, "").unwrap();
+
+        let registry = ProfileSchemaRegistry::new_with_cache_dir(root.to_path_buf())
+            .await
+            .expect("other folders and the older layout are not read");
+        registry
+            .insert_schema(PROFILE_STR, schema_body(PROFILE_STR))
+            .expect("the entry is written");
+        let mut hasher = Sha256::new();
+        hasher.update(PROFILE_STR.as_bytes());
+        let entry = own.join(format!("{:x}.json", hasher.finalize()));
+        assert!(entry.is_file(), "the entry is {}", entry.display());
+
+        registry.clear_cache().expect("the cache clears");
+        assert!(!entry.exists());
+        assert!(own.is_dir(), "the library's folder stays, emptied");
+        assert!(!legacy.exists(), "the older layout's files are removed");
+        assert!(!legacy_temporary.exists());
+        assert!(other.join("not-read.json").exists(), "another library's folder is left");
     }
 }
