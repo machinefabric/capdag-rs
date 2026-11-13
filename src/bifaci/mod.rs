@@ -19,6 +19,7 @@ pub mod launch;
 pub mod live_feed;
 pub mod local_socket;
 pub mod manifest;
+pub mod peer_hold;
 pub mod policy;
 pub mod pools;
 pub mod protocol_trace;
@@ -34,6 +35,8 @@ pub mod stats;
 mod conformance_tests;
 #[cfg(test)]
 mod integration_tests;
+#[cfg(test)]
+mod peer_hold_tests;
 
 /// CBOR-decode a response chunk payload to extract raw bytes.
 ///

@@ -1275,6 +1275,38 @@ impl CartridgeRepo {
         suggestions
     }
 
+    /// The cartridges of `registry_url`'s `channel` whose declared caps serve
+    /// `request` — a cap a cartridge's peer call named — each with the cap
+    /// that serves it. This is
+    /// DISPATCH, not resolution: a peer request is served by any cap that can
+    /// serve it, as the switch routes it (`is_dispatchable`), and which one
+    /// serves is the ranking's choice among these ([`CapUrn::select`]).
+    /// Ordered by cartridge id, so the ranking's tie rule picks
+    /// the same one every time.
+    pub async fn get_cartridges_serving(
+        &self,
+        registry_url: &str,
+        channel: CartridgeChannel,
+        request: &crate::urn::cap_urn::CapUrn,
+    ) -> Vec<(String, crate::urn::cap_urn::CapUrn)> {
+        let caches = self.caches.read().await;
+        let mut serving: Vec<(&CartridgeKey, crate::urn::cap_urn::CapUrn)> = Vec::new();
+        for cache in caches.values() {
+            for (key, cartridge) in &cache.cartridges {
+                if key.registry_url != registry_url || key.channel != channel {
+                    continue;
+                }
+                for cap in cartridge.iter_caps() {
+                    if cap.urn.is_dispatchable(request) {
+                        serving.push((key, cap.urn.clone()));
+                    }
+                }
+            }
+        }
+        serving.sort_by(|(a, _), (b, _)| a.id.cmp(&b.id));
+        serving.into_iter().map(|(key, cap)| (key.id.clone(), cap)).collect()
+    }
+
     /// Get all available cartridges from all repos. Returns
     /// `(registry_url, channel, id, info)` so consumers can render
     /// the (registry, channel) distinction without looking it up

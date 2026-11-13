@@ -63,7 +63,7 @@ pub use cli_cap::{
     CapInvocation, CapToken, SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
 };
 pub use cli_output::{emit_terminals, emit_terminals_by_output, extension_for_media, EmitOptions};
-pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_UNSCOPED_FLOW};
+pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_PEER_HOLD, CLI_UNSCOPED_FLOW};
 pub use cli_session::{
     finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, StrandFailure,
     StrandHandle, StrandNote, StrandReport, StrandRun,
@@ -104,7 +104,7 @@ pub use executor::{
     map_progress, run_dag_on_context, BundledProvider, CapProgressFn, CartridgeAdapterGroups,
     RefusedAdapterGroup,
     CapStepProgressFn, CartridgeManager, CollateralCause, DagOutput, ExecutionContext,
-    ExecutionError, HostableCartridge, ProgressMapper, RunCancel,
+    ExecutionError, HostableCartridge, PeerSource, ProgressMapper, RunCancel,
 };
 
 pub use stream_io::{
