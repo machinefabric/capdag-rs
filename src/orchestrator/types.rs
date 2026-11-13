@@ -12,6 +12,23 @@ use thiserror::Error;
 // Error Types
 // =============================================================================
 
+impl ParseOrchestrationError {
+    /// What a registry lookup of the cap `cap_urn` that came back
+    /// empty-handed means for a plan: `CapNotFound` when the registry holds
+    /// no such cap, else `DefinitionUnavailable` carrying what kept it.
+    pub(crate) fn from_cap_lookup(cap_urn: &str, error: crate::FabricRegistryError) -> Self {
+        match error {
+            crate::FabricRegistryError::NotFound(_) => Self::CapNotFound {
+                cap_urn: cap_urn.to_string(),
+            },
+            error => Self::DefinitionUnavailable {
+                urn: cap_urn.to_string(),
+                error,
+            },
+        }
+    }
+}
+
 /// Errors that can occur during machine notation parsing and orchestration
 #[derive(Debug, Error)]
 pub enum ParseOrchestrationError {
@@ -22,6 +39,15 @@ pub enum ParseOrchestrationError {
     /// Cap URN not found in registry
     #[error("Cap URN '{cap_urn}' not found in registry")]
     CapNotFound { cap_urn: String },
+
+    /// A definition the plan needs — a cap, a media def, a cap alias — is in
+    /// the registry and could not be had from it: its fetch was refused or
+    /// got no answer, or it is not fetched yet.
+    #[error("the definition of '{urn}' could not be had from the registry: {error}")]
+    DefinitionUnavailable {
+        urn: String,
+        error: crate::FabricRegistryError,
+    },
 
     /// Graph contains a cycle (not a DAG)
     #[error("Graph is not a DAG, contains cycle involving nodes: {cycle_nodes:?}")]

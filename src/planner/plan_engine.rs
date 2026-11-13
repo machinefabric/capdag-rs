@@ -1173,8 +1173,17 @@ impl LiveCapFab {
             .collect();
 
         'caps: for cap_urn in self.cap_urns() {
-            let Some(cap) = registry.get_cached_cap(&cap_urn.to_string()) else {
-                continue;
+            let cap = match registry.get_cached_cap(&cap_urn.to_string()) {
+                Ok(cap) => cap,
+                // A graph cap the registry holds no definition of offers no
+                // args to merge into.
+                Err(crate::FabricRegistryError::NotFound(_)) => continue,
+                Err(error) => {
+                    return Err(PlanError::DefinitionUnavailable {
+                        cap_urn: cap_urn.to_string(),
+                        error: error.to_string(),
+                    })
+                }
             };
             let arg_urns: Vec<MediaUrn> = cap
                 .args

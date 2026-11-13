@@ -317,12 +317,16 @@ async fn unknown(ctx: &Ctx, words: Vec<String>) -> CliResult<Exit> {
             .hint(format!("did you mean `capdag {near}`?")));
     }
     // A capability's name: the bare form is not a command. Say how to run it.
-    if let Ok(registry) = ctx.registry().await {
-        if let Ok(cap) = registry.get_cap(&word).await {
+    // Whether it names one is the registry's to say: when the registry
+    // cannot be asked, that is said, not "no capability".
+    let registry = ctx.registry().await?;
+    match registry.get_cap(&word).await {
+        Ok(cap) => {
             return Err(CliError::usage(format!("'{word}' is a capability, not a command"))
                 .context(format!("{} — {}", names::cap(&registry, &cap), cap.title))
                 .hint(format!("run it with: capdag run {word}{rest}")));
         }
+        Err(e) => ctx::nothing_by_that_name(e)?,
     }
     Err(CliError::usage(format!("there is no command or capability named `{word}`"))
         .context(format!("the commands are: {}", commands.join(", ")))

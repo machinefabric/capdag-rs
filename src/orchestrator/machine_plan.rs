@@ -25,8 +25,9 @@ use crate::MediaUrn;
 use super::types::ParseOrchestrationError;
 
 /// Translate a `MachineParseError` from the resolver into the orchestrator's
-/// error type: an unknown cap and a cycle keep their own variants, so a caller
-/// can tell them from notation that does not parse.
+/// error type: an unknown cap, a definition the registry could not give, and a
+/// cycle keep their own variants, so a caller can tell them from notation that
+/// does not parse.
 pub(crate) fn translate_machine_parse_error(
     err: crate::machine::MachineParseError,
 ) -> ParseOrchestrationError {
@@ -34,6 +35,9 @@ pub(crate) fn translate_machine_parse_error(
     match err {
         MachineParseError::Resolution(MachineAbstractionError::UnknownCap { cap_urn }) => {
             ParseOrchestrationError::CapNotFound { cap_urn }
+        }
+        MachineParseError::Resolution(MachineAbstractionError::DefinitionUnavailable { urn, error }) => {
+            ParseOrchestrationError::DefinitionUnavailable { urn, error }
         }
         MachineParseError::Resolution(MachineAbstractionError::CyclicMachineStrand {
             strand_index,

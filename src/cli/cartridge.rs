@@ -213,10 +213,14 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
         name.to_string()
     } else {
         let registry = ctx.registry().await?;
-        let cap = registry.get_cap(name).await.map_err(|_| {
-            CliError::usage(format!("there is no cartridge or capability named '{name}'"))
-                .hint("see the cartridges with: capdag cartridge list; find a capability with: capdag caps")
-        })?;
+        let cap = match registry.get_cap(name).await {
+            Ok(cap) => cap,
+            Err(e) => {
+                super::ctx::nothing_by_that_name(e)?;
+                return Err(CliError::usage(format!("there is no cartridge or capability named '{name}'"))
+                    .hint("see the cartridges with: capdag cartridge list; find a capability with: capdag caps"));
+            }
+        };
         if let Some(provider) = bundled_providers(&cap.urn).await?.first() {
             let alias = names::cap(&registry, &cap);
             if ctx.term.json {

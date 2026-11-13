@@ -33,26 +33,45 @@ pub async fn info(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         // A cap, a media type, or neither.
         match registry.get_cap(name).await {
             Ok(cap) => show_cap(ctx, &registry, &cap).await?,
-            Err(_) => match media_named(&registry, name).await {
-                Some(media) => show_media(ctx, &registry, &media).await?,
-                None => return Err(super::run::unknown_cap(&registry, name, "capability or media type").await),
-            },
+            Err(e) => {
+                super::ctx::nothing_by_that_name(e)?;
+                match media_named(&registry, name).await? {
+                    Some(media) => show_media(ctx, &registry, &media).await?,
+                    None => return Err(super::run::unknown_cap(&registry, name, "capability or media type").await),
+                }
+            }
         }
     }
     Ok(Exit::Ok)
 }
 
-async fn media_named(registry: &crate::FabricRegistry, name: &str) -> Option<crate::MediaUrn> {
+/// The media type `name` names, `None` when the registry has none by that
+/// name, and the registry's failure when it could not be asked.
+async fn media_named(registry: &crate::FabricRegistry, name: &str) -> CliResult<Option<crate::MediaUrn>> {
     let urn = if name.contains(':') {
         name.to_string()
     } else {
-        registry
+        match registry
             .resolve_alias_typed(name, Some(crate::fabric::alias::AliasTargetKind::Media))
             .await
-            .ok()?
+        {
+            Ok(urn) => urn,
+            Err(e) => {
+                super::ctx::nothing_by_that_name(e)?;
+                return Ok(None);
+            }
+        }
     };
-    let media = crate::MediaUrn::from_string(&urn).ok()?;
-    registry.get_media_def(&media.to_string()).await.ok().map(|_| media)
+    let Ok(media) = crate::MediaUrn::from_string(&urn) else {
+        return Ok(None);
+    };
+    match registry.get_media_def(&media.to_string()).await {
+        Ok(_) => Ok(Some(media)),
+        Err(e) => {
+            super::ctx::nothing_by_that_name(e)?;
+            Ok(None)
+        }
+    }
 }
 
 async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> CliResult<()> {

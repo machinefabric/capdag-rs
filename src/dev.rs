@@ -72,6 +72,12 @@ pub enum DevError {
         dev_urn: String,
         fabric_urn: String,
     },
+    /// Whether the fabric already defines an alias the dev cap claims could
+    /// not be asked: the registry refused the fetch, or did not answer.
+    FabricUnavailable {
+        alias: String,
+        error: crate::FabricRegistryError,
+    },
 }
 
 impl std::fmt::Display for DevError {
@@ -154,6 +160,10 @@ impl std::fmt::Display for DevError {
                  alias to a different cap '{fabric_urn}'. A dev cartridge may declare caps the \
                  fabric does not know, but its aliases must not collide with the fabric. Rename \
                  the dev cap's alias."
+            ),
+            DevError::FabricUnavailable { alias, error } => write!(
+                f,
+                "whether the fabric already defines alias '{alias}' could not be checked: {error}"
             ),
         }
     }
@@ -636,7 +646,20 @@ pub async fn check_no_fabric_conflict(
 ) -> Result<(), DevError> {
     let dev_urn = cap.urn.to_string();
     for alias in cap.get_aliases() {
-        if let Ok(target) = registry.resolve_alias(alias).await {
+        // An alias the fabric does not define is the ordinary case for a dev
+        // cap: nothing to conflict with. A fetch the registry refused says
+        // nothing either way, and stops the check.
+        let resolved = match registry.resolve_alias(alias).await {
+            Ok(target) => Some(target),
+            Err(crate::FabricRegistryError::NotFound(_)) => None,
+            Err(error) => {
+                return Err(DevError::FabricUnavailable {
+                    alias: alias.clone(),
+                    error,
+                })
+            }
+        };
+        if let Some(target) = resolved {
             // Compare canonical forms — resolve_alias returns the target URN
             // string; a dev cap providing the SAME fabric cap (e.g. identity) is
             // not a conflict.

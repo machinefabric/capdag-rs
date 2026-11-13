@@ -351,8 +351,15 @@ fn parse_program(
             // A token containing ':' is a URN, not an alias — but the
             // grammar's `alias` rule already forbids ':' in a cap-position
             // name, so any name reaching here is alias-shaped. Resolve it.
-            let Some(target) = registry.resolve_alias_cached(&name) else {
-                continue; // not a known alias → phase 4 yields UndefinedAlias
+            // No alias by this name in the registry → phase 4 yields
+            // UndefinedAlias. An alias the registry has and that could not
+            // be fetched is reported as what kept it, never as undefined.
+            let target = match registry.resolve_alias_cached(&name) {
+                Ok(Some(target)) => target,
+                Ok(None) => continue,
+                Err(error) => {
+                    return Err(MachineAbstractionError::DefinitionUnavailable { urn: name, error }.into())
+                }
             };
             let cap_urn =
                 CapUrn::from_string(&target).map_err(|_| MachineSyntaxError::AliasNotACap {
@@ -853,10 +860,11 @@ fn type_nodes(
         let (cap_urn, _) = alias_map
             .get(&w.cap_alias)
             .expect("cap alias was validated above");
-        let cap = registry.get_cached_cap(&cap_urn.to_string()).ok_or_else(|| {
-            MachineAbstractionError::UnknownCap {
-                cap_urn: cap_urn.to_string(),
-            }
+        let cap_urn_text = cap_urn.to_string();
+        let cap = registry.get_cached_cap(&cap_urn_text).map_err(|e| {
+            MachineAbstractionError::from_lookup(&cap_urn_text, e, || MachineAbstractionError::UnknownCap {
+                cap_urn: cap_urn_text.clone(),
+            })
         })?;
         Ok((cap_urn.clone(), cap))
     };
@@ -1185,15 +1193,30 @@ fn included_notations(
 /// Fetch into the registry's cache the cap definitions one notation names:
 /// every header's cap, and every registered cap alias used in step position.
 async fn fetch_named_caps(input: &str, registry: &FabricRegistry) -> Result<(), MachineParseError> {
+    // A cap the registry does not have, or that does not hold, makes the
+    // notation's cap invalid; one that could not be fetched is reported as
+    // what kept it.
+    let unresolved = |name: &str, error: FabricRegistryError, details: &dyn Fn(&FabricRegistryError) -> String| -> MachineParseError {
+        match error {
+            FabricRegistryError::NotFound(_)
+            | FabricRegistryError::ParseError(_)
+            | FabricRegistryError::ValidationError(_) => MachineSyntaxError::InvalidCapUrn {
+                alias: name.to_string(),
+                details: details(&error),
+            }
+            .into(),
+            error => MachineAbstractionError::DefinitionUnavailable {
+                urn: name.to_string(),
+                error,
+            }
+            .into(),
+        }
+    };
     let cap_urns = extract_header_cap_urns(input)?;
     for urn in &cap_urns {
-        registry
-            .get_cap(urn)
-            .await
-            .map_err(|e| MachineSyntaxError::InvalidCapUrn {
-                alias: urn.clone(),
-                details: format!("registry could not resolve cap: {}", e),
-            })?;
+        registry.get_cap(urn).await.map_err(|e| {
+            unresolved(urn, e, &|e| format!("registry could not resolve cap: {}", e))
+        })?;
     }
 
     // Warm cap aliases used in wirings without a local header. A name that
@@ -1208,13 +1231,12 @@ async fn fetch_named_caps(input: &str, registry: &FabricRegistry) -> Result<(), 
         {
             Ok(target_cap_urn) => {
                 registry.get_cap(&target_cap_urn).await.map_err(|e| {
-                    MachineSyntaxError::InvalidCapUrn {
-                        alias: name.clone(),
-                        details: format!(
+                    unresolved(name, e, &|e| {
+                        format!(
                             "alias resolved to cap '{}' but the registry could not load it: {}",
                             target_cap_urn, e
-                        ),
-                    }
+                        )
+                    })
                 })?;
             }
             Err(FabricRegistryError::NotFound(_)) => {
@@ -1231,11 +1253,7 @@ async fn fetch_named_caps(input: &str, registry: &FabricRegistry) -> Result<(), 
                 .into());
             }
             Err(e) => {
-                return Err(MachineSyntaxError::InvalidCapUrn {
-                    alias: name.clone(),
-                    details: format!("alias resolution failed: {}", e),
-                }
-                .into());
+                return Err(unresolved(name, e, &|e| format!("alias resolution failed: {}", e)));
             }
         }
     }

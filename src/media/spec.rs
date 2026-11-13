@@ -565,7 +565,8 @@ impl ResolvedMediaDef {
 /// * `registry` - The FabricRegistry for cache and remote lookups
 ///
 /// # Errors
-/// Returns `MediaDefError::UnresolvableMediaUrn` if the media URN cannot be resolved.
+/// Returns `MediaDefError::UnresolvableMediaUrn` if the registry holds no such
+/// media def, and `MediaDefError::Unavailable` if its fetch failed.
 pub async fn resolve_media_urn(
     media_urn: &str,
     registry: &crate::media::registry::FabricRegistry,
@@ -584,10 +585,14 @@ pub async fn resolve_media_urn(
             metadata: stored_spec.metadata,
             extensions: stored_spec.extensions,
         }),
-        Err(e) => Err(MediaDefError::UnresolvableMediaUrn(format!(
+        Err(e @ crate::FabricRegistryError::NotFound(_)) => Err(MediaDefError::UnresolvableMediaUrn(format!(
             "cannot resolve media URN '{}' via registry: {}",
             media_urn, e
         ))),
+        Err(e) => Err(MediaDefError::Unavailable {
+            media_urn: media_urn.to_string(),
+            error: e.to_string(),
+        }),
     }
 }
 
@@ -617,6 +622,9 @@ pub fn validate_media_defs_no_duplicates(media_defs: &[MediaDef]) -> Result<(), 
 pub enum MediaDefError {
     /// Media URN cannot be resolved (not in media_defs and not in registry)
     UnresolvableMediaUrn(String),
+    /// The registry holds the media def and it could not be had from it: its
+    /// fetch was refused or got no answer. `error` is the registry's account.
+    Unavailable { media_urn: String, error: String },
     /// Duplicate media URN in media_defs array
     DuplicateMediaUrn(String),
 }
@@ -630,6 +638,9 @@ impl fmt::Display for MediaDefError {
                     "cannot resolve media URN '{}' - not found in media_defs or registry",
                     urn
                 )
+            }
+            MediaDefError::Unavailable { media_urn, error } => {
+                write!(f, "media URN '{media_urn}' could not be had from the registry: {error}")
             }
             MediaDefError::DuplicateMediaUrn(urn) => {
                 write!(

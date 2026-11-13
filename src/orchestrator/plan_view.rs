@@ -32,6 +32,11 @@ pub enum PlanViewError {
     /// The registry's cache holds no definition for a cap the plan runs.
     #[error("No cached cap for '{0}'")]
     MissingCap(String),
+    /// A definition the plan names is in the registry and could not be had
+    /// from it: its fetch was refused or got no answer, or it is not fetched
+    /// yet. `error` is the registry's account of it.
+    #[error("the definition of '{urn}' could not be had from the registry: {error}")]
+    DefinitionUnavailable { urn: String, error: String },
     /// The type a node holds cannot be derived from the plan.
     #[error("the type plan node '{node}' holds cannot be derived: {reason}")]
     UnderivableMedia { node: String, reason: String },
@@ -208,16 +213,25 @@ impl PlanView {
                 }
             }
         }
+        // Missing only when the registry holds no such definition; one that
+        // could not be had is reported as what kept it.
+        let unavailable = |urn: &str, error: crate::FabricRegistryError, absent: PlanViewError| match error {
+            crate::FabricRegistryError::NotFound(_) => absent,
+            error => PlanViewError::DefinitionUnavailable {
+                urn: urn.to_string(),
+                error: error.to_string(),
+            },
+        };
         let title_of = |urn: &str| -> Result<String, PlanViewError> {
             registry
                 .get_cached_media_def(urn)
                 .map(|def| def.title)
-                .ok_or_else(|| PlanViewError::MissingMediaDef(urn.to_string()))
+                .map_err(|e| unavailable(urn, e, PlanViewError::MissingMediaDef(urn.to_string())))
         };
         let cap_of = |urn: &str| -> Result<crate::Cap, PlanViewError> {
             registry
                 .get_cached_cap(urn)
-                .ok_or_else(|| PlanViewError::MissingCap(urn.to_string()))
+                .map_err(|e| unavailable(urn, e, PlanViewError::MissingCap(urn.to_string())))
         };
 
         let mut ids: Vec<&String> = plan.nodes.keys().collect();

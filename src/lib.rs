@@ -95,7 +95,9 @@ pub use fabric::alias::{
     AliasTargetKind, StoredAlias,
 };
 pub use fabric::dim::{check_dim_refs, DimError, DimRef, DimTag, StoredDim, StoredDimValue};
-pub use fabric::registry::{FabricRegistry, FabricRegistryError, RegistryConfig, StoredMediaDef};
+pub use fabric::registry::{
+    FabricRegistry, FabricRegistryError, FetchCause, FetchFailure, RegistryConfig, StoredMediaDef,
+};
 
 // Build-time-baked fabric manifest version (see capdag/build.rs).
 pub use cartridge_registry_version::CARTRIDGE_REGISTRY_VERSION;

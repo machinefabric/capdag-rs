@@ -331,7 +331,10 @@ pub async fn target_media(registry: &FabricRegistry, token: &str) -> CliResult<M
             .await
         {
             Ok(target) => target,
-            Err(_) => format!("media:ext={token}"),
+            Err(e) => {
+                super::ctx::nothing_by_that_name(e)?;
+                format!("media:ext={token}")
+            }
         }
     };
     MediaUrn::from_string(&urn).map_err(|e| {
@@ -380,7 +383,7 @@ fn target_choice(registry: &FabricRegistry, target: &p::ConvergentTargetInfo) ->
     let title = registry
         .get_cached_media_def(&target.media_def.to_string())
         .map(|d| d.title)
-        .unwrap_or_else(|| target.display_name.clone());
+        .unwrap_or_else(|_| target.display_name.clone());
     let how = if target.apex.is_some() { "combine all" } else { "each" };
     Choice {
         label: alias.clone(),
@@ -465,9 +468,11 @@ async fn describe(registry: &Arc<FabricRegistry>, bundled: &[CapUrn], candidate:
     let mut downloads = false;
     for strand in machine.strands() {
         for edge in strand.edges() {
-            if let Ok(cap) = registry.get_cap(&edge.cap_urn.to_string()).await {
-                model |= cap.default_model_spec.is_some();
-            }
+            let cap = registry
+                .get_cap(&edge.cap_urn.to_string())
+                .await
+                .map_err(super::ctx::registry_failure)?;
+            model |= cap.default_model_spec.is_some();
             downloads |= !bundled.iter().any(|b| b.is_equivalent(&edge.cap_urn));
         }
     }

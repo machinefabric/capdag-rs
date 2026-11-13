@@ -13,8 +13,11 @@
 //! Resolution policy (same for both domains):
 //!   1. In-memory cache hit → return immediately.
 //!   2. Synchronous fetch attempt with hard 500 ms deadline.
-//!   3. Deadline miss / error → enqueue for background consumer, return
-//!      `None` (sync surface) or `Err` (async surface).
+//!   3. Deadline miss / error → enqueue for background consumer, and return
+//!      the error: a refusal, a timeout or the deadline running out is a
+//!      `FetchFailed` naming the URL, the status and the manifest version;
+//!      only the registry's own answer that it has no such definition is a
+//!      `NotFound`.
 //!
 //! The cap fetch is **atomic**: if any media URN referenced by a cap fails
 //! to fetch, the cap is NOT cached. This guarantees that any cap landing
@@ -405,7 +408,29 @@ pub struct FabricRegistry {
     offline_flag: Arc<AtomicBool>,
     fetch_queue_tx: Option<mpsc::UnboundedSender<FetchKey>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
+    /// What the last failed fetch of each definition came to, until a fetch
+    /// of it succeeds. A lookup that cannot wait on the network says this
+    /// rather than "not fetched yet" when the registry already answered.
+    fetch_failures: FetchFailures,
     cache_revision_tx: watch::Sender<u64>,
+}
+
+/// The last failure of each definition's fetch: see `FabricRegistry::fetch_failures`.
+type FetchFailures = Arc<Mutex<HashMap<FetchKey, FabricRegistryError>>>;
+
+/// Keep what a fetch of `key` came to: a failure is remembered, and a success
+/// forgets the failure before it.
+fn note_fetch<T>(failures: &FetchFailures, key: FetchKey, result: &Result<T, FabricRegistryError>) {
+    if let Ok(mut failures) = failures.lock() {
+        match result {
+            Ok(_) => {
+                failures.remove(&key);
+            }
+            Err(e) => {
+                failures.insert(key, e.clone());
+            }
+        }
+    }
 }
 
 /// Outcome of trying to narrow an abstract cap to a concrete backed cap given a
@@ -631,6 +656,7 @@ impl FabricRegistry {
         let extension_index = Arc::new(Mutex::new(extension_index_map));
         let manifest_arc = Arc::new(Mutex::new(manifest));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
+        let fetch_failures: FetchFailures = Arc::new(Mutex::new(HashMap::new()));
         let offline_flag = Arc::new(AtomicBool::new(false));
         let (cache_revision_tx, _) = watch::channel(0u64);
 
@@ -648,6 +674,7 @@ impl FabricRegistry {
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
+                    Arc::clone(&fetch_failures),
                     Arc::clone(&offline_flag),
                     locations.clone(),
                     cache_revision_tx.clone(),
@@ -673,6 +700,7 @@ impl FabricRegistry {
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
+            fetch_failures,
             cache_revision_tx,
         };
 
@@ -948,24 +976,55 @@ impl FabricRegistry {
             &self.offline_flag,
             &self.locations,
             &self.cache_revision_tx,
+            self.manifest_version,
             &normalized,
             defver,
         )
         .await
     }
 
-    /// Synchronous, in-memory-only alias resolution. Returns the target
-    /// URN if the alias is already in the warm cache, else `None`. Used by
-    /// synchronous call sites (the machine-notation resolver) after an
-    /// async pre-warm has populated the cache. Returns `None` (not an
-    /// error) for a malformed name so callers can treat "not a valid alias"
-    /// and "not a cached alias" uniformly as "no resolution".
-    pub fn resolve_alias_cached(&self, name: &str) -> Option<String> {
-        let normalized = normalize_alias_name(name).ok()?;
-        self.cached_aliases
+    /// Synchronous, in-memory-only alias resolution, for synchronous call
+    /// sites (the machine-notation resolver) after an async pre-warm.
+    ///
+    /// `Some(target)` when the alias is in memory. `None` when the registry
+    /// has no alias by this name: the pinned manifest does not name it, or
+    /// the name is not one an alias can have. An alias the manifest names
+    /// that is not in memory is an error: what its last fetch came to (a
+    /// refusal is reported as itself), or `Pending` when it has not been
+    /// fetched — it exists, so it is never reported as undefined.
+    pub fn resolve_alias_cached(&self, name: &str) -> Result<Option<String>, FabricRegistryError> {
+        let Ok(normalized) = normalize_alias_name(name) else {
+            return Ok(None);
+        };
+        if let Some(target) = self
+            .cached_aliases
             .lock()
             .ok()
             .and_then(|m| m.get(&normalized).map(|a| a.target.clone()))
+        {
+            return Ok(Some(target));
+        }
+        let defver = match self.alias_defver(&normalized) {
+            Ok(defver) => defver,
+            Err(FabricRegistryError::NotFound(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let key = FetchKey::Alias {
+            name: normalized.clone(),
+            defver,
+        };
+        let last_failure = self
+            .fetch_failures
+            .lock()
+            .ok()
+            .and_then(|failures| failures.get(&key).cloned());
+        let (url, _) = alias_url_and_cache_path(&self.cache_dir, &self.locations, &normalized, defver);
+        Err(last_failure.unwrap_or_else(|| {
+            FabricRegistryError::Pending(format!(
+                "alias '{normalized}' (defver {defver}) is named by manifest v{} and has not been fetched from {url}",
+                self.manifest_version
+            ))
+        }))
     }
 
     /// Reverse lookup: the display alias for a `cap:`/`media:` URN, or `None`
@@ -1102,6 +1161,7 @@ impl FabricRegistry {
             &self.offline_flag,
             &self.locations,
             &self.cache_revision_tx,
+            self.manifest_version,
             name,
             defver,
         )
@@ -1122,6 +1182,14 @@ impl FabricRegistry {
     /// without fetching the body.
     pub fn dim_defver_for(&self, name: &str) -> Result<u32, FabricRegistryError> {
         self.dim_defver(name)
+    }
+
+    /// Test-only: name a media def in the pinned manifest at `defver` without
+    /// caching it, so a lookup of it goes to the registry.
+    #[cfg(test)]
+    pub(crate) fn pin_media_def_for_test(&self, urn: &str, defver: u32) {
+        let normalized = normalize_media_urn(urn).expect("a test media URN parses");
+        self.manifest.lock().unwrap().media.insert(normalized, defver);
     }
 
     /// Test-only: insert a dim directly into the in-memory cache and register
@@ -1370,6 +1438,8 @@ impl FabricRegistry {
         let offline_flag = Arc::clone(&self.offline_flag);
         let locations = self.locations.clone();
         let cache_revision_tx = self.cache_revision_tx.clone();
+        let manifest_version = self.manifest_version;
+        let fetch_failures = Arc::clone(&self.fetch_failures);
         // Resolve the defver under the manifest lock BEFORE spawning — the
         // task then owns everything it needs.
         let normalized = match normalize_alias_name(&name) {
@@ -1402,10 +1472,12 @@ impl FabricRegistry {
                 &offline_flag,
                 &locations,
                 &cache_revision_tx,
+                manifest_version,
                 &normalized,
                 defver,
             )
             .await;
+            note_fetch(&fetch_failures, FetchKey::Alias { name: normalized, defver }, &result);
             (name, result)
         });
     }
@@ -1428,6 +1500,7 @@ impl FabricRegistry {
         let locations = self.locations.clone();
         let manifest_version = self.manifest_version;
         let cache_revision_tx = self.cache_revision_tx.clone();
+        let fetch_failures = Arc::clone(&self.fetch_failures);
         set.spawn(async move {
             let normalized_urn = match normalize_cap_urn(&urn) {
                 Ok(n) => n,
@@ -1464,6 +1537,7 @@ impl FabricRegistry {
                 defver,
             )
             .await;
+            note_fetch(&fetch_failures, FetchKey::Cap { urn: normalized_urn, defver }, &result);
             (urn, result)
         });
     }
@@ -1536,91 +1610,104 @@ impl FabricRegistry {
     }
 
     /// Synchronous cap lookup that warms its own cache. See module docs.
-    pub fn get_cached_cap(&self, urn: &str) -> Option<Cap> {
-        // A malformed URN cannot be in the cache and cannot be fetched, so it
-        // resolves to `None` — the same graceful "not available" outcome this
-        // method already returns for a cache miss, a fetch error, or a deadline.
-        // We log it (it usually signals an upstream bug passing a non-canonical
-        // string) but never panic: this is a latency-critical lookup reached
-        // from many call sites, and a bad URN must degrade, not crash the app.
-        let normalized_urn = match normalize_cap_urn(urn) {
-            Ok(n) => n,
-            Err(e) => {
-                tracing::warn!(
-                    target: "capdag::fabric::registry",
-                    urn = %urn, error = %e,
-                    "get_cached_cap received a malformed URN; treating as not found"
-                );
-                return None;
-            }
-        };
+    ///
+    /// The cap, or why it is not at hand: `NotFound` when the registry's
+    /// answer is that it has no such cap (the pinned manifest does not name
+    /// it, or the registry answered 404); `FetchFailed` when a fetch was
+    /// refused or got no answer — the registry's status, or the synchronous
+    /// deadline running out, with the URL and the manifest version;
+    /// `Pending` when the fetch has been handed to the background fetcher
+    /// and nothing has failed yet; and the URN's own error when it does not
+    /// parse.
+    pub fn get_cached_cap(&self, urn: &str) -> Result<Cap, FabricRegistryError> {
+        let normalized_urn = normalize_cap_urn(urn)?;
         if let Some(cap) = self
             .cached_caps
             .lock()
             .ok()
             .and_then(|m| m.get(&normalized_urn).cloned())
         {
-            return Some(cap);
+            return Ok(cap);
         }
-        // If the URN is not in the manifest under v >= 1, there's
-        // nothing to fetch — return None without enqueuing.
-        let defver = self.cap_defver(&normalized_urn).ok()?;
-        let runtime = tokio::runtime::Handle::try_current().ok()?;
-        if !matches!(
-            runtime.runtime_flavor(),
-            tokio::runtime::RuntimeFlavor::MultiThread
-        ) {
-            self.enqueue_for_background_fetch(FetchKey::Cap {
-                urn: normalized_urn,
-                defver,
-            });
-            return None;
-        }
-        let sync_attempt = tokio::task::block_in_place(|| {
-            runtime.block_on(async {
-                tokio::time::timeout(
-                    SYNC_FETCH_DEADLINE,
-                    fetch_one_cap_atomic(
-                        &self.client,
-                        &self.cache_dir,
-                        &self.cached_caps,
-                        &self.cached_media_defs,
-                        &self.cached_dims,
-                        &self.extension_index,
-                        &self.manifest,
-                        &self.offline_flag,
-                        &self.locations,
-                        self.manifest_version,
-                        &self.cache_revision_tx,
-                        &normalized_urn,
-                        defver,
-                    ),
-                )
-                .await
-            })
-        });
-        match sync_attempt {
-            Ok(Ok(cap)) => return Some(cap),
-            Ok(Err(e)) => {
-                tracing::debug!(
-                    target: "capdag::fabric::registry",
-                    urn = %normalized_urn, error = %e,
-                    "Synchronous cap fetch errored within deadline; enqueueing for background fetch."
-                );
-            }
-            Err(_elapsed) => {
-                tracing::debug!(
-                    target: "capdag::fabric::registry",
-                    urn = %normalized_urn,
-                    "Synchronous cap fetch did not complete within deadline; enqueueing for background fetch."
-                );
-            }
-        }
-        self.enqueue_for_background_fetch(FetchKey::Cap {
-            urn: normalized_urn,
+        let defver = self.cap_defver(&normalized_urn)?;
+        let key = FetchKey::Cap {
+            urn: normalized_urn.clone(),
             defver,
+        };
+        let (url, _) = cap_url_and_cache_path(&self.cache_dir, &self.locations, &normalized_urn, defver);
+        self.fetch_synchronously(key, url, format!("cap '{normalized_urn}' (defver {defver})"), || {
+            fetch_one_cap_atomic(
+                &self.client,
+                &self.cache_dir,
+                &self.cached_caps,
+                &self.cached_media_defs,
+                &self.cached_dims,
+                &self.extension_index,
+                &self.manifest,
+                &self.offline_flag,
+                &self.locations,
+                self.manifest_version,
+                &self.cache_revision_tx,
+                &normalized_urn,
+                defver,
+            )
+        })
+    }
+
+    /// The synchronous half of `get_cached_cap` and `get_cached_media_def`,
+    /// for a definition the manifest names and memory does not hold.
+    ///
+    /// On a multi-threaded runtime the fetch is made here, bounded by
+    /// `SYNC_FETCH_DEADLINE`: its result is returned as it is, and a fetch
+    /// that runs out of time is a `FetchFailed` saying so (and goes on in the
+    /// background). Where the fetch cannot be waited on — no runtime, or a
+    /// current-thread one — it is handed to the background fetcher, and what
+    /// the last fetch of it came to is returned, or `Pending` when none has
+    /// failed.
+    fn fetch_synchronously<T, F, Fut>(
+        &self,
+        key: FetchKey,
+        url: String,
+        what: String,
+        fetch: F,
+    ) -> Result<T, FabricRegistryError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, FabricRegistryError>>,
+    {
+        let runtime = tokio::runtime::Handle::try_current()
+            .ok()
+            .filter(|r| matches!(r.runtime_flavor(), tokio::runtime::RuntimeFlavor::MultiThread));
+        let Some(runtime) = runtime else {
+            self.enqueue_for_background_fetch(key.clone());
+            let last_failure = self
+                .fetch_failures
+                .lock()
+                .ok()
+                .and_then(|failures| failures.get(&key).cloned());
+            return Err(last_failure.unwrap_or_else(|| {
+                FabricRegistryError::Pending(format!(
+                    "{what} is named by manifest v{} and is being fetched from {url} in the background",
+                    self.manifest_version
+                ))
+            }));
+        };
+        let attempt = tokio::task::block_in_place(|| {
+            runtime.block_on(async { tokio::time::timeout(SYNC_FETCH_DEADLINE, fetch()).await })
         });
-        None
+        let result = attempt.unwrap_or_else(|_elapsed| {
+            Err(FabricRegistryError::FetchFailed(FetchFailure {
+                what,
+                url,
+                manifest_version: self.manifest_version,
+                cause: FetchCause::DeadlineElapsed(SYNC_FETCH_DEADLINE),
+            }))
+        });
+        note_fetch(&self.fetch_failures, key.clone(), &result);
+        if result.is_err() {
+            self.enqueue_for_background_fetch(key);
+        }
+        result
     }
 
     /// In-memory-only cap lookup for latency-critical planner sync.
@@ -1714,9 +1801,15 @@ impl FabricRegistry {
         Ok(())
     }
 
-    /// Check whether a cap URN exists in the registry (cached or online).
-    pub async fn cap_exists(&self, urn: &str) -> bool {
-        self.get_cap(urn).await.is_ok()
+    /// Whether the registry holds the cap (cached or online): `false` only
+    /// when its answer is that it has none, and the error when it could not
+    /// be asked — a refused fetch says nothing about whether the cap exists.
+    pub async fn cap_exists(&self, urn: &str) -> Result<bool, FabricRegistryError> {
+        match self.get_cap(urn).await {
+            Ok(_) => Ok(true),
+            Err(FabricRegistryError::NotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Add caps to the in-memory cache. Test helper.
@@ -1845,97 +1938,47 @@ impl FabricRegistry {
         Ok(cached_specs.values().cloned().collect())
     }
 
-    /// Synchronous media-def lookup that warms its own cache.
-    pub fn get_cached_media_def(&self, urn: &str) -> Option<StoredMediaDef> {
-        // A malformed URN cannot be in the cache and cannot be fetched, so it
-        // resolves to `None` — the same graceful "not available" outcome as a
-        // cache miss. Log it (it usually means an upstream bug passed a
-        // non-canonical string) but never panic: this latency-critical lookup
-        // must degrade, not crash the app.
-        let normalized = match normalize_media_urn(urn) {
-            Ok(n) => n,
-            Err(e) => {
-                tracing::warn!(
-                    target: "capdag::fabric::registry",
-                    urn = %urn, error = %e,
-                    "get_cached_media_def received a malformed URN; treating as not found"
-                );
-                return None;
-            }
-        };
+    /// Synchronous media-def lookup that warms its own cache: the media
+    /// def, or why it is not at hand, as `get_cached_cap` says.
+    pub fn get_cached_media_def(&self, urn: &str) -> Result<StoredMediaDef, FabricRegistryError> {
+        let normalized = normalize_media_urn(urn)?;
         if let Some(spec) = self
             .cached_media_defs
             .lock()
             .ok()
             .and_then(|m| m.get(&normalized).cloned())
         {
-            return Some(spec);
+            return Ok(spec);
         }
-        let defver = self.media_defver(&normalized).ok()?;
-        let runtime = tokio::runtime::Handle::try_current().ok()?;
-        if !matches!(
-            runtime.runtime_flavor(),
-            tokio::runtime::RuntimeFlavor::MultiThread
-        ) {
-            self.enqueue_for_background_fetch(FetchKey::Media {
-                urn: normalized,
-                defver,
-            });
-            return None;
-        }
-        let sync_attempt = tokio::task::block_in_place(|| {
-            runtime.block_on(async {
-                tokio::time::timeout(
-                    SYNC_FETCH_DEADLINE,
-                    fetch_one_media_def(
-                        &self.client,
-                        &self.cache_dir,
-                        &self.cached_media_defs,
-                        &self.cached_dims,
-                        &self.extension_index,
-                        &self.manifest,
-                        self.manifest_version,
-                        &self.offline_flag,
-                        &self.locations,
-                        &self.cache_revision_tx,
-                        &normalized,
-                        defver,
-                    ),
-                )
-                .await
-            })
-        });
-        match sync_attempt {
-            Ok(Ok(spec)) => return Some(spec),
-            Ok(Err(e)) => {
-                tracing::debug!(
-                    target: "capdag::fabric::registry",
-                    urn = %normalized, error = %e,
-                    "Synchronous media-def fetch errored within deadline; enqueueing for background fetch."
-                );
-            }
-            Err(_elapsed) => {
-                tracing::debug!(
-                    target: "capdag::fabric::registry",
-                    urn = %normalized,
-                    "Synchronous media-def fetch did not complete within deadline; enqueueing for background fetch."
-                );
-            }
-        }
-        self.enqueue_for_background_fetch(FetchKey::Media {
-            urn: normalized,
+        let defver = self.media_defver(&normalized)?;
+        let key = FetchKey::Media {
+            urn: normalized.clone(),
             defver,
-        });
-        None
+        };
+        let (url, _) = media_url_and_cache_path(&self.cache_dir, &self.locations, &normalized, defver);
+        self.fetch_synchronously(key, url, format!("media def '{normalized}' (defver {defver})"), || {
+            fetch_one_media_def(
+                &self.client,
+                &self.cache_dir,
+                &self.cached_media_defs,
+                &self.cached_dims,
+                &self.extension_index,
+                &self.manifest,
+                self.manifest_version,
+                &self.offline_flag,
+                &self.locations,
+                &self.cache_revision_tx,
+                &normalized,
+                defver,
+            )
+        })
     }
 
-    /// Returns `true` if the URN is a bookend-eligible file format — its
-    /// stored spec has at least one registered file extension.
-    pub fn is_bookend(&self, urn: &str) -> bool {
-        match self.get_cached_media_def(urn) {
-            Some(spec) => !spec.extensions.is_empty(),
-            None => false,
-        }
+    /// Whether the URN is a bookend-eligible file format — its stored spec
+    /// has at least one registered file extension — or why its spec is not
+    /// at hand (`get_cached_media_def`).
+    pub fn is_bookend(&self, urn: &str) -> Result<bool, FabricRegistryError> {
+        Ok(!self.get_cached_media_def(urn)?.extensions.is_empty())
     }
 
     /// Snapshot of every bookend-eligible URN currently in the cache.
@@ -2154,9 +2197,14 @@ impl FabricRegistry {
         publish_cache_revision(&self.cache_revision_tx);
     }
 
-    /// Check if a media URN exists in registry (cached or online).
-    pub async fn media_def_exists(&self, urn: &str) -> bool {
-        self.get_media_def(urn).await.is_ok()
+    /// Whether the registry holds the media def (cached or online), as
+    /// `cap_exists` answers it.
+    pub async fn media_def_exists(&self, urn: &str) -> Result<bool, FabricRegistryError> {
+        match self.get_media_def(urn).await {
+            Ok(_) => Ok(true),
+            Err(FabricRegistryError::NotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -2654,6 +2702,7 @@ impl FabricRegistry {
         let extension_index = Arc::new(Mutex::new(HashMap::new()));
         let manifest_arc = Arc::new(Mutex::new(Manifest::empty(manifest_version)));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
+        let fetch_failures: FetchFailures = Arc::new(Mutex::new(HashMap::new()));
         let offline_flag = Arc::new(AtomicBool::new(false));
         let client = reqwest::Client::new();
         let (cache_revision_tx, _) = watch::channel(0u64);
@@ -2672,6 +2721,7 @@ impl FabricRegistry {
                     Arc::clone(&extension_index),
                     Arc::clone(&manifest_arc),
                     Arc::clone(&fetch_in_queue),
+                    Arc::clone(&fetch_failures),
                     Arc::clone(&offline_flag),
                     locations.clone(),
                     cache_revision_tx.clone(),
@@ -2697,6 +2747,7 @@ impl FabricRegistry {
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
+            fetch_failures,
             cache_revision_tx,
         };
         registry.ensure_identity_cap();
@@ -2763,6 +2814,41 @@ async fn fetch_body(
     .await
 }
 
+/// The body of one registry object — `what` at `url`, fetched for fabric
+/// manifest `manifest_version`.
+///
+/// A success is the body. 404 or 410 is the registry's answer that it does
+/// not hold the object, and only that is `NotFound`. Any other status, and a
+/// fetch that got no answer, is `FetchFailed`, saying the URL, the status or
+/// what happened on the connection, and the manifest version: a refused fetch
+/// is never reported as a missing definition.
+async fn fetch_object(
+    client: &reqwest::Client,
+    url: &str,
+    what: &str,
+    manifest_version: u32,
+) -> Result<Vec<u8>, FabricRegistryError> {
+    let (status, body) = fetch_body(client, url, &format!("fetch {what}"))
+        .await
+        .map_err(|e| {
+            FabricRegistryError::FetchFailed(FetchFailure::transport(what, url, manifest_version, &e))
+        })?;
+    if status.is_success() {
+        return Ok(body);
+    }
+    if matches!(status, reqwest::StatusCode::NOT_FOUND | reqwest::StatusCode::GONE) {
+        return Err(FabricRegistryError::NotFound(format!(
+            "the registry has no {what} for fabric manifest v{manifest_version} (HTTP {status} from {url})"
+        )));
+    }
+    Err(FabricRegistryError::FetchFailed(FetchFailure {
+        what: what.to_string(),
+        url: url.to_string(),
+        manifest_version,
+        cause: FetchCause::Status(status.as_u16()),
+    }))
+}
+
 /// A cap definition as a registry served it: parsed, then held to the
 /// definition rules (`capdag/docs/10-validation-rules.md`).
 ///
@@ -2812,6 +2898,7 @@ async fn fetch_one_alias(
     offline_flag: &Arc<AtomicBool>,
     locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
+    manifest_version: u32,
     normalized_name: &str,
     defver: u32,
 ) -> Result<StoredAlias, FabricRegistryError> {
@@ -2828,20 +2915,13 @@ async fn fetch_one_alias(
         )));
     }
     let (url, cache_path) = alias_url_and_cache_path(cache_dir, locations, normalized_name, defver);
-    let (status, body) = fetch_body(client, &url, &format!("fetch alias '{normalized_name}'"))
-        .await
-        .map_err(|e| {
-            FabricRegistryError::HttpError(format!(
-                "Failed to fetch alias '{}': {}",
-                normalized_name, e
-            ))
-        })?;
-    if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "alias '{}' not found in registry (HTTP {}) at {}",
-            normalized_name, status, url
-        )));
-    }
+    let body = fetch_object(
+        client,
+        &url,
+        &format!("alias '{normalized_name}' (defver {defver})"),
+        manifest_version,
+    )
+    .await?;
     let alias: StoredAlias = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
             "Failed to parse alias '{}': {}",
@@ -2956,6 +3036,7 @@ async fn fetch_one_dim(
     offline_flag: &Arc<AtomicBool>,
     locations: &FabricLocations,
     cache_revision_tx: &watch::Sender<u64>,
+    manifest_version: u32,
     name: &str,
     defver: u32,
 ) -> Result<StoredDim, FabricRegistryError> {
@@ -2972,15 +3053,13 @@ async fn fetch_one_dim(
         )));
     }
     let (url, cache_path) = dim_url_and_cache_path(cache_dir, locations, name, defver);
-    let (status, body) = fetch_body(client, &url, &format!("fetch dim '{name}'"))
-        .await
-        .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch dim '{}': {}", name, e)))?;
-    if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "dim '{}' not found in registry (HTTP {}) at {}",
-            name, status, url
-        )));
-    }
+    let body = fetch_object(
+        client,
+        &url,
+        &format!("dim '{name}' (defver {defver})"),
+        manifest_version,
+    )
+    .await?;
     let dim = checked_dim(&body, name, defver)?;
     let entry = DimCacheEntry {
         dim: dim.clone(),
@@ -3124,6 +3203,8 @@ async fn ensure_dims_cached(
                         owner, r.dim, manifest_version
                     ))
                 })?;
+                // The dim's own failure, as it is (see the media footprint
+                // in `fetch_one_cap_atomic`).
                 fetch_one_dim(
                     client,
                     cache_dir,
@@ -3131,16 +3212,11 @@ async fn ensure_dims_cached(
                     offline_flag,
                     locations,
                     cache_revision_tx,
+                    manifest_version,
                     &r.dim,
                     defver,
                 )
-                .await
-                .map_err(|e| {
-                    FabricRegistryError::NotFound(format!(
-                        "{} names dim '{}', which could not be fetched: {}",
-                        owner, r.dim, e
-                    ))
-                })?
+                .await?
             }
         };
         if dim.value(&r.value).is_none() {
@@ -3215,15 +3291,13 @@ async fn fetch_one_cap_atomic(
 
     let (url, cache_file) = cap_url_and_cache_path(cache_dir, locations, normalized_urn, defver);
 
-    let (status, body) = fetch_body(client, &url, &format!("fetch cap '{normalized_urn}'"))
-        .await
-        .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch cap: {}", e)))?;
-    if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Cap '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn, defver, status, url
-        )));
-    }
+    let body = fetch_object(
+        client,
+        &url,
+        &format!("cap '{normalized_urn}' (defver {defver})"),
+        manifest_version,
+    )
+    .await?;
     let cap = checked_cap_definition(&body, normalized_urn)?;
 
     let referenced = referenced_media_urns(&cap)?;
@@ -3284,10 +3358,9 @@ async fn fetch_one_cap_atomic(
                 "Aborting cap cache write: a referenced media def could not be fetched. \
                  The cap is NOT cached so the next attempt re-tries cleanly."
             );
-            return Err(FabricRegistryError::NotFound(format!(
-                "cap '{}' references media URN '{}' which could not be fetched: {}",
-                normalized_urn, media_urn, e
-            )));
+            // The media def's own failure, as it is: a refused fetch stays a
+            // refused fetch, and only the registry's 404 is a NotFound.
+            return Err(e);
         }
     }
 
@@ -3364,15 +3437,13 @@ pub(crate) async fn fetch_one_media_def(
 
     let (url, cache_file) = media_url_and_cache_path(cache_dir, locations, normalized_urn, defver);
 
-    let (status, body) = fetch_body(client, &url, &format!("fetch media def '{normalized_urn}'"))
-        .await
-        .map_err(|e| FabricRegistryError::HttpError(format!("Failed to fetch media def: {}", e)))?;
-    if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Media def '{}' (defver {}) not found in registry (HTTP {}) at {}",
-            normalized_urn, defver, status, url
-        )));
-    }
+    let body = fetch_object(
+        client,
+        &url,
+        &format!("media def '{normalized_urn}' (defver {defver})"),
+        manifest_version,
+    )
+    .await?;
     let spec: StoredMediaDef = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!(
             "Failed to parse media def '{}': {}",
@@ -3475,20 +3546,7 @@ async fn load_or_fetch_manifest(
     }
 
     let url = locations.manifest(version);
-    let (status, body) = fetch_body(client, &url, &format!("fetch manifest v{version}"))
-        .await
-        .map_err(|e| {
-            FabricRegistryError::HttpError(format!(
-                "Failed to fetch manifest v{} at {}: {}",
-                version, url, e
-            ))
-        })?;
-    if !status.is_success() {
-        return Err(FabricRegistryError::NotFound(format!(
-            "Manifest v{} not found in registry (HTTP {}) at {}",
-            version, status, url
-        )));
-    }
+    let body = fetch_object(client, &url, &format!("manifest v{version}"), version).await?;
     let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| {
         FabricRegistryError::ParseError(format!("Failed to parse manifest v{}: {}", version, e))
     })?;
@@ -3628,6 +3686,7 @@ async fn run_fetch_consumer(
     extension_index: Arc<Mutex<HashMap<String, Vec<String>>>>,
     manifest: Arc<Mutex<Manifest>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
+    fetch_failures: FetchFailures,
     offline_flag: Arc<AtomicBool>,
     locations: FabricLocations,
     cache_revision_tx: watch::Sender<u64>,
@@ -3645,7 +3704,7 @@ async fn run_fetch_consumer(
                     .map(|m| m.contains_key(normalized_urn))
                     .unwrap_or(false);
                 if !already_cached {
-                    match fetch_one_cap_atomic(
+                    let result = fetch_one_cap_atomic(
                         &client,
                         &cache_dir,
                         &cached_caps,
@@ -3660,8 +3719,9 @@ async fn run_fetch_consumer(
                         normalized_urn,
                         *defver,
                     )
-                    .await
-                    {
+                    .await;
+                    note_fetch(&fetch_failures, key.clone(), &result);
+                    match result {
                         Ok(_) => {
                             tracing::debug!(
                                 target: "capdag::fabric::registry::fetch_consumer",
@@ -3689,7 +3749,7 @@ async fn run_fetch_consumer(
                     .map(|m| m.contains_key(normalized_urn))
                     .unwrap_or(false);
                 if !already_cached {
-                    match fetch_one_media_def(
+                    let result = fetch_one_media_def(
                         &client,
                         &cache_dir,
                         &cached_media_defs,
@@ -3703,8 +3763,9 @@ async fn run_fetch_consumer(
                         normalized_urn,
                         *defver,
                     )
-                    .await
-                    {
+                    .await;
+                    note_fetch(&fetch_failures, key.clone(), &result);
+                    match result {
                         Ok(_) => {
                             tracing::debug!(
                                 target: "capdag::fabric::registry::fetch_consumer",
@@ -3732,18 +3793,20 @@ async fn run_fetch_consumer(
                     .map(|m| m.contains_key(normalized_name))
                     .unwrap_or(false);
                 if !already_cached {
-                    match fetch_one_alias(
+                    let result = fetch_one_alias(
                         &client,
                         &cache_dir,
                         &cached_aliases,
                         &offline_flag,
                         &locations,
                         &cache_revision_tx,
+                        manifest_version,
                         normalized_name,
                         *defver,
                     )
-                    .await
-                    {
+                    .await;
+                    note_fetch(&fetch_failures, key.clone(), &result);
+                    match result {
                         Ok(_) => {
                             tracing::debug!(
                                 target: "capdag::fabric::registry::fetch_consumer",
@@ -3772,13 +3835,30 @@ async fn run_fetch_consumer(
 // ERROR
 // =============================================================================
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum FabricRegistryError {
+    /// The HTTP client could not be made.
     #[error("HTTP error: {0}")]
     HttpError(String),
 
+    /// The registry's answer is that it does not hold the definition: the
+    /// pinned manifest does not name it, or the registry answered 404 (or 410)
+    /// for it. Nothing else is reported as a missing definition.
     #[error("Not found in registry: {0}")]
     NotFound(String),
+
+    /// A fetch from the registry brought back no body: the registry refused
+    /// it, or did not answer. The definition may well exist; what is known
+    /// is only that this fetch failed, and the failure says where and why.
+    #[error("{0}")]
+    FetchFailed(FetchFailure),
+
+    /// The pinned manifest names the definition, it is not in memory, and its
+    /// fetch has been handed to the background fetcher: it is not at hand
+    /// yet. Only a synchronous lookup that cannot wait on the network says
+    /// this.
+    #[error("Not fetched yet: {0}")]
+    Pending(String),
 
     #[error("Failed to parse registry response: {0}")]
     ParseError(String),
@@ -3799,6 +3879,98 @@ pub enum FabricRegistryError {
 
     #[error("No media def registered for extension: {0}")]
     ExtensionNotFound(String),
+}
+
+/// One fetch from the registry that brought back no body: what was being
+/// fetched, from where, for which fabric manifest, and why it failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchFailure {
+    /// What was being fetched, e.g. `media def 'media:pdf' (defver 3)` or
+    /// `manifest v10`.
+    pub what: String,
+    /// The URL that was fetched.
+    pub url: String,
+    /// The fabric manifest version the fetch was made for.
+    pub manifest_version: u32,
+    pub cause: FetchCause,
+}
+
+/// Why a fetch from the registry brought back no body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchCause {
+    /// The registry answered with this HTTP status, which is neither a
+    /// success nor an answer that the object is absent (404, 410). Statuses
+    /// worth repeating (429, 5xx) were repeated before this was concluded.
+    Status(u16),
+    /// The registry did not answer before the HTTP client's timeout, on any
+    /// attempt.
+    TimedOut,
+    /// A synchronous lookup stopped waiting for the fetch after this long;
+    /// the fetch goes on in the background.
+    DeadlineElapsed(Duration),
+    /// The request could not be made or its answer could not be read: the
+    /// connection was refused or broke off.
+    Transport(String),
+}
+
+impl FetchFailure {
+    fn transport(what: &str, url: &str, manifest_version: u32, error: &reqwest::Error) -> Self {
+        let cause = if error.is_timeout() {
+            FetchCause::TimedOut
+        } else {
+            // reqwest's own text names the URL; the source chain says what
+            // actually happened on the connection.
+            let mut detail = error.to_string();
+            let mut source = std::error::Error::source(error);
+            while let Some(inner) = source {
+                detail.push_str(": ");
+                detail.push_str(&inner.to_string());
+                source = inner.source();
+            }
+            FetchCause::Transport(detail)
+        };
+        Self {
+            what: what.to_string(),
+            url: url.to_string(),
+            manifest_version,
+            cause,
+        }
+    }
+}
+
+impl std::fmt::Display for FetchFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { what, url, manifest_version, cause } = self;
+        match cause {
+            FetchCause::Status(code) => {
+                let reason = reqwest::StatusCode::from_u16(*code)
+                    .ok()
+                    .and_then(|s| s.canonical_reason())
+                    .map(|r| format!(" {r}"))
+                    .unwrap_or_default();
+                write!(
+                    f,
+                    "the registry refused the fetch of {what} for fabric manifest v{manifest_version}: \
+                     HTTP {code}{reason} from {url}"
+                )
+            }
+            FetchCause::TimedOut => write!(
+                f,
+                "the registry did not answer the fetch of {what} for fabric manifest v{manifest_version}: \
+                 the request to {url} timed out"
+            ),
+            FetchCause::DeadlineElapsed(after) => write!(
+                f,
+                "the fetch of {what} for fabric manifest v{manifest_version} did not finish within \
+                 {} ms: no answer yet from {url}",
+                after.as_millis()
+            ),
+            FetchCause::Transport(detail) => write!(
+                f,
+                "the fetch of {what} for fabric manifest v{manifest_version} from {url} failed: {detail}"
+            ),
+        }
+    }
 }
 
 // =============================================================================
@@ -4152,9 +4324,10 @@ mod alias_tests {
             "unknown alias must be NotFound, got {err:?}"
         );
         assert!(registry.alias_defver_for("nosuchalias").is_err());
-        // resolve_alias_cached returns None for an unknown (and for malformed).
-        assert!(registry.resolve_alias_cached("nosuchalias").is_none());
-        assert!(registry.resolve_alias_cached("bad:name").is_none());
+        // resolve_alias_cached answers no alias for an unknown name (and for a
+        // malformed one): the manifest names neither.
+        assert_eq!(registry.resolve_alias_cached("nosuchalias").unwrap(), None);
+        assert_eq!(registry.resolve_alias_cached("bad:name").unwrap(), None);
     }
 }
 
@@ -4400,13 +4573,15 @@ mod parity_port_tests {
         assert!(exts.contains("epub"));
     }
 
-    // TEST610: get_cached_spec returns None for unknown and Some for known
+    // TEST610: get_cached_media_def answers NotFound for a media def the
+    // manifest does not name, and the def for a known one
     #[test]
     fn test610_get_cached_media_def() {
         let registry = FabricRegistry::new_for_test();
-        assert!(registry
-            .get_cached_media_def("media:nonexistent;xyzzy")
-            .is_none());
+        assert!(matches!(
+            registry.get_cached_media_def("media:nonexistent;xyzzy"),
+            Err(FabricRegistryError::NotFound(_))
+        ));
         registry.insert_cached_media_def_for_test(spec("media:enc=utf8;test;spec", "Test Spec"));
         let got = registry
             .get_cached_media_def("media:enc=utf8;test;spec")
@@ -5122,5 +5297,274 @@ mod dim_tests {
         );
         let err = ensure(vec![DimRef::new("language", "en"), DimRef::new("language", "en")]).await.unwrap_err();
         assert!(matches!(&err, FabricRegistryError::ValidationError(m) if m.contains("named more than once")), "{err}");
+    }
+}
+
+// =============================================================================
+// FETCH FAILURE TESTS
+// =============================================================================
+
+/// A fetch the registry refused, or did not answer, is reported as itself —
+/// the URL, the status and the manifest version — and never as a definition
+/// the registry does not have. Run against a stub registry on a local socket.
+#[cfg(test)]
+mod fetch_failure_tests {
+    use super::*;
+    use crate::fabric::stub_registry::{Answer, StubRegistry};
+
+    const MANIFEST_VERSION: u32 = 10;
+    const MEDIA: &str = "media:refusal-probe;enc=utf8";
+    const CAP: &str = r#"cap:in="media:refusal-probe;enc=utf8";refusal-probe;out="media:refusal-probe;enc=utf8""#;
+    const ALIAS: &str = "measure-returns";
+    const DIM: &str = "refusal-probe";
+
+    /// A registry pinned at manifest v10 against `stub`: its manifest names
+    /// one cap, media def, alias and dim, and none of them is in memory.
+    fn registry_at(stub: &StubRegistry) -> FabricRegistry {
+        let registry = FabricRegistry::new_for_test_with_config_and_version(
+            RegistryConfig::new().with_anchor(stub.anchor.clone()),
+            MANIFEST_VERSION,
+        );
+        {
+            let mut manifest = registry.manifest.lock().unwrap();
+            manifest.caps.insert(normalize_cap_urn(CAP).unwrap(), 1);
+            manifest.media.insert(normalize_media_urn(MEDIA).unwrap(), 1);
+            manifest.aliases.insert(ALIAS.to_string(), 2);
+            manifest.dims.insert(DIM.to_string(), 1);
+        }
+        registry
+    }
+
+    fn failure(error: FabricRegistryError) -> FetchFailure {
+        match error {
+            FabricRegistryError::FetchFailed(failure) => failure,
+            other => panic!("expected a failed fetch, got {other:?}"),
+        }
+    }
+
+    fn cap_what() -> String {
+        format!("cap '{}' (defver 1)", normalize_cap_urn(CAP).unwrap())
+    }
+
+    fn media_what() -> String {
+        format!("media def '{}' (defver 1)", normalize_media_urn(MEDIA).unwrap())
+    }
+
+    // TEST7167: a manifest fetch the registry refuses (403) is reported as
+    // the refusal — the URL, the status and the manifest version — and not as
+    // a manifest that is not found. A 403 is not repeated.
+    #[tokio::test]
+    async fn test7167_a_refused_manifest_fetch_is_reported_as_the_refusal() {
+        let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+        let cache = tempfile::tempdir().unwrap();
+        let locations = layout_locations(&stub.anchor);
+        let error = load_or_fetch_manifest(cache.path(), &reqwest::Client::new(), &locations, 10, false)
+            .await
+            .unwrap_err();
+        let text = error.to_string();
+        let refusal = failure(error);
+        assert_eq!(
+            refusal,
+            FetchFailure {
+                what: "manifest v10".to_string(),
+                url: locations.manifest(10),
+                manifest_version: 10,
+                cause: FetchCause::Status(403),
+            }
+        );
+        for part in ["refused", "HTTP 403 Forbidden", refusal.url.as_str(), "fabric manifest v10"] {
+            assert!(text.contains(part), "'{part}' is missing from: {text}");
+        }
+        assert!(!text.to_lowercase().contains("not found"), "{text}");
+        assert_eq!(stub.requests_for("/manifest/10.json"), 1, "a 403 is not repeated");
+    }
+
+    // TEST7168: a manifest the registry answers 404 for is the registry's
+    // word that it has no such manifest: NotFound, naming the URL and the
+    // status.
+    #[tokio::test]
+    async fn test7168_a_manifest_the_registry_does_not_have_is_not_found() {
+        let stub = StubRegistry::start(|_| Answer::Status(404)).await;
+        let cache = tempfile::tempdir().unwrap();
+        let locations = layout_locations(&stub.anchor);
+        let error = load_or_fetch_manifest(cache.path(), &reqwest::Client::new(), &locations, 10, false)
+            .await
+            .unwrap_err();
+        match &error {
+            FabricRegistryError::NotFound(detail) => {
+                assert!(detail.contains("HTTP 404"), "{detail}");
+                assert!(detail.contains(&locations.manifest(10)), "{detail}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    // TEST7169: a refused fetch of a cap, a media def, an alias or a dim is
+    // reported as the refusal, each with its own URL, the status and the
+    // manifest version it was fetched for.
+    #[tokio::test]
+    async fn test7169_a_refused_definition_fetch_is_reported_as_the_refusal() {
+        let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+        let registry = registry_at(&stub);
+        let refused = [
+            (registry.get_cap(CAP).await.unwrap_err(), cap_what()),
+            (registry.get_media_def(MEDIA).await.unwrap_err(), media_what()),
+            (registry.get_alias(ALIAS).await.unwrap_err(), format!("alias '{ALIAS}' (defver 2)")),
+            (registry.get_dim(DIM).await.unwrap_err(), format!("dim '{DIM}' (defver 1)")),
+        ];
+        for (error, what) in refused {
+            let text = error.to_string();
+            let refusal = failure(error);
+            assert_eq!(refusal.what, what);
+            assert_eq!(refusal.cause, FetchCause::Status(403), "{text}");
+            assert_eq!(refusal.manifest_version, MANIFEST_VERSION);
+            assert_eq!(stub.requests_for(stub.path_of(&refusal.url)), 1, "{what} was fetched from {}", refusal.url);
+            assert!(text.contains(&refusal.url) && text.contains("403"), "{text}");
+        }
+    }
+
+    // TEST7170: a registry that answers 503 is asked again, and when it never
+    // answers otherwise the fetch is reported with the 503 — never as a
+    // missing definition.
+    #[tokio::test]
+    async fn test7170_a_registry_that_keeps_failing_is_reported_with_its_status() {
+        let stub = StubRegistry::start(|_| Answer::Status(503)).await;
+        let registry = registry_at(&stub);
+        let refusal = failure(registry.get_media_def(MEDIA).await.unwrap_err());
+        assert_eq!(refusal.what, media_what());
+        assert_eq!(refusal.cause, FetchCause::Status(503));
+        assert_eq!(
+            stub.requests_for(stub.path_of(&refusal.url)),
+            crate::net_retry::RetryPolicy::default().max_attempts as usize,
+            "a 503 is asked again before it is reported"
+        );
+    }
+
+    // TEST7171: a registry that does not answer is reported as a fetch that
+    // timed out, with the URL and the manifest version; a synchronous lookup
+    // that stops waiting says how long it waited.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test7171_a_registry_that_does_not_answer_is_reported_as_a_timeout() {
+        let stub = StubRegistry::start(|_| Answer::Silence).await;
+        let mut registry = registry_at(&stub);
+        registry.client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .unwrap();
+        let error = registry.get_media_def(MEDIA).await.unwrap_err();
+        let text = error.to_string();
+        let timeout = failure(error);
+        assert_eq!(timeout.what, media_what());
+        assert_eq!(timeout.cause, FetchCause::TimedOut);
+        assert_eq!(timeout.manifest_version, MANIFEST_VERSION);
+        assert!(text.contains("timed out") && text.contains(&timeout.url), "{text}");
+
+        registry.client = reqwest::Client::new();
+        let deadline = failure(registry.get_cached_cap(CAP).unwrap_err());
+        assert_eq!(deadline.what, cap_what());
+        assert_eq!(deadline.cause, FetchCause::DeadlineElapsed(SYNC_FETCH_DEADLINE));
+        assert!(deadline.to_string().contains(&deadline.url), "{deadline}");
+    }
+
+    // TEST7172: a definition the registry answers 404 for is the registry's
+    // word that it does not have it, and only that is NotFound.
+    #[tokio::test]
+    async fn test7172_a_definition_the_registry_does_not_have_is_not_found() {
+        let stub = StubRegistry::start(|_| Answer::Status(404)).await;
+        let registry = registry_at(&stub);
+        for error in [
+            registry.get_cap(CAP).await.unwrap_err(),
+            registry.get_media_def(MEDIA).await.unwrap_err(),
+            registry.get_alias(ALIAS).await.unwrap_err(),
+        ] {
+            match &error {
+                FabricRegistryError::NotFound(detail) => {
+                    assert!(detail.contains("HTTP 404") && detail.contains(&stub.anchor), "{detail}");
+                }
+                other => panic!("expected NotFound, got {other:?}"),
+            }
+        }
+    }
+
+    // TEST7173: the synchronous lookups report a refused fetch as the refusal,
+    // where they used to come back empty — and report a definition the
+    // manifest does not name as not found.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test7173_a_synchronous_lookup_reports_a_refused_fetch() {
+        let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+        let registry = registry_at(&stub);
+        let media = failure(registry.get_cached_media_def(MEDIA).unwrap_err());
+        assert_eq!((media.what, media.cause), (media_what(), FetchCause::Status(403)));
+        let cap = failure(registry.get_cached_cap(CAP).unwrap_err());
+        assert_eq!((cap.what, cap.cause), (cap_what(), FetchCause::Status(403)));
+        assert!(matches!(
+            registry.get_cached_media_def("media:named-by-no-manifest"),
+            Err(FabricRegistryError::NotFound(_))
+        ));
+    }
+
+    // TEST7174: a machine whose cap alias the registry refused to serve fails
+    // with the refusal, never as an undefined alias; an alias the registry
+    // does not have is still undefined.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test7174_a_refused_alias_is_reported_as_the_refusal_not_as_undefined() {
+        let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+        let registry = registry_at(&stub);
+        let error = crate::machine::parse_machine_async(&format!("[doc -> {ALIAS} -> text]"), &registry)
+            .await
+            .unwrap_err();
+        let text = error.to_string();
+        match error {
+            crate::machine::MachineParseError::Resolution(
+                crate::machine::MachineAbstractionError::DefinitionUnavailable { urn, error },
+            ) => {
+                assert_eq!(urn, ALIAS);
+                let refusal = failure(error);
+                assert_eq!(refusal.what, format!("alias '{ALIAS}' (defver 2)"));
+                assert_eq!(refusal.cause, FetchCause::Status(403));
+            }
+            other => panic!("expected the alias to be unavailable, got {other:?}"),
+        }
+        for part in ["refused", "403", ALIAS, "fabric manifest v10", stub.anchor.as_str()] {
+            assert!(text.contains(part), "'{part}' is missing from: {text}");
+        }
+
+        let undefined = crate::machine::parse_machine_async("[doc -> named-by-no-manifest -> text]", &registry)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                undefined,
+                crate::machine::MachineParseError::Syntax(crate::machine::MachineSyntaxError::UndefinedAlias { .. })
+            ),
+            "{undefined}"
+        );
+    }
+
+    // TEST7175: what a background fetch came to is kept: a lookup that cannot
+    // wait on the network reports the refusal the prefetch got, says a
+    // definition it has not fetched yet is pending, and finds an alias the
+    // manifest does not name to be no alias.
+    #[tokio::test]
+    async fn test7175_a_refused_prefetch_is_remembered_by_lookups_that_cannot_wait() {
+        let stub = StubRegistry::start(|_| Answer::Status(403)).await;
+        let registry = registry_at(&stub);
+        assert!(matches!(
+            registry.resolve_alias_cached(ALIAS),
+            Err(FabricRegistryError::Pending(_))
+        ));
+        assert!(matches!(
+            registry.get_cached_media_def(MEDIA),
+            Err(FabricRegistryError::Pending(_))
+        ));
+
+        registry.prefetch_manifest_aliases().await;
+        registry.prefetch_manifest_caps().await;
+        let alias = failure(registry.resolve_alias_cached(ALIAS).unwrap_err());
+        assert_eq!(alias.what, format!("alias '{ALIAS}' (defver 2)"));
+        assert_eq!(alias.cause, FetchCause::Status(403));
+        let cap = failure(registry.get_cached_cap(CAP).unwrap_err());
+        assert_eq!((cap.what, cap.cause), (cap_what(), FetchCause::Status(403)));
+        assert_eq!(registry.resolve_alias_cached("named-by-no-manifest").unwrap(), None);
     }
 }

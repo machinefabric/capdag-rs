@@ -245,8 +245,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
 /// drive the model cartridge's own caps. The run is shown as any run is.
 pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress: ProgressChoice) -> CliResult<Vec<u8>> {
     let registry = ctx.registry().await?;
-    let cap = registry.get_cap(alias).await.map_err(|e| {
-        CliError::failed(format!("the capability {alias} is not in this fabric")).context(e.to_string())
+    let cap = registry.get_cap(alias).await.map_err(|e| match e {
+        crate::FabricRegistryError::NotFound(_) => {
+            CliError::failed(format!("the capability {alias} is not in this fabric")).context(e.to_string())
+        }
+        e => ctx::registry_failure(e),
     })?;
     let notation = synthesize_single_cap_notation(&cap)
         .map_err(|e| CliError::failed(format!("'{alias}' cannot be run on its own")).context(e))?;
@@ -306,8 +309,9 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
         Ok(CapToken::Alias(alias)) => alias,
         Err(e) => return Err(CliError::usage(format!("'{token}' is neither a capability nor a file")).context(e)),
     };
-    if let Ok(cap) = registry.get_cap(&reference).await {
-        return Ok(Target::Cap { cap, dev_dir: None });
+    match registry.get_cap(&reference).await {
+        Ok(cap) => return Ok(Target::Cap { cap, dev_dir: None }),
+        Err(e) => ctx::nothing_by_that_name(e)?,
     }
     // A cap the fabric does not define may be a dev cartridge's, run by its
     // alias before it is published — when none of its aliases means another
@@ -392,8 +396,11 @@ async fn narrow_if_abstract(ctx: &Ctx, registry: &Arc<FabricRegistry>, cap: Cap,
                 input.display()
             ))
         })?;
-    let concrete = registry.get_cap(&concrete.to_string()).await.map_err(|e| {
-        CliError::failed(format!("'{alias}' was narrowed to a cap the fabric does not hold")).context(e.to_string())
+    let concrete = registry.get_cap(&concrete.to_string()).await.map_err(|e| match e {
+        crate::FabricRegistryError::NotFound(_) => {
+            CliError::failed(format!("'{alias}' was narrowed to a cap the fabric does not hold")).context(e.to_string())
+        }
+        e => ctx::registry_failure(e),
     })?;
     // What actually runs is said, as the generic name chose it.
     if ctx.term.verbosity >= 0 && !ctx.term.json {
