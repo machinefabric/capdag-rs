@@ -2,7 +2,7 @@
 
 Generated from the test catalogue. Edit the tests, not this file.
 
-1713 tests: 1704 numbered, 9 unnumbered.
+1717 tests: 1708 numbered, 9 unnumbered.
 
 ## Numbered
 
@@ -572,27 +572,30 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST601 | capdag/capdag-rs | rust | `test601_get_content_type` | src/cap/response.rs:254 | TEST601: get_content_type returns correct MIME type for each variant |
 | TEST602 | capdag/capdag-rs | rust | `test602_as_type_binary_error` | src/cap/response.rs:267 | TEST602: as_type on binary response returns error (cannot deserialize binary) |
 | TEST603 | capdag/capdag-rs | rust | `test603_as_bool_edge_cases` | src/cap/response.rs:284 | TEST603: as_bool handles all accepted truthy/falsy variants and rejects garbage |
+| TEST604 | capdag/capdag-rs | rust | `test604_concurrent_readers_never_read_a_torn_entry` | src/media/profile.rs:886 | TEST604: Processes loading the profile-schema cache while others replace the same entry never read part of an entry: every load succeeds and holds the schema whole, the old one or the new one. |
 | TEST605 | capdag/capdag-rs | rust | `test605_all_coercion_paths_build_valid_urns` | src/standard/caps.rs:1266 | TEST605: all_coercion_paths each entry builds a valid parseable CapUrn |
 | TEST606 | capdag/capdag-rs | rust | `test606_coercion_urn_specs` | src/standard/caps.rs:1294 | TEST606: coercion_urn in/out specs match the type's media URN constant |
 | TEST607 | capdag/capdag-rs | rust | `test607_media_urns_for_extension_unknown` | src/fabric/registry.rs:4322 | TEST607: media_urns_for_extension returns error for unknown extension |
 | TEST608 | capdag/capdag-rs | rust | `test608_media_urns_for_extension_populated` | src/fabric/registry.rs:4332 | TEST608: media_urns_for_extension returns URNs after adding a spec with extensions |
 | TEST609 | capdag/capdag-rs | rust | `test609_get_extension_mappings` | src/fabric/registry.rs:4349 | TEST609: get_extension_mappings returns all registered extension→URN pairs. |
 | TEST610 | capdag/capdag-rs | rust | `test610_get_cached_media_def` | src/fabric/registry.rs:4372 | TEST610: get_cached_media_def answers NotFound for a media def the manifest does not name, and the def for a known one |
-| TEST612 | capdag/capdag-rs | rust | `test612_clear_cache` | src/media/profile.rs:700 | TEST612: clear_cache empties the in-memory cache for seeded schemas. |
-| TEST613 | capdag/capdag-rs | rust | `test613_validate_cached` | src/media/profile.rs:717 | TEST613: validate_cached validates against cached standard schemas |
+| TEST611 | capdag/capdag-rs | rust | `test611_corrupt_entry_is_an_error_naming_its_file` | src/media/profile.rs:959 | TEST611: A cache entry that is there and does not parse is an error that names its file; the registry does not open over it as if it were absent. |
+| TEST612 | capdag/capdag-rs | rust | `test612_clear_cache` | src/media/profile.rs:802 | TEST612: clear_cache empties the in-memory cache for seeded schemas. |
+| TEST613 | capdag/capdag-rs | rust | `test613_validate_cached` | src/media/profile.rs:819 | TEST613: validate_cached validates against cached standard schemas |
 | TEST614 | capdag/capdag-rs | rust | `test614_registry_creation` | src/fabric/registry.rs:4387 | TEST614: Verify registry creation succeeds and cache directory exists |
+| TEST615 | capdag/capdag-rs | rust | `test615_entry_not_matching_its_file_is_an_error` | src/media/profile.rs:984 | TEST615: A cache entry that parses but is not the schema its file names (it holds another profile URL, or a body that does not compile) is an error naming its file. |
 | TEST616 | capdag/capdag-rs | rust | `test616_stored_media_def_to_def` | src/fabric/registry.rs:4393 | TEST616: Verify StoredMediaDef converts to MediaDef preserving all fields |
 | TEST617 | capdag/capdag-rs | rust | `test617_normalize_media_urn` | src/fabric/registry.rs:4407 | TEST617: Verify normalize_media_urn produces consistent non-empty results |
-| TEST618 | capdag/capdag-rs | rust | `test618_registry_creation` | src/media/profile.rs:517 | TEST618: Verify profile schema registry creation succeeds with temp cache |
-| TEST619 | capdag/capdag-rs | rust | `test619_fresh_registry_cache_is_empty` | src/media/profile.rs:526 | TEST619: A freshly constructed registry has an empty cache. The well-known profile schemas are no longer bundled in the binary; callers must either fetch them on demand or seed via insert_schema. |
-| TEST620 | capdag/capdag-rs | rust | `test620_string_validation` | src/media/profile.rs:539 | TEST620: Verify string schema validates strings and rejects non-strings |
-| TEST621 | capdag/capdag-rs | rust | `test621_integer_validation` | src/media/profile.rs:554 | TEST621: Verify integer schema validates integers and rejects floats and strings |
-| TEST622 | capdag/capdag-rs | rust | `test622_number_validation` | src/media/profile.rs:572 | TEST622: Verify number schema validates integers and floats, rejects strings |
-| TEST623 | capdag/capdag-rs | rust | `test623_boolean_validation` | src/media/profile.rs:590 | TEST623: Verify boolean schema validates true/false and rejects string "true" |
-| TEST624 | capdag/capdag-rs | rust | `test624_object_validation` | src/media/profile.rs:606 | TEST624: Verify object schema validates objects and rejects arrays |
-| TEST625 | capdag/capdag-rs | rust | `test625_string_array_validation` | src/media/profile.rs:624 | TEST625: Verify string array schema validates string arrays and rejects mixed arrays |
-| TEST626 | capdag/capdag-rs | rust | `test626_unknown_profile_skips_validation` | src/media/profile.rs:648 | TEST626: Verify unknown profile URL skips validation and returns Ok |
-| TEST627 | capdag/capdag-rs | rust | `test627_insert_schema_rejects_invalid_schema` | src/media/profile.rs:686 | TEST627: insert_schema rejects malformed JSON Schemas instead of caching them. A registry that silently accepted invalid schemas would hide compilation problems until the first validation call. |
+| TEST618 | capdag/capdag-rs | rust | `test618_registry_creation` | src/media/profile.rs:619 | TEST618: Verify profile schema registry creation succeeds with temp cache |
+| TEST619 | capdag/capdag-rs | rust | `test619_fresh_registry_cache_is_empty` | src/media/profile.rs:628 | TEST619: A freshly constructed registry has an empty cache. The well-known profile schemas are no longer bundled in the binary; callers must either fetch them on demand or seed via insert_schema. |
+| TEST620 | capdag/capdag-rs | rust | `test620_string_validation` | src/media/profile.rs:641 | TEST620: Verify string schema validates strings and rejects non-strings |
+| TEST621 | capdag/capdag-rs | rust | `test621_integer_validation` | src/media/profile.rs:656 | TEST621: Verify integer schema validates integers and rejects floats and strings |
+| TEST622 | capdag/capdag-rs | rust | `test622_number_validation` | src/media/profile.rs:674 | TEST622: Verify number schema validates integers and floats, rejects strings |
+| TEST623 | capdag/capdag-rs | rust | `test623_boolean_validation` | src/media/profile.rs:692 | TEST623: Verify boolean schema validates true/false and rejects string "true" |
+| TEST624 | capdag/capdag-rs | rust | `test624_object_validation` | src/media/profile.rs:708 | TEST624: Verify object schema validates objects and rejects arrays |
+| TEST625 | capdag/capdag-rs | rust | `test625_string_array_validation` | src/media/profile.rs:726 | TEST625: Verify string array schema validates string arrays and rejects mixed arrays |
+| TEST626 | capdag/capdag-rs | rust | `test626_unknown_profile_skips_validation` | src/media/profile.rs:750 | TEST626: Verify unknown profile URL skips validation and returns Ok |
+| TEST627 | capdag/capdag-rs | rust | `test627_insert_schema_rejects_invalid_schema` | src/media/profile.rs:788 | TEST627: insert_schema rejects malformed JSON Schemas instead of caching them. A registry that silently accepted invalid schemas would hide compilation problems until the first validation call. |
 | TEST628 | capdag/capdag-rs | rust | `test628_media_urn_constants_format` | src/standard/media.rs:126 | TEST628: Verify media URN constants all start with "media:" prefix |
 | TEST629 | capdag/capdag-rs | rust | `test629_profile_constants_format` | src/standard/media.rs:136 | TEST629: Verify profile URL constants all start with capdag.com schema prefix |
 | TEST630 | capdag/capdag-rs | rust | `test630_cartridge_repo_creation` | src/bifaci/cartridge_repo.rs:1862 | TEST630: CartridgeRepo creation starts with empty cartridge list. |
@@ -619,6 +622,7 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST651 | capdag/capdag-rs | rust | `test651_wildcard_013_generic_forms_rejected` | src/urn/cap_urn.rs:2683 | TEST651: All bare/default top-to-top forms are rejected |
 | TEST652 | capdag/capdag-rs | rust | `test652_wildcard_014_cap_identity_constant_works` | src/urn/cap_urn.rs:2704 | TEST652: CAP_IDENTITY constant matches identity caps regardless of string form |
 | TEST653 | capdag/capdag-rs | rust | `test653_effect_none_illegal_declaration_rejected` | src/urn/cap_urn.rs:2726 | TEST653: invalid effect=none declarations fail at construction |
+| TEST654 | capdag/capdag-rs | rust | `test654_entries_live_in_the_library_version_folder` | src/media/profile.rs:1034 | TEST654: A library keeps its entries in its own folder, `<cache>/<library>-<version>/`, and reads no other: neither another library's or version's folder nor the older layout's files directly in the cache folder. Clearing the cache empties its own folder and removes the older layout's files, and leaves other folders alone. |
 | TEST658 | capdag/capdag-rs | rust | `test658_heartbeat_response` | src/bifaci/in_process_host.rs:1857 | TEST658: InProcessCartridgeHost handles heartbeat by echoing same ID |
 | TEST659 | capdag/capdag-rs | rust | `test659_handler_error_returns_err_frame` | src/bifaci/in_process_host.rs:1902 | TEST659: InProcessCartridgeHost handler error returns ERR frame |
 | TEST660 | capdag/capdag-rs | rust | `test660_closest_specificity_routing` | src/bifaci/in_process_host.rs:1978 | TEST660: InProcessCartridgeHost closest-specificity routing prefers specific over identity |
@@ -1229,7 +1233,7 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST6594 | capdag/capdag-rs | rust | `test6594_capabilities_empty_initially` | src/bifaci/host_runtime.rs:4618 | TEST6594: aggregate_installed_cartridges() is empty before any cartridge with a resolvable identity is attached. A binary path that does not exist on disk has no identity (`installed_identity` is `None`) and therefore does not appear in the relay payload. |
 | TEST6600 | capdag/capdag-rs | rust | `test6600_parse_cap_groups_rejects_manifest_without_identity` | src/bifaci/host_runtime.rs:4171 | TEST6600: parse_cap_groups_from_manifest classifies failures by kind Manifest JSON that parses but lacks CAP_IDENTITY is `Incompatible` (schema-rejected). Manifest bytes that don't parse as CapManifest are `ManifestInvalid` (JSON-level failure). The split lets the host's attachment-error reporter surface the right kind to the UI. |
 | TEST6601 | capdag/capdag-rs | rust | `test6601_attached_cartridge_identity_derived_from_manifest` | src/bifaci/host_runtime.rs:4282 | TEST6601: An attached cartridge (raw-stream, no on-disk anchor) must get a resolvable install identity derived from its HELLO manifest. Advertisement is identity-gated: build_installed_cartridge_identities drops any cartridge whose installed_cartridge_record() is None. If an attached cartridge had no identity it would be silently excluded from every RelayNotify, the host would advertise an empty inventory, and the engine could never route to it — the deadlock that hung the rust-rust-rust interop echo test forever. |
-| TEST6605 | capdag/capdag-rs | rust | `test6605_insert_schema_populates_cache` | src/media/profile.rs:662 | TEST6605: insert_schema is the production seam for non-HTTP schema injection. It must persist to the in-memory cache so subsequent schema_exists/validate calls succeed without network access. |
+| TEST6605 | capdag/capdag-rs | rust | `test6605_insert_schema_populates_cache` | src/media/profile.rs:764 | TEST6605: insert_schema is the production seam for non-HTTP schema injection. It must persist to the in-memory cache so subsequent schema_exists/validate calls succeed without network access. |
 | TEST6623 | capdag/capdag-rs | rust | `test6623_cartridge_death_keeps_caps_advertised` | src/bifaci/host_runtime.rs:6027 | TEST6623: Cartridge death keeps caps advertised for on-demand respawn. The cartridge's `cap_groups` survive process death, so the host can continue advertising the cartridge's caps and the relay can route a fresh REQ to it (which triggers an on-demand respawn). |
 | TEST6672 | capdag/capdag-rs | rust | `test6672_cbor_accepts_stream_end_without_chunk_count` | src/bifaci/frame.rs:3462 | TEST6672: CBOR decode ACCEPTS STREAM_END without chunk_count — unbounded streams make no length promise (L16) |
 | TEST6734 | capdag/capdag-rs | rust | `test6734_reject_invalid_combinations` | src/urn/cap_urn.rs:3793 | TEST6734: Invalid combinations of qualifiers must be rejected by the parser. These are hard parse errors, not silently accepted shorthands. |

@@ -30,6 +30,7 @@
 
 pub mod bifaci;
 pub mod cap;
+pub(crate) mod cache_file;
 pub mod capture;
 pub mod cartridge_discovery;
 pub mod cartridge_registry_version;
