@@ -11,6 +11,8 @@
 //!   ```text
 //!   <os cache>/capdag/<charter slug>/        the registry's folder; its charter
 //!     v<N>/manifest.json                     manifest N, as the registry served it
+//!     v<N>/file_types.json                   which of manifest N's media are file types, worked
+//!                                            out once from manifest.json (and its hash)
 //!     v<N>/caps/<sha256 of URN>/<defver>.json
 //!     v<N>/media/<sha256 of URN>/<defver>.json
 //!     v<N>/aliases/<sha256 of name>/<defver>.json
@@ -48,6 +50,11 @@ pub(crate) const KIND_FOLDERS: [&str; 4] = ["caps", "media", "aliases", "dims"];
 
 /// The file a manifest version's manifest is kept in, in its folder.
 pub(crate) const MANIFEST_FILE: &str = "manifest.json";
+
+/// The file the file types a manifest version's manifest names are kept in,
+/// in its folder: which of its media definitions carry the `ext=` tag, with
+/// the hash of the manifest file they were worked out from.
+pub(crate) const FILE_TYPES_FILE: &str = "file_types.json";
 
 /// The folders the shared layout before this one kept in a registry's folder.
 /// Nothing reads them; clearing the cache removes them.
