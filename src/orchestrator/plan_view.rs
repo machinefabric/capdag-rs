@@ -387,3 +387,277 @@ impl PlanView {
             .map(|index| &self.nodes[index])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::fabric::registry::StoredMediaDef;
+    use crate::orchestrator::machine_plan::tests::{cap, header, registry, step_of, with_arg};
+    use crate::orchestrator::{ResolvedNotation, RunInputs, StrandPlan};
+    use crate::Cap;
+
+    const RENDER: &str = r#"cap:in="media:document;ext=pdf";render-page-image;out="media:ext=png;image""#;
+    const TO_JPEG: &str = r#"cap:in="media:ext=png;image";convert-image;out="media:ext=jpeg;image""#;
+    const A: &str = r#"cap:in="media:document;ext=pdf";a;out="media:enc=utf8""#;
+    const B: &str = r#"cap:in="media:ext=md;plain-text";b;out="media:enc=utf8""#;
+    const MERGE: &str = r#"cap:in="media:enc=utf8";merge;out="media:enc=utf8;merged""#;
+    const OTHER: &str = "media:enc=utf8;other";
+    const LABEL: &str = "media:enc=utf8;label";
+
+    /// The media every plan below holds, each with a title of its own.
+    const TITLES: &[(&str, &str)] = &[
+        ("media:document;ext=pdf", "PDF document"),
+        ("media:ext=png;image", "PNG image"),
+        ("media:ext=jpeg;image", "JPEG image"),
+        ("media:ext=md;plain-text", "Markdown"),
+        ("media:enc=utf8", "Text"),
+        ("media:enc=utf8;merged", "Merged text"),
+        (LABEL, "Label"),
+    ];
+
+    fn titled(mut cap: Cap, title: &str) -> Cap {
+        cap.title = title.to_string();
+        cap
+    }
+
+    fn media_def(urn: &str, title: &str) -> StoredMediaDef {
+        StoredMediaDef {
+            dims: Vec::new(),
+            version: 0,
+            urn: urn.to_string(),
+            media_type: "application/octet-stream".to_string(),
+            title: title.to_string(),
+            profile_uri: None,
+            schema: None,
+            description: None,
+            documentation: None,
+            validation: None,
+            metadata: None,
+            extensions: Vec::new(),
+        }
+    }
+
+    /// A registry holding `caps` and every media definition of [`TITLES`]
+    /// but those `leaving_out` names.
+    fn fabric(caps: Vec<Cap>, leaving_out: &[&str]) -> Arc<FabricRegistry> {
+        let reg = registry(caps);
+        for (urn, title) in TITLES {
+            if !leaving_out.contains(urn) {
+                reg.insert_cached_media_def_for_test(media_def(urn, title));
+            }
+        }
+        reg
+    }
+
+    async fn strand(notation: &str, reg: Arc<FabricRegistry>) -> StrandPlan {
+        let resolved = ResolvedNotation::resolve(notation, reg)
+            .await
+            .unwrap_or_else(|e| panic!("{notation}: {e}"));
+        assert_eq!(resolved.strand_count(), 1, "one connected strand");
+        resolved
+            .plan(0, &RunInputs::declared())
+            .await
+            .unwrap_or_else(|e| panic!("{notation} cannot be planned: {e}"))
+    }
+
+    fn render_then_convert() -> String {
+        format!(
+            "{}{}[pages -> render -> thumbnail][thumbnail -> to_jpeg -> picture]",
+            header("render", RENDER),
+            header("to_jpeg", TO_JPEG)
+        )
+    }
+
+    fn render_caps() -> Vec<Cap> {
+        vec![titled(cap(RENDER, true), "Render pages"), titled(cap(TO_JPEG, false), "Convert to JPEG")]
+    }
+
+    fn media_title(view: &PlanView, id: &str) -> Option<String> {
+        view.node(id).unwrap_or_else(|| panic!("no node '{id}'")).media.as_ref().map(|m| m.title.clone())
+    }
+
+    // TEST22104: a plan is drawn with every node, ordered by id and found by
+    // it, holding the title of its media and of its cap, the name the
+    // notation gives it, and the innermost map it runs in; every edge is
+    // drawn in the plan's order with what it carries.
+    #[tokio::test]
+    async fn test22104_a_plan_is_drawn_with_the_names_and_maps_of_its_nodes() {
+        let reg = fabric(render_caps(), &[]);
+        let planned = strand(&render_then_convert(), reg.clone()).await;
+        let plan = &planned.plan;
+        let view = PlanView::of(&reg, plan, &planned.node_names).expect("every cap and media is known");
+
+        assert_eq!(view.name, plan.name);
+        assert_eq!(view.nodes.len(), plan.nodes.len(), "every node is drawn");
+        assert!(view.nodes.windows(2).all(|pair| pair[0].id < pair[1].id), "ordered by id");
+        for id in plan.nodes.keys() {
+            assert_eq!(view.node(id).map(|node| &node.id), Some(id), "'{id}' is found by its id");
+        }
+        assert!(view.node("no-such-node").is_none());
+
+        let render = step_of(plan, RENDER);
+        let to_jpeg = step_of(plan, TO_JPEG);
+        match &view.node(&render).unwrap().kind {
+            PlanViewKind::Step(step) => {
+                assert_eq!(step.title, "Render pages");
+                assert_eq!(step.cap_urn, plan.nodes[&render].cap_urn().unwrap());
+                assert!(step.constants.is_empty());
+            }
+            other => panic!("render is drawn as {other:?}"),
+        }
+        match &view.node(&to_jpeg).unwrap().kind {
+            PlanViewKind::Step(step) => assert_eq!(step.title, "Convert to JPEG"),
+            other => panic!("to_jpeg is drawn as {other:?}"),
+        }
+        assert_eq!(media_title(&view, &render).as_deref(), Some("PNG image"));
+        assert_eq!(media_title(&view, &to_jpeg).as_deref(), Some("JPEG image"));
+        assert_eq!(view.node(&render).unwrap().label.as_deref(), Some("thumbnail"));
+        assert_eq!(view.node(&to_jpeg).unwrap().label.as_deref(), Some("picture"));
+
+        // The input, named as the notation names it and holding what render takes.
+        let input = view
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, PlanViewKind::Input { .. }))
+            .expect("the machine's input is drawn");
+        assert_eq!(input.kind, PlanViewKind::Input { name: "pages".into(), sequence: false });
+        assert_eq!(input.media.as_ref().map(|m| m.title.as_str()), Some("PDF document"));
+
+        // The map: holds nothing, runs to_jpeg, and is what to_jpeg and its
+        // item run in; render runs once, in no map.
+        let map = view
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, PlanViewKind::Map { .. }))
+            .expect("the pages are mapped over");
+        assert!(map.media.is_none(), "a map holds nothing of its own");
+        match &map.kind {
+            PlanViewKind::Map { body, .. } => assert!(body.contains(&to_jpeg)),
+            _ => unreachable!(),
+        }
+        assert_eq!(view.node(&to_jpeg).unwrap().enclosing_map.as_deref(), Some(map.id.as_str()));
+        assert_eq!(view.node(&render).unwrap().enclosing_map, None);
+        let item = view
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, PlanViewKind::Item { .. }))
+            .expect("one run's item is drawn");
+        assert_eq!(item.kind, PlanViewKind::Item { map: map.id.clone(), source: render.clone() });
+        assert_eq!(item.media.as_ref().map(|m| m.title.as_str()), Some("PNG image"));
+
+        // The output, of to_jpeg's value.
+        let output = view
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, PlanViewKind::Output { .. }))
+            .expect("the machine's output is drawn");
+        assert_eq!(output.kind, PlanViewKind::Output { name: "picture".into(), source_node: to_jpeg.clone() });
+
+        // Every edge, in the plan's order, carrying what the plan says.
+        let drawn: Vec<(&str, &str)> =
+            view.edges.iter().map(|edge| (edge.from_node.as_str(), edge.to_node.as_str())).collect();
+        let planned_edges: Vec<(&str, &str)> =
+            plan.edges.iter().map(|edge| (edge.from_node.as_str(), edge.to_node.as_str())).collect();
+        assert_eq!(drawn, planned_edges);
+        for (edge, drawn) in plan.edges.iter().zip(&view.edges) {
+            let expected = match &edge.edge_type {
+                EdgeType::Direct => PlanViewEdgeKind::Direct,
+                EdgeType::Iteration => PlanViewEdgeKind::Iteration,
+                EdgeType::Collection => PlanViewEdgeKind::Collection,
+                EdgeType::Arg { .. } => panic!("this machine wires no arg but a main input"),
+            };
+            assert_eq!(drawn.kind, expected, "{} -> {}", edge.from_node, edge.to_node);
+        }
+        assert!(
+            view.edges.iter().any(|edge| edge.kind == PlanViewEdgeKind::Iteration
+                && edge.from_node == map.id
+                && edge.to_node == item.id),
+            "the map's edge to its item is an iteration"
+        );
+    }
+
+    // TEST22105: an arg a step is fed by an edge and an arg it is given a
+    // constant are drawn by the names their cap gives them.
+    #[tokio::test]
+    async fn test22105_args_and_constants_are_drawn_by_their_names_in_the_cap() {
+        let merge = with_arg(
+            with_arg(titled(cap(MERGE, false), "Merge"), "other", OTHER, Some("media:enc=utf8")),
+            "label",
+            LABEL,
+            None,
+        );
+        let reg = fabric(vec![cap(A, false), cap(B, false), merge], &[]);
+        let notation = format!(
+            "{}{}{}[doc_a -> a -> x][doc_b -> b -> y][(x, other=y, label=\"weekly\") -> merge -> z]",
+            header("a", A),
+            header("b", B),
+            header("merge", MERGE)
+        );
+        let planned = strand(&notation, reg.clone()).await;
+        let view = PlanView::of(&reg, &planned.plan, &planned.node_names).expect("every cap and media is known");
+
+        let merge = step_of(&planned.plan, MERGE);
+        match &view.node(&merge).unwrap().kind {
+            PlanViewKind::Step(step) => {
+                assert_eq!(step.title, "Merge");
+                assert_eq!(
+                    step.constants,
+                    [PlanViewConstant {
+                        arg_urn: LABEL.to_string(),
+                        arg_name: "label".to_string(),
+                        value_json: "\"weekly\"".to_string(),
+                    }]
+                );
+            }
+            other => panic!("merge is drawn as {other:?}"),
+        }
+        let b = step_of(&planned.plan, B);
+        let fed = view
+            .edges
+            .iter()
+            .find(|edge| edge.to_node == merge && edge.from_node == b)
+            .expect("b's value is wired into merge");
+        assert_eq!(
+            fed.kind,
+            PlanViewEdgeKind::Arg { arg_urn: OTHER.to_string(), arg_name: "other".to_string() }
+        );
+        let a = step_of(&planned.plan, A);
+        let main = view
+            .edges
+            .iter()
+            .find(|edge| edge.to_node == merge && edge.from_node == a)
+            .expect("a's value is merge's main input");
+        assert_eq!(main.kind, PlanViewEdgeKind::Direct);
+    }
+
+    // TEST22106: a plan names nothing it cannot draw: a media type or a cap
+    // the registry's cache does not hold is an error naming it, never a node
+    // drawn with a blank title.
+    #[tokio::test]
+    async fn test22106_a_media_or_cap_the_cache_lacks_is_an_error_naming_it() {
+        let planned = strand(&render_then_convert(), fabric(render_caps(), &[])).await;
+
+        let without_jpeg = fabric(render_caps(), &["media:ext=jpeg;image"]);
+        match PlanView::of(&without_jpeg, &planned.plan, &planned.node_names) {
+            Err(PlanViewError::MissingMediaDef(urn)) => assert!(
+                MediaUrn::from_string(&urn)
+                    .unwrap()
+                    .is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap())
+                    .unwrap(),
+                "the error names the media it lacks, not {urn}"
+            ),
+            other => panic!("a missing media definition is refused, not {other:?}"),
+        }
+
+        let without_convert = fabric(vec![titled(cap(RENDER, true), "Render pages")], &[]);
+        match PlanView::of(&without_convert, &planned.plan, &planned.node_names) {
+            Err(PlanViewError::MissingCap(urn)) => {
+                let to_jpeg = step_of(&planned.plan, TO_JPEG);
+                assert_eq!(urn, planned.plan.nodes[&to_jpeg].cap_urn().unwrap(), "the error names the cap it lacks");
+            }
+            other => panic!("a missing cap is refused, not {other:?}"),
+        }
+    }
+}

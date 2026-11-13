@@ -2,7 +2,7 @@
 
 Generated from the test catalogue. Edit the tests, not this file.
 
-1722 tests: 1713 numbered, 9 unnumbered.
+1727 tests: 1718 numbered, 9 unnumbered.
 
 ## Numbered
 
@@ -1721,6 +1721,11 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST20123 | capdag/capdag-rs | rust | `test20123_an_aborted_or_interrupted_wait_says_no_verdict` | src/cli/run.rs:1349 | TEST20123: an aborted run's verdict is not waited for, nor is one an interrupt cuts short: neither is said, and the stop is abandoned. |
 | TEST20150 | capdag/capdag-rs | rust | `test20150_truncate_respects_display_width_and_graphemes` | src/tui/text.rs:85 | TEST20150: cutting text to a column budget never exceeds the budget, keeps whole grapheme clusters (a wide CJK character takes two columns and is never split), and says it cut with an ellipsis. |
 | TEST20151 | capdag/capdag-rs | rust | `test20151_a_chosen_cap_is_written_by_its_alias` | src/tui/edit.rs:585 | TEST20151: a cap chosen for a step is written by its fabric alias, with no header, as every machine the command line writes is; a header naming an equivalent cap is still reused, and a header that claims the alias's name for another cap leaves the chosen one a header of its own. |
+| TEST22102 | capdag/capdag-rs | rust | `test22102_signals_of_every_run_arrive_in_order_tagged_with_their_run` | src/orchestrator/observe.rs:207 | TEST22102: every signal of every run a host starts arrives on the one receiver, in the order the callbacks gave them, tagged with the run and strand it is of, and carrying exactly what its callback was handed. |
+| TEST22103 | capdag/capdag-rs | rust | `test22103_a_gone_receiver_fails_the_run_or_marks_the_observer_lost` | src/orchestrator/observe.rs:290 | TEST22103: a receiver dropped while a run still speaks is never absorbed: the callbacks that can fail fail the run, naming it, and the ones that cannot mark the observer lost for the host to see when the run returns. |
+| TEST22104 | capdag/capdag-rs | rust | `test22104_a_plan_is_drawn_with_the_names_and_maps_of_its_nodes` | src/orchestrator/plan_view.rs:486 | TEST22104: a plan is drawn with every node, ordered by id and found by it, holding the title of its media and of its cap, the name the notation gives it, and the innermost map it runs in; every edge is drawn in the plan's order with what it carries. |
+| TEST22105 | capdag/capdag-rs | rust | `test22105_args_and_constants_are_drawn_by_their_names_in_the_cap` | src/orchestrator/plan_view.rs:584 | TEST22105: an arg a step is fed by an edge and an arg it is given a constant are drawn by the names their cap gives them. |
+| TEST22106 | capdag/capdag-rs | rust | `test22106_a_media_or_cap_the_cache_lacks_is_an_error_naming_it` | src/orchestrator/plan_view.rs:639 | TEST22106: a plan names nothing it cannot draw: a media type or a cap the registry's cache does not hold is an error naming it, never a node drawn with a blank title. |
 
 ## Unnumbered
 
