@@ -671,7 +671,7 @@ pub async fn build_plans_from_notation_from(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::cap::definition::{ArgSource, Cap, CapArg, CapOutput, OutputCarries};
     use crate::planner::{EdgeType, ExecutionNodeType};
@@ -717,7 +717,7 @@ mod tests {
 
     /// `cap` with one more arg, named `name`: its identity is `media_urn`, and
     /// it takes what conforms to `accepts` — its own URN when `None`.
-    fn with_arg(mut cap: Cap, name: &str, media_urn: &str, accepts: Option<&str>) -> Cap {
+    pub(crate) fn with_arg(mut cap: Cap, name: &str, media_urn: &str, accepts: Option<&str>) -> Cap {
         let mut arg = CapArg::new(
             media_urn.to_string(),
             name,
@@ -746,7 +746,7 @@ mod tests {
     }
 
     /// The header that gives `alias` to `urn`.
-    fn header(alias: &str, urn: &str) -> String {
+    pub(crate) fn header(alias: &str, urn: &str) -> String {
         format!("[{alias} {urn}]")
     }
 
@@ -773,7 +773,7 @@ mod tests {
 
     /// The node of the one step that runs the cap `cap` (compared as cap
     /// URNs, never as strings).
-    fn step_of(plan: &MachinePlan, cap: &str) -> String {
+    pub(crate) fn step_of(plan: &MachinePlan, cap: &str) -> String {
         let wanted = CapUrn::from_string(cap).unwrap();
         let found: Vec<&String> = plan
             .nodes

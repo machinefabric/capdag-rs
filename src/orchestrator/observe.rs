@@ -184,3 +184,130 @@ impl RunObserver {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orchestrator::execute_plan::StepOutcome;
+    use crate::planner::StepToken;
+    use crate::AttributionClass;
+
+    fn drain(receiver: &mut mpsc::UnboundedReceiver<RunEvent>) -> Vec<RunEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            events.push(event);
+        }
+        events
+    }
+
+    // TEST22102: every signal of every run a host starts arrives on the one
+    // receiver, in the order the callbacks gave them, tagged with the run and
+    // strand it is of, and carrying exactly what its callback was handed.
+    #[test]
+    fn test22102_signals_of_every_run_arrive_in_order_tagged_with_their_run() {
+        let (observer, mut receiver) = RunObserver::new();
+        let first = RunKey { run: 0, strand: 1 };
+        let second = RunKey { run: 3, strand: 0 };
+        let a = observer.callbacks(first);
+        let b = observer.callbacks(second);
+        let step = StepToken::mint();
+        let item = ForEachItemSnapshot {
+            foreach_token_id: step.clone(),
+            body_index: 4,
+            enclosing: Vec::new(),
+            item_preview_text: Some("page 5".into()),
+            item_byte_count: 17,
+        };
+
+        (a.progress.as_ref().unwrap())(0.25, "cap:a", "starting");
+        (b.step_progress.as_ref().unwrap())(0.5, "cap:b", "map-b");
+        (a.log.as_ref().unwrap())(PipelineLogRecord::attributed(
+            &step,
+            "cap:a",
+            "warn",
+            AttributionClass::Input,
+            "a page was empty",
+        ));
+        (b.foreach_items.as_ref().unwrap())("map-b", std::slice::from_ref(&item)).unwrap();
+        (a.body_outcome.as_ref().unwrap())(&[]).unwrap();
+        (b.step_report.as_ref().unwrap())(&StepReport {
+            step_token_id: step.clone(),
+            cap_urn: "cap:b".into(),
+            body: None,
+            outcome: StepOutcome::Skipped { absent: vec!["node-7".into()] },
+        });
+
+        let events = drain(&mut receiver);
+        let keys: Vec<RunKey> = events.iter().map(|event| event.key).collect();
+        assert_eq!(keys, [first, second, first, second, first, second]);
+        match &events[0].signal {
+            RunSignal::Progress { progress, cap_urn, message } => {
+                assert_eq!((*progress, cap_urn.as_str(), message.as_str()), (0.25, "cap:a", "starting"));
+            }
+            other => panic!("first signal is {other:?}"),
+        }
+        match &events[1].signal {
+            RunSignal::StepProgress { token_id, cap_urn, progress } => {
+                assert_eq!((token_id.as_str(), cap_urn.as_str(), *progress), ("map-b", "cap:b", 0.5));
+            }
+            other => panic!("second signal is {other:?}"),
+        }
+        match &events[2].signal {
+            RunSignal::Log(record) => {
+                assert_eq!(record.message, "a page was empty");
+                assert_eq!(record.level, "warn");
+                assert_eq!(record.step_token_id.as_ref(), Some(&step));
+            }
+            other => panic!("third signal is {other:?}"),
+        }
+        match &events[3].signal {
+            RunSignal::ForEachItems { map_token, items } => {
+                assert_eq!(map_token, "map-b");
+                assert_eq!(items.len(), 1);
+                assert_eq!((items[0].body_index, items[0].item_byte_count), (4, 17));
+                assert_eq!(items[0].item_preview_text.as_deref(), Some("page 5"));
+            }
+            other => panic!("fourth signal is {other:?}"),
+        }
+        match &events[4].signal {
+            RunSignal::BodyOutcomes(outcomes) => assert!(outcomes.is_empty()),
+            other => panic!("fifth signal is {other:?}"),
+        }
+        match &events[5].signal {
+            RunSignal::StepReport(report) => {
+                assert_eq!(report.cap_urn, "cap:b");
+                assert_eq!(report.outcome, StepOutcome::Skipped { absent: vec!["node-7".into()] });
+            }
+            other => panic!("sixth signal is {other:?}"),
+        }
+        assert!(!observer.lost(), "every signal was delivered");
+    }
+
+    // TEST22103: a receiver dropped while a run still speaks is never absorbed:
+    // the callbacks that can fail fail the run, naming it, and the ones that
+    // cannot mark the observer lost for the host to see when the run returns.
+    #[test]
+    fn test22103_a_gone_receiver_fails_the_run_or_marks_the_observer_lost() {
+        let (observer, receiver) = RunObserver::new();
+        let callbacks = observer.callbacks(RunKey { run: 2, strand: 5 });
+        drop(receiver);
+
+        (callbacks.progress.as_ref().unwrap())(0.1, "cap:a", "starting");
+        assert!(observer.lost(), "an undeliverable progress signal marks the observer lost");
+
+        let (observer, receiver) = RunObserver::new();
+        let callbacks = observer.callbacks(RunKey { run: 2, strand: 5 });
+        drop(receiver);
+        match (callbacks.body_outcome.as_ref().unwrap())(&[]) {
+            Err(ExecutionError::HostError(message)) => {
+                assert!(message.contains("run 2 strand 5"), "the failure names its run: {message}");
+            }
+            other => panic!("an undeliverable body outcome fails the run, not {other:?}"),
+        }
+        assert!(observer.lost());
+        assert!(matches!(
+            (callbacks.foreach_items.as_ref().unwrap())("map", &[]),
+            Err(ExecutionError::HostError(_))
+        ));
+    }
+}
