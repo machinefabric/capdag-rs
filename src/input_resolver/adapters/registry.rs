@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::media::registry::FabricRegistry;
+use crate::FabricRegistryError;
 use crate::urn::media_urn::MediaUrn;
 
 /// Error returned when cap group registration fails due to adapter ambiguity
@@ -211,22 +212,38 @@ impl MediaAdapterRegistry {
         Ok(())
     }
 
+    /// The file media types the fabric declares for an extension, parsed.
+    async fn extension_candidates(&self, ext: &str) -> Result<Vec<MediaUrn>, FabricRegistryError> {
+        let defs = self.fabric_registry.file_media_for_extension(ext).await?;
+        defs.iter()
+            .map(|d| {
+                MediaUrn::from_string(&d.urn).map_err(|e| {
+                    FabricRegistryError::ParseError(format!(
+                        "the fabric's media definition '{}' has no valid URN: {e}",
+                        d.urn
+                    ))
+                })
+            })
+            .collect()
+    }
+
     /// Find adapters that can handle candidate URNs for a given file extension.
     ///
-    /// 1. Queries FabricRegistry for candidate URNs via extension
+    /// 1. Queries FabricRegistry for the extension's file media types
     /// 2. For each candidate, finds registered adapters where the candidate
     ///    `conforms_to` the registered adapter URN
     /// 3. Returns `(cartridge_id, adapter_media_urn)` pairs
-    pub fn find_adapters_for_extension(&self, ext: &str) -> Vec<(String, MediaUrn)> {
-        let candidate_strings = match self.fabric_registry.media_urns_for_extension(ext) {
-            Ok(urns) if !urns.is_empty() => urns,
-            _ => return Vec::new(),
-        };
+    pub async fn find_adapters_for_extension(
+        &self,
+        ext: &str,
+    ) -> Result<Vec<(String, MediaUrn)>, FabricRegistryError> {
+        let candidates = self.extension_candidates(ext).await?;
+        Ok(self.adapters_for_candidates(&candidates))
+    }
 
-        let candidates: Vec<MediaUrn> = candidate_strings
-            .iter()
-            .filter_map(|s| MediaUrn::from_string(s).ok())
-            .collect();
+    /// The registered adapters some of these candidates conform to, one per
+    /// cartridge, as `(cartridge_id, adapter_media_urn)` pairs.
+    pub fn adapters_for_candidates(&self, candidates: &[MediaUrn]) -> Vec<(String, MediaUrn)> {
 
         let mut results: Vec<(String, MediaUrn)> = Vec::new();
         let mut seen_cartridges: std::collections::HashSet<String> =
@@ -251,22 +268,13 @@ impl MediaAdapterRegistry {
 
     /// Quick check for UI queries — returns true if any registered adapter
     /// handles candidate URNs for this extension.
-    pub fn has_adapter_for_extension(&self, ext: &str) -> bool {
-        let candidate_strings = match self.fabric_registry.media_urns_for_extension(ext) {
-            Ok(urns) if !urns.is_empty() => urns,
-            _ => return false,
-        };
-
-        let candidates: Vec<MediaUrn> = candidate_strings
-            .iter()
-            .filter_map(|s| MediaUrn::from_string(s).ok())
-            .collect();
-
-        self.registered_adapters.iter().any(|registered| {
+    pub async fn has_adapter_for_extension(&self, ext: &str) -> Result<bool, FabricRegistryError> {
+        let candidates = self.extension_candidates(ext).await?;
+        Ok(self.registered_adapters.iter().any(|registered| {
             candidates
                 .iter()
                 .any(|c| c.conforms_to(&registered.media_urn).unwrap_or(false))
-        })
+        }))
     }
 }
 
@@ -285,7 +293,7 @@ mod tests {
         registry.insert_cached_media_def_for_test(StoredMediaDef {
             dims: Vec::new(),
             version: 0,
-            urn: "media:enc=utf8;fmt=json;record".to_string(),
+            urn: "media:enc=utf8;ext=json;fmt=json;record".to_string(),
             media_type: "application/json".to_string(),
             title: "JSON".to_string(),
             profile_uri: None,
@@ -443,8 +451,8 @@ mod tests {
     }
 
     // TEST1280: find_adapters_for_extension returns correct cartridge IDs
-    #[test]
-    fn test1280_find_adapters_for_extension() {
+    #[tokio::test]
+    async fn test1280_find_adapters_for_extension() {
         let (fabric_registry, _temp) = create_test_registry();
         let mut registry = MediaAdapterRegistry::new(fabric_registry);
 
@@ -457,7 +465,7 @@ mod tests {
             )
             .unwrap();
 
-        let results = registry.find_adapters_for_extension("json");
+        let results = registry.find_adapters_for_extension("json").await.unwrap();
         // Should find txtcartridge since json extension candidates conform to media:enc=utf8;fmt=json
         assert!(
             !results.is_empty(),
@@ -468,13 +476,13 @@ mod tests {
     }
 
     // TEST1281: has_adapter_for_extension returns false for unregistered extension
-    #[test]
-    fn test1281_no_adapter_for_unknown() {
+    #[tokio::test]
+    async fn test1281_no_adapter_for_unknown() {
         let (fabric_registry, _temp) = create_test_registry();
         let registry = MediaAdapterRegistry::new(fabric_registry);
 
         assert!(
-            !registry.has_adapter_for_extension("xyz_unknown"),
+            !registry.has_adapter_for_extension("xyz_unknown").await.unwrap(),
             "Unknown extension must return false"
         );
     }

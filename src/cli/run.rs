@@ -377,7 +377,7 @@ async fn narrow_if_abstract(ctx: &Ctx, registry: &Arc<FabricRegistry>, cap: Cap,
                 .context("piped input has no type to tell it by")
                 .hint(format!("capdag run {alias} <file> --to <type>"))
         })?;
-    let media = inputs::detect(&input, registry)?;
+    let media = inputs::detect(&input, registry).await?;
     let target = match &args.to {
         Some(to) => Some(super::plan::target_media(registry, to).await?),
         None => None,
@@ -701,7 +701,7 @@ async fn plan_machine_runs(
     };
     let mut file_inputs: Vec<(String, PathBuf, Vec<u8>)> = Vec::with_capacity(files.len());
     for file in &files {
-        let media = inputs::detect(file, registry)?;
+        let media = inputs::detect(file, registry).await?;
         let name = closest(&media, &inputs::describe(file, &media, registry), Some(file))?;
         file_inputs.push((name, file.clone(), inputs::read(file)?));
     }

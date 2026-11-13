@@ -87,7 +87,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     // Files of one type are one sequence; each type is its own source.
     let mut groups: Vec<(MediaUrn, usize)> = Vec::new();
     for file in &files {
-        let media = inputs::detect(file, &registry)?;
+        let media = inputs::detect(file, &registry).await?;
         match groups.iter_mut().find(|(m, _)| m.is_equivalent(&media).unwrap_or(false)) {
             Some((_, count)) => *count += 1,
             None => groups.push((media, 1)),

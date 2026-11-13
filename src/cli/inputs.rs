@@ -97,33 +97,31 @@ pub fn pair<'a>(flag: &str, given: &'a str) -> CliResult<(&'a str, &'a str)> {
     }
 }
 
-/// The media a file is, as the desktop clients detect it: by its extension,
-/// then by what its content validates as. A file the fabric cannot identify is
-/// an error naming it — never the bare `media:`, which would plan into a dead
-/// end or merge files of different types.
-pub fn detect(file: &Path, registry: &FabricRegistry) -> CliResult<MediaUrn> {
-    let resolved = crate::detect_file_discriminated(file, registry, &crate::ValueAdapterRegistry::new())
-        .map_err(|e| {
-            CliError::failed(format!("the type of '{}' could not be detected", file.display()))
-                .context(e.to_string())
-        })?;
-    if resolved.media_urn == "media:" {
-        return Err(match file.extension().and_then(|e| e.to_str()) {
-            Some(ext) => CliError::failed(format!(
-                "capdag does not know what kind of file '{}' is",
-                file.display()
-            ))
-            .context(format!("the fabric defines no media type for the extension .{ext}"))
+/// The media a file is, by the one detection the desktop clients run: the
+/// file media types its extension names, decided by its content. A file the
+/// fabric cannot identify is an error naming it, never the bare `media:`,
+/// which would plan into a dead end or merge files of different types.
+pub async fn detect(file: &Path, registry: &FabricRegistry) -> CliResult<MediaUrn> {
+    let unknown = || CliError::failed(format!("capdag does not know what kind of file '{}' is", file.display()));
+    let found = crate::detect_file_media(
+        file,
+        registry,
+        &crate::NoAdapters,
+        &crate::NoInvoker,
+        &crate::ValueAdapterRegistry::new(),
+    )
+    .await
+    .map_err(|e| match e {
+        crate::InputResolverError::UnknownExtension { extension, .. } => unknown()
+            .context(format!("the fabric defines no media type for the extension .{extension}"))
             .hint("name its input explicitly with --input <name>=@<path>, or report the missing type"),
-            None => CliError::failed(format!(
-                "capdag does not know what kind of file '{}' is",
-                file.display()
-            ))
+        crate::InputResolverError::NoExtension(_) => unknown()
             .context("the file has no extension to detect its type from")
             .hint("give the file its usual extension, or --input <name>=@<path>"),
-        });
-    }
-    MediaUrn::from_string(&resolved.media_urn).map_err(|e| {
+        other => CliError::failed(format!("the type of '{}' could not be detected", file.display()))
+            .context(other.to_string()),
+    })?;
+    MediaUrn::from_string(found.primary()).map_err(|e| {
         CliError::failed(format!("'{}' was detected as an invalid media type", file.display()))
             .context(e.to_string())
     })

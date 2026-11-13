@@ -1,0 +1,1546 @@
+{
+ "manifest_version": 13,
+ "about": "Every media definition of fabric manifest 13 that carries the ext= file-type tag, and the content-only JSON records that declare an extension, as published (urn, version, media_type, title, extensions, validation; documentation, schema and dims left out).",
+ "definitions": {
+  "media:archive;ext=apk": {
+   "urn": "media:archive;ext=apk",
+   "version": 4,
+   "media_type": "application/vnd.android.package-archive",
+   "title": "APK, Archive",
+   "extensions": [
+    "apk"
+   ]
+  },
+  "media:archive;ext=bzip2": {
+   "urn": "media:archive;ext=bzip2",
+   "version": 4,
+   "media_type": "application/x-bzip2",
+   "title": "Bzip2, Archive",
+   "extensions": [
+    "bz2"
+   ]
+  },
+  "media:archive;ext=deb": {
+   "urn": "media:archive;ext=deb",
+   "version": 4,
+   "media_type": "application/vnd.debian.binary-package",
+   "title": "Debian package, Archive",
+   "extensions": [
+    "deb"
+   ]
+  },
+  "media:archive;ext=dmg": {
+   "urn": "media:archive;ext=dmg",
+   "version": 4,
+   "media_type": "application/x-apple-diskimage",
+   "title": "DMG, Archive",
+   "extensions": [
+    "dmg"
+   ]
+  },
+  "media:archive;ext=gzip": {
+   "urn": "media:archive;ext=gzip",
+   "version": 4,
+   "media_type": "application/gzip",
+   "title": "Gzip, Archive",
+   "extensions": [
+    "gz"
+   ]
+  },
+  "media:archive;ext=ipa": {
+   "urn": "media:archive;ext=ipa",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "IPA, Archive",
+   "extensions": [
+    "ipa"
+   ]
+  },
+  "media:archive;ext=iso": {
+   "urn": "media:archive;ext=iso",
+   "version": 4,
+   "media_type": "application/x-iso9660-image",
+   "title": "ISO, Archive",
+   "extensions": [
+    "iso"
+   ]
+  },
+  "media:archive;ext=jar": {
+   "urn": "media:archive;ext=jar",
+   "version": 4,
+   "media_type": "application/java-archive",
+   "title": "JAR, Archive",
+   "extensions": [
+    "jar"
+   ]
+  },
+  "media:archive;ext=lzma": {
+   "urn": "media:archive;ext=lzma",
+   "version": 4,
+   "media_type": "application/x-lzma",
+   "title": "LZMA, Archive",
+   "extensions": [
+    "lzma"
+   ]
+  },
+  "media:archive;ext=pkg": {
+   "urn": "media:archive;ext=pkg",
+   "version": 4,
+   "media_type": "application/x-xar",
+   "title": "PKG, Archive",
+   "extensions": [
+    "pkg"
+   ]
+  },
+  "media:archive;ext=rar": {
+   "urn": "media:archive;ext=rar",
+   "version": 4,
+   "media_type": "application/vnd.rar",
+   "title": "RAR, Archive",
+   "extensions": [
+    "rar"
+   ]
+  },
+  "media:archive;ext=rpm": {
+   "urn": "media:archive;ext=rpm",
+   "version": 4,
+   "media_type": "application/x-rpm",
+   "title": "RPM, Archive",
+   "extensions": [
+    "rpm"
+   ]
+  },
+  "media:archive;ext=sevenz": {
+   "urn": "media:archive;ext=sevenz",
+   "version": 4,
+   "media_type": "application/x-7z-compressed",
+   "title": "7-Zip, Archive",
+   "extensions": [
+    "7z"
+   ]
+  },
+  "media:archive;ext=tar": {
+   "urn": "media:archive;ext=tar",
+   "version": 4,
+   "media_type": "application/x-tar",
+   "title": "TAR, Archive",
+   "extensions": [
+    "tar"
+   ]
+  },
+  "media:archive;ext=targz": {
+   "urn": "media:archive;ext=targz",
+   "version": 4,
+   "media_type": "application/gzip",
+   "title": "tar.gz, Archive",
+   "extensions": [
+    "tgz"
+   ]
+  },
+  "media:archive;ext=war": {
+   "urn": "media:archive;ext=war",
+   "version": 4,
+   "media_type": "application/java-archive",
+   "title": "WAR, Archive",
+   "extensions": [
+    "war"
+   ]
+  },
+  "media:archive;ext=xz": {
+   "urn": "media:archive;ext=xz",
+   "version": 4,
+   "media_type": "application/x-xz",
+   "title": "XZ, Archive",
+   "extensions": [
+    "xz"
+   ]
+  },
+  "media:archive;ext=zip": {
+   "urn": "media:archive;ext=zip",
+   "version": 4,
+   "media_type": "application/zip",
+   "title": "ZIP, Archive",
+   "extensions": [
+    "zip"
+   ]
+  },
+  "media:archive;ext=zstd": {
+   "urn": "media:archive;ext=zstd",
+   "version": 4,
+   "media_type": "application/zstd",
+   "title": "Zstandard, Archive",
+   "extensions": [
+    "zst"
+   ]
+  },
+  "media:audio;ext=aac": {
+   "urn": "media:audio;ext=aac",
+   "version": 3,
+   "media_type": "audio/aac",
+   "title": "AAC, Audio",
+   "extensions": [
+    "aac"
+   ]
+  },
+  "media:audio;ext=aiff": {
+   "urn": "media:audio;ext=aiff",
+   "version": 3,
+   "media_type": "audio/aiff",
+   "title": "AIFF, Audio",
+   "extensions": [
+    "aiff",
+    "aif"
+   ]
+  },
+  "media:audio;ext=caf": {
+   "urn": "media:audio;ext=caf",
+   "version": 3,
+   "media_type": "audio/x-caf",
+   "title": "CAF, Audio",
+   "extensions": [
+    "caf"
+   ]
+  },
+  "media:audio;ext=flac": {
+   "urn": "media:audio;ext=flac",
+   "version": 3,
+   "media_type": "audio/flac",
+   "title": "FLAC, Audio",
+   "extensions": [
+    "flac"
+   ]
+  },
+  "media:audio;ext=m4a": {
+   "urn": "media:audio;ext=m4a",
+   "version": 3,
+   "media_type": "audio/mp4",
+   "title": "M4A, Audio",
+   "extensions": [
+    "m4a"
+   ]
+  },
+  "media:audio;ext=midi": {
+   "urn": "media:audio;ext=midi",
+   "version": 3,
+   "media_type": "audio/midi",
+   "title": "MIDI, Audio",
+   "extensions": [
+    "mid",
+    "midi"
+   ]
+  },
+  "media:audio;ext=mp3": {
+   "urn": "media:audio;ext=mp3",
+   "version": 3,
+   "media_type": "audio/mpeg",
+   "title": "MP3, Audio",
+   "extensions": [
+    "mp3"
+   ]
+  },
+  "media:audio;ext=ogg": {
+   "urn": "media:audio;ext=ogg",
+   "version": 3,
+   "media_type": "audio/ogg",
+   "title": "Ogg Vorbis, Audio",
+   "extensions": [
+    "ogg"
+   ]
+  },
+  "media:audio;ext=opus": {
+   "urn": "media:audio;ext=opus",
+   "version": 3,
+   "media_type": "audio/opus",
+   "title": "Opus, Audio",
+   "extensions": [
+    "opus"
+   ]
+  },
+  "media:audio;ext=wav": {
+   "urn": "media:audio;ext=wav",
+   "version": 3,
+   "media_type": "audio/wav",
+   "title": "WAV, Audio",
+   "extensions": [
+    "wav"
+   ]
+  },
+  "media:audio;ext=wma": {
+   "urn": "media:audio;ext=wma",
+   "version": 3,
+   "media_type": "audio/x-ms-wma",
+   "title": "WMA, Audio",
+   "extensions": [
+    "wma"
+   ]
+  },
+  "media:digitized;enc=utf8;ext=txt;plain-text": {
+   "urn": "media:digitized;enc=utf8;ext=txt;plain-text",
+   "version": 5,
+   "media_type": "text/plain",
+   "title": "UTF-8, Plain Text, Plain Text, Digitized",
+   "extensions": [
+    "txt"
+   ]
+  },
+  "media:document;ext=djvu": {
+   "urn": "media:document;ext=djvu",
+   "version": 2,
+   "media_type": "image/vnd.djvu",
+   "title": "DjVu, Document",
+   "extensions": [
+    "djvu",
+    "djv"
+   ]
+  },
+  "media:document;ext=doc": {
+   "urn": "media:document;ext=doc",
+   "version": 2,
+   "media_type": "application/msword",
+   "title": "Word DOC, Document",
+   "extensions": [
+    "doc"
+   ]
+  },
+  "media:document;ext=docx": {
+   "urn": "media:document;ext=docx",
+   "version": 2,
+   "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+   "title": "Word DOCX, Document",
+   "extensions": [
+    "docx"
+   ]
+  },
+  "media:document;ext=epub": {
+   "urn": "media:document;ext=epub",
+   "version": 2,
+   "media_type": "application/epub+zip",
+   "title": "EPUB, Document",
+   "extensions": [
+    "epub"
+   ]
+  },
+  "media:document;ext=keynote": {
+   "urn": "media:document;ext=keynote",
+   "version": 2,
+   "media_type": "application/vnd.apple.keynote",
+   "title": "Apple Keynote, Document",
+   "extensions": [
+    "key"
+   ]
+  },
+  "media:document;ext=mobi": {
+   "urn": "media:document;ext=mobi",
+   "version": 2,
+   "media_type": "application/x-mobipocket-ebook",
+   "title": "Mobipocket, Document",
+   "extensions": [
+    "mobi"
+   ]
+  },
+  "media:document;ext=numbers": {
+   "urn": "media:document;ext=numbers",
+   "version": 2,
+   "media_type": "application/vnd.apple.numbers",
+   "title": "Apple Numbers, Document",
+   "extensions": [
+    "numbers"
+   ]
+  },
+  "media:document;ext=odp": {
+   "urn": "media:document;ext=odp",
+   "version": 2,
+   "media_type": "application/vnd.oasis.opendocument.presentation",
+   "title": "ODP, Document",
+   "extensions": [
+    "odp"
+   ]
+  },
+  "media:document;ext=ods": {
+   "urn": "media:document;ext=ods",
+   "version": 2,
+   "media_type": "application/vnd.oasis.opendocument.spreadsheet",
+   "title": "ODS, Document",
+   "extensions": [
+    "ods"
+   ]
+  },
+  "media:document;ext=odt": {
+   "urn": "media:document;ext=odt",
+   "version": 2,
+   "media_type": "application/vnd.oasis.opendocument.text",
+   "title": "ODT, Document",
+   "extensions": [
+    "odt"
+   ]
+  },
+  "media:document;ext=pages": {
+   "urn": "media:document;ext=pages",
+   "version": 2,
+   "media_type": "application/vnd.apple.pages",
+   "title": "Apple Pages, Document",
+   "extensions": [
+    "pages"
+   ]
+  },
+  "media:document;ext=pdf": {
+   "urn": "media:document;ext=pdf",
+   "version": 2,
+   "media_type": "application/pdf",
+   "title": "PDF, Document",
+   "extensions": [
+    "pdf"
+   ]
+  },
+  "media:document;ext=ppt": {
+   "urn": "media:document;ext=ppt",
+   "version": 2,
+   "media_type": "application/vnd.ms-powerpoint",
+   "title": "PowerPoint PPT, Document",
+   "extensions": [
+    "ppt"
+   ]
+  },
+  "media:document;ext=pptx": {
+   "urn": "media:document;ext=pptx",
+   "version": 2,
+   "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+   "title": "PowerPoint PPTX, Document",
+   "extensions": [
+    "pptx"
+   ]
+  },
+  "media:document;ext=xls": {
+   "urn": "media:document;ext=xls",
+   "version": 2,
+   "media_type": "application/vnd.ms-excel",
+   "title": "Excel XLS, Document",
+   "extensions": [
+    "xls"
+   ]
+  },
+  "media:document;ext=xlsx": {
+   "urn": "media:document;ext=xlsx",
+   "version": 2,
+   "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+   "title": "Excel XLSX, Document",
+   "extensions": [
+    "xlsx"
+   ]
+  },
+  "media:download-result;enc=utf8;fmt=json;record": {
+   "urn": "media:download-result;enc=utf8;fmt=json;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Download Result (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:embedding-vector;enc=utf8;fmt=json;list;record": {
+   "urn": "media:embedding-vector;enc=utf8;fmt=json;list;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Embedding Vector List (List, Record, JSON, UTF-8)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:embedding-vector;enc=utf8;fmt=json;record": {
+   "urn": "media:embedding-vector;enc=utf8;fmt=json;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Embedding Vector (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;ext=asciidoc;plain-text": {
+   "urn": "media:enc=utf8;ext=asciidoc;plain-text",
+   "version": 4,
+   "media_type": "text/asciidoc",
+   "title": "AsciiDoc, UTF-8, Plain Text",
+   "extensions": [
+    "adoc",
+    "asciidoc"
+   ]
+  },
+  "media:enc=utf8;ext=ass;list": {
+   "urn": "media:enc=utf8;ext=ass;list",
+   "version": 4,
+   "media_type": "text/x-ssa",
+   "title": "Advanced SubStation, List, UTF-8",
+   "extensions": [
+    "ass",
+    "ssa"
+   ]
+  },
+  "media:enc=utf8;ext=cmake": {
+   "urn": "media:enc=utf8;ext=cmake",
+   "version": 4,
+   "media_type": "text/x-cmake",
+   "title": "CMake, UTF-8",
+   "extensions": [
+    "cmake"
+   ]
+  },
+  "media:enc=utf8;ext=css": {
+   "urn": "media:enc=utf8;ext=css",
+   "version": 4,
+   "media_type": "text/css",
+   "title": "CSS, UTF-8",
+   "extensions": [
+    "css"
+   ]
+  },
+  "media:enc=utf8;ext=csv;fmt=csv;list;record": {
+   "urn": "media:enc=utf8;ext=csv;fmt=csv;list;record",
+   "version": 4,
+   "media_type": "text/csv",
+   "title": "CSV, CSV, UTF-8, List, Record",
+   "extensions": [
+    "csv"
+   ]
+  },
+  "media:enc=utf8;ext=dockerfile": {
+   "urn": "media:enc=utf8;ext=dockerfile",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "Dockerfile, UTF-8",
+   "extensions": [
+    "dockerfile"
+   ]
+  },
+  "media:enc=utf8;ext=dockerignore": {
+   "urn": "media:enc=utf8;ext=dockerignore",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": ".dockerignore, UTF-8",
+   "extensions": [
+    "dockerignore"
+   ]
+  },
+  "media:enc=utf8;ext=dot": {
+   "urn": "media:enc=utf8;ext=dot",
+   "version": 4,
+   "media_type": "text/vnd.graphviz",
+   "title": "Graphviz DOT, UTF-8",
+   "extensions": [
+    "dot",
+    "gv"
+   ]
+  },
+  "media:enc=utf8;ext=editorconfig": {
+   "urn": "media:enc=utf8;ext=editorconfig",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "EditorConfig, UTF-8",
+   "extensions": [
+    "editorconfig"
+   ]
+  },
+  "media:enc=utf8;ext=eml": {
+   "urn": "media:enc=utf8;ext=eml",
+   "version": 4,
+   "media_type": "message/rfc822",
+   "title": "Email Message, UTF-8",
+   "extensions": [
+    "eml"
+   ]
+  },
+  "media:enc=utf8;ext=env": {
+   "urn": "media:enc=utf8;ext=env",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "ENV, UTF-8",
+   "extensions": [
+    "env"
+   ]
+  },
+  "media:enc=utf8;ext=geojson;record": {
+   "urn": "media:enc=utf8;ext=geojson;record",
+   "version": 4,
+   "media_type": "application/geo+json",
+   "title": "GeoJSON, Record, UTF-8",
+   "extensions": [
+    "geojson"
+   ]
+  },
+  "media:enc=utf8;ext=gitignore": {
+   "urn": "media:enc=utf8;ext=gitignore",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": ".gitignore, UTF-8",
+   "extensions": [
+    "gitignore"
+   ]
+  },
+  "media:enc=utf8;ext=gomod": {
+   "urn": "media:enc=utf8;ext=gomod",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "go.mod, UTF-8",
+   "extensions": [
+    "mod"
+   ]
+  },
+  "media:enc=utf8;ext=gosum": {
+   "urn": "media:enc=utf8;ext=gosum",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "go.sum, UTF-8",
+   "extensions": [
+    "sum"
+   ]
+  },
+  "media:enc=utf8;ext=gpx": {
+   "urn": "media:enc=utf8;ext=gpx",
+   "version": 4,
+   "media_type": "application/gpx+xml",
+   "title": "GPX, UTF-8",
+   "extensions": [
+    "gpx"
+   ]
+  },
+  "media:enc=utf8;ext=html": {
+   "urn": "media:enc=utf8;ext=html",
+   "version": 4,
+   "media_type": "text/html",
+   "title": "HTML, UTF-8",
+   "extensions": [
+    "html",
+    "htm"
+   ]
+  },
+  "media:enc=utf8;ext=html;filing-document": {
+   "urn": "media:enc=utf8;ext=html;filing-document",
+   "version": 3,
+   "media_type": "text/html",
+   "title": "Filing Document (HTML, UTF-8)",
+   "extensions": [
+    "html",
+    "htm"
+   ]
+  },
+  "media:enc=utf8;ext=ics;list": {
+   "urn": "media:enc=utf8;ext=ics;list",
+   "version": 4,
+   "media_type": "text/calendar",
+   "title": "iCalendar, List, UTF-8",
+   "extensions": [
+    "ics"
+   ]
+  },
+  "media:enc=utf8;ext=ini": {
+   "urn": "media:enc=utf8;ext=ini",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "INI, UTF-8",
+   "extensions": [
+    "ini",
+    "cfg"
+   ]
+  },
+  "media:enc=utf8;ext=json;fmt=json": {
+   "urn": "media:enc=utf8;ext=json;fmt=json",
+   "version": 4,
+   "media_type": "application/json",
+   "title": "JSON, JSON, UTF-8",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;ext=json;fmt=json;list": {
+   "urn": "media:enc=utf8;ext=json;fmt=json;list",
+   "version": 4,
+   "media_type": "application/json",
+   "title": "JSON, JSON, UTF-8, List",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;ext=json;fmt=json;list;record": {
+   "urn": "media:enc=utf8;ext=json;fmt=json;list;record",
+   "version": 4,
+   "media_type": "application/json",
+   "title": "JSON, JSON, UTF-8, List, Record",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;ext=json;fmt=json;record": {
+   "urn": "media:enc=utf8;ext=json;fmt=json;record",
+   "version": 4,
+   "media_type": "application/json",
+   "title": "JSON, JSON, UTF-8, Record",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;ext=jupyter;record": {
+   "urn": "media:enc=utf8;ext=jupyter;record",
+   "version": 4,
+   "media_type": "application/x-ipynb+json",
+   "title": "Jupyter Notebook, Record, UTF-8",
+   "extensions": [
+    "ipynb"
+   ]
+  },
+  "media:enc=utf8;ext=kml": {
+   "urn": "media:enc=utf8;ext=kml",
+   "version": 4,
+   "media_type": "application/vnd.google-earth.kml+xml",
+   "title": "KML, UTF-8",
+   "extensions": [
+    "kml"
+   ]
+  },
+  "media:enc=utf8;ext=latex": {
+   "urn": "media:enc=utf8;ext=latex",
+   "version": 4,
+   "media_type": "application/x-latex",
+   "title": "LaTeX, UTF-8",
+   "extensions": [
+    "tex",
+    "latex"
+   ]
+  },
+  "media:enc=utf8;ext=less": {
+   "urn": "media:enc=utf8;ext=less",
+   "version": 4,
+   "media_type": "text/x-less",
+   "title": "LESS, UTF-8",
+   "extensions": [
+    "less"
+   ]
+  },
+  "media:enc=utf8;ext=log;plain-text": {
+   "urn": "media:enc=utf8;ext=log;plain-text",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "Log file, UTF-8, Plain Text",
+   "extensions": [
+    "log"
+   ]
+  },
+  "media:enc=utf8;ext=makefile": {
+   "urn": "media:enc=utf8;ext=makefile",
+   "version": 4,
+   "media_type": "text/x-makefile",
+   "title": "Makefile, UTF-8",
+   "extensions": [
+    "makefile"
+   ]
+  },
+  "media:enc=utf8;ext=mbox;list": {
+   "urn": "media:enc=utf8;ext=mbox;list",
+   "version": 4,
+   "media_type": "application/mbox",
+   "title": "Mbox, List, UTF-8",
+   "extensions": [
+    "mbox"
+   ]
+  },
+  "media:enc=utf8;ext=md;plain-text": {
+   "urn": "media:enc=utf8;ext=md;plain-text",
+   "version": 4,
+   "media_type": "text/markdown",
+   "title": "Markdown, UTF-8, Plain Text",
+   "extensions": [
+    "md",
+    "markdown"
+   ]
+  },
+  "media:enc=utf8;ext=mermaid": {
+   "urn": "media:enc=utf8;ext=mermaid",
+   "version": 4,
+   "media_type": "text/x-mermaid",
+   "title": "Mermaid, UTF-8",
+   "extensions": [
+    "mmd"
+   ]
+  },
+  "media:enc=utf8;ext=ndjson;fmt=ndjson": {
+   "urn": "media:enc=utf8;ext=ndjson;fmt=ndjson",
+   "version": 4,
+   "media_type": "application/x-ndjson",
+   "title": "NDJSON, NDJSON, UTF-8",
+   "extensions": [
+    "ndjson",
+    "jsonl"
+   ]
+  },
+  "media:enc=utf8;ext=ndjson;fmt=ndjson;list": {
+   "urn": "media:enc=utf8;ext=ndjson;fmt=ndjson;list",
+   "version": 4,
+   "media_type": "application/x-ndjson",
+   "title": "NDJSON, NDJSON, UTF-8, List",
+   "extensions": [
+    "ndjson",
+    "jsonl"
+   ]
+  },
+  "media:enc=utf8;ext=ndjson;fmt=ndjson;list;record": {
+   "urn": "media:enc=utf8;ext=ndjson;fmt=ndjson;list;record",
+   "version": 4,
+   "media_type": "application/x-ndjson",
+   "title": "NDJSON, NDJSON, UTF-8, List, Record",
+   "extensions": [
+    "ndjson",
+    "jsonl"
+   ]
+  },
+  "media:enc=utf8;ext=ndjson;fmt=ndjson;record": {
+   "urn": "media:enc=utf8;ext=ndjson;fmt=ndjson;record",
+   "version": 4,
+   "media_type": "application/x-ndjson",
+   "title": "NDJSON, NDJSON, UTF-8, Record",
+   "extensions": [
+    "ndjson",
+    "jsonl"
+   ]
+  },
+  "media:enc=utf8;ext=org;plain-text": {
+   "urn": "media:enc=utf8;ext=org;plain-text",
+   "version": 4,
+   "media_type": "text/x-org",
+   "title": "Org-mode, UTF-8, Plain Text",
+   "extensions": [
+    "org"
+   ]
+  },
+  "media:enc=utf8;ext=pem": {
+   "urn": "media:enc=utf8;ext=pem",
+   "version": 4,
+   "media_type": "application/x-pem-file",
+   "title": "PEM, UTF-8",
+   "extensions": [
+    "pem",
+    "crt",
+    "key"
+   ]
+  },
+  "media:enc=utf8;ext=properties": {
+   "urn": "media:enc=utf8;ext=properties",
+   "version": 4,
+   "media_type": "text/x-java-properties",
+   "title": "Java Properties, UTF-8",
+   "extensions": [
+    "properties"
+   ]
+  },
+  "media:enc=utf8;ext=psv;fmt=psv;list;record": {
+   "urn": "media:enc=utf8;ext=psv;fmt=psv;list;record",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "PSV, PSV, UTF-8, List, Record",
+   "extensions": [
+    "psv"
+   ]
+  },
+  "media:enc=utf8;ext=requirements": {
+   "urn": "media:enc=utf8;ext=requirements",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "requirements.txt, UTF-8",
+   "extensions": [
+    "txt"
+   ]
+  },
+  "media:enc=utf8;ext=rst;plain-text": {
+   "urn": "media:enc=utf8;ext=rst;plain-text",
+   "version": 4,
+   "media_type": "text/x-rst",
+   "title": "reStructuredText, UTF-8, Plain Text",
+   "extensions": [
+    "rst"
+   ]
+  },
+  "media:enc=utf8;ext=rtf": {
+   "urn": "media:enc=utf8;ext=rtf",
+   "version": 4,
+   "media_type": "application/rtf",
+   "title": "RTF, UTF-8",
+   "extensions": [
+    "rtf"
+   ]
+  },
+  "media:enc=utf8;ext=scss": {
+   "urn": "media:enc=utf8;ext=scss",
+   "version": 4,
+   "media_type": "text/x-scss",
+   "title": "SCSS, UTF-8",
+   "extensions": [
+    "scss"
+   ]
+  },
+  "media:enc=utf8;ext=srt;list": {
+   "urn": "media:enc=utf8;ext=srt;list",
+   "version": 4,
+   "media_type": "application/x-subrip",
+   "title": "SubRip, List, UTF-8",
+   "extensions": [
+    "srt"
+   ]
+  },
+  "media:enc=utf8;ext=toml": {
+   "urn": "media:enc=utf8;ext=toml",
+   "version": 4,
+   "media_type": "application/toml",
+   "title": "TOML, UTF-8",
+   "extensions": [
+    "toml"
+   ]
+  },
+  "media:enc=utf8;ext=tsv;fmt=tsv;list;record": {
+   "urn": "media:enc=utf8;ext=tsv;fmt=tsv;list;record",
+   "version": 4,
+   "media_type": "text/tab-separated-values",
+   "title": "TSV, TSV, UTF-8, List, Record",
+   "extensions": [
+    "tsv"
+   ]
+  },
+  "media:enc=utf8;ext=txt;image-description;plain-text": {
+   "urn": "media:enc=utf8;ext=txt;image-description;plain-text",
+   "version": 5,
+   "media_type": "text/plain",
+   "title": "UTF-8, Plain Text, Plain Text, Image Description",
+   "extensions": [
+    "txt"
+   ]
+  },
+  "media:enc=utf8;ext=txt;page;plain-text": {
+   "urn": "media:enc=utf8;ext=txt;page;plain-text",
+   "version": 4,
+   "media_type": "text/plain",
+   "title": "Document Page, UTF-8, Plain Text, Plain Text",
+   "extensions": [
+    "txt"
+   ]
+  },
+  "media:enc=utf8;ext=txt;plain-text": {
+   "urn": "media:enc=utf8;ext=txt;plain-text",
+   "version": 5,
+   "media_type": "text/plain",
+   "title": "UTF-8, Plain Text, Plain Text",
+   "extensions": [
+    "txt"
+   ]
+  },
+  "media:enc=utf8;ext=vcf;list": {
+   "urn": "media:enc=utf8;ext=vcf;list",
+   "version": 4,
+   "media_type": "text/vcard",
+   "title": "vCard, List, UTF-8",
+   "extensions": [
+    "vcf"
+   ]
+  },
+  "media:enc=utf8;ext=vtt;list": {
+   "urn": "media:enc=utf8;ext=vtt;list",
+   "version": 4,
+   "media_type": "text/vtt",
+   "title": "WebVTT, List, UTF-8",
+   "extensions": [
+    "vtt"
+   ]
+  },
+  "media:enc=utf8;ext=xml;fmt=xml": {
+   "urn": "media:enc=utf8;ext=xml;fmt=xml",
+   "version": 4,
+   "media_type": "application/xml",
+   "title": "XML, XML, UTF-8",
+   "extensions": [
+    "xml"
+   ]
+  },
+  "media:enc=utf8;ext=xml;fmt=xml;list": {
+   "urn": "media:enc=utf8;ext=xml;fmt=xml;list",
+   "version": 4,
+   "media_type": "application/xml",
+   "title": "XML, XML, UTF-8, List",
+   "extensions": [
+    "xml"
+   ]
+  },
+  "media:enc=utf8;ext=xml;fmt=xml;list;record": {
+   "urn": "media:enc=utf8;ext=xml;fmt=xml;list;record",
+   "version": 4,
+   "media_type": "application/xml",
+   "title": "XML, XML, UTF-8, List, Record",
+   "extensions": [
+    "xml"
+   ]
+  },
+  "media:enc=utf8;ext=xml;fmt=xml;record": {
+   "urn": "media:enc=utf8;ext=xml;fmt=xml;record",
+   "version": 4,
+   "media_type": "application/xml",
+   "title": "XML, XML, UTF-8, Record",
+   "extensions": [
+    "xml"
+   ]
+  },
+  "media:enc=utf8;ext=yaml;fmt=yaml": {
+   "urn": "media:enc=utf8;ext=yaml;fmt=yaml",
+   "version": 4,
+   "media_type": "application/yaml",
+   "title": "YAML, YAML, UTF-8",
+   "extensions": [
+    "yaml",
+    "yml"
+   ]
+  },
+  "media:enc=utf8;ext=yaml;fmt=yaml;list": {
+   "urn": "media:enc=utf8;ext=yaml;fmt=yaml;list",
+   "version": 4,
+   "media_type": "application/yaml",
+   "title": "YAML, YAML, UTF-8, List",
+   "extensions": [
+    "yaml",
+    "yml"
+   ]
+  },
+  "media:enc=utf8;ext=yaml;fmt=yaml;list;record": {
+   "urn": "media:enc=utf8;ext=yaml;fmt=yaml;list;record",
+   "version": 4,
+   "media_type": "application/yaml",
+   "title": "YAML, YAML, UTF-8, List, Record",
+   "extensions": [
+    "yaml",
+    "yml"
+   ]
+  },
+  "media:enc=utf8;ext=yaml;fmt=yaml;record": {
+   "urn": "media:enc=utf8;ext=yaml;fmt=yaml;record",
+   "version": 4,
+   "media_type": "application/yaml",
+   "title": "YAML, YAML, UTF-8, Record",
+   "extensions": [
+    "yaml",
+    "yml"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-availability;record": {
+   "urn": "media:enc=utf8;fmt=json;model-availability;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Availability (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-contents;record": {
+   "urn": "media:enc=utf8;fmt=json;model-contents;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Contents (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-delete-result;record": {
+   "urn": "media:enc=utf8;fmt=json;model-delete-result;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Delete Result (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-list;record": {
+   "urn": "media:enc=utf8;fmt=json;model-list;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model List (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-path;record": {
+   "urn": "media:enc=utf8;fmt=json;model-path;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Path (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;fmt=json;model-repo;record": {
+   "urn": "media:enc=utf8;fmt=json;model-repo;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Repository (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ],
+   "validation": {
+    "allowed_values": [
+     "huggingface"
+    ]
+   }
+  },
+  "media:enc=utf8;fmt=json;model-status;record": {
+   "urn": "media:enc=utf8;fmt=json;model-status;record",
+   "version": 3,
+   "media_type": "application/json",
+   "title": "Model Status (JSON, UTF-8, Record)",
+   "extensions": [
+    "json"
+   ]
+  },
+  "media:enc=utf8;mlx-model-path": {
+   "urn": "media:enc=utf8;mlx-model-path",
+   "version": 3,
+   "media_type": "text/plain",
+   "title": "Mlx Model Path (UTF-8)",
+   "validation": {
+    "min_length": 1
+   }
+  },
+  "media:ext=avi;video": {
+   "urn": "media:ext=avi;video",
+   "version": 3,
+   "media_type": "video/x-msvideo",
+   "title": "AVI, Video",
+   "extensions": [
+    "avi"
+   ]
+  },
+  "media:ext=avif;image": {
+   "urn": "media:ext=avif;image",
+   "version": 3,
+   "media_type": "image/avif",
+   "title": "AVIF, Image",
+   "extensions": [
+    "avif"
+   ]
+  },
+  "media:ext=bmp;image": {
+   "urn": "media:ext=bmp;image",
+   "version": 3,
+   "media_type": "image/bmp",
+   "title": "BMP, Image",
+   "extensions": [
+    "bmp"
+   ]
+  },
+  "media:ext=coreml;model": {
+   "urn": "media:ext=coreml;model",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "CoreML, Model",
+   "extensions": [
+    "mlmodel",
+    "mlpackage"
+   ]
+  },
+  "media:ext=eps;image": {
+   "urn": "media:ext=eps;image",
+   "version": 3,
+   "media_type": "application/postscript",
+   "title": "EPS, Image",
+   "extensions": [
+    "eps"
+   ]
+  },
+  "media:ext=exr;image": {
+   "urn": "media:ext=exr;image",
+   "version": 3,
+   "media_type": "image/x-exr",
+   "title": "OpenEXR, Image",
+   "extensions": [
+    "exr"
+   ]
+  },
+  "media:ext=fbx;mesh": {
+   "urn": "media:ext=fbx;mesh",
+   "version": 1,
+   "media_type": "model/fbx",
+   "title": "FBX, 3D Mesh",
+   "extensions": [
+    "fbx"
+   ]
+  },
+  "media:ext=flv;video": {
+   "urn": "media:ext=flv;video",
+   "version": 3,
+   "media_type": "video/x-flv",
+   "title": "FLV, Video",
+   "extensions": [
+    "flv"
+   ]
+  },
+  "media:ext=gguf;model": {
+   "urn": "media:ext=gguf;model",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "GGUF, Model",
+   "extensions": [
+    "gguf"
+   ]
+  },
+  "media:ext=gif;image": {
+   "urn": "media:ext=gif;image",
+   "version": 3,
+   "media_type": "image/gif",
+   "title": "GIF, Image",
+   "extensions": [
+    "gif"
+   ]
+  },
+  "media:ext=glb;mesh": {
+   "urn": "media:ext=glb;mesh",
+   "version": 1,
+   "media_type": "model/gltf-binary",
+   "title": "GLB, 3D Mesh",
+   "extensions": [
+    "glb"
+   ]
+  },
+  "media:ext=gltf;mesh": {
+   "urn": "media:ext=gltf;mesh",
+   "version": 1,
+   "media_type": "model/gltf+json",
+   "title": "glTF, 3D Mesh",
+   "extensions": [
+    "gltf"
+   ]
+  },
+  "media:ext=hdf5": {
+   "urn": "media:ext=hdf5",
+   "version": 3,
+   "media_type": "application/x-hdf",
+   "title": "HDF5",
+   "extensions": [
+    "h5",
+    "hdf5"
+   ]
+  },
+  "media:ext=hdr;image": {
+   "urn": "media:ext=hdr;image",
+   "version": 3,
+   "media_type": "image/vnd.radiance",
+   "title": "Radiance HDR, Image",
+   "extensions": [
+    "hdr"
+   ]
+  },
+  "media:ext=heic;image": {
+   "urn": "media:ext=heic;image",
+   "version": 3,
+   "media_type": "image/heic",
+   "title": "HEIC, Image",
+   "extensions": [
+    "heic",
+    "heif"
+   ]
+  },
+  "media:ext=icns;image": {
+   "urn": "media:ext=icns;image",
+   "version": 3,
+   "media_type": "image/icns",
+   "title": "ICNS, Image",
+   "extensions": [
+    "icns"
+   ]
+  },
+  "media:ext=ico;image": {
+   "urn": "media:ext=ico;image",
+   "version": 3,
+   "media_type": "image/vnd.microsoft.icon",
+   "title": "ICO, Image",
+   "extensions": [
+    "ico"
+   ]
+  },
+  "media:ext=jpeg;image": {
+   "urn": "media:ext=jpeg;image",
+   "version": 3,
+   "media_type": "image/jpeg",
+   "title": "JPEG, Image",
+   "extensions": [
+    "jpg",
+    "jpeg"
+   ]
+  },
+  "media:ext=mkv;video": {
+   "urn": "media:ext=mkv;video",
+   "version": 3,
+   "media_type": "video/x-matroska",
+   "title": "Matroska, Video",
+   "extensions": [
+    "mkv"
+   ]
+  },
+  "media:ext=mov;video": {
+   "urn": "media:ext=mov;video",
+   "version": 3,
+   "media_type": "video/quicktime",
+   "title": "QuickTime MOV, Video",
+   "extensions": [
+    "mov"
+   ]
+  },
+  "media:ext=mp4;video": {
+   "urn": "media:ext=mp4;video",
+   "version": 3,
+   "media_type": "video/mp4",
+   "title": "MP4, Video",
+   "extensions": [
+    "mp4"
+   ]
+  },
+  "media:ext=mpeg;video": {
+   "urn": "media:ext=mpeg;video",
+   "version": 3,
+   "media_type": "video/mpeg",
+   "title": "MPEG, Video",
+   "extensions": [
+    "mpg",
+    "mpeg"
+   ]
+  },
+  "media:ext=numpy": {
+   "urn": "media:ext=numpy",
+   "version": 3,
+   "media_type": "application/x-npy",
+   "title": "NumPy NPY",
+   "extensions": [
+    "npy",
+    "npz"
+   ]
+  },
+  "media:ext=obj;mesh": {
+   "urn": "media:ext=obj;mesh",
+   "version": 1,
+   "media_type": "model/obj",
+   "title": "Wavefront OBJ, 3D Mesh",
+   "extensions": [
+    "obj"
+   ]
+  },
+  "media:ext=ogv;video": {
+   "urn": "media:ext=ogv;video",
+   "version": 3,
+   "media_type": "video/ogg",
+   "title": "Ogg Theora, Video",
+   "extensions": [
+    "ogv"
+   ]
+  },
+  "media:ext=onnx;model": {
+   "urn": "media:ext=onnx;model",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "ONNX, Model",
+   "extensions": [
+    "onnx"
+   ]
+  },
+  "media:ext=otf;font": {
+   "urn": "media:ext=otf;font",
+   "version": 4,
+   "media_type": "font/otf",
+   "title": "OpenType, Font",
+   "extensions": [
+    "otf"
+   ]
+  },
+  "media:ext=pkcs12": {
+   "urn": "media:ext=pkcs12",
+   "version": 3,
+   "media_type": "application/x-pkcs12",
+   "title": "PKCS#12",
+   "extensions": [
+    "p12",
+    "pfx"
+   ]
+  },
+  "media:ext=plist;record": {
+   "urn": "media:ext=plist;record",
+   "version": 3,
+   "media_type": "application/x-plist",
+   "title": "plist, Record",
+   "extensions": [
+    "plist"
+   ]
+  },
+  "media:ext=png;image": {
+   "urn": "media:ext=png;image",
+   "version": 3,
+   "media_type": "image/png",
+   "title": "PNG, Image",
+   "extensions": [
+    "png"
+   ]
+  },
+  "media:ext=protobuf": {
+   "urn": "media:ext=protobuf",
+   "version": 3,
+   "media_type": "application/x-protobuf",
+   "title": "Protocol Buffers",
+   "extensions": [
+    "pb"
+   ]
+  },
+  "media:ext=psd;image": {
+   "urn": "media:ext=psd;image",
+   "version": 3,
+   "media_type": "image/vnd.adobe.photoshop",
+   "title": "PSD, Image",
+   "extensions": [
+    "psd"
+   ]
+  },
+  "media:ext=pytorch;model": {
+   "urn": "media:ext=pytorch;model",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "PyTorch, Model",
+   "extensions": [
+    "pt",
+    "pth",
+    "bin"
+   ]
+  },
+  "media:ext=raw;image": {
+   "urn": "media:ext=raw;image",
+   "version": 3,
+   "media_type": "image/x-raw",
+   "title": "Camera RAW, Image",
+   "extensions": [
+    "raw"
+   ]
+  },
+  "media:ext=safetensors;model": {
+   "urn": "media:ext=safetensors;model",
+   "version": 4,
+   "media_type": "application/octet-stream",
+   "title": "Safetensors, Model",
+   "extensions": [
+    "safetensors"
+   ]
+  },
+  "media:ext=sqlite": {
+   "urn": "media:ext=sqlite",
+   "version": 3,
+   "media_type": "application/x-sqlite3",
+   "title": "SQLite",
+   "extensions": [
+    "sqlite",
+    "db"
+   ]
+  },
+  "media:ext=stl;mesh": {
+   "urn": "media:ext=stl;mesh",
+   "version": 1,
+   "media_type": "model/stl",
+   "title": "STL, 3D Mesh",
+   "extensions": [
+    "stl"
+   ]
+  },
+  "media:ext=svg;image": {
+   "urn": "media:ext=svg;image",
+   "version": 3,
+   "media_type": "image/svg+xml",
+   "title": "SVG, Image",
+   "extensions": [
+    "svg"
+   ]
+  },
+  "media:ext=threegp;video": {
+   "urn": "media:ext=threegp;video",
+   "version": 3,
+   "media_type": "video/3gpp",
+   "title": "3GP, Video",
+   "extensions": [
+    "3gp"
+   ]
+  },
+  "media:ext=tiff;image": {
+   "urn": "media:ext=tiff;image",
+   "version": 3,
+   "media_type": "image/tiff",
+   "title": "TIFF, Image",
+   "extensions": [
+    "tiff",
+    "tif"
+   ]
+  },
+  "media:ext=ts;video": {
+   "urn": "media:ext=ts;video",
+   "version": 3,
+   "media_type": "video/mp2t",
+   "title": "MPEG Transport Stream, Video",
+   "extensions": [
+    "ts"
+   ]
+  },
+  "media:ext=ttf;font": {
+   "urn": "media:ext=ttf;font",
+   "version": 4,
+   "media_type": "font/ttf",
+   "title": "TrueType, Font",
+   "extensions": [
+    "ttf"
+   ]
+  },
+  "media:ext=wasm": {
+   "urn": "media:ext=wasm",
+   "version": 3,
+   "media_type": "application/wasm",
+   "title": "WebAssembly",
+   "extensions": [
+    "wasm"
+   ]
+  },
+  "media:ext=webm;video": {
+   "urn": "media:ext=webm;video",
+   "version": 3,
+   "media_type": "video/webm",
+   "title": "WebM, Video",
+   "extensions": [
+    "webm"
+   ]
+  },
+  "media:ext=webp;image": {
+   "urn": "media:ext=webp;image",
+   "version": 3,
+   "media_type": "image/webp",
+   "title": "WebP, Image",
+   "extensions": [
+    "webp"
+   ]
+  },
+  "media:ext=wmv;video": {
+   "urn": "media:ext=wmv;video",
+   "version": 3,
+   "media_type": "video/x-ms-wmv",
+   "title": "WMV, Video",
+   "extensions": [
+    "wmv"
+   ]
+  },
+  "media:ext=woff2;font": {
+   "urn": "media:ext=woff2;font",
+   "version": 4,
+   "media_type": "font/woff2",
+   "title": "WOFF2, Font",
+   "extensions": [
+    "woff2"
+   ]
+  },
+  "media:ext=woff;font": {
+   "urn": "media:ext=woff;font",
+   "version": 4,
+   "media_type": "font/woff",
+   "title": "WOFF, Font",
+   "extensions": [
+    "woff"
+   ]
+  }
+ }
+}
