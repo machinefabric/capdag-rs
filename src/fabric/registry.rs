@@ -24,7 +24,7 @@
 //! The cap fetch is **atomic**: if any media URN referenced by a cap fails
 //! to fetch, the cap is NOT cached. This guarantees that any cap landing
 //! in the cap cache has every one of its referenced media defs already in
-//! the media cache (and the extension index).
+//! the media cache.
 //!
 //! A cap or media def is likewise cached only once every dim it names
 //! (`dims`) is cached, at the version the manifest pins, with the value it
@@ -419,6 +419,10 @@ pub struct FabricRegistry {
     /// Wrapped in Mutex because test helpers like `add_caps_to_cache`
     /// mutate it.
     manifest: Arc<Mutex<Manifest>>,
+    /// The cached manifest file `manifest` was read from: the file types it
+    /// names are kept beside it (`file_types_of`). `None` for a manifest
+    /// made in memory, and once a test helper has changed `manifest`'s media.
+    manifest_file: Mutex<Option<PathBuf>>,
     offline_flag: Arc<AtomicBool>,
     fetch_queue_tx: Option<mpsc::UnboundedSender<FetchKey>>,
     fetch_in_queue: Arc<Mutex<HashSet<FetchKey>>>,
@@ -796,6 +800,7 @@ impl FabricRegistry {
             Err(_) => None,
         };
 
+        let manifest_file = cache_dir.join(cache::MANIFEST_FILE);
         let registry = Self {
             client,
             cache_dir,
@@ -810,6 +815,7 @@ impl FabricRegistry {
             locations,
             manifest_version,
             manifest: manifest_arc,
+            manifest_file: Mutex::new(Some(manifest_file)),
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
@@ -1302,6 +1308,10 @@ impl FabricRegistry {
     pub(crate) fn pin_media_def_for_test(&self, urn: &str, defver: u32) {
         let normalized = normalize_media_urn(urn).expect("a test media URN parses");
         self.manifest.lock().unwrap().media.insert(normalized, defver);
+        // The manifest is no longer the file it was read from.
+        if let Ok(mut file) = self.manifest_file.lock() {
+            *file = None;
+        }
     }
 
     /// Test-only: insert a dim directly into the in-memory cache and register
@@ -2247,19 +2257,10 @@ impl FabricRegistry {
             let m = self.manifest.lock().map_err(|e| {
                 FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
             })?;
-            let mut file_urns = Vec::new();
-            for (urn, defver) in m.media.iter() {
-                let parsed = crate::MediaUrn::from_string(urn).map_err(|e| {
-                    FabricRegistryError::FileTypes(format!(
-                        "manifest v{} names '{urn}' as a media definition, and it is no media URN: {e}",
-                        self.manifest_version
-                    ))
-                })?;
-                if parsed.get_tag("ext").is_some() {
-                    file_urns.push((urn.clone(), *defver));
-                }
-            }
-            file_urns
+            let manifest_file = self.manifest_file.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock the manifest's file: {}", e))
+            })?;
+            file_types_of(&self.cache_dir, manifest_file.as_deref(), &m)?
         };
         let mut defs: Vec<StoredMediaDef> = Vec::with_capacity(file_urns.len());
         let mut missing: Vec<(String, u32)> = Vec::new();
@@ -2354,6 +2355,10 @@ impl FabricRegistry {
         if let Ok(mut m) = self.manifest.lock() {
             m.media.insert(normalized, defver);
         }
+        // The manifest is no longer the file it was read from.
+        if let Ok(mut file) = self.manifest_file.lock() {
+            *file = None;
+        }
     }
 
     /// Insert a media def into the in-memory cache. Test helper.
@@ -2390,6 +2395,10 @@ impl FabricRegistry {
         }
         if let Ok(mut m) = self.manifest.lock() {
             m.media.insert(normalized, spec_version);
+        }
+        // The manifest is no longer the file it was read from.
+        if let Ok(mut file) = self.manifest_file.lock() {
+            *file = None;
         }
         publish_cache_revision(&self.cache_revision_tx);
     }
@@ -2598,6 +2607,7 @@ impl FabricRegistry {
             locations,
             manifest_version,
             manifest: manifest_arc,
+            manifest_file: Mutex::new(None),
             offline_flag,
             fetch_queue_tx,
             fetch_in_queue,
@@ -3379,6 +3389,77 @@ pub(crate) async fn fetch_one_media_def(
     }
     publish_cache_revision(cache_revision_tx);
     Ok(spec)
+}
+
+/// The media definitions of `manifest` that are file types: those whose URN
+/// carries the `ext=` file-type tag, each with its pinned defver, in URN
+/// order. A manifest entry that is no media URN is an error naming it.
+fn derive_file_types(manifest: &Manifest) -> Result<Vec<(String, u32)>, FabricRegistryError> {
+    let mut file_types = Vec::new();
+    for (urn, defver) in manifest.media.iter() {
+        let parsed = crate::MediaUrn::from_string(urn).map_err(|e| {
+            FabricRegistryError::FileTypes(format!(
+                "manifest v{} names '{urn}' as a media definition, and it is no media URN: {e}",
+                manifest.version
+            ))
+        })?;
+        if parsed.get_tag("ext").is_some() {
+            file_types.push((urn.clone(), *defver));
+        }
+    }
+    file_types.sort();
+    Ok(file_types)
+}
+
+/// The file types a manifest names, as they are kept beside it
+/// ([`cache::FILE_TYPES_FILE`]): worked out from the manifest file whose
+/// bytes hash to `manifest_sha256`.
+#[derive(Debug, Serialize, Deserialize)]
+struct KeptFileTypes {
+    manifest_sha256: String,
+    file_types: Vec<(String, u32)>,
+}
+
+/// The file types of `manifest`, in the cache folder `cache_dir` of its
+/// version. `manifest_file` is the cached manifest file `manifest` was read
+/// from, `None` for a manifest made in memory.
+///
+/// Working them out parses every media URN the manifest names (32,890 in
+/// manifest 13), which a command that reads a file would otherwise pay on
+/// every run. So they are kept beside the manifest file, with the hash of its
+/// bytes, and read back while that file is unchanged; a manifest fetched
+/// again has other bytes and its file types are worked out afresh. Kept file
+/// types that cannot be read are an error naming their file. A manifest with
+/// no file keeps nothing.
+fn file_types_of(
+    cache_dir: &Path,
+    manifest_file: Option<&Path>,
+    manifest: &Manifest,
+) -> Result<Vec<(String, u32)>, FabricRegistryError> {
+    use sha2::{Digest, Sha256};
+    let Some(manifest_file) = manifest_file else {
+        return derive_file_types(manifest);
+    };
+    let bytes = fs::read(manifest_file).map_err(|e| {
+        FabricRegistryError::CacheError(format!(
+            "the cached manifest {} cannot be read: {e}",
+            manifest_file.display()
+        ))
+    })?;
+    let manifest_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let kept_file = cache_dir.join(cache::FILE_TYPES_FILE);
+    if let Some(kept) = cache::read_entry::<KeptFileTypes>(&kept_file, "file types")? {
+        if kept.manifest_sha256 == manifest_sha256 {
+            return Ok(kept.file_types);
+        }
+    }
+    let file_types = derive_file_types(manifest)?;
+    cache::store_entry(
+        &kept_file,
+        &KeptFileTypes { manifest_sha256, file_types: file_types.clone() },
+        "file types",
+    )?;
+    Ok(file_types)
 }
 
 /// Manifest bootstrap, in the cache folder `cache_dir` of manifest
@@ -4992,6 +5073,72 @@ mod concurrent_cache_tests {
         let b = FabricRegistry::new_for_test_with_config_and_version(RegistryConfig::default(), 13);
         assert_ne!(a.cache_dir(), b.cache_dir(), "registries at two manifests cache in two folders");
         assert_eq!(a.cache_dir().parent(), b.cache_dir().parent(), "under one registry folder");
+    }
+
+    /// A manifest at 13 naming a file type and a content-only JSON record,
+    /// kept in `cache_dir` as a fetched manifest is.
+    fn kept_manifest(cache_dir: &Path) -> (Manifest, PathBuf) {
+        fs::create_dir_all(cache_dir).unwrap();
+        let mut manifest = Manifest::empty(13);
+        manifest.media.insert("media:enc=utf8;ext=csv;fmt=csv;list;record".to_string(), 2);
+        manifest.media.insert("media:download-result;enc=utf8;fmt=json;record".to_string(), 1);
+        let file = cache_dir.join(cache::MANIFEST_FILE);
+        fs::write(&file, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        (manifest, file)
+    }
+
+    // TEST7186: the file types a manifest names are worked out once and kept
+    // beside it, in its version's folder; read back while that manifest file
+    // is unchanged, its media URNs are not parsed again; a manifest file that
+    // changed (fetched again) is read afresh; a manifest made in memory, with
+    // no file, leaves nothing behind
+    #[test]
+    fn test7186_file_types_are_kept_beside_the_manifest_they_were_read_from() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache_dir = cache::version_dir(dir.path(), 13);
+        let (manifest, manifest_file) = kept_manifest(&cache_dir);
+        let index_file = cache_dir.join(cache::FILE_TYPES_FILE);
+        let csv = vec![("media:enc=utf8;ext=csv;fmt=csv;list;record".to_string(), 2)];
+
+        assert_eq!(file_types_of(&cache_dir, Some(&manifest_file), &manifest).unwrap(), csv);
+        assert!(index_file.is_file(), "the file types are kept beside the manifest");
+
+        // The same manifest file, with an entry that is no media URN in the
+        // manifest held in memory: the kept answer is given, so no URN of the
+        // manifest was parsed.
+        let mut unparsable = manifest.clone();
+        unparsable.media.insert("not a media urn".to_string(), 1);
+        assert_eq!(file_types_of(&cache_dir, Some(&manifest_file), &unparsable).unwrap(), csv);
+
+        // The manifest file changed: the kept file types are not its own.
+        fs::write(&manifest_file, serde_json::to_vec(&unparsable).unwrap()).unwrap();
+        let error = file_types_of(&cache_dir, Some(&manifest_file), &unparsable)
+            .expect_err("a manifest file that changed is read afresh");
+        assert!(error.to_string().contains("'not a media urn'"), "{error}");
+
+        let memory = tempfile::TempDir::new().expect("temp dir");
+        let memory_dir = cache::version_dir(memory.path(), 13);
+        fs::create_dir_all(&memory_dir).unwrap();
+        assert_eq!(file_types_of(&memory_dir, None, &manifest).unwrap(), csv);
+        assert!(!memory_dir.join(cache::FILE_TYPES_FILE).exists(), "nothing is kept for a manifest with no file");
+    }
+
+    // TEST7187: kept file types that cannot be read are an error naming
+    // their file, never worked out again in silence
+    #[test]
+    fn test7187_corrupt_kept_file_types_are_an_error_naming_the_file() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache_dir = cache::version_dir(dir.path(), 13);
+        let (manifest, manifest_file) = kept_manifest(&cache_dir);
+        let index_file = cache_dir.join(cache::FILE_TYPES_FILE);
+        fs::write(&index_file, "{\"manifest_sha256\": \"ab").unwrap();
+        let error = file_types_of(&cache_dir, Some(&manifest_file), &manifest)
+            .expect_err("a corrupt file is an error");
+        let message = error.to_string();
+        assert!(matches!(error, FabricRegistryError::CacheError(_)), "{error:?}");
+        assert!(message.contains(&index_file.display().to_string()), "names the file: {message}");
+        assert!(message.contains("corrupt"), "{message}");
+        assert!(index_file.is_file(), "the file is left for whoever reads the error");
     }
 
     // TEST1992: an entry that is there and is not what its path names is
