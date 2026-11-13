@@ -208,3 +208,83 @@ fn test8110_dev_cartridge_create_install_run_update() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The media `capdag plan --json` took each file as, from its `input`
+/// records, by file.
+fn planned_inputs(stdout: &str) -> std::collections::BTreeMap<String, String> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|record| record["type"] == "input")
+        .map(|record| {
+            let file = record["file"].as_str().expect("an input record names its file");
+            let urn = record["urn"].as_str().expect("an input record names its media URN");
+            (Path::new(file).file_name().unwrap().to_string_lossy().into_owned(), urn.to_string())
+        })
+        .collect()
+}
+
+// TEST8107: the capdag command tells what a file is the way the desktop
+// clients do: when a file's candidates fall under a cartridge's content
+// adapter, it starts that cartridge and asks it. A dev-installed cartridge that
+// inspects JSON proves an object is a record and an array of objects a list of
+// records; without it nothing does, and every .json file is plain JSON.
+#[test]
+fn test8107_the_command_asks_the_cartridge_that_inspects_a_file() {
+    assert!(
+        python_runtime_available(),
+        "this e2e requires the interpreter the runtime launches cartridges with to have \
+         capdag, tagged-urn, cbor2 and ops installed: install the workspace's \
+         requirements.txt with it (`python -m pip install -r requirements.txt`)"
+    );
+    const JSON: &str = "media:enc=utf8;ext=json;fmt=json";
+    const RECORD: &str = "media:enc=utf8;ext=json;fmt=json;record";
+    const LIST_OF_RECORDS: &str = "media:enc=utf8;ext=json;fmt=json;list;record";
+
+    let tmp = std::env::temp_dir().join(format!("capdag-inspect-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let home = tmp.join("home");
+    let files = tmp.join("files");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&files).unwrap();
+    for (name, content) in [
+        ("person.json", r#"{"name": "ann"}"#),
+        ("people.json", r#"[{"name": "ann"}, {"name": "bo"}]"#),
+        ("numbers.json", "[1, 2, 3]"),
+    ] {
+        std::fs::write(files.join(name), content).unwrap();
+    }
+    let plan = |file: &str| -> std::collections::BTreeMap<String, String> {
+        let path = files.join(file).display().to_string();
+        let (out, _, err) = run_capdag(&home, &["--json", "--no-input", "plan", &path], None);
+        let found = planned_inputs(&out);
+        assert!(found.contains_key(file), "`capdag plan {file}` named no input for it; stdout:\n{out}\nstderr:\n{err}");
+        found
+    };
+
+    // No cartridge inspects JSON: each file is what its extension names.
+    for file in ["person.json", "people.json", "numbers.json"] {
+        assert_eq!(plan(file)[file], JSON, "{file} with no inspecting cartridge installed");
+    }
+
+    // The project directory is named for the cartridge, as `dev install` reads it.
+    let project = tmp.join("json-inspector");
+    std::fs::create_dir_all(&project).unwrap();
+    let fixture = crate_dir().join("tests/fixtures/json-inspector/cartridge.py");
+    let entry = project.join("cartridge.py");
+    std::fs::copy(&fixture, &entry).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let (_, ok, err) = run_capdag(&home, &["dev", "install", project.to_str().unwrap()], None);
+    assert!(ok, "`dev install` of the inspecting cartridge failed: {err}");
+
+    // Installed, it is asked, and what it proves is what each file is.
+    assert_eq!(plan("person.json")["person.json"], RECORD, "an object, asked of the inspecting cartridge");
+    assert_eq!(plan("people.json")["people.json"], LIST_OF_RECORDS, "an array of objects, asked of it");
+    assert_eq!(plan("numbers.json")["numbers.json"], JSON, "an array of numbers, which it says is plain JSON");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

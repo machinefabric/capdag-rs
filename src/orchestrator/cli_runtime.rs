@@ -40,6 +40,7 @@ use crate::cap::registry::FabricRegistry;
 use crate::orchestrator::execute_plan::{EngineRuntime, MapFailurePolicy};
 use crate::orchestrator::executor::{
     discover_bundled_cartridges, segment_activity_timeout, CartridgeManager, ExecutionContext,
+    HostableCartridge, CAP_DISPATCH_READY_TIMEOUT,
 };
 use crate::orchestrator::observe::RunKey;
 use crate::orchestrator::run_flow::{FlowRecorder, FlowScopeGuard, RunFlowRegistry};
@@ -437,8 +438,24 @@ impl CliHost {
             resolved.extend(manager.resolve_cartridges(&unbundled).await?);
         }
 
-        // Host only cartridges not already hosted (dedup by binary path).
-        resolved.retain(|cartridge| !self.registered_paths.contains(&cartridge.entry_point));
+        self.host(rt, resolved).await?;
+
+        // Every cap this segment needs is now hosted — record them so the next body of
+        // this cap takes the fast path above.
+        for c in &cap_urns {
+            self.registered_caps.insert((*c).to_string());
+        }
+        Ok(())
+    }
+
+    /// Host `cartridges` on the shared switch, building the switch on first use. A
+    /// cartridge already hosted (dedup by binary path) is not hosted again.
+    async fn host(
+        &mut self,
+        rt: &CliRuntime,
+        mut cartridges: Vec<HostableCartridge>,
+    ) -> Result<(), ExecutionError> {
+        cartridges.retain(|cartridge| !self.registered_paths.contains(&cartridge.entry_point));
 
         // Build the bootstrap context on first use. `ExecutionContext::new` creates the
         // switch and starts its background frame pump, so RelayNotify capability updates
@@ -464,23 +481,63 @@ impl CliHost {
             self.ctx = Some(ctx);
         }
 
-        if !resolved.is_empty() {
-            for cartridge in &resolved {
-                self.registered_paths.insert(cartridge.entry_point.clone());
-            }
+        if !cartridges.is_empty() {
+            let paths: Vec<PathBuf> = cartridges.iter().map(|c| c.entry_point.clone()).collect();
             self.ctx
                 .as_mut()
                 .expect("bootstrap context ensured above")
-                .add_cartridge_host(resolved)
+                .add_cartridge_host(cartridges)
                 .await?;
-        }
-
-        // Every cap this segment needs is now hosted — record them so the next body of
-        // this cap takes the fast path above.
-        for c in &cap_urns {
-            self.registered_caps.insert((*c).to_string());
+            self.registered_paths.extend(paths);
         }
         Ok(())
+    }
+}
+
+impl CliRuntime {
+    /// Host the cartridge `id` to inspect a file's content, and return the switch
+    /// once the switch knows the cartridge by that id, so an adapter-selection
+    /// request can be addressed to it. The switch, and the cartridge on it, are
+    /// the ones a run of this runtime uses: a cartridge started to inspect an
+    /// input is the one that later runs on it. A cartridge already hosted is not
+    /// hosted again.
+    ///
+    /// A cartridge the switch has not made ready within the dispatch timeout —
+    /// reported by a master that passed its identity probe — is an error
+    /// naming it, with its attachment error when it has one.
+    pub async fn host_inspector(
+        &self,
+        id: &str,
+        cartridge: HostableCartridge,
+    ) -> Result<Arc<RelaySwitch>, ExecutionError> {
+        let switch = {
+            let mut host = self.host.lock().await;
+            host.host(self, vec![cartridge]).await?;
+            host.ctx
+                .as_ref()
+                .expect("hosting builds the bootstrap context")
+                .switch()
+                .clone()
+        };
+        if switch.wait_for_cartridge(id, CAP_DISPATCH_READY_TIMEOUT).await.is_some() {
+            return Ok(switch);
+        }
+        let attachment_error = switch
+            .installed_cartridges()
+            .await
+            .into_iter()
+            .find(|c| c.id == id)
+            .and_then(|c| c.attachment_error);
+        Err(ExecutionError::HostError(match attachment_error {
+            Some(error) => format!(
+                "the cartridge '{id}' could not be attached to inspect files: {}",
+                error.message
+            ),
+            None => format!(
+                "the cartridge host did not make the cartridge '{id}' ready within {} s",
+                CAP_DISPATCH_READY_TIMEOUT.as_secs()
+            ),
+        }))
     }
 }
 

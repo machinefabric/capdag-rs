@@ -60,7 +60,7 @@ const ACTIVITY_TIMEOUT_METADATA_KEY: &str = "activity_timeout_secs";
 /// `add_master` returns. On a long-lived switch (the engine) the cap is already
 /// registered and the first probe succeeds, so this bound only ever elapses for a
 /// genuinely unprovided cap.
-const CAP_DISPATCH_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+pub(crate) const CAP_DISPATCH_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 use crate::bifaci::local_socket::UnixStream;
 use crate::planner::StepToken;
 use tokio::io::{BufReader, BufWriter};

@@ -23,6 +23,7 @@ mod adapter;
 mod adapters;
 pub mod detection;
 mod os_filter;
+mod relay_invoker;
 pub(crate) mod path_resolver;
 mod resolver;
 mod types;
@@ -43,5 +44,6 @@ pub use resolver::{resolve_file, resolve_input, resolve_inputs, resolve_paths, D
 pub use path_resolver::resolve_directory;
 
 pub use adapters::MediaAdapterRegistry;
+pub use relay_invoker::RelaySwitchAdapterInvoker;
 pub use value_adapter::{ValueAdapter, ValueAdapterResult};
 pub use value_adapter_registry::ValueAdapterRegistry;

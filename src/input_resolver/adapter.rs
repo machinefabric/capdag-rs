@@ -27,9 +27,11 @@ pub const MAX_CONTENT_INSPECTION_BYTES: usize = 100 * 1024;
 
 /// Trait for invoking the adapter-selection cap on a specific cartridge.
 ///
-/// The implementation lives on the host side (floom-engine) where it has access
-/// to the cartridge process/relay infrastructure. capdag defines the trait;
-/// the host implements it.
+/// A host that holds a [`RelaySwitch`](crate::RelaySwitch) asks its
+/// cartridges through
+/// [`RelaySwitchAdapterInvoker`](crate::input_resolver::RelaySwitchAdapterInvoker):
+/// the desktop engine its attached cartridges, the `capdag` CLI the ones it
+/// starts to inspect a file.
 #[async_trait]
 pub trait CartridgeAdapterInvoker: Send + Sync {
     /// Invoke adapter-selection cap on a specific cartridge by ID.
