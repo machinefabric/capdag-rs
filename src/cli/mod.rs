@@ -357,14 +357,19 @@ fn shell_words(words: &[String]) -> String {
 }
 
 async fn cache(ctx: &Ctx, command: CacheCommand) -> CliResult<Exit> {
-    // Cleared through a registry on the live cache, so the directory cleared is
-    // the one every other command reads.
-    let registry = ctx.registry().await?;
-    let dir = registry.cache_dir().display().to_string();
-    registry.clear_cache().map_err(|e| {
-        CliError::failed(format!("the fabric cache at {dir} could not be cleared"))
-            .context(e.to_string())
-    })?;
+    // Cleared without opening a registry on it: a cache holding a corrupt
+    // entry is one a registry refuses to open, and clearing is what that
+    // refusal says to do. The folder is the one every other command reads: the
+    // fabric this process is bound to, at the manifest version it is built for.
+    let config = crate::RegistryConfig::default();
+    let dir = crate::FabricRegistry::clear_cache_of(&config, crate::FABRIC_MANIFEST_VERSION)
+        .await
+        .map_err(|e| {
+            CliError::failed(format!("the fabric cache of {} could not be cleared", config.anchor))
+                .context(e.to_string())
+        })?
+        .display()
+        .to_string();
     let refreshed = match command {
         CacheCommand::Clear => None,
         // The manifest and everything it pins, fetched afresh into the now

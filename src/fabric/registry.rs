@@ -6,9 +6,11 @@
 //! - `StoredAlias` (aliases) at `<base>/aliases/<sha256-of-name>`
 //! - `StoredDim` (dims) at `<base>/dims/<sha256-of-name>`
 //!
-//! On disk:
-//! - `<cache_dir>/caps/<sha256>.json`
-//! - `<cache_dir>/media/<sha256>.json`
+//! On disk, under the folder of the manifest version the registry is pinned
+//! at (`<os cache>/capdag/<charter slug>/v<N>/`), each at
+//! `<kind>/<sha256>/<defver>.json`, beside `manifest.json`. Entries are
+//! replaced whole and a corrupt one is an error naming its file: see the
+//! `cache` module.
 //!
 //! Resolution policy (same for both domains):
 //!   1. In-memory cache hit → return immediately.
@@ -30,6 +32,7 @@
 //! documentation of the dims it was built from (`get_cached_dim`).
 
 use crate::bifaci::trust::RegistryKind;
+use crate::fabric::cache;
 use mg_srel::{Charter, CharterTrust, VerifiedCharter};
 use crate::fabric::alias::{classify_alias_target, normalize_alias_name, AliasTargetKind};
 use crate::fabric::dim::{is_dim_name, DimRef, StoredDim};
@@ -37,7 +40,6 @@ use crate::media::spec::MediaDef;
 use crate::Cap;
 use crate::StoredAlias;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -374,9 +376,10 @@ impl Manifest {
 #[derive(Debug)]
 pub struct FabricRegistry {
     client: reqwest::Client,
-    /// Root cache directory, `<os cache>/capdag/<charter slug>`. Definitions
-    /// live at `<kind>/<sha>/<defver>.json` and manifests at
-    /// `manifests/<N>.json`, beside the stored charter.
+    /// The cache folder of the manifest version this registry is pinned at,
+    /// `<os cache>/capdag/<charter slug>/v<N>`. Definitions live at
+    /// `<kind>/<sha>/<defver>.json` and the manifest at `manifest.json`
+    /// (the `cache` module).
     cache_dir: PathBuf,
     cached_caps: Arc<Mutex<HashMap<String, Cap>>>,
     cached_media_defs: Arc<Mutex<HashMap<String, StoredMediaDef>>>,
@@ -544,6 +547,110 @@ fn deleted_by_a_peer(path: &Path, error: &std::io::Error) -> bool {
     false
 }
 
+/// Empty the cache folder of one manifest version, `version_dir`, and remove
+/// the folders the layout before per-version folders kept beside it.
+///
+/// The cache is SHARED, and the processes that clear it run at the same time:
+/// a test run starts eight cartridge builds within milliseconds of each other
+/// and every one of them refreshes this folder. Removing the tree and putting
+/// it back is not safe between peers — one process deleting an ancestor while
+/// another is creating into it is how a build fails with `No such file or
+/// directory` on a path it had just made.
+///
+/// So a kind's folder is never removed, only its contents, and every step
+/// tolerates a peer having done the same thing first. The end state is the
+/// same — an empty cache — and no peer is ever left with the tree missing
+/// underneath it. The manifest, and any temporary file a killed writer left,
+/// are removed from the version's folder; other versions' folders and the
+/// stored charter are left as they are.
+pub(crate) fn clear_cache_folder(version_dir: &Path) -> Result<(), FabricRegistryError> {
+    for kind in cache::KIND_FOLDERS {
+        let directory = version_dir.join(kind);
+        fs::create_dir_all(&directory).map_err(|e| {
+            FabricRegistryError::CacheError(format!(
+                "Failed to create cache directory {}: {e}",
+                directory.display()
+            ))
+        })?;
+        remove_contents(&directory)?;
+    }
+    // What is left at the top of the version's folder: the manifest, and
+    // temporary files. The kinds' folders themselves stay.
+    let top = match fs::read_dir(version_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(FabricRegistryError::CacheError(format!(
+                "Failed to read cache directory {}: {error}",
+                version_dir.display()
+            )))
+        }
+    };
+    for entry in top.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            remove_shared(&path)?;
+        }
+    }
+    if let Some(registry_dir) = version_dir.parent() {
+        for legacy in cache::LEGACY_FOLDERS {
+            let path = registry_dir.join(legacy);
+            if path.is_dir() {
+                remove_shared(&path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Remove everything in `directory`, which peers are clearing and filling at
+/// the same time ([`remove_shared`]).
+fn remove_contents(directory: &Path) -> Result<(), FabricRegistryError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        // A peer removed it between the create and the read. It is empty by
+        // any reading, which is what was wanted.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(FabricRegistryError::CacheError(format!(
+                "Failed to read cache directory {}: {error}",
+                directory.display()
+            )))
+        }
+    };
+    for entry in entries.flatten() {
+        remove_shared(&entry.path())?;
+    }
+    Ok(())
+}
+
+/// Remove one file or folder of the shared cache, which a peer may be
+/// removing or refilling at the same moment.
+fn remove_shared(path: &Path) -> Result<(), FabricRegistryError> {
+    let removed = if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    match removed {
+        Ok(()) => Ok(()),
+        // Already gone: a peer clearing the same cache got there first, which
+        // is the outcome either way.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // Refilled underneath us. macOS reports this as `Directory not empty`
+        // where Linux reports the missing path — two faces of the same race,
+        // and neither is a failure of this clear: the entries now there were
+        // put there by a peer that has just refreshed them, so they are
+        // exactly what a refresh was for.
+        Err(error) if is_busy(&error) => Ok(()),
+        Err(error) if deleted_by_a_peer(path, &error) => Ok(()),
+        Err(error) => Err(FabricRegistryError::CacheError(format!(
+            "Failed to remove {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
 impl FabricRegistry {
     /// Create a new fabric registry pinned at the workspace-baked
     /// `capdag::FABRIC_MANIFEST_VERSION`. Standard entry point — engine
@@ -597,17 +704,15 @@ impl FabricRegistry {
         )
         .await?;
         let locations = FabricLocations::from_charter(&charter.charter)?;
-        let cache_dir = capdag_cache.join(&charter.charter.slug);
-        let caps_dir = cache_dir.join("caps");
-        let media_dir = cache_dir.join("media");
-        let aliases_dir = cache_dir.join("aliases");
-        let dims_dir = cache_dir.join("dims");
-        let manifests_dir = cache_dir.join("manifests");
-        for d in [&caps_dir, &media_dir, &aliases_dir, &dims_dir, &manifests_dir] {
-            fs::create_dir_all(d).map_err(|e| {
+        let cache_dir =
+            cache::version_dir(&capdag_cache.join(&charter.charter.slug), manifest_version);
+        for kind in cache::KIND_FOLDERS {
+            let d = cache_dir.join(kind);
+            fs::create_dir_all(&d).map_err(|e| {
                 FabricRegistryError::CacheError(format!(
-                    "Failed to create cache directory {:?}: {}",
-                    d, e
+                    "Failed to create cache directory {}: {}",
+                    d.display(),
+                    e
                 ))
             })?;
         }
@@ -616,7 +721,7 @@ impl FabricRegistry {
         // loaders hydrate the in-memory map with entries matching the
         // manifest's pinned defvers, never bytes from another snapshot.
         let manifest = load_or_fetch_manifest(
-            &manifests_dir,
+            &cache_dir,
             &client,
             &locations,
             manifest_version,
@@ -628,17 +733,16 @@ impl FabricRegistry {
         // alias body is fetched fresh on demand against the (just re-fetched)
         // manifest, so a mutable channel can never serve a stale body under a
         // reused defver. The fresh bytes still write through to the cache.
-        let (mut cached_caps_map, mut cached_specs_map, mut cached_aliases_map, mut cached_dims_map) =
-            if config.bypass_cache {
-                (HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new())
-            } else {
-                (
-                    Self::load_all_cached_caps(&caps_dir)?,
-                    Self::load_all_cached_media_defs(&media_dir)?,
-                    Self::load_all_cached_aliases(&aliases_dir)?,
-                    Self::load_all_cached_dims(&dims_dir)?,
-                )
-            };
+        let PinnedEntries {
+            caps: mut cached_caps_map,
+            media: mut cached_specs_map,
+            aliases: mut cached_aliases_map,
+            dims: mut cached_dims_map,
+        } = if config.bypass_cache {
+            PinnedEntries::default()
+        } else {
+            load_pinned_entries(&cache_dir, &manifest)?
+        };
         retain_pinned(
             &manifest,
             manifest_version,
@@ -2211,18 +2315,20 @@ impl FabricRegistry {
     // SHARED ADMIN API
     // -------------------------------------------------------------------------
 
-    /// The on-disk cache root for this registry (per-registry-URL slug under
-    /// the OS cache dir). Exposed so admin surfaces can report the path they
-    /// purge/renew.
+    /// The cache folder of the manifest version this registry is pinned at,
+    /// `<os cache>/capdag/<charter slug>/v<N>`. Exposed so admin surfaces can
+    /// report the folder they purge or renew.
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
 
-    /// Invalidate every cache for this registry — in-memory maps and the
-    /// entire on-disk cache tree, INCLUDING the manifest snapshot. After
-    /// this the next lookup (or a freshly constructed `FabricRegistry`)
+    /// Invalidate every cache of this registry's manifest version: the
+    /// in-memory maps and its whole folder on disk, INCLUDING the manifest.
+    /// After this the next lookup (or a freshly constructed `FabricRegistry`)
     /// re-fetches the manifest and all bodies from the network, so this is
-    /// the way to force a full renewal against a mutated channel.
+    /// the way to force a full renewal against a mutated channel. The folders
+    /// of the layout before per-version folders are removed with it
+    /// ([`clear_cache_folder`]).
     pub fn clear_cache(&self) -> Result<(), FabricRegistryError> {
         if let Ok(mut g) = self.cached_caps.lock() {
             g.clear();
@@ -2239,68 +2345,38 @@ impl FabricRegistry {
         if let Ok(mut g) = self.extension_index.lock() {
             g.clear();
         }
-        // The cache is SHARED, and the processes that clear it run at the same
-        // time: a test run starts eight cartridge builds within milliseconds of
-        // each other and every one of them refreshes this directory. Removing
-        // the tree and putting it back is not safe between peers — one process
-        // deleting an ancestor while another is creating into it is how a
-        // build fails with `No such file or directory` on a path it had just
-        // made.
-        //
-        // So the DIRECTORY is never removed, only its contents, and every step
-        // tolerates a peer having done the same thing first. The end state is
-        // the same — an empty cache — and no peer is ever left with the tree
-        // missing underneath it.
-        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
-            let directory = self.cache_dir.join(sub);
-            fs::create_dir_all(&directory).map_err(|e| {
-                FabricRegistryError::CacheError(format!(
-                    "Failed to create cache directory {}: {e}",
-                    directory.display()
-                ))
+        clear_cache_folder(&self.cache_dir)
+    }
+
+    /// Clear the disk cache of manifest `manifest_version` of the registry
+    /// `config` names, without opening a registry on it — so a cache holding a
+    /// corrupt entry, which a registry refuses to open, can still be cleared.
+    /// The registry's charter is the stored one when it still verifies, else
+    /// fetched, as a registry finds it. Answers the folder cleared.
+    pub async fn clear_cache_of(
+        config: &RegistryConfig,
+        manifest_version: u32,
+    ) -> Result<PathBuf, FabricRegistryError> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| {
+                FabricRegistryError::HttpError(format!("Failed to create HTTP client: {}", e))
             })?;
-            let entries = match fs::read_dir(&directory) {
-                Ok(entries) => entries,
-                // A peer removed it between the create and the read. It is
-                // empty by any reading, which is what was wanted.
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "Failed to read cache directory {}: {error}",
-                        directory.display()
-                    )))
-                }
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let removed = if path.is_dir() {
-                    fs::remove_dir_all(&path)
-                } else {
-                    fs::remove_file(&path)
-                };
-                match removed {
-                    Ok(()) => {}
-                    // Already gone: a peer clearing the same cache got there
-                    // first, which is the outcome either way.
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    // Refilled underneath us. macOS reports this as
-                    // `Directory not empty` where Linux reports the missing
-                    // path — two faces of the same race, and neither is a
-                    // failure of this clear: the entries now there were put
-                    // there by a peer that has just refreshed them, so they
-                    // are exactly what a refresh was for.
-                    Err(error) if is_busy(&error) => {}
-                    Err(error) if deleted_by_a_peer(&path, &error) => {}
-                    Err(error) => {
-                        return Err(FabricRegistryError::CacheError(format!(
-                            "Failed to remove {}: {error}",
-                            path.display()
-                        )))
-                    }
-                }
-            }
-        }
-        Ok(())
+        let capdag_cache = Self::capdag_cache_root()?;
+        let charter = resolve_charter(
+            &client,
+            &capdag_cache,
+            &config.anchor,
+            false,
+            &crate::bifaci::trust::charter_trust(),
+            mg_srel::unix_now(),
+        )
+        .await?;
+        let cache_dir =
+            cache::version_dir(&capdag_cache.join(&charter.charter.slug), manifest_version);
+        clear_cache_folder(&cache_dir)?;
+        Ok(cache_dir)
     }
 
     // -------------------------------------------------------------------------
@@ -2340,306 +2416,6 @@ impl FabricRegistry {
                 "Background fetch queue send failed (consumer task is gone); dropping URN."
             );
         }
-    }
-
-    // -------------------------------------------------------------------------
-    // DISK LOAD
-    // -------------------------------------------------------------------------
-
-    /// Walk the cap cache directory recursively, picking up both v0 flat
-    /// files (`caps/<sha>.json`) and v >= 1 versioned files
-    /// (`caps/<sha>/<defver>.json`). TTL applies only to v0 entries —
-    /// v >= 1 entries are immutable by protocol so no expiry pass.
-    fn load_all_cached_caps(caps_dir: &Path) -> Result<HashMap<String, Cap>, FabricRegistryError> {
-        let mut caps = HashMap::new();
-        if !caps_dir.exists() {
-            return Ok(caps);
-        }
-        let mut stack: Vec<PathBuf> = vec![caps_dir.to_path_buf()];
-        let mut is_v0_layer = true;
-        while let Some(dir) = stack.pop() {
-            // A directory removed between its parent being listed and it
-            // being opened contributes nothing — the same answer the absent
-            // cache root gives above. See `load_all_cached_aliases`.
-            let listing = match fs::read_dir(&dir) {
-                Ok(listing) => listing,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "Failed to read cap cache directory {:?}: {}",
-                        dir, e
-                    )))
-                }
-            };
-            for entry in listing {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to read cap cache entry: {}", e);
-                        continue;
-                    }
-                };
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read cap cache file {:?}: {}", path, e);
-                        continue;
-                    }
-                };
-                let cache_entry: CapCacheEntry = match serde_json::from_str(&content) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to parse cap cache file {:?}: {}", path, e);
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                };
-                // TTL applies only to v0 (flat) entries. Versioned
-                // entries are immutable by protocol.
-                if cache_entry.definition.version == 0 && cache_entry.is_expired() {
-                    let _ = fs::remove_file(&path);
-                    continue;
-                }
-                // Only a checked definition is written to the cache, so one
-                // that fails the rules was written by a capdag with other
-                // rules: it is dropped like an unparseable one and fetched anew.
-                if let Err(e) =
-                    crate::cap::validation::validate_cap_definition(&cache_entry.definition)
-                {
-                    tracing::warn!("Dropping cap cache file {:?}: {}", path, e);
-                    let _ = fs::remove_file(&path);
-                    continue;
-                }
-                let urn = cache_entry.definition.urn_string();
-                // A cached entry whose URN no longer parses is a corrupt cache
-                // entry; surface it as an error rather than silently insert it
-                // under a raw, unnormalized key.
-                caps.insert(normalize_cap_urn(&urn)?, cache_entry.definition);
-            }
-            let _ = is_v0_layer;
-            is_v0_layer = false;
-        }
-        Ok(caps)
-    }
-
-    /// Same recursive walk as `load_all_cached_caps`, for media defs.
-    fn load_all_cached_media_defs(
-        media_dir: &Path,
-    ) -> Result<HashMap<String, StoredMediaDef>, FabricRegistryError> {
-        let mut specs = HashMap::new();
-        if !media_dir.exists() {
-            return Ok(specs);
-        }
-        let mut stack: Vec<PathBuf> = vec![media_dir.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            // A directory removed between its parent being listed and it
-            // being opened contributes nothing — the same answer the absent
-            // cache root gives above. See `load_all_cached_aliases`.
-            let listing = match fs::read_dir(&dir) {
-                Ok(listing) => listing,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "Failed to read media cache directory {:?}: {}",
-                        dir, e
-                    )))
-                }
-            };
-            for entry in listing {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to read media cache entry: {}", e);
-                        continue;
-                    }
-                };
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read media cache file {:?}: {}", path, e);
-                        continue;
-                    }
-                };
-                let cache_entry: MediaCacheEntry = match serde_json::from_str(&content) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to parse media cache file {:?}: {}", path, e);
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                };
-                if cache_entry.spec.version == 0 && cache_entry.is_expired() {
-                    let _ = fs::remove_file(&path);
-                    continue;
-                }
-                // Corrupt cache entry (URN no longer parses) surfaces as an
-                // error rather than a silent raw-key insertion.
-                specs.insert(
-                    normalize_media_urn(&cache_entry.spec.urn)?,
-                    cache_entry.spec,
-                );
-            }
-        }
-        Ok(specs)
-    }
-
-    /// Walk the alias cache directory (`aliases/<sha>/<defver>.json`) and
-    /// load every cached `StoredAlias` keyed by its normalized name.
-    /// Aliases are versioned-only — there is no v0 flat path and no TTL
-    /// expiry (a published defver is immutable).
-    fn load_all_cached_aliases(
-        aliases_dir: &Path,
-    ) -> Result<HashMap<String, StoredAlias>, FabricRegistryError> {
-        let mut aliases = HashMap::new();
-        if !aliases_dir.exists() {
-            return Ok(aliases);
-        }
-        let mut stack: Vec<PathBuf> = vec![aliases_dir.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            // A directory that is gone by the time it is read contributes no
-            // aliases, which is the same answer an absent cache root gives
-            // above.
-            //
-            // The check at the top is one moment; this loop reads directories
-            // it discovered afterwards. Anything that empties the cache while
-            // a registry is being built — a refresh, a clear, another process
-            // taking a snapshot — removes a `<sha>` directory between its
-            // parent being listed and it being opened. Failing there turns a
-            // cache that is merely emptier than expected into "the fabric
-            // cannot be reached", and a build refuses over a directory nobody
-            // needed.
-            //
-            // Only NotFound. Any other error is a cache that cannot be read
-            // rather than one that is not there, and is still reported.
-            let listing = match fs::read_dir(&dir) {
-                Ok(listing) => listing,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "Failed to read alias cache directory {:?}: {}",
-                        dir, e
-                    )))
-                }
-            };
-            for entry in listing {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to read alias cache entry: {}", e);
-                        continue;
-                    }
-                };
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read alias cache file {:?}: {}", path, e);
-                        continue;
-                    }
-                };
-                let cache_entry: AliasCacheEntry = match serde_json::from_str(&content) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to parse alias cache file {:?}: {}", path, e);
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                };
-                aliases.insert(cache_entry.alias.name.clone(), cache_entry.alias);
-            }
-        }
-        Ok(aliases)
-    }
-
-    /// Walk the dim cache directory (`dims/<sha>/<defver>.json`) and load
-    /// every cached `StoredDim` keyed by its name. Dims are versioned-only —
-    /// there is no v0 flat path and no TTL expiry (a published defver is
-    /// immutable). A cached body this library cannot hold is dropped like an
-    /// unparseable one, and fetched anew.
-    fn load_all_cached_dims(
-        dims_dir: &Path,
-    ) -> Result<HashMap<String, StoredDim>, FabricRegistryError> {
-        let mut dims = HashMap::new();
-        if !dims_dir.exists() {
-            return Ok(dims);
-        }
-        let mut stack: Vec<PathBuf> = vec![dims_dir.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            // A directory removed between its parent being listed and it
-            // being opened contributes nothing. See `load_all_cached_aliases`.
-            let listing = match fs::read_dir(&dir) {
-                Ok(listing) => listing,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "Failed to read dim cache directory {:?}: {}",
-                        dir, e
-                    )))
-                }
-            };
-            for entry in listing {
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to read dim cache entry: {}", e);
-                        continue;
-                    }
-                };
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                    continue;
-                }
-                let content = match fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::warn!("Failed to read dim cache file {:?}: {}", path, e);
-                        continue;
-                    }
-                };
-                let cache_entry: DimCacheEntry = match serde_json::from_str(&content) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::warn!("Failed to parse dim cache file {:?}: {}", path, e);
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-                };
-                if let Err(e) = cache_entry.dim.validate() {
-                    tracing::warn!("Dropping dim cache file {:?}: {}", path, e);
-                    let _ = fs::remove_file(&path);
-                    continue;
-                }
-                dims.insert(cache_entry.dim.name.clone(), cache_entry.dim);
-            }
-        }
-        Ok(dims)
     }
 
     fn build_extension_index(
@@ -2689,12 +2465,10 @@ impl FabricRegistry {
         };
         let locations = FabricLocations::from_charter(&charter.charter)
             .expect("the test charter is a fabric charter with both locations");
-        let cache_dir = PathBuf::from("/tmp/capdag-test-cache");
-        let _ = fs::create_dir_all(cache_dir.join("caps"));
-        let _ = fs::create_dir_all(cache_dir.join("media"));
-        let _ = fs::create_dir_all(cache_dir.join("aliases"));
-        let _ = fs::create_dir_all(cache_dir.join("dims"));
-        let _ = fs::create_dir_all(cache_dir.join("manifests"));
+        let cache_dir = cache::version_dir(Path::new("/tmp/capdag-test-cache"), manifest_version);
+        for kind in cache::KIND_FOLDERS {
+            let _ = fs::create_dir_all(cache_dir.join(kind));
+        }
         let cached_caps = Arc::new(Mutex::new(HashMap::new()));
         let cached_media_defs = Arc::new(Mutex::new(HashMap::new()));
         let cached_aliases = Arc::new(Mutex::new(HashMap::new()));
@@ -2756,6 +2530,123 @@ impl FabricRegistry {
 }
 
 // =============================================================================
+// DISK LOAD
+// =============================================================================
+
+/// The definitions a manifest version's cache folder holds at the versions
+/// its manifest pins, keyed as the registry keys them in memory.
+#[derive(Debug, Default)]
+pub(crate) struct PinnedEntries {
+    pub(crate) caps: HashMap<String, Cap>,
+    pub(crate) media: HashMap<String, StoredMediaDef>,
+    pub(crate) aliases: HashMap<String, StoredAlias>,
+    pub(crate) dims: HashMap<String, StoredDim>,
+}
+
+/// Read, from the cache folder `cache_dir` of manifest `manifest`, every
+/// definition the manifest pins that is cached: each from the one file its
+/// key and pinned defver name, so nothing at another defver, and nothing
+/// another manifest version cached, is ever read.
+///
+/// An entry that is not there is not cached. One that is there and cannot be
+/// read, does not parse, or is not the definition and defver its path names
+/// is corrupt, and an error naming the file. Two rules drop an entry and leave
+/// it to be fetched anew, naming its file in the log:
+/// - a defver-0 cap or media def older than its time to live (defver 0 is the
+///   flat, mutable regime);
+/// - a cap or dim that breaks the definition rules was written by a capdag
+///   with other rules (`capdag/docs/10-validation-rules.md`).
+pub(crate) fn load_pinned_entries(
+    cache_dir: &Path,
+    manifest: &Manifest,
+) -> Result<PinnedEntries, FabricRegistryError> {
+    let mut entries = PinnedEntries::default();
+    for (urn, &defver) in &manifest.caps {
+        let path = cache::entry_path(cache_dir, "caps", urn, defver);
+        let Some(entry) = cache::read_entry::<CapCacheEntry>(&path, "cap")? else {
+            continue;
+        };
+        let cached_urn = normalize_cap_urn(&entry.definition.urn_string())
+            .map_err(|e| cache::corrupt(&path, "cap", &e.to_string()))?;
+        if &cached_urn != urn || entry.definition.version != defver {
+            return Err(cache::corrupt(
+                &path,
+                "cap",
+                &format!(
+                    "it holds '{}' at defver {}, where '{}' at defver {} belongs",
+                    cached_urn, entry.definition.version, urn, defver
+                ),
+            ));
+        }
+        if defver == 0 && entry.is_expired() {
+            tracing::info!("the cached cap {} is past its time to live", path.display());
+            continue;
+        }
+        if let Err(e) = crate::cap::validation::validate_cap_definition(&entry.definition) {
+            tracing::warn!("dropping the cached cap {}: {}", path.display(), e);
+            let _ = fs::remove_file(&path);
+            continue;
+        }
+        entries.caps.insert(cached_urn, entry.definition);
+    }
+    for (urn, &defver) in &manifest.media {
+        let path = cache::entry_path(cache_dir, "media", urn, defver);
+        let Some(entry) = cache::read_entry::<MediaCacheEntry>(&path, "media def")? else {
+            continue;
+        };
+        let cached_urn = normalize_media_urn(&entry.spec.urn)
+            .map_err(|e| cache::corrupt(&path, "media def", &e.to_string()))?;
+        if &cached_urn != urn || entry.spec.version != defver {
+            return Err(cache::corrupt(
+                &path,
+                "media def",
+                &format!(
+                    "it holds '{}' at defver {}, where '{}' at defver {} belongs",
+                    cached_urn, entry.spec.version, urn, defver
+                ),
+            ));
+        }
+        if defver == 0 && entry.is_expired() {
+            tracing::info!("the cached media def {} is past its time to live", path.display());
+            continue;
+        }
+        entries.media.insert(cached_urn, entry.spec);
+    }
+    for (name, &defver) in &manifest.aliases {
+        let path = cache::entry_path(cache_dir, "aliases", name, defver);
+        let Some(entry) = cache::read_entry::<AliasCacheEntry>(&path, "alias")? else {
+            continue;
+        };
+        validate_fetched_alias(&entry.alias, name, defver)
+            .map_err(|e| cache::corrupt(&path, "alias", &e.to_string()))?;
+        entries.aliases.insert(entry.alias.name.clone(), entry.alias);
+    }
+    for (name, &defver) in &manifest.dims {
+        let path = cache::entry_path(cache_dir, "dims", name, defver);
+        let Some(entry) = cache::read_entry::<DimCacheEntry>(&path, "dim")? else {
+            continue;
+        };
+        if &entry.dim.name != name || entry.dim.version != defver {
+            return Err(cache::corrupt(
+                &path,
+                "dim",
+                &format!(
+                    "it holds '{}' at defver {}, where '{}' at defver {} belongs",
+                    entry.dim.name, entry.dim.version, name, defver
+                ),
+            ));
+        }
+        if let Err(e) = entry.dim.validate() {
+            tracing::warn!("dropping the cached dim {}: {}", path.display(), e);
+            let _ = fs::remove_file(&path);
+            continue;
+        }
+        entries.dims.insert(entry.dim.name.clone(), entry.dim);
+    }
+    Ok(entries)
+}
+
+// =============================================================================
 // ATOMIC FETCH HELPERS (free functions)
 // =============================================================================
 
@@ -2767,15 +2658,9 @@ fn cap_url_and_cache_path(
     normalized_urn: &str,
     defver: u32,
 ) -> (String, PathBuf) {
-    let mut hasher = Sha256::new();
-    hasher.update(normalized_urn.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
     (
-        locations.definition("caps", &hash, defver),
-        cache_dir
-            .join("caps")
-            .join(&hash)
-            .join(format!("{}.json", defver)),
+        locations.definition("caps", &cache::key_hash(normalized_urn), defver),
+        cache::entry_path(cache_dir, "caps", normalized_urn, defver),
     )
 }
 
@@ -2787,15 +2672,9 @@ fn media_url_and_cache_path(
     normalized_urn: &str,
     defver: u32,
 ) -> (String, PathBuf) {
-    let mut hasher = Sha256::new();
-    hasher.update(normalized_urn.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
     (
-        locations.definition("media", &hash, defver),
-        cache_dir
-            .join("media")
-            .join(&hash)
-            .join(format!("{}.json", defver)),
+        locations.definition("media", &cache::key_hash(normalized_urn), defver),
+        cache::entry_path(cache_dir, "media", normalized_urn, defver),
     )
 }
 
@@ -2873,15 +2752,9 @@ fn alias_url_and_cache_path(
     normalized_name: &str,
     defver: u32,
 ) -> (String, PathBuf) {
-    let mut hasher = Sha256::new();
-    hasher.update(normalized_name.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
     (
-        locations.definition("aliases", &hash, defver),
-        cache_dir
-            .join("aliases")
-            .join(&hash)
-            .join(format!("{}.json", defver)),
+        locations.definition("aliases", &cache::key_hash(normalized_name), defver),
+        cache::entry_path(cache_dir, "aliases", normalized_name, defver),
     )
 }
 
@@ -2979,23 +2852,7 @@ fn cache_alias_entry(
         cached_at: now,
         ttl_hours: CACHE_DURATION_HOURS,
     };
-    if let Some(parent) = cache_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            FabricRegistryError::CacheError(format!(
-                "Failed to create alias cache dir {:?}: {}",
-                parent, e
-            ))
-        })?;
-    }
-    let serialized = serde_json::to_string(&entry).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to serialize alias cache entry: {}", e))
-    })?;
-    fs::write(cache_path, serialized).map_err(|e| {
-        FabricRegistryError::CacheError(format!(
-            "Failed to write alias cache file {:?}: {}",
-            cache_path, e
-        ))
-    })?;
+    cache::store_entry(cache_path, &entry, "alias")?;
     if let Ok(mut guard) = cached_aliases.lock() {
         guard.insert(alias.name.clone(), alias.clone());
     }
@@ -3011,15 +2868,9 @@ fn dim_url_and_cache_path(
     name: &str,
     defver: u32,
 ) -> (String, PathBuf) {
-    let mut hasher = Sha256::new();
-    hasher.update(name.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
     (
-        locations.definition("dims", &hash, defver),
-        cache_dir
-            .join("dims")
-            .join(&hash)
-            .join(format!("{}.json", defver)),
+        locations.definition("dims", &cache::key_hash(name), defver),
+        cache::entry_path(cache_dir, "dims", name, defver),
     )
 }
 
@@ -3069,23 +2920,7 @@ async fn fetch_one_dim(
             .as_secs(),
         ttl_hours: CACHE_DURATION_HOURS,
     };
-    if let Some(parent) = cache_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            FabricRegistryError::CacheError(format!(
-                "Failed to create dim cache dir {:?}: {}",
-                parent, e
-            ))
-        })?;
-    }
-    let serialized = serde_json::to_string(&entry).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to serialize dim cache entry: {}", e))
-    })?;
-    fs::write(&cache_path, serialized).map_err(|e| {
-        FabricRegistryError::CacheError(format!(
-            "Failed to write dim cache file {:?}: {}",
-            cache_path, e
-        ))
-    })?;
+    cache::store_entry(&cache_path, &entry, "dim")?;
     if let Ok(mut guard) = cached_dims.lock() {
         guard.insert(dim.name.clone(), dim.clone());
     }
@@ -3388,20 +3223,7 @@ async fn fetch_one_cap_atomic(
             .as_secs(),
         ttl_hours: CACHE_DURATION_HOURS,
     };
-    if let Some(parent) = cache_file.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            FabricRegistryError::CacheError(format!(
-                "Failed to create cap cache parent directory {:?}: {}",
-                parent, e
-            ))
-        })?;
-    }
-    let content = serde_json::to_string_pretty(&cache_entry).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to serialize cap cache entry: {}", e))
-    })?;
-    fs::write(&cache_file, content).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to write cap cache file: {}", e))
-    })?;
+    cache::store_entry(&cache_file, &cache_entry, "cap")?;
 
     if let Ok(mut cached) = cached_caps.lock() {
         cached.insert(normalized_urn.to_string(), cap.clone());
@@ -3473,20 +3295,7 @@ pub(crate) async fn fetch_one_media_def(
             .as_secs(),
         ttl_hours: CACHE_DURATION_HOURS,
     };
-    if let Some(parent) = cache_file.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            FabricRegistryError::CacheError(format!(
-                "Failed to create media cache parent directory {:?}: {}",
-                parent, e
-            ))
-        })?;
-    }
-    let content = serde_json::to_string_pretty(&cache_entry).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to serialize media cache entry: {}", e))
-    })?;
-    fs::write(&cache_file, content).map_err(|e| {
-        FabricRegistryError::CacheError(format!("Failed to write media cache file: {}", e))
-    })?;
+    cache::store_entry(&cache_file, &cache_entry, "media def")?;
 
     if let Ok(mut cached) = cached_media_defs.lock() {
         cached.insert(normalized_urn.to_string(), spec.clone());
@@ -3504,44 +3313,32 @@ pub(crate) async fn fetch_one_media_def(
     Ok(spec)
 }
 
-/// Manifest bootstrap. Tries the local cache first; falls back to a
-/// blocking network GET; if neither produces a manifest, returns an
-/// error — there is no v0 fallback (caller chose v >= 1 explicitly).
+/// Manifest bootstrap, in the cache folder `cache_dir` of manifest
+/// `version`. Tries the cached manifest first; falls back to a blocking
+/// network GET; if neither produces a manifest, returns an error — there is
+/// no v0 fallback (caller chose v >= 1 explicitly). A cached manifest that
+/// does not parse, or is another version's, is corrupt: an error naming its
+/// file.
 async fn load_or_fetch_manifest(
-    manifests_dir: &Path,
+    cache_dir: &Path,
     client: &reqwest::Client,
     locations: &FabricLocations,
     version: u32,
     bypass_cache: bool,
 ) -> Result<Manifest, FabricRegistryError> {
-    let cache_file = manifests_dir.join(format!("{}.json", version));
+    let cache_file = cache_dir.join(cache::MANIFEST_FILE);
     // In bypass mode skip the cached manifest entirely and fetch fresh — the
     // fresh copy still writes through below so later cached reads are current.
-    if !bypass_cache && cache_file.exists() {
-        let content = fs::read_to_string(&cache_file).map_err(|e| {
-            FabricRegistryError::CacheError(format!(
-                "Failed to read cached manifest at {:?}: {}",
-                cache_file, e
-            ))
-        })?;
-        match serde_json::from_str::<Manifest>(&content) {
-            Ok(m) => {
-                if m.version != version {
-                    return Err(FabricRegistryError::ParseError(format!(
-                        "Cached manifest at {:?} reports version {} but file is {}.json",
-                        cache_file, m.version, version
-                    )));
-                }
-                return Ok(m);
+    if !bypass_cache {
+        if let Some(m) = cache::read_entry::<Manifest>(&cache_file, "manifest")? {
+            if m.version != version {
+                return Err(cache::corrupt(
+                    &cache_file,
+                    "manifest",
+                    &format!("it is manifest {}, in the folder of manifest {}", m.version, version),
+                ));
             }
-            Err(e) => {
-                tracing::warn!(
-                    "Cached manifest at {:?} did not parse: {}; re-fetching from network",
-                    cache_file,
-                    e
-                );
-                let _ = fs::remove_file(&cache_file);
-            }
+            return Ok(m);
         }
     }
 
@@ -3556,12 +3353,7 @@ async fn load_or_fetch_manifest(
             version, manifest.version
         )));
     }
-    fs::write(&cache_file, &body).map_err(|e| {
-        FabricRegistryError::CacheError(format!(
-            "Failed to write manifest cache to {:?}: {}",
-            cache_file, e
-        ))
-    })?;
+    cache::write_atomically(&cache_file, &body)?;
     Ok(manifest)
 }
 
@@ -4339,6 +4131,7 @@ mod alias_tests {
 #[cfg(test)]
 mod parity_port_tests {
     use super::*;
+    use sha2::{Digest, Sha256};
 
     fn spec(urn: &str, title: &str) -> StoredMediaDef {
         StoredMediaDef {
@@ -4755,15 +4548,7 @@ mod parity_port_tests {
     #[test]
     fn test12715_a_cached_definition_that_breaks_a_rule_is_dropped() {
         let scratch = tempfile::tempdir().unwrap();
-        let caps_dir = scratch.path().join("caps");
-        let entry = |cap: &Cap| {
-            serde_json::to_string(&CapCacheEntry {
-                definition: cap.clone(),
-                cached_at: 0,
-                ttl_hours: 0,
-            })
-            .unwrap()
-        };
+        let cache_dir = scratch.path();
         let urn = |op: &str| {
             crate::CapUrn::from_string(&format!(r#"cap:in="media:void";{op};out="media:record""#)).unwrap()
         };
@@ -4774,19 +4559,23 @@ mod parity_port_tests {
         let mut stale = Cap::new(urn("stale"), "Stale".to_string(), vec!["stale".to_string()]);
         stale.version = 3;
 
-        let kept_file = caps_dir.join("aa").join("3.json");
-        let stale_file = caps_dir.join("bb").join("3.json");
-        for (file, cap) in [(&kept_file, &kept), (&stale_file, &stale)] {
-            fs::create_dir_all(file.parent().unwrap()).unwrap();
-            fs::write(file, entry(cap)).unwrap();
+        let mut manifest = Manifest::empty(11);
+        let mut files = Vec::new();
+        for cap in [&kept, &stale] {
+            let key = normalize_cap_urn(&cap.urn_string()).unwrap();
+            manifest.caps.insert(key.clone(), 3);
+            let file = cache::entry_path(cache_dir, "caps", &key, 3);
+            let entry = CapCacheEntry { definition: cap.clone(), cached_at: 0, ttl_hours: 0 };
+            cache::store_entry(&file, &entry, "cap").unwrap();
+            files.push(file);
         }
 
-        let loaded = FabricRegistry::load_all_cached_caps(&caps_dir).unwrap();
+        let loaded = load_pinned_entries(cache_dir, &manifest).unwrap().caps;
         let urns: Vec<&String> = loaded.keys().collect();
         assert_eq!(loaded.len(), 1, "only the valid definition is loaded: {urns:?}");
         assert!(loaded.values().all(|cap| cap.title == "Kept"));
-        assert!(kept_file.is_file());
-        assert!(!stale_file.exists(), "the stale entry's file is removed");
+        assert!(files[0].is_file());
+        assert!(!files[1].exists(), "the stale entry's file is removed");
     }
 
     // TEST6382: Test parsing registry JSON without stdin args verifies cap structure
@@ -4990,7 +4779,8 @@ mod parity_port_tests {
     }
 }
 
-/// Clearing a cache that other processes are clearing at the same time.
+/// The disk cache shared by processes that run at once, and by capdag
+/// releases pinned at different fabric manifests.
 #[cfg(test)]
 mod concurrent_cache_tests {
     use super::*;
@@ -5002,10 +4792,206 @@ mod concurrent_cache_tests {
         registry
     }
 
+    const URN: &str = r#"cap:in="media:void";shared-entry;out="media:record""#;
+
+    /// The cap `URN` at defver 3, titled `title`, with a documentation large
+    /// enough that writing it takes more than one step.
+    fn variant(title: &str) -> Cap {
+        let mut cap = Cap::new(
+            crate::CapUrn::from_string(URN).unwrap(),
+            title.to_string(),
+            vec!["shared-entry".to_string()],
+        );
+        cap.version = 3;
+        cap.add_output(crate::cap::definition::CapOutput::new("media:record", "record", "The record"));
+        cap.documentation = Some(format!("{title}\n").repeat(2_000));
+        cap
+    }
+
+    fn pinned(version: u32) -> Manifest {
+        let mut manifest = Manifest::empty(version);
+        manifest.caps.insert(normalize_cap_urn(URN).unwrap(), 3);
+        manifest
+    }
+
+    fn store(cache_dir: &Path, cap: &Cap) {
+        let file = cache::entry_path(cache_dir, "caps", &normalize_cap_urn(URN).unwrap(), 3);
+        let entry = CapCacheEntry { definition: cap.clone(), cached_at: 0, ttl_hours: 0 };
+        cache::store_entry(&file, &entry, "cap").expect("the entry is written");
+    }
+
+    // TEST1990: many readers and writers on one cache entry at once: every
+    // read finds no entry or one whole entry a writer wrote, never part of one
+    // and never an error, and no temporary file is left behind. The readers
+    // read for as long as any writer writes, so every write overlaps reads.
+    #[test]
+    fn test1990_concurrent_readers_and_writers_never_see_a_torn_entry() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache_dir = cache::version_dir(dir.path(), 11);
+        let manifest = pinned(11);
+        let variants: Vec<Cap> = (0..4).map(|n| variant(&format!("written by writer {n}"))).collect();
+        let writing = AtomicUsize::new(variants.len());
+        let reads = AtomicUsize::new(0);
+        let done = AtomicBool::new(false);
+
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for cap in &variants {
+                let (cache_dir, writing, done) = (&cache_dir, &writing, &done);
+                handles.push(scope.spawn(move || {
+                    for _ in 0..400 {
+                        store(cache_dir, cap);
+                    }
+                    if writing.fetch_sub(1, Ordering::SeqCst) == 1 {
+                        done.store(true, Ordering::SeqCst);
+                    }
+                    Vec::new()
+                }));
+            }
+            for _ in 0..4 {
+                let (cache_dir, manifest, variants, done, reads) = (&cache_dir, &manifest, &variants, &done, &reads);
+                handles.push(scope.spawn(move || {
+                    let mut failures = Vec::new();
+                    while !done.load(Ordering::SeqCst) {
+                        reads.fetch_add(1, Ordering::Relaxed);
+                        match load_pinned_entries(cache_dir, manifest) {
+                            Ok(entries) => {
+                                if let Some(cap) = entries.caps.values().next() {
+                                    if !variants.iter().any(|v| {
+                                        v.title == cap.title && v.documentation == cap.documentation
+                                    }) {
+                                        failures.push(format!("read a cap no writer wrote: {}", cap.title));
+                                    }
+                                }
+                            }
+                            Err(error) => failures.push(error.to_string()),
+                        }
+                    }
+                    failures
+                }));
+            }
+            handles.into_iter().flat_map(|h| h.join().expect("no panic")).collect()
+        });
+
+        assert!(reads.load(Ordering::Relaxed) > 0, "the readers read while the writers wrote");
+        assert!(failures.is_empty(), "{} torn or failed reads, first: {:?}", failures.len(), failures.first());
+        let loaded = load_pinned_entries(&cache_dir, &manifest).unwrap().caps;
+        assert_eq!(loaded.len(), 1, "the entry is there at the end");
+        let folder = cache::entry_path(&cache_dir, "caps", &normalize_cap_urn(URN).unwrap(), 3);
+        let left: Vec<_> = fs::read_dir(folder.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["3.json".to_string()], "no temporary file is left behind");
+    }
+
+    // TEST1991: two fabric manifest versions share one registry folder: each
+    // keeps its entries in a folder of its own, and reads only what was cached
+    // for it, even where both manifests pin the same definition at the same
+    // defver.
+    #[test]
+    fn test1991_two_manifest_versions_read_only_their_own_entries() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let v10 = cache::version_dir(dir.path(), 10);
+        let v13 = cache::version_dir(dir.path(), 13);
+        assert_ne!(v10, v13, "each manifest version has a folder of its own");
+
+        store(&v10, &variant("cached for manifest 10"));
+        assert!(
+            load_pinned_entries(&v13, &pinned(13)).unwrap().caps.is_empty(),
+            "manifest 13 does not read what was cached for manifest 10"
+        );
+
+        store(&v13, &variant("cached for manifest 13"));
+        let title = |dir: &Path, version: u32| {
+            load_pinned_entries(dir, &pinned(version)).unwrap().caps.values().next().unwrap().title.clone()
+        };
+        assert_eq!(title(&v10, 10), "cached for manifest 10");
+        assert_eq!(title(&v13, 13), "cached for manifest 13");
+
+        let a = FabricRegistry::new_for_test_with_config_and_version(RegistryConfig::default(), 10);
+        let b = FabricRegistry::new_for_test_with_config_and_version(RegistryConfig::default(), 13);
+        assert_ne!(a.cache_dir(), b.cache_dir(), "registries at two manifests cache in two folders");
+        assert_eq!(a.cache_dir().parent(), b.cache_dir().parent(), "under one registry folder");
+    }
+
+    // TEST1992: an entry that is there and is not what its path names is
+    // reported naming its file, and left where it is; it is never taken for
+    // a missing entry. That covers a body that does not parse, one holding
+    // another definition or defver, and a cached manifest that does not parse.
+    #[tokio::test]
+    async fn test1992_a_corrupt_entry_is_reported_naming_its_file() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let cache_dir = cache::version_dir(dir.path(), 11);
+        let manifest = pinned(11);
+        let file = cache::entry_path(&cache_dir, "caps", &normalize_cap_urn(URN).unwrap(), 3);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+
+        fs::write(&file, r#"{"definition": {"urn": "cap:in="#).unwrap();
+        let error = load_pinned_entries(&cache_dir, &manifest).expect_err("a truncated entry is an error");
+        let message = error.to_string();
+        assert!(matches!(error, FabricRegistryError::CacheError(_)), "{error:?}");
+        assert!(message.contains(&file.display().to_string()), "names the file: {message}");
+        assert!(message.contains("corrupt"), "{message}");
+        assert!(file.is_file(), "the file is left for whoever reads the error");
+
+        let mut other = variant("another defver");
+        other.version = 4;
+        let entry = CapCacheEntry { definition: other, cached_at: 0, ttl_hours: 0 };
+        cache::store_entry(&file, &entry, "cap").unwrap();
+        let error = load_pinned_entries(&cache_dir, &manifest).expect_err("another defver is an error");
+        assert!(error.to_string().contains(&file.display().to_string()), "{error}");
+        assert!(error.to_string().contains("defver 4"), "{error}");
+
+        let manifest_file = cache_dir.join(cache::MANIFEST_FILE);
+        fs::write(&manifest_file, "{\"version\": 11, \"prev").unwrap();
+        let locations = layout_locations("http://127.0.0.1:9");
+        let error = load_or_fetch_manifest(&cache_dir, &reqwest::Client::new(), &locations, 11, false)
+            .await
+            .expect_err("a corrupt manifest is an error, not a fetch");
+        assert!(error.to_string().contains(&manifest_file.display().to_string()), "{error}");
+        assert!(manifest_file.is_file());
+    }
+
+    // TEST1993: clearing a manifest version's cache empties its folder and
+    // removes the folders the shared layout before it kept in the registry's
+    // folder; other manifest versions' folders and the stored charter stay.
+    #[test]
+    fn test1993_clearing_empties_one_version_and_removes_the_old_shared_folders() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let registry_dir = dir.path().join("example-fabric");
+        let v11 = cache::version_dir(&registry_dir, 11);
+        let v10 = cache::version_dir(&registry_dir, 10);
+        store(&v11, &variant("eleven"));
+        store(&v10, &variant("ten"));
+        fs::write(v11.join(cache::MANIFEST_FILE), "{}").unwrap();
+        fs::write(v11.join(".manifest.json.1-0.tmp"), "half").unwrap();
+        fs::write(registry_dir.join("charter.json"), "{}").unwrap();
+        for legacy in cache::LEGACY_FOLDERS {
+            fs::create_dir_all(registry_dir.join(legacy).join("ab")).unwrap();
+            fs::write(registry_dir.join(legacy).join("ab").join("1.json"), "{}").unwrap();
+        }
+
+        clear_cache_folder(&v11).expect("clears");
+
+        for kind in cache::KIND_FOLDERS {
+            let folder = v11.join(kind);
+            assert!(folder.is_dir(), "{kind} stays");
+            assert_eq!(fs::read_dir(&folder).unwrap().count(), 0, "{kind} is empty");
+        }
+        assert_eq!(fs::read_dir(&v11).unwrap().count(), cache::KIND_FOLDERS.len(), "only the kinds' folders are left");
+        for legacy in cache::LEGACY_FOLDERS {
+            assert!(!registry_dir.join(legacy).exists(), "the old shared {legacy} folder is removed");
+        }
+        assert_eq!(load_pinned_entries(&v10, &pinned(10)).unwrap().caps.len(), 1, "manifest 10's cache stays");
+        assert!(registry_dir.join("charter.json").is_file(), "the charter stays");
+    }
+
     #[test]
     fn test11158_clearing_leaves_the_cache_present_and_empty() {
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let cache = dir.path().join("fabric.example.com");
+        let cache = cache::version_dir(&dir.path().join("fabric.example.com"), 1);
         let registry = registry_at(cache.clone());
 
         std::fs::create_dir_all(cache.join("caps")).expect("caps");
@@ -5022,9 +5008,9 @@ mod concurrent_cache_tests {
         // The first build on a machine finds nothing here. That is not a
         // failure to report, and the old code silently did nothing at all.
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let cache = dir.path().join("never-existed");
+        let cache = cache::version_dir(&dir.path().join("never-existed"), 1);
         registry_at(cache.clone()).clear_cache().expect("clears");
-        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
+        for sub in cache::KIND_FOLDERS {
             assert!(cache.join(sub).is_dir(), "{sub} exists after clearing");
         }
     }
@@ -5037,7 +5023,7 @@ mod concurrent_cache_tests {
         // deleting an ancestor while another creates into it is exactly the
         // `No such file or directory` a build died on.
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let cache = dir.path().join("shared.example.com");
+        let cache = cache::version_dir(&dir.path().join("shared.example.com"), 1);
         std::fs::create_dir_all(cache.join("caps")).expect("caps");
         for n in 0..200 {
             std::fs::write(cache.join(format!("caps/entry-{n}.json")), "{}").expect("entry");
@@ -5077,7 +5063,7 @@ mod concurrent_cache_tests {
             !failures.iter().any(|f| f.contains("not empty") || f.contains("No such file")),
             "neither platform's symptom may survive: {failures:?}"
         );
-        for sub in ["caps", "media", "aliases", "dims", "manifests"] {
+        for sub in cache::KIND_FOLDERS {
             assert!(cache.join(sub).is_dir(), "{sub} is present at the end");
         }
     }
@@ -5090,6 +5076,7 @@ mod concurrent_cache_tests {
 #[cfg(test)]
 mod dim_tests {
     use super::*;
+    use sha2::{Digest, Sha256};
     use crate::fabric::dim::{DimTag, StoredDimValue};
 
     fn dim(name: &str, version: u32, values: &[&str]) -> StoredDim {
