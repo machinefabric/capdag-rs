@@ -127,7 +127,11 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let targets: Vec<MediaUrn> = if !args.to.is_empty() {
         let mut out = Vec::new();
         for token in &args.to {
-            out.push(match_target(&registry, &discovered.targets, token, &what).await?);
+            let target = match_target(&registry, &discovered.targets, token, &what).await?;
+            if !target.named {
+                say_matched(ctx, &registry, token, &target.media, &what);
+            }
+            out.push(target.media);
         }
         out
     } else if ctx.term.interactive || wants_machine {
@@ -339,6 +343,13 @@ pub async fn target_media(registry: &FabricRegistry, token: &str) -> CliResult<M
     })
 }
 
+/// The reachable target a `--to` means, and whether it named that target
+/// itself (`named`) or a kind of which that target is the one reachable.
+struct Matched {
+    media: MediaUrn,
+    named: bool,
+}
+
 /// The reachable target a `--to` means: the one it names, or the one reachable
 /// target of the kind it names. Several of that kind is a choice to make.
 async fn match_target(
@@ -346,17 +357,17 @@ async fn match_target(
     reachable: &[p::ConvergentTargetInfo],
     token: &str,
     what: &str,
-) -> CliResult<MediaUrn> {
+) -> CliResult<Matched> {
     let wanted = target_media(registry, token).await?;
     if let Some(exact) = reachable.iter().find(|t| t.media_def.is_equivalent(&wanted).unwrap_or(false)) {
-        return Ok(exact.media_def.clone());
+        return Ok(Matched { media: exact.media_def.clone(), named: true });
     }
     let fitting: Vec<&p::ConvergentTargetInfo> = reachable
         .iter()
         .filter(|t| t.media_def.conforms_to(&wanted).unwrap_or(false))
         .collect();
     match fitting.as_slice() {
-        [one] => Ok(one.media_def.clone()),
+        [one] => Ok(Matched { media: one.media_def.clone(), named: false }),
         [] => Err(CliError::failed(format!("{what} cannot become {token}"))
             .context(format!(
                 "it can become: {}",
@@ -370,6 +381,19 @@ async fn match_target(
             }
             Err(error.hint("say which with one of the --to values above"))
         }
+    }
+}
+
+/// Say which target a `--to` of a kind was taken as: the one target of that
+/// kind the files can become, which the `--to` did not name itself.
+fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &MediaUrn, what: &str) {
+    let alias = names::media(registry, target);
+    if ctx.term.json {
+        emit_record(&serde_json::json!({
+            "type": "to", "given": token, "alias": alias, "urn": target.to_string(),
+        }));
+    } else {
+        eprintln!("--to {token}: making {alias}, the one {token} {what} can become");
     }
 }
 
@@ -506,4 +530,37 @@ fn print_machines(ctx: &Ctx, machines: &[Planned], target: &str, what: &str, all
         files.join(" "),
         files.join(" ")
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(urn: &str) -> p::ConvergentTargetInfo {
+        p::ConvergentTargetInfo {
+            media_def: MediaUrn::from_string(urn).unwrap(),
+            display_name: urn.to_string(),
+            min_total_steps: 1,
+            apex: None,
+            convergent: false,
+        }
+    }
+
+    // TEST8211: a --to is told apart by whether it named the target the files
+    // can become or a kind of which that target is the one reachable: JSON
+    // names no reachable target of a PDF, and the embedding vector is the one
+    // JSON it can become, which plan then says it is making
+    #[tokio::test]
+    async fn test8211_a_to_of_a_kind_is_known_from_one_that_names_its_target() {
+        let registry = FabricRegistry::new_for_test();
+        let embedding = "media:embedding-vector;enc=utf8;fmt=json;record";
+        let reachable = [target(embedding), target("media:ext=png;image")];
+
+        let of_a_kind = match_target(&registry, &reachable, "media:enc=utf8;fmt=json", "1 pdf").await.unwrap();
+        assert_eq!(of_a_kind.media, MediaUrn::from_string(embedding).unwrap());
+        assert!(!of_a_kind.named, "JSON is a kind the embedding vector is one of, not the target itself");
+
+        let named = match_target(&registry, &reachable, embedding, "1 pdf").await.unwrap();
+        assert!(named.named, "the embedding vector's own URN names it");
+    }
 }
