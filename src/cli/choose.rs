@@ -13,7 +13,6 @@
 //!   error, so a program can read the options and ask again with the flag.
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style as Paint};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -21,6 +20,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult};
+use super::inline::InlineBackend;
 use super::term::emit_record;
 
 /// One option.
@@ -96,7 +96,7 @@ async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style
     let failed = |e: std::io::Error| CliError::failed("the picker could not be drawn").context(e.to_string());
     crossterm::terminal::enable_raw_mode().map_err(failed)?;
     let mut terminal = match Terminal::with_options(
-        CrosstermBackend::new(std::io::stderr()),
+        InlineBackend::new(),
         TerminalOptions { viewport: Viewport::Inline(HEIGHT) },
     ) {
         Ok(terminal) => terminal,

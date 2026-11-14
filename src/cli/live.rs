@@ -18,7 +18,6 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style as Paint};
 use ratatui::text::{Line, Span};
@@ -26,6 +25,7 @@ use ratatui::widgets::{Paragraph, Widget};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 
 use super::error::{CliError, CliResult};
+use super::inline::InlineBackend;
 use super::term::{emit_record, Style, Term};
 use super::watch::{MapItems, RunWatch, StepState, Watch};
 use crate::orchestrator::observe::RunKey;
@@ -333,9 +333,8 @@ impl PlainLines {
 
 /// The inline block: drawn in the scrollback under the command.
 pub struct LiveView {
-    terminal: Terminal<CrosstermBackend<std::io::Stderr>>,
+    terminal: Terminal<InlineBackend>,
     style: Style,
-    events: crossterm::event::EventStream,
     selected: usize,
     show_log: bool,
     said: Vec<String>,
@@ -345,12 +344,15 @@ pub struct LiveView {
 /// step's last line, the keys.
 const BLOCK_HEIGHT: u16 = 14;
 
+/// How often the live view looks for a key.
+const KEYS_EVERY: Duration = Duration::from_millis(50);
+
 impl LiveView {
     fn open(style: Style) -> CliResult<Self> {
         crossterm::terminal::enable_raw_mode()
             .map_err(|e| CliError::failed("the terminal could not be set up for the live view").context(e.to_string()))?;
         let terminal = Terminal::with_options(
-            CrosstermBackend::new(std::io::stderr()),
+            InlineBackend::new(),
             TerminalOptions {
                 viewport: Viewport::Inline(BLOCK_HEIGHT),
             },
@@ -362,7 +364,6 @@ impl LiveView {
         Ok(Self {
             terminal,
             style,
-            events: crossterm::event::EventStream::new(),
             selected: 0,
             show_log: false,
             said: Vec::new(),
@@ -380,30 +381,43 @@ impl LiveView {
         self.said.push(line.to_string());
     }
 
+    /// The next key that asks something of the run. Keys are read here, in
+    /// the run's own task, and never by a thread of their own: a thread left
+    /// reading the terminal would take the answer the block's draw waits
+    /// for when it asks where the cursor is.
     async fn key(&mut self) -> Option<Key> {
-        use futures_util::StreamExt;
         loop {
-            let event = self.events.next().await?;
-            let Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) = event else { continue };
-            if kind != KeyEventKind::Press {
-                continue;
+            while let Ok(true) = crossterm::event::poll(Duration::ZERO) {
+                let Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) = crossterm::event::read() else { continue };
+                if kind != KeyEventKind::Press {
+                    continue;
+                }
+                match (code, modifiers) {
+                    (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => return Some(Key::Interrupt),
+                    (KeyCode::Char('l'), _) => self.show_log = !self.show_log,
+                    (KeyCode::Up, _) => self.selected = self.selected.saturating_sub(1),
+                    (KeyCode::Down, _) => self.selected += 1,
+                    _ => {}
+                }
             }
-            match (code, modifiers) {
-                (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => return Some(Key::Interrupt),
-                (KeyCode::Char('l'), _) => self.show_log = !self.show_log,
-                (KeyCode::Up, _) => self.selected = self.selected.saturating_sub(1),
-                (KeyCode::Down, _) => self.selected += 1,
-                _ => {}
-            }
+            tokio::time::sleep(KEYS_EVERY).await;
         }
     }
 
     fn draw(&mut self, watch: &Watch, phase: RunPhase) -> CliResult<()> {
         let said = std::mem::take(&mut self.said);
+        let width = self
+            .terminal
+            .size()
+            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?
+            .width;
         for line in said {
-            let text = strip_escapes(&line);
+            let rows = rows_of(&strip_escapes(&line), width);
+            let height = u16::try_from(rows.len()).unwrap_or(u16::MAX);
             self.terminal
-                .insert_before(1, |buf| Paragraph::new(text.clone()).render(buf.area, buf))
+                .insert_before(height, |buf| {
+                    Paragraph::new(rows.iter().map(|row| Line::raw(row.clone())).collect::<Vec<_>>()).render(buf.area, buf)
+                })
                 .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?;
         }
         let style = self.style;
@@ -451,6 +465,30 @@ fn strip_escapes(text: &str) -> String {
         }
     }
     out
+}
+
+/// `text` in rows of at most `width` columns, a new row at each line break:
+/// what is said above the block is wrapped, never cut, so the paths a summary
+/// names are whole in the scrollback.
+fn rows_of(text: &str, width: u16) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let width = usize::from(width.max(1));
+    let mut rows = Vec::new();
+    for line in text.split('\n') {
+        let mut row = String::new();
+        let mut used = 0;
+        for c in line.chars() {
+            let columns = c.width().unwrap_or(0);
+            if used + columns > width && used > 0 {
+                rows.push(std::mem::take(&mut row));
+                used = 0;
+            }
+            row.push(c);
+            used += columns;
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 /// The block's lines: the run being watched, its steps, the selected step's
@@ -570,5 +608,18 @@ mod tests {
         let style = Style::plain();
         assert_eq!(bar(0.5, 10, &style), "█████░░░░░  50%");
         assert_eq!(bar(1.2, 4, &style), "████ 100%", "progress past the whole is shown as the whole");
+    }
+
+    // TEST22115: a line said above the block is wrapped at the terminal's
+    // width, never cut: every character is kept, in order, no row is wider
+    // than the terminal (a wide character counts as two columns), and a line
+    // break starts a row.
+    #[test]
+    fn test22115_said_lines_wrap_and_keep_every_character() {
+        assert_eq!(rows_of("→ /tmp/work/note.pages.0.png", 10), vec!["→ /tmp/wor", "k/note.pag", "es.0.png"]);
+        assert_eq!(rows_of("ab界cd", 3), vec!["ab", "界c", "d"]);
+        assert_eq!(rows_of("one\ntwo", 80), vec!["one", "two"]);
+        assert_eq!(rows_of("", 80), vec![""], "an empty line is one empty row");
+        assert_eq!(rows_of("fits", 4), vec!["fits"]);
     }
 }

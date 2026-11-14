@@ -2,7 +2,7 @@
 
 Generated from the test catalogue. Edit the tests, not this file.
 
-1727 tests: 1718 numbered, 9 unnumbered.
+1729 tests: 1720 numbered, 9 unnumbered.
 
 ## Numbered
 
@@ -1708,11 +1708,11 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST20110 | capdag/capdag-rs | rust | `test20110_an_error_names_the_problem_its_context_and_the_next_step` | src/cli/error.rs:142 | TEST20110: an error reads as its problem, its context indented under it, and its hint last — and as the same three parts in its JSON record. |
 | TEST20111 | capdag/capdag-rs | rust | `test20111_exit_statuses` | src/cli/error.rs:160 | TEST20111: every usage error exits 2, a failure 1, and a run as the model says its outcome exits. |
 | TEST20112 | capdag/capdag-rs | rust | `test20112_statements_are_shown_one_per_line` | src/cli/names.rs:99 | TEST20112: alias-form notation is shown one statement per line, quoted brackets left alone. |
-| TEST20113 | capdag/capdag-rs | rust | `test20113_every_command_has_help_with_an_example` | src/cli/mod.rs:426 | TEST20113: the command tree is well formed: clap's own checks pass, and every command a person sees has help with at least one example. |
-| TEST20114 | capdag/capdag-rs | rust | `test20114_a_mistyped_command_is_answered_with_the_one_meant` | src/cli/mod.rs:453 | TEST20114: a mistyped command is answered with the one it meant. |
+| TEST20113 | capdag/capdag-rs | rust | `test20113_every_command_has_help_with_an_example` | src/cli/mod.rs:427 | TEST20113: the command tree is well formed: clap's own checks pass, and every command a person sees has help with at least one example. |
+| TEST20114 | capdag/capdag-rs | rust | `test20114_a_mistyped_command_is_answered_with_the_one_meant` | src/cli/mod.rs:454 | TEST20114: a mistyped command is answered with the one it meant. |
 | TEST20115 | capdag/capdag-rs | rust | `test20115_inputs_name_what_is_missing` | src/cli/inputs.rs:210 | TEST20115: an input that names nothing is a usage error naming it; a directory lists its content files, sorted. |
-| TEST20116 | capdag/capdag-rs | rust | `test20116_items_read_as_ended_of_total` | src/cli/live.rs:559 | TEST20116: a map's items read as how many ended of how many, and a failed item is counted as failed. |
-| TEST20117 | capdag/capdag-rs | rust | `test20117_progress_bar` | src/cli/live.rs:569 | TEST20117: the progress bar fills in proportion and states the percent, never past the whole. |
+| TEST20116 | capdag/capdag-rs | rust | `test20116_items_read_as_ended_of_total` | src/cli/live.rs:597 | TEST20116: a map's items read as how many ended of how many, and a failed item is counted as failed. |
+| TEST20117 | capdag/capdag-rs | rust | `test20117_progress_bar` | src/cli/live.rs:607 | TEST20117: the progress bar fills in proportion and states the percent, never past the whole. |
 | TEST20118 | capdag/capdag-rs | rust | `test20118_a_choice_not_made_names_the_flag_and_its_values` | src/cli/choose.rs:254 | TEST20118: a choice not made without a terminal is a usage error naming the flag and the values it takes. |
 | TEST20119 | capdag/capdag-rs | rust | `test20119_typing_filters_by_every_word` | src/cli/choose.rs:265 | TEST20119: typing filters by every word, in the label or the detail. |
 | TEST20120 | capdag/capdag-rs | rust | `test20120_cap_tokens_are_separated_from_runs_flags` | src/cli/run.rs:1366 | TEST20120: a cap's own options and inputs are put after `--`, in order, and run's own flags — wherever they were — stay `run`'s. |
@@ -1726,6 +1726,8 @@ Generated from the test catalogue. Edit the tests, not this file.
 | TEST22104 | capdag/capdag-rs | rust | `test22104_a_plan_is_drawn_with_the_names_and_maps_of_its_nodes` | src/orchestrator/plan_view.rs:486 | TEST22104: a plan is drawn with every node, ordered by id and found by it, holding the title of its media and of its cap, the name the notation gives it, and the innermost map it runs in; every edge is drawn in the plan's order with what it carries. |
 | TEST22105 | capdag/capdag-rs | rust | `test22105_args_and_constants_are_drawn_by_their_names_in_the_cap` | src/orchestrator/plan_view.rs:584 | TEST22105: an arg a step is fed by an edge and an arg it is given a constant are drawn by the names their cap gives them. |
 | TEST22106 | capdag/capdag-rs | rust | `test22106_a_media_or_cap_the_cache_lacks_is_an_error_naming_it` | src/orchestrator/plan_view.rs:639 | TEST22106: a plan names nothing it cannot draw: a media type or a cap the registry's cache does not hold is an error naming it, never a node drawn with a blank title. |
+| TEST22114 | capdag/capdag-rs | rust | `test22114_the_cursor_is_read_from_a_whole_answer` | src/cli/inline.rs:186 | TEST22114: the cursor position is read from the terminal's answer alone, counted from 0, once the answer is whole: keys typed before it are not part of it, and a partial or malformed answer gives none. |
+| TEST22115 | capdag/capdag-rs | rust | `test22115_said_lines_wrap_and_keep_every_character` | src/cli/live.rs:618 | TEST22115: a line said above the block is wrapped at the terminal's width, never cut: every character is kept, in order, no row is wider than the terminal (a wide character counts as two columns), and a line break starts a row. |
 
 ## Unnumbered
 

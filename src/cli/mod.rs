@@ -17,6 +17,7 @@ pub mod dev;
 pub mod error;
 pub mod graph;
 pub mod info;
+pub mod inline;
 pub mod inputs;
 pub mod live;
 pub mod model;
