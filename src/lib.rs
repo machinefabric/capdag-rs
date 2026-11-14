@@ -249,6 +249,7 @@ pub use bifaci::in_process_host::{
 };
 pub use bifaci::protocol_trace::{ProtocolTraceError, ProtocolTraceSink};
 pub use bifaci::relay::{RelayMaster, RelaySlave};
+pub use bifaci::peer_hold::{PeerHoldBound, PeerProvider, PeerProvision, PeerRefusal};
 pub use bifaci::relay_switch::{
     CartridgeAttachmentError, CartridgeAttachmentErrorKind, CartridgeLifecycle,
     InstalledCartridgeRecord, MasterHealthStatus, RelayNotifyCapabilitiesPayload, RelaySwitch,

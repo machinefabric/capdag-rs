@@ -724,6 +724,17 @@ pub(crate) fn decompose_step_chains(
 // Cartridge Manager
 // =============================================================================
 
+/// Where the cap a cartridge's peer call named is provided from
+/// ([`CartridgeManager::peer_provider_of`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PeerSource {
+    /// A dev cartridge this manager was given: its binary.
+    Dev(PathBuf),
+    /// A cartridge of this manager's registry: its id. It is installed, or
+    /// installed when it is brought ([`CartridgeManager::get_cartridge_path`]).
+    Registry(String),
+}
+
 /// Manages cartridge discovery, download, and caching.
 pub struct CartridgeManager {
     cartridge_repo: CartridgeRepo,
@@ -1041,30 +1052,74 @@ impl CartridgeManager {
         // an advertisement that never came.
         let mut result: Vec<HostableCartridge> = Vec::with_capacity(cartridge_paths.len());
         for path in cartridge_paths {
-            if let Some(manifest) = self.dev_cartridges.get(&path) {
-                let identity = Some((
-                    manifest.name.clone(),
-                    manifest.version.clone(),
-                    manifest.channel,
-                ));
-                result.push(HostableCartridge {
-                    entry_point: path,
-                    identity,
-                    cap_groups: manifest.cap_groups.clone(),
-                    bundle_sha256: None,
-                });
-            } else {
-                let manifest = self.discover_manifest(&path).await?;
-                result.push(HostableCartridge {
-                    entry_point: path,
-                    identity: None,
-                    cap_groups: manifest.cap_groups,
-                    bundle_sha256: None,
-                });
-            }
+            result.push(self.hostable(path).await?);
         }
 
         Ok(result)
+    }
+
+    /// The cartridge at `path` — a dev binary this manager was given, or an
+    /// installed one — as a host is given it: with every cap group it
+    /// declares. A dev cartridge's are the ones its HELLO reported at `init`;
+    /// an installed one's are read from its binary the same way, since the
+    /// installed version is what runs.
+    pub async fn hostable(&self, path: PathBuf) -> Result<HostableCartridge, ExecutionError> {
+        if let Some(manifest) = self.dev_cartridges.get(&path) {
+            let identity = Some((manifest.name.clone(), manifest.version.clone(), manifest.channel));
+            return Ok(HostableCartridge {
+                entry_point: path,
+                identity,
+                cap_groups: manifest.cap_groups.clone(),
+                bundle_sha256: None,
+            });
+        }
+        let manifest = self.discover_manifest(&path).await?;
+        Ok(HostableCartridge {
+            entry_point: path,
+            identity: None,
+            cap_groups: manifest.cap_groups,
+            bundle_sha256: None,
+        })
+    }
+
+    /// What provides `cap_urn` — the cap a cartridge's peer call named — by
+    /// the rule a run of a cap follows for its own cartridge: a dev cartridge
+    /// this manager was given, else this manager's registry. Unlike a run's
+    /// own cap, which names exactly one cap ([`Self::resolve_cartridges`]
+    /// matches it by equivalence), a peer call is routed: any cap that serves
+    /// the request may answer it (`is_dispatchable`), and the proved ranking
+    /// chooses among them ([`CapUrn::select`]), as the switch does among the
+    /// masters it has.
+    pub async fn peer_provider_of(&self, cap_urn: &str) -> Result<PeerSource, ExecutionError> {
+        let request = CapUrn::from_string(cap_urn).map_err(|e| ExecutionError::CartridgeNotFound {
+            cap_urn: format!("Invalid URN: {}: {}", cap_urn, e),
+        })?;
+
+        // Dev cartridges, by path, so the ranking's tie rule picks the same one
+        // every time.
+        let mut dev: Vec<(&PathBuf, CapUrn)> = self
+            .dev_cartridges
+            .iter()
+            .flat_map(|(path, manifest)| manifest.all_caps().into_iter().map(move |cap| (path, cap.urn.clone())))
+            .collect();
+        dev.sort_by(|a, b| a.0.cmp(b.0));
+        let dev_caps: Vec<CapUrn> = dev.iter().map(|(_, cap)| cap.clone()).collect();
+        if let Some(chosen) = CapUrn::select(&dev_caps, &request) {
+            return Ok(PeerSource::Dev(dev[chosen].0.clone()));
+        }
+
+        let Some(registry_url) = self.registry_url.as_deref() else {
+            return Err(ExecutionError::CartridgeNotFound { cap_urn: cap_urn.to_string() });
+        };
+        let serving = self
+            .cartridge_repo
+            .get_cartridges_serving(registry_url, self.channel, &request)
+            .await;
+        let caps: Vec<CapUrn> = serving.iter().map(|(_, cap)| cap.clone()).collect();
+        match CapUrn::select(&caps, &request) {
+            Some(chosen) => Ok(PeerSource::Registry(serving[chosen].0.clone())),
+            None => Err(ExecutionError::CartridgeNotFound { cap_urn: cap_urn.to_string() }),
+        }
     }
 
     /// Registry suggestions for a cap URN (which cartridges provide it),
