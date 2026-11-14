@@ -76,14 +76,31 @@ impl Ctx {
             .await
             .map_err(|e| fabric_unreachable(&anchor, &e, self.offline))?;
         registry.set_offline(self.offline);
-        // Planning, listing and extension detection read the cached sets: warm
-        // them from the pinned manifest, as the engine does at startup. A
-        // no-op once everything is cached.
+        // Machine notation resolves aliases synchronously, from memory: warm
+        // them from the pinned manifest. A no-op once they are cached. Caps
+        // are not warmed here: a command that needs every cap of the fabric
+        // asks for them (`fabric_caps`), and the others fetch what they use.
         if !self.offline {
-            registry.prefetch_manifest_caps().await;
             registry.prefetch_manifest_aliases().await;
         }
         Ok(Arc::new(registry))
+    }
+
+    /// Every cap of the fabric (`FabricRegistry::manifest_caps`): those not
+    /// cached are fetched; one that cannot be had is an error naming it.
+    pub async fn fabric_caps(&self, registry: &FabricRegistry) -> CliResult<Vec<crate::Cap>> {
+        registry.manifest_caps().await.map_err(|e| self.caps_unreadable(e))
+    }
+
+    /// The fabric's caps could not all be read: what went wrong, and what to do.
+    pub fn caps_unreadable(&self, error: FabricRegistryError) -> CliError {
+        CliError::failed("the fabric's capabilities could not be read")
+            .context(error.to_string())
+            .hint(if self.offline {
+                "they are not all cached: run the command without --offline once"
+            } else {
+                "check the connection, then run the command again; if it keeps failing, report it"
+            })
     }
 }
 

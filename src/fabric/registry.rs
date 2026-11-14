@@ -200,6 +200,14 @@ fn is_zero_u32(v: &u32) -> bool {
 }
 
 impl StoredMediaDef {
+    /// Whether a value of this media can begin or end a planned machine (a
+    /// strand bookend): its definition lists a file extension, so it can be
+    /// read from a file or saved as one. The one rule every planner graph
+    /// marks its bookends by.
+    pub fn is_bookend(&self) -> bool {
+        !self.extensions.is_empty()
+    }
+
     pub fn to_media_def_def(&self) -> MediaDef {
         MediaDef {
             urn: self.urn.clone(),
@@ -379,6 +387,10 @@ type FileMediaIndex = HashMap<String, Vec<StoredMediaDef>>;
 /// How many file media definitions are fetched at once when the file media
 /// index loads on a cold cache.
 const FILE_MEDIA_FETCHES_AT_ONCE: usize = 16;
+
+/// How many caps are fetched at once when the manifest's caps load on a cold
+/// cache (`FabricRegistry::manifest_caps`).
+const CAP_FETCHES_AT_ONCE: usize = 16;
 
 #[derive(Debug)]
 pub struct FabricRegistry {
@@ -1354,96 +1366,140 @@ impl FabricRegistry {
     /// thousands of "no equivalent in the registry yet" warnings and the
     /// staggered graph rebuilds that follow into one upfront warm-up.
     ///
-    /// At v0 (manifest_version == 0) the manifest is empty, so this is a
-    /// no-op — legacy flat-path resolution is unchanged. Individual fetch
-    /// failures are logged and counted but do not abort the warm-up: a
-    /// missing or unreachable cap still hits the existing on-demand
-    /// background path later.
+    /// This is a warm-up for a host that rebuilds its graph whenever a cap
+    /// lands: a cap that cannot be fetched is logged and left to the
+    /// on-demand background fetcher, which retries it. A caller that needs
+    /// every cap of the fabric now, and must not go on without one, asks
+    /// [`manifest_caps`](Self::manifest_caps) instead.
     pub async fn prefetch_manifest_caps(&self) {
-        if self.manifest_version == 0 {
-            return;
+        let failures = self.fetch_manifest_caps().await;
+        for (urn, error) in &failures {
+            tracing::warn!(
+                cap_urn = %urn,
+                error = %error,
+                "[prefetch] failed to warm cap; on-demand background fetch will retry later"
+            );
         }
+    }
 
+    /// Every cap the pinned manifest names — the whole capability graph of
+    /// the fabric — in URN order.
+    ///
+    /// The caps not in memory yet are fetched, [`CAP_FETCHES_AT_ONCE`] at a
+    /// time, each with the media definitions and dims it names, and kept in
+    /// this manifest version's cache; a later call, and a later command
+    /// reading the same cache, fetches nothing. What it answers never
+    /// depends on what earlier commands happened to fetch.
+    ///
+    /// A cap that cannot be had fails the call, naming each one and why (a
+    /// refused or unanswered fetch, a definition the registry does not hold,
+    /// a fetch blocked offline): an answer from part of the fabric's caps
+    /// would be a wrong answer.
+    pub async fn manifest_caps(&self) -> Result<Vec<Cap>, FabricRegistryError> {
+        let mut failures = self.fetch_manifest_caps().await;
+        let named: Vec<String> = {
+            let manifest = self.manifest.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
+            })?;
+            manifest.caps.keys().cloned().collect()
+        };
+        let mut caps: Vec<Cap> = Vec::with_capacity(named.len());
+        {
+            let cached = self.cached_caps.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock cap cache: {}", e))
+            })?;
+            for urn in &named {
+                match cached.get(urn) {
+                    Some(cap) => caps.push(cap.clone()),
+                    None if failures.iter().any(|(failed, _)| failed == urn) => {}
+                    None => failures.push((
+                        urn.clone(),
+                        FabricRegistryError::CacheError(
+                            "it was fetched and is not in the cap cache".to_string(),
+                        ),
+                    )),
+                }
+            }
+        }
+        if !failures.is_empty() {
+            let mut named_failures: Vec<String> =
+                failures.iter().map(|(urn, error)| format!("{urn}: {error}")).collect();
+            named_failures.sort();
+            return Err(FabricRegistryError::Caps(format!(
+                "{} of the {} caps of manifest v{} could not be loaded, so the fabric's \
+                 capabilities are not all known: {}",
+                named_failures.len(),
+                named.len(),
+                self.manifest_version,
+                named_failures.join("; ")
+            )));
+        }
+        caps.sort_by_key(|cap| cap.urn.to_string());
+        Ok(caps)
+    }
+
+    /// Fetch every cap the pinned manifest names that is not in memory,
+    /// [`CAP_FETCHES_AT_ONCE`] at a time, through the atomic fetcher `get_cap`
+    /// uses (a cap is cached with the media definitions and dims it names, or
+    /// not at all). Answers each cap that could not be had, with why.
+    async fn fetch_manifest_caps(&self) -> Vec<(String, FabricRegistryError)> {
         // Snapshot the manifest URNs and the already-cached set under their
         // locks, then release before doing any network work.
         let to_fetch: Vec<String> = {
             let manifest = match self.manifest.lock() {
                 Ok(m) => m,
                 Err(e) => {
-                    tracing::error!(error = %e, "[prefetch] failed to lock manifest");
-                    return;
+                    return vec![(
+                        format!("manifest v{}", self.manifest_version),
+                        FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e)),
+                    )]
                 }
             };
-            let cached = self.cached_caps.lock().ok();
-            manifest
-                .caps
-                .keys()
-                .filter(|urn| {
-                    cached
-                        .as_ref()
-                        .map(|c| !c.contains_key(*urn))
-                        .unwrap_or(true)
-                })
-                .cloned()
-                .collect()
+            let cached = match self.cached_caps.lock() {
+                Ok(c) => c,
+                Err(e) => {
+                    return vec![(
+                        format!("manifest v{}", self.manifest_version),
+                        FabricRegistryError::CacheError(format!("Failed to lock cap cache: {}", e)),
+                    )]
+                }
+            };
+            manifest.caps.keys().filter(|urn| !cached.contains_key(*urn)).cloned().collect()
         };
-
         if to_fetch.is_empty() {
-            return;
+            return Vec::new();
         }
-
-        let total = to_fetch.len();
         tracing::info!(
-            count = total,
+            count = to_fetch.len(),
             manifest_version = self.manifest_version,
-            "[prefetch] warming cap cache from manifest before LiveCapFab builds"
+            "fetching the manifest's caps that are not cached"
         );
 
-        // Bounded concurrency: drive the network directly through the same
-        // atomic fetcher `get_cap` uses (which caches the cap and its
-        // referenced media defs on success), but cap the in-flight requests
-        // to avoid a thundering-herd of connections against R2.
-        const MAX_IN_FLIGHT: usize = 16;
-        let mut warmed = 0usize;
-        let mut failed = 0usize;
+        let mut failures: Vec<(String, FabricRegistryError)> = Vec::new();
         let mut set: tokio::task::JoinSet<(String, Result<Cap, FabricRegistryError>)> =
             tokio::task::JoinSet::new();
         let mut iter = to_fetch.into_iter();
-
-        // Prime up to MAX_IN_FLIGHT tasks, then refill one-for-one as each
-        // completes so at most MAX_IN_FLIGHT fetches are ever in flight.
-        for _ in 0..MAX_IN_FLIGHT {
+        // Prime up to CAP_FETCHES_AT_ONCE tasks, then refill one-for-one as
+        // each completes, so at most that many fetches are ever in flight.
+        for _ in 0..CAP_FETCHES_AT_ONCE {
             if let Some(urn) = iter.next() {
                 self.spawn_cap_warm(&mut set, urn);
             }
         }
         while let Some(joined) = set.join_next().await {
             match joined {
-                Ok((_, Ok(_))) => warmed += 1,
-                Ok((urn, Err(e))) => {
-                    failed += 1;
-                    tracing::warn!(
-                        cap_urn = %urn,
-                        error = %e,
-                        "[prefetch] failed to warm cap; on-demand background fetch will retry later"
-                    );
-                }
-                Err(e) => {
-                    failed += 1;
-                    tracing::warn!(error = %e, "[prefetch] cap warm task panicked");
-                }
+                Ok((_, Ok(_))) => {}
+                Ok((urn, Err(e))) => failures.push((urn, e)),
+                Err(e) => failures.push((
+                    "a cap fetch".to_string(),
+                    FabricRegistryError::CacheError(format!("the fetch did not finish: {e}")),
+                )),
             }
             if let Some(urn) = iter.next() {
                 self.spawn_cap_warm(&mut set, urn);
             }
         }
-
-        tracing::info!(
-            warmed,
-            failed,
-            total,
-            "[prefetch] cap cache warm-up complete"
-        );
+        failures
     }
 
     /// Warm the alias cache from the pinned manifest so the SYNCHRONOUS
@@ -1662,7 +1718,9 @@ impl FabricRegistry {
         });
     }
 
-    /// Get all currently cached caps from in-memory cache.
+    /// The caps in memory now: what this process has fetched or read from
+    /// the cache so far, which is not the fabric's caps. A question about
+    /// every cap of the fabric asks [`manifest_caps`](Self::manifest_caps).
     pub async fn get_cached_caps(&self) -> Result<Vec<Cap>, FabricRegistryError> {
         let cached_caps = self.cached_caps.lock().map_err(|e| {
             FabricRegistryError::CacheError(format!("Failed to lock cap cache: {}", e))
@@ -1694,8 +1752,10 @@ impl FabricRegistry {
             .with_in_spec(input_media.to_string())
             .with_out_spec(out_spec);
 
+        // Every cap of the fabric, not only those cached: a concrete cap no
+        // earlier command fetched is still a candidate.
         let all = self
-            .get_cached_caps()
+            .manifest_caps()
             .await
             .map_err(|e| CapNarrowError::Registry(e.to_string()))?;
 
@@ -2095,7 +2155,7 @@ impl FabricRegistry {
     /// has at least one registered file extension — or why its spec is not
     /// at hand (`get_cached_media_def`).
     pub fn is_bookend(&self, urn: &str) -> Result<bool, FabricRegistryError> {
-        Ok(!self.get_cached_media_def(urn)?.extensions.is_empty())
+        Ok(self.get_cached_media_def(urn)?.is_bookend())
     }
 
     /// Snapshot of every bookend-eligible URN currently in the cache.
@@ -2106,7 +2166,7 @@ impl FabricRegistry {
         };
         cached
             .values()
-            .filter(|spec| !spec.extensions.is_empty())
+            .filter(|spec| spec.is_bookend())
             .filter_map(|spec| crate::MediaUrn::from_string(&spec.urn).ok())
             .collect()
     }
@@ -3818,6 +3878,10 @@ pub enum FabricRegistryError {
     /// The fabric's file media types could not all be loaded.
     #[error("{0}")]
     FileTypes(String),
+
+    /// The caps the pinned manifest names could not all be loaded.
+    #[error("{0}")]
+    Caps(String),
 }
 
 /// One fetch from the registry that brought back no body: what was being
@@ -5780,3 +5844,7 @@ mod fetch_failure_tests {
         assert_eq!(registry.resolve_alias_cached("named-by-no-manifest").unwrap(), None);
     }
 }
+
+#[cfg(test)]
+#[path = "manifest_caps_tests.rs"]
+mod manifest_caps_tests;

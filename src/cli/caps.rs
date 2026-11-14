@@ -36,10 +36,7 @@ pub struct Listed {
 
 pub async fn caps(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = ctx.registry().await?;
-    let mut all = registry
-        .get_cached_caps()
-        .await
-        .map_err(|e| CliError::failed("the capabilities could not be read from the fabric cache").context(e.to_string()))?;
+    let mut all = ctx.fabric_caps(&registry).await?;
     all.retain(|cap| !cap.aliases.is_empty() && cap.primary_alias() != "identity");
     let takes = match &args.input {
         Some(t) => Some(super::plan::target_media(&registry, t).await?),

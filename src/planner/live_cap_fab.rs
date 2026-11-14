@@ -30,6 +30,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use crate::cap::registry::FabricRegistry;
+use crate::fabric::registry::FabricRegistryError;
 
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
@@ -722,6 +723,37 @@ impl LiveCapFab {
             identity: identity_count,
             dropped: rejected_count,
         }
+    }
+
+    /// The graph of the whole fabric: every cap the registry's pinned
+    /// manifest names ([`FabricRegistry::manifest_caps`]), each node marked a
+    /// bookend by its own media definition ([`StoredMediaDef::is_bookend`]).
+    ///
+    /// Nothing comes from what the cache happens to hold: the caps not cached
+    /// are fetched, and every node's definition is one its cap was fetched
+    /// with. A cap or a node's definition that cannot be had is an error
+    /// naming it, never a graph with a part of the fabric missing.
+    ///
+    /// [`StoredMediaDef::is_bookend`]: crate::fabric::registry::StoredMediaDef::is_bookend
+    pub async fn from_fabric(registry: &FabricRegistry) -> Result<Self, FabricRegistryError> {
+        let caps = registry.manifest_caps().await?;
+        let mut fab = Self::new();
+        for cap in &caps {
+            fab.add_cap(cap);
+        }
+        let mut bookends = HashSet::new();
+        for node in &fab.nodes {
+            // `media:` takes anything and names no definition: nothing is a
+            // file of it.
+            if node.is_top() {
+                continue;
+            }
+            if registry.get_media_def(&node.to_string()).await?.is_bookend() {
+                bookends.insert(node.clone());
+            }
+        }
+        fab.bookend_nodes = bookends;
+        Ok(fab)
     }
 
     /// Add a capability as an edge in the graph.

@@ -7,7 +7,6 @@
 //! `--save` or `--run`. On a terminal, a target or machine not given is chosen
 //! from a list, and so is what to do with the machine.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -113,7 +112,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         .map(|(media, count)| format!("{count} {}", names::media(&registry, media)))
         .collect::<Vec<_>>()
         .join(" and ");
-    let fab = cap_graph(&registry).await?;
+    let fab = cap_graph(ctx, &registry).await?;
     let max_depth = args.depth.unwrap_or(p::PlanRequest::DEFAULT_MAX_DEPTH);
     let discovered = fab
         .discover_convergent_targets(&sources, max_depth)
@@ -258,25 +257,10 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     ran
 }
 
-/// The live cap graph, from the fabric's cached caps and every media type with
-/// a file extension.
-async fn cap_graph(registry: &Arc<FabricRegistry>) -> CliResult<p::LiveCapFab> {
-    let caps = registry
-        .get_cached_caps()
-        .await
-        .map_err(|e| CliError::failed("the capabilities could not be read from the fabric cache").context(e.to_string()))?;
-    let media = registry
-        .get_cached_media_defs()
-        .await
-        .map_err(|e| CliError::failed("the media types could not be read from the fabric cache").context(e.to_string()))?;
-    let bookends: HashSet<MediaUrn> = media
-        .iter()
-        .filter(|d| !d.extensions.is_empty())
-        .filter_map(|d| MediaUrn::from_string(&d.urn).ok())
-        .collect();
-    let mut fab = p::LiveCapFab::new();
-    fab.sync_from_caps(&caps, &bookends);
-    Ok(fab)
+/// The graph plans are found in: every cap of the fabric, its bookends marked
+/// by their media definitions (`LiveCapFab::from_fabric`).
+async fn cap_graph(ctx: &Ctx, registry: &FabricRegistry) -> CliResult<p::LiveCapFab> {
+    p::LiveCapFab::from_fabric(registry).await.map_err(|e| ctx.caps_unreadable(e))
 }
 
 fn request(args: &Args, sources: Vec<p::SourceSpec>, targets: Vec<MediaUrn>) -> CliResult<p::PlanRequest> {

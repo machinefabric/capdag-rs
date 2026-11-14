@@ -151,10 +151,7 @@ async fn show_media(ctx: &Ctx, registry: &crate::FabricRegistry, media: &crate::
     let def = registry.get_media_def(&media.to_string()).await.map_err(|e| {
         CliError::failed(format!("the media type {} could not be read", names::media(registry, media))).context(e.to_string())
     })?;
-    let caps = registry
-        .get_cached_caps()
-        .await
-        .map_err(|e| CliError::failed("the capabilities could not be read").context(e.to_string()))?;
+    let caps = ctx.fabric_caps(registry).await?;
     let takes: Vec<String> = caps
         .iter()
         .filter(|cap| !cap.aliases.is_empty())

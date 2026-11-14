@@ -389,12 +389,15 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
 /// No capability has this name: say which ones are near it. `what` is what
 /// the name was looked for as: "capability or machine file".
 pub async fn unknown_cap(registry: &FabricRegistry, token: &str, what: &str) -> CliError {
-    let aliases: Vec<String> = registry
-        .get_cached_caps()
-        .await
-        .map(|caps| caps.iter().flat_map(|c| c.aliases.clone()).collect())
-        .unwrap_or_default();
     let mut error = CliError::usage(format!("there is no {what} named '{token}'"));
+    let aliases: Vec<String> = match registry.manifest_caps().await {
+        Ok(caps) => caps.iter().flat_map(|c| c.aliases.clone()).collect(),
+        Err(e) => {
+            return error
+                .context(format!("names near it cannot be offered: {e}"))
+                .hint(format!("find capabilities with: capdag caps {token}"))
+        }
+    };
     let mut near: Vec<(f64, &String)> = aliases
         .iter()
         .map(|a| (strsim::jaro_winkler(token, a), a))

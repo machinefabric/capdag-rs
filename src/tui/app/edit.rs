@@ -48,10 +48,10 @@ pub struct CatalogCap {
 }
 
 impl CatalogCap {
-    /// The caps the registry holds, as the palette offers them.
+    /// Every cap of the fabric, as the palette offers them.
     pub async fn from_registry(registry: &FabricRegistry) -> Result<Vec<CatalogCap>, String> {
         let caps = registry
-            .get_cached_caps()
+            .manifest_caps()
             .await
             .map_err(|e| format!("the fabric's caps cannot be read: {e}"))?;
         let mut out = Vec::with_capacity(caps.len());

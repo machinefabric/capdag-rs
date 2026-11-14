@@ -1,0 +1,3350 @@
+{
+ "caps": {
+  "cap:convert-format;in=\"media:enc=utf8;fmt=csv;list;record\";out=\"media:enc=utf8;fmt=json;list;record\"": {
+   "aliases": [
+    "convert-csv-to-json-list-records",
+    "csv2json"
+   ],
+   "args": [
+    {
+     "arg_description": "CSV data to convert",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;fmt=csv;list;record",
+     "name": "input",
+     "required": true,
+     "sources": [
+      {
+       "stdin": "media:enc=utf8;fmt=csv;list;record"
+      },
+      {
+       "position": 0
+      }
+     ],
+     "streaming": false
+    }
+   ],
+   "cap_description": "Convert CSV data to a JSON array of objects with keys from the header row",
+   "documentation": "## Purpose\n\nConverts a CSV file into a JSON array of objects. Each data row becomes one JSON object; the CSV header row supplies the object keys. Use this when a downstream cap expects JSON but the data source is CSV.\n\n## Inputs\n\nA CSV file with a header row and one or more data rows.\n\n## Outputs\n\nA JSON array of objects, one per CSV row.\n\n## Notes\n\n- Column names from the header row become JSON keys. Sanitize column names upstream if they contain characters that are problematic as JSON keys.\n- For YAML output, use [Convert CSV to YAML List of Mappings](https://capdag.com/browse/cap:convert-format;in=\"media:enc=utf8;fmt=csv;list;record\";out=\"media:enc=utf8;fmt=yaml;list;record\").\n- For the reverse, use [Convert JSON Array of Objects to CSV](https://capdag.com/browse/cap:convert-format;in=\"media:enc=utf8;fmt=json;list;record\";out=\"media:enc=utf8;fmt=csv;list;record\").",
+   "outputs": [
+    {
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;fmt=json;list;record",
+     "name": "output",
+     "optional": false,
+     "output_description": "JSON formatted array of objects",
+     "streaming": false
+    }
+   ],
+   "title": "Convert CSV to JSON Array of Objects",
+   "urn": "cap:convert-format;in=\"media:enc=utf8;fmt=csv;list;record\";out=\"media:enc=utf8;fmt=json;list;record\"",
+   "version": 4
+  },
+  "cap:convert-format;in=\"media:enc=utf8;fmt=json;list;record\";out=\"media:enc=utf8;fmt=csv;list;record\"": {
+   "aliases": [
+    "convert-json-list-records-to-csv",
+    "json2csv"
+   ],
+   "args": [
+    {
+     "arg_description": "JSON array of objects to convert",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;fmt=json;list;record",
+     "name": "input",
+     "required": true,
+     "sources": [
+      {
+       "stdin": "media:enc=utf8;fmt=json;list;record"
+      },
+      {
+       "position": 0
+      }
+     ],
+     "streaming": false
+    }
+   ],
+   "cap_description": "Convert a JSON array of objects to CSV with headers derived from object keys",
+   "documentation": "## Purpose\n\nConverts a JSON array of objects into a CSV file. Object keys become column headers; each array element becomes one row. Use this when downstream processing or export requires CSV format.\n\n## Inputs\n\nA JSON array where each element is an object.\n\n## Outputs\n\nA CSV file with a header row derived from the union of all object keys.\n\n## Notes\n\n- Objects with missing keys produce empty cells in those columns.\n- Column order follows the key order of the first object (or union order if keys differ across objects).\n- For the reverse, use [Convert CSV to JSON Array of Objects](https://capdag.com/browse/cap:convert-format;in=\"media:enc=utf8;fmt=csv;list;record\";out=\"media:enc=utf8;fmt=json;list;record\").",
+   "outputs": [
+    {
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;fmt=csv;list;record",
+     "name": "output",
+     "optional": false,
+     "output_description": "CSV formatted data with header row",
+     "streaming": false
+    }
+   ],
+   "title": "Convert JSON Array of Objects to CSV",
+   "urn": "cap:convert-format;in=\"media:enc=utf8;fmt=json;list;record\";out=\"media:enc=utf8;fmt=csv;list;record\"",
+   "version": 4
+  },
+  "cap:convert-image;in=\"media:ext=png;image\";out=\"media:ext=jpeg;image\"": {
+   "aliases": [
+    "convert-image-png-to-jpeg",
+    "png2jpeg"
+   ],
+   "args": [
+    {
+     "arg_description": "Path to the PNG file to convert",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;file-path",
+     "name": "input",
+     "required": true,
+     "sources": [
+      {
+       "stdin": "media:ext=png;image"
+      },
+      {
+       "position": 0
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "JPEG encode quality, 1-100",
+     "default_value": 85,
+     "is_sequence": false,
+     "media_urn": "media:integer;jpeg-quality;numeric",
+     "name": "quality",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--quality"
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Matte color (hex #RRGGBB) that transparency composites onto \u2014 JPEG has no alpha channel",
+     "default_value": "#FFFFFF",
+     "is_sequence": false,
+     "media_urn": "media:background-color;enc=utf8",
+     "name": "background",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--background"
+      }
+     ],
+     "streaming": false
+    }
+   ],
+   "cap_description": "Re-encode a PNG image as a JPEG",
+   "documentation": "## Purpose\n\nDecodes a PNG and re-encodes it as a JPEG. Use when a smaller file is preferred and the loss of transparency and the introduction of compression artifacts are acceptable.\n\n## Inputs\n\nA PNG file. RGBA inputs have the alpha channel composited against white.\n\n## Outputs\n\nA JPEG file at quality 85 (default, adjustable via --quality). EXIF orientation from the source is applied to the pixels, so the output displays upright.\n\n## Notes\n\nJPEG does not support transparency. Alpha is composited on a white background. Quality is fixed at 85; if you need different quality, request a feature.",
+   "outputs": [
+    {
+     "is_sequence": false,
+     "media_urn": "media:ext=jpeg;image",
+     "name": "output",
+     "optional": false,
+     "output_description": "JPEG-encoded image",
+     "streaming": false
+    }
+   ],
+   "title": "Convert PNG to JPEG",
+   "urn": "cap:convert-image;in=\"media:ext=png;image\";out=\"media:ext=jpeg;image\"",
+   "version": 4
+  },
+  "cap:disbind;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;page;plain-text\"": {
+   "aliases": [
+    "disbind-pdf"
+   ],
+   "args": [
+    {
+     "arg_description": "Path to the document file to process",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;file-path",
+     "name": "input",
+     "required": true,
+     "sources": [
+      {
+       "stdin": "media:document;ext=pdf"
+      },
+      {
+       "position": 0
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Pages to select (1-based). Grammar: '2', '1-5', '3-', '1,3,5-7'. Ranges past the end clamp to the document.",
+     "default_value": "1-",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;index-range",
+     "name": "index-range",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--index-range"
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Password for encrypted PDFs. Without it, an encrypted PDF fails with an error naming this flag; a wrong password fails saying so.",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;pdf-password;secret",
+     "name": "password",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--password"
+      }
+     ],
+     "streaming": false
+    }
+   ],
+   "cap_description": "Extract plain text content from each PDF page",
+   "documentation": "## Purpose\n\nSplits a PDF into its individual pages and extracts the plain text content from each page. The output is a sequence of text items, one per page. Use this as the first step in any PDF processing pipeline \u2014 text extraction, summarization, search indexing, or embedding.\n\n## Inputs\n\n- A PDF file (path or stdin).\n- An optional index range (default: `1-`, meaning all pages). Format: `1` (single page), `1-5` (pages 1 to 5), `3-` (page 3 to end).\n\n## Outputs\n\nA sequence of plain text values, one item per extracted page.\n\n## Notes\n\n- A page whose text extraction fails emits an empty-text item with a warning (same shape as a scanned page) \u2014 one bad page never aborts the rest of the document. Encrypted PDFs need `--password`.\n\n- Text extraction works on digitally-created PDFs. Scanned PDFs (image-only) will produce empty or near-empty pages. Run an OCR step first for scanned documents.\n- For visual rendering of pages as images (e.g. to feed into vision models), use [Render PDF Page Images](https://capdag.com/browse/cap:render-page-image;in=\"media:document;ext=pdf\";out=\"media:ext=png;image\").\n- Page numbers in the index range are 1-based.",
+   "outputs": [
+    {
+     "is_sequence": true,
+     "media_urn": "media:enc=utf8;ext=txt;page;plain-text",
+     "name": "output",
+     "optional": false,
+     "output_description": "Plain text pages, one per page in the document; each page is persistable as a `.txt` file",
+     "streaming": false
+    }
+   ],
+   "title": "Disbind PDF Into Pages",
+   "urn": "cap:disbind;in=\"media:document;ext=pdf\";out=\"media:enc=utf8;ext=txt;page;plain-text\"",
+   "version": 5
+  },
+  "cap:in=\"media:enc=utf8;ext=txt;plain-text\";out=\"media:ext=png;image\";render-page-image": {
+   "aliases": [
+    "render-page-image-txt",
+    "render-txt2png"
+   ],
+   "args": [
+    {
+     "arg_description": "Path to the text file to process",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;file-path",
+     "name": "input",
+     "required": true,
+     "sources": [
+      {
+       "stdin": "media:enc=utf8;ext=txt;plain-text"
+      },
+      {
+       "position": 0
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Width of the page image in pixels",
+     "default_value": 800,
+     "is_sequence": false,
+     "media_urn": "media:integer;numeric;page-image-width",
+     "name": "width",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--width"
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Height of the page image in pixels",
+     "default_value": 1200,
+     "is_sequence": false,
+     "media_urn": "media:integer;numeric;page-image-height",
+     "name": "height",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--height"
+      }
+     ],
+     "streaming": false
+    },
+    {
+     "arg_description": "Pages to render (1-based). Grammar: '2', '1-5', '3-', '1,3,5-7'. Ranges past the end clamp to the document.",
+     "default_value": "1-",
+     "is_sequence": false,
+     "media_urn": "media:enc=utf8;index-range",
+     "name": "index-range",
+     "required": false,
+     "sources": [
+      {
+       "cli_flag": "--index-range"
+      }
+     ],
+     "streaming": false
+    }
+   ],
+   "cap_description": "Render a page-like PNG image preview of the text document",
+   "documentation": "## Purpose\n\nRenders a plain text file as a page-like PNG image \u2014 monospaced font, line-by-line layout. Useful for generating visual previews of text documents, configuration files, or output logs for display in image-aware contexts.\n\n## Inputs\n\n- A plain text file (path or stdin).\n- Page width in pixels (default 800).\n- Page height in pixels (default 1200).\n\n## Outputs\n\nA sequence of PNG images, one per page.\n\n## Notes\n\n- Long documents paginate: the text is wrapped to the page width by measured glyph advance (long lines wrap, they are never clipped) and split into as many pages as needed. Nothing is truncated.\n- Invalid UTF-8 bytes render as the replacement character (U+FFFD) \u2014 the page shows exactly what was recoverable instead of the file being rejected.\n- For log files specifically, use [Render Log Page Image](https://capdag.com/browse/cap:render-page-image;in=\"media:enc=utf8;ext=log;plain-text\";out=\"media:ext=png;image\") which may apply syntax-aware formatting.",
+   "outputs": [
+    {
+     "is_sequence": true,
+     "media_urn": "media:ext=png;image",
+     "name": "output",
+     "optional": false,
+     "output_description": "PNG page images, one per rendered page",
+     "streaming": false
+    }
+   ],
+   "title": "Render Text Page Image",
+   "urn": "cap:in=\"media:enc=utf8;ext=txt;plain-text\";out=\"media:ext=png;image\";render-page-image",
+   "version": 5
+  }
+ },
+ "dims": {
+  "data-format": {
+   "documentation": "## Data format (fmt)\nThe content/serialization format of a value's bytes, emitted as the `fmt=x` tag.\nA value tagged with both a `fmt` and a structure tag (record/list) tells consumers\nexactly how to parse the bytes into a structured representation. This is\nindependent of the `ext=x` file-type dim: `fmt` describes the structure of the\ncontent, `ext` describes the file it came from / would be written to. JSON is the\ndefault `fmt` for cap inter-step data exchange.\n\nThe textual formats (JSON, NDJSON, YAML, CSV, TSV, PSV, XML) are characters and\ncarry their encoding beside the format: JSON and NDJSON are always UTF-8\n(`enc=utf8`, as RFC 8259 requires of JSON exchanged between systems); the others\nname the encoding they are written in. The binary formats (CBOR, MessagePack,\nAvro, Arrow, Parquet) are not characters and never carry `enc`. A serialization\nis never `plain-text`: structured data is parsed, not read as prose.\n",
+   "name": "data-format",
+   "title": "Data Format",
+   "values": [
+    {
+     "documentation": "JavaScript Object Notation. Text-based, human-readable, ubiquitous. The default\nserialization for structured cap inputs and outputs.\n",
+     "media_type": "application/json",
+     "name": "json",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "json"
+      }
+     ],
+     "title": "JSON"
+    },
+    {
+     "documentation": "Newline-delimited JSON. Each line is a complete JSON value. Suited to streaming\ncontexts where consumers process records one at a time without loading the entire\nsequence into memory.\n",
+     "media_type": "application/x-ndjson",
+     "name": "ndjson",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "ndjson"
+      }
+     ],
+     "title": "NDJSON"
+    },
+    {
+     "documentation": "YAML Ain't Markup Language. Indentation-based, supports references and anchors.\nCommon for configuration and authoring contexts where humans edit files directly.\n",
+     "media_type": "application/yaml",
+     "name": "yaml",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "yaml"
+      }
+     ],
+     "title": "YAML"
+    },
+    {
+     "documentation": "Concise Binary Object Representation. Binary-compact JSON-equivalent. Used by the\nbifaci wire protocol for frame payloads.\n",
+     "media_type": "application/cbor",
+     "name": "cbor",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "cbor"
+      }
+     ],
+     "title": "CBOR"
+    },
+    {
+     "documentation": "MessagePack. Binary, JSON-equivalent, more compact than JSON for numeric-heavy data.\n",
+     "media_type": "application/msgpack",
+     "name": "msgpack",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "msgpack"
+      }
+     ],
+     "title": "MessagePack"
+    },
+    {
+     "documentation": "Apache Avro. Schema-based binary format with strong typing. Common in data\nengineering and stream-processing systems.\n",
+     "media_type": "application/avro",
+     "name": "avro",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "avro"
+      }
+     ],
+     "title": "Avro"
+    },
+    {
+     "documentation": "Apache Arrow IPC stream format. Columnar in-memory representation, zero-copy\ninterchange between processes. Used for high-throughput analytics pipelines.\n",
+     "media_type": "application/vnd.apache.arrow.stream",
+     "name": "arrow",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "arrow"
+      }
+     ],
+     "title": "Arrow"
+    },
+    {
+     "documentation": "Apache Parquet. Columnar on-disk format with compression. Standard for data-lake\nstorage and batch analytics.\n",
+     "media_type": "application/vnd.apache.parquet",
+     "name": "parquet",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "parquet"
+      }
+     ],
+     "title": "Parquet"
+    },
+    {
+     "documentation": "Comma-separated values. Text-based tabular format: a header row of field names\nfollowed by one record per line. The serialization format for list-of-records\ndata interchange alongside JSON and YAML. Distinct from the `ext=csv` file-type\ntag, which marks a `.csv` file on disk; `fmt=csv` marks the content encoding.\n",
+     "media_type": "text/csv",
+     "name": "csv",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "csv"
+      }
+     ],
+     "title": "CSV"
+    },
+    {
+     "documentation": "Tab-separated values. Tabular text format using tab as the field delimiter.\nThe content-encoding counterpart of the `ext=tsv` file-type tag: `fmt=tsv` marks\ntabular content flowing between caps, `ext=tsv` marks a `.tsv` file on disk.\n",
+     "media_type": "text/tab-separated-values",
+     "name": "tsv",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "tsv"
+      }
+     ],
+     "title": "TSV"
+    },
+    {
+     "documentation": "Pipe-separated values. Tabular text format using `|` as the field delimiter.\nThe content-encoding counterpart of the `ext=psv` file-type tag: `fmt=psv` marks\ntabular content flowing between caps, `ext=psv` marks a `.psv` file on disk.\n",
+     "media_type": "text/plain",
+     "name": "psv",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "psv"
+      }
+     ],
+     "title": "PSV"
+    },
+    {
+     "documentation": "XML (Extensible Markup Language). Tree-structured markup content. The\ncontent-encoding counterpart of the `ext=xml` file-type tag: `fmt=xml` marks\nXML content flowing between caps, `ext=xml` marks an `.xml` file on disk.\n",
+     "media_type": "application/xml",
+     "name": "xml",
+     "tags": [
+      {
+       "key": "fmt",
+       "value": "xml"
+      }
+     ],
+     "title": "XML"
+    }
+   ],
+   "version": 2
+  },
+  "encoding": {
+   "documentation": "## Encoding (enc)\nThe character encoding a textual value's bytes use, emitted as the `enc=x` tag.\nIndependent of `ext=` (file type), `fmt=` (serialization format) and\n`plain-text` (text written to be read): `enc` describes how characters become\nbytes, and nothing more.\n\nEvery value made of characters carries it. Any UTF-8 string is `media:enc=utf8`;\na JSON value is `media:enc=utf8;fmt=json`; source code is\n`media:code;enc=utf8;\u2026`; prose is `media:enc=utf8;plain-text`. A cap that\naccepts any UTF-8 string takes `media:enc=utf8`; a cap that reads text as\nlanguage takes `media:enc=utf8;plain-text`.\n\nBinary serializations (CBOR, MessagePack, Avro, Arrow, Parquet), numbers\n(`numeric`) and booleans (`bool`) are not characters and never carry `enc`.\n",
+   "name": "encoding",
+   "title": "Encoding",
+   "values": [
+    {
+     "documentation": "UTF-8: variable-width, ASCII-compatible, the universal interchange encoding and\nthe encoding of all textual content in the system. A value tagged `enc=utf8` is\na sequence of UTF-8-encoded characters; the tag makes no claim about structure\n(`fmt`) or about whether the text is written to be read (`plain-text`).\n",
+     "name": "utf8",
+     "tags": [
+      {
+       "key": "enc",
+       "value": "utf8"
+      }
+     ],
+     "title": "UTF-8"
+    }
+   ],
+   "version": 2
+  },
+  "file-type": {
+   "documentation": "## File type\nThe concrete file format. Each value identifies a single, well-known format with its\nfile extensions and MIME type, contributed as the keyed `ext=<value>` tag. File-type\nis the identity-axis of on-disk file media URNs: `media:document;ext=pdf` is a PDF file,\n`media:enc=utf8;ext=txt;plain-text` a plain-text file. It is orthogonal to the `fmt=` content\naxis \u2014 a `.csv` file holding CSV content is `media:enc=utf8;ext=csv;fmt=csv`.\n",
+   "name": "file-type",
+   "title": "File Type",
+   "values": [
+    {
+     "documentation": "ZIP archive. Universal compressed container; multiple files bundled with per-entry\ndeflate compression.\n",
+     "extensions": [
+      "zip"
+     ],
+     "media_type": "application/zip",
+     "name": "zip",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "zip"
+      }
+     ],
+     "title": "ZIP"
+    },
+    {
+     "documentation": "TAR (tape archive). Uncompressed bundle of files preserving paths and permissions;\ntypically composed with gzip or xz for compression.\n",
+     "extensions": [
+      "tar"
+     ],
+     "media_type": "application/x-tar",
+     "name": "tar",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "tar"
+      }
+     ],
+     "title": "TAR"
+    },
+    {
+     "documentation": "gzip-compressed tar archive. Standard distribution format for Unix software.\n",
+     "extensions": [
+      "tgz"
+     ],
+     "media_type": "application/gzip",
+     "name": "targz",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "targz"
+      }
+     ],
+     "title": "tar.gz"
+    },
+    {
+     "documentation": "Gzip-compressed single file. Standard Unix compression for individual files.\n",
+     "extensions": [
+      "gz"
+     ],
+     "media_type": "application/gzip",
+     "name": "gzip",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gzip"
+      }
+     ],
+     "title": "Gzip"
+    },
+    {
+     "documentation": "Bzip2-compressed file. Higher compression ratio than gzip at the cost of speed.\n",
+     "extensions": [
+      "bz2"
+     ],
+     "media_type": "application/x-bzip2",
+     "name": "bzip2",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "bzip2"
+      }
+     ],
+     "title": "Bzip2"
+    },
+    {
+     "documentation": "XZ-compressed file. Uses LZMA2; high compression ratio.\n",
+     "extensions": [
+      "xz"
+     ],
+     "media_type": "application/x-xz",
+     "name": "xz",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "xz"
+      }
+     ],
+     "title": "XZ"
+    },
+    {
+     "documentation": "LZMA-compressed file. Predecessor of XZ.\n",
+     "extensions": [
+      "lzma"
+     ],
+     "media_type": "application/x-lzma",
+     "name": "lzma",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "lzma"
+      }
+     ],
+     "title": "LZMA"
+    },
+    {
+     "documentation": "Zstandard-compressed file. Modern compressor offering MP3-quality compression at\ngzip-like speeds.\n",
+     "extensions": [
+      "zst"
+     ],
+     "media_type": "application/zstd",
+     "name": "zstd",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "zstd"
+      }
+     ],
+     "title": "Zstandard"
+    },
+    {
+     "documentation": "7-Zip archive. High-compression Windows-popular archive format.\n",
+     "extensions": [
+      "7z"
+     ],
+     "media_type": "application/x-7z-compressed",
+     "name": "sevenz",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "sevenz"
+      }
+     ],
+     "title": "7-Zip"
+    },
+    {
+     "documentation": "RAR archive. Proprietary compressed archive format.\n",
+     "extensions": [
+      "rar"
+     ],
+     "media_type": "application/vnd.rar",
+     "name": "rar",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "rar"
+      }
+     ],
+     "title": "RAR"
+    },
+    {
+     "documentation": "ISO disk image. Filesystem image of an optical disc; mountable as a virtual drive.\n",
+     "extensions": [
+      "iso"
+     ],
+     "media_type": "application/x-iso9660-image",
+     "name": "iso",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "iso"
+      }
+     ],
+     "title": "ISO"
+    },
+    {
+     "documentation": "macOS disk image. Apple's installer container.\n",
+     "extensions": [
+      "dmg"
+     ],
+     "media_type": "application/x-apple-diskimage",
+     "name": "dmg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "dmg"
+      }
+     ],
+     "title": "DMG"
+    },
+    {
+     "documentation": "macOS installer package. Scriptable installer bundle.\n",
+     "extensions": [
+      "pkg"
+     ],
+     "media_type": "application/x-xar",
+     "name": "pkg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pkg"
+      }
+     ],
+     "title": "PKG"
+    },
+    {
+     "documentation": "Debian / Ubuntu package format.\n",
+     "extensions": [
+      "deb"
+     ],
+     "media_type": "application/vnd.debian.binary-package",
+     "name": "deb",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "deb"
+      }
+     ],
+     "title": "Debian package"
+    },
+    {
+     "documentation": "RPM (Red Hat Package Manager) package format.\n",
+     "extensions": [
+      "rpm"
+     ],
+     "media_type": "application/x-rpm",
+     "name": "rpm",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "rpm"
+      }
+     ],
+     "title": "RPM"
+    },
+    {
+     "documentation": "Android application package.\n",
+     "extensions": [
+      "apk"
+     ],
+     "media_type": "application/vnd.android.package-archive",
+     "name": "apk",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "apk"
+      }
+     ],
+     "title": "APK"
+    },
+    {
+     "documentation": "iOS application archive. Distribution format for iOS apps.\n",
+     "extensions": [
+      "ipa"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "ipa",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ipa"
+      }
+     ],
+     "title": "IPA"
+    },
+    {
+     "documentation": "Java archive. ZIP container holding compiled Java classes and resources.\n",
+     "extensions": [
+      "jar"
+     ],
+     "media_type": "application/java-archive",
+     "name": "jar",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "jar"
+      }
+     ],
+     "title": "JAR"
+    },
+    {
+     "documentation": "Java web archive. JAR variant for Java EE web applications.\n",
+     "extensions": [
+      "war"
+     ],
+     "media_type": "application/java-archive",
+     "name": "war",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "war"
+      }
+     ],
+     "title": "WAR"
+    },
+    {
+     "documentation": "MP3 (MPEG Audio Layer 3). Lossy compressed audio. Ubiquitous for music and podcasts;\nbroad compatibility across devices.\n",
+     "extensions": [
+      "mp3"
+     ],
+     "media_type": "audio/mpeg",
+     "name": "mp3",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mp3"
+      }
+     ],
+     "title": "MP3"
+    },
+    {
+     "documentation": "AAC (Advanced Audio Coding). Lossy audio format; better quality than MP3 at the\nsame bitrate. Standard for streaming and broadcast.\n",
+     "extensions": [
+      "aac"
+     ],
+     "media_type": "audio/aac",
+     "name": "aac",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "aac"
+      }
+     ],
+     "title": "AAC"
+    },
+    {
+     "documentation": "M4A. AAC audio in an MP4 container. Apple's default for purchased music and\nvoice memos.\n",
+     "extensions": [
+      "m4a"
+     ],
+     "media_type": "audio/mp4",
+     "name": "m4a",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "m4a"
+      }
+     ],
+     "title": "M4A"
+    },
+    {
+     "documentation": "WAV (Waveform Audio File Format). Uncompressed PCM audio. Large files but maximum\nfidelity; standard intermediate format for audio production.\n",
+     "extensions": [
+      "wav"
+     ],
+     "media_type": "audio/wav",
+     "name": "wav",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "wav"
+      }
+     ],
+     "title": "WAV"
+    },
+    {
+     "documentation": "FLAC (Free Lossless Audio Codec). Lossless compressed audio; smaller than WAV\nwithout quality loss.\n",
+     "extensions": [
+      "flac"
+     ],
+     "media_type": "audio/flac",
+     "name": "flac",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "flac"
+      }
+     ],
+     "title": "FLAC"
+    },
+    {
+     "documentation": "Ogg container with Vorbis audio codec. Open-format alternative to MP3/AAC.\n",
+     "extensions": [
+      "ogg"
+     ],
+     "media_type": "audio/ogg",
+     "name": "ogg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ogg"
+      }
+     ],
+     "title": "Ogg Vorbis"
+    },
+    {
+     "documentation": "Opus audio codec, typically in an Ogg container. Modern codec excelling at both\nvoice and music; default for WebRTC and Discord.\n",
+     "extensions": [
+      "opus"
+     ],
+     "media_type": "audio/opus",
+     "name": "opus",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "opus"
+      }
+     ],
+     "title": "Opus"
+    },
+    {
+     "documentation": "AIFF (Audio Interchange File Format). Apple's uncompressed PCM audio format;\nequivalent role to WAV on Mac platforms.\n",
+     "extensions": [
+      "aiff",
+      "aif"
+     ],
+     "media_type": "audio/aiff",
+     "name": "aiff",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "aiff"
+      }
+     ],
+     "title": "AIFF"
+    },
+    {
+     "documentation": "CAF (Core Audio Format). Apple's flexible audio container; supports many codecs\nand large files.\n",
+     "extensions": [
+      "caf"
+     ],
+     "media_type": "audio/x-caf",
+     "name": "caf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "caf"
+      }
+     ],
+     "title": "CAF"
+    },
+    {
+     "documentation": "WMA (Windows Media Audio). Microsoft's lossy audio codec.\n",
+     "extensions": [
+      "wma"
+     ],
+     "media_type": "audio/x-ms-wma",
+     "name": "wma",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "wma"
+      }
+     ],
+     "title": "WMA"
+    },
+    {
+     "documentation": "MIDI (Musical Instrument Digital Interface). Symbolic representation of music as\nnote events rather than recorded waveform; rendered to audio by a synthesizer.\n",
+     "extensions": [
+      "mid",
+      "midi"
+     ],
+     "media_type": "audio/midi",
+     "name": "midi",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "midi"
+      }
+     ],
+     "title": "MIDI"
+    },
+    {
+     "documentation": "TOML (Tom's Obvious Minimal Language). Configuration file format with strong typing\nand clear section semantics.\n",
+     "extensions": [
+      "toml"
+     ],
+     "media_type": "application/toml",
+     "name": "toml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "toml"
+      }
+     ],
+     "title": "TOML"
+    },
+    {
+     "documentation": "INI configuration file. Section-based key-value format; widely used by legacy\napplications.\n",
+     "extensions": [
+      "ini",
+      "cfg"
+     ],
+     "media_type": "text/plain",
+     "name": "ini",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ini"
+      }
+     ],
+     "title": "INI"
+    },
+    {
+     "documentation": "Environment-variable file. KEY=VALUE pairs, one per line.\n",
+     "extensions": [
+      "env"
+     ],
+     "media_type": "text/plain",
+     "name": "env",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "env"
+      }
+     ],
+     "title": "ENV"
+    },
+    {
+     "documentation": "Java properties file. KEY=VALUE pairs with Unicode escaping conventions.\n",
+     "extensions": [
+      "properties"
+     ],
+     "media_type": "text/x-java-properties",
+     "name": "properties",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "properties"
+      }
+     ],
+     "title": "Java Properties"
+    },
+    {
+     "documentation": "Apple property list. XML or binary key-value structure used throughout macOS / iOS.\n",
+     "extensions": [
+      "plist"
+     ],
+     "media_type": "application/x-plist",
+     "name": "plist",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "plist"
+      }
+     ],
+     "title": "plist"
+    },
+    {
+     "documentation": "EditorConfig file. Per-project editor settings honoured by most code editors.\n",
+     "extensions": [
+      "editorconfig"
+     ],
+     "media_type": "text/plain",
+     "name": "editorconfig",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "editorconfig"
+      }
+     ],
+     "title": "EditorConfig"
+    },
+    {
+     "documentation": "Git ignore file. Patterns of files to exclude from version control.\n",
+     "extensions": [
+      "gitignore"
+     ],
+     "media_type": "text/plain",
+     "name": "gitignore",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gitignore"
+      }
+     ],
+     "title": ".gitignore"
+    },
+    {
+     "documentation": "Docker ignore file. Patterns of files to exclude from a Docker build context.\n",
+     "extensions": [
+      "dockerignore"
+     ],
+     "media_type": "text/plain",
+     "name": "dockerignore",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "dockerignore"
+      }
+     ],
+     "title": ".dockerignore"
+    },
+    {
+     "documentation": "Dockerfile. Container image build script.\n",
+     "extensions": [
+      "dockerfile"
+     ],
+     "media_type": "text/plain",
+     "name": "dockerfile",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "dockerfile"
+      }
+     ],
+     "title": "Dockerfile"
+    },
+    {
+     "documentation": "Makefile. GNU Make build script.\n",
+     "extensions": [
+      "makefile"
+     ],
+     "media_type": "text/x-makefile",
+     "name": "makefile",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "makefile"
+      }
+     ],
+     "title": "Makefile"
+    },
+    {
+     "documentation": "CMake build script.\n",
+     "extensions": [
+      "cmake"
+     ],
+     "media_type": "text/x-cmake",
+     "name": "cmake",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "cmake"
+      }
+     ],
+     "title": "CMake"
+    },
+    {
+     "documentation": "Go module file. Declares module path and dependencies.\n",
+     "extensions": [
+      "mod"
+     ],
+     "media_type": "text/plain",
+     "name": "gomod",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gomod"
+      }
+     ],
+     "title": "go.mod"
+    },
+    {
+     "documentation": "Go module checksum file.\n",
+     "extensions": [
+      "sum"
+     ],
+     "media_type": "text/plain",
+     "name": "gosum",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gosum"
+      }
+     ],
+     "title": "go.sum"
+    },
+    {
+     "documentation": "Python pip requirements file. One package specifier per line.\n",
+     "extensions": [
+      "txt"
+     ],
+     "media_type": "text/plain",
+     "name": "requirements",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "requirements"
+      }
+     ],
+     "title": "requirements.txt"
+    },
+    {
+     "documentation": "SQLite database file. Self-contained relational database in a single file.\n",
+     "extensions": [
+      "sqlite",
+      "db"
+     ],
+     "media_type": "application/x-sqlite3",
+     "name": "sqlite",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "sqlite"
+      }
+     ],
+     "title": "SQLite"
+    },
+    {
+     "documentation": "HDF5 (Hierarchical Data Format). Binary scientific-data container with internal\nhierarchy of datasets and groups.\n",
+     "extensions": [
+      "h5",
+      "hdf5"
+     ],
+     "media_type": "application/x-hdf",
+     "name": "hdf5",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "hdf5"
+      }
+     ],
+     "title": "HDF5"
+    },
+    {
+     "documentation": "NumPy binary array file. Native serialisation for NumPy arrays.\n",
+     "extensions": [
+      "npy",
+      "npz"
+     ],
+     "media_type": "application/x-npy",
+     "name": "numpy",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "numpy"
+      }
+     ],
+     "title": "NumPy NPY"
+    },
+    {
+     "documentation": "Protocol Buffers binary message. Schema-based binary serialisation by Google.\nThe `.proto` extension is the schema source text and lives under\n`source-language` as `protobuf-schema`, NOT here \u2014 they are distinct media\neven though they share a name.\n",
+     "extensions": [
+      "pb"
+     ],
+     "media_type": "application/x-protobuf",
+     "name": "protobuf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "protobuf"
+      }
+     ],
+     "title": "Protocol Buffers"
+    },
+    {
+     "documentation": "WebAssembly binary module.\n",
+     "extensions": [
+      "wasm"
+     ],
+     "media_type": "application/wasm",
+     "name": "wasm",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "wasm"
+      }
+     ],
+     "title": "WebAssembly"
+    },
+    {
+     "documentation": "PEM (Privacy-Enhanced Mail). Base64-encoded cryptographic material \u2014 keys,\ncertificates, signing requests.\n",
+     "extensions": [
+      "pem",
+      "crt",
+      "key"
+     ],
+     "media_type": "application/x-pem-file",
+     "name": "pem",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pem"
+      }
+     ],
+     "title": "PEM"
+    },
+    {
+     "documentation": "PKCS#12 certificate bundle. Encrypted container for keys and certificates.\n",
+     "extensions": [
+      "p12",
+      "pfx"
+     ],
+     "media_type": "application/x-pkcs12",
+     "name": "pkcs12",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pkcs12"
+      }
+     ],
+     "title": "PKCS#12"
+    },
+    {
+     "documentation": "KML (Keyhole Markup Language). Geographic XML format used by Google Earth.\n",
+     "extensions": [
+      "kml"
+     ],
+     "media_type": "application/vnd.google-earth.kml+xml",
+     "name": "kml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "kml"
+      }
+     ],
+     "title": "KML"
+    },
+    {
+     "documentation": "GPX (GPS Exchange Format). XML format for GPS tracks and waypoints.\n",
+     "extensions": [
+      "gpx"
+     ],
+     "media_type": "application/gpx+xml",
+     "name": "gpx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gpx"
+      }
+     ],
+     "title": "GPX"
+    },
+    {
+     "documentation": "GeoJSON. JSON-based geographic data format.\n",
+     "extensions": [
+      "geojson"
+     ],
+     "media_type": "application/geo+json",
+     "name": "geojson",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "geojson"
+      }
+     ],
+     "title": "GeoJSON"
+    },
+    {
+     "documentation": "iCalendar. Calendar event interchange format.\n",
+     "extensions": [
+      "ics"
+     ],
+     "media_type": "text/calendar",
+     "name": "ics",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ics"
+      }
+     ],
+     "title": "iCalendar"
+    },
+    {
+     "documentation": "vCard. Contact-card interchange format.\n",
+     "extensions": [
+      "vcf"
+     ],
+     "media_type": "text/vcard",
+     "name": "vcf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "vcf"
+      }
+     ],
+     "title": "vCard"
+    },
+    {
+     "documentation": "Email message in RFC 822 / MIME format.\n",
+     "extensions": [
+      "eml"
+     ],
+     "media_type": "message/rfc822",
+     "name": "eml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "eml"
+      }
+     ],
+     "title": "Email Message"
+    },
+    {
+     "documentation": "Mbox archive. Concatenated email messages, one per record.\n",
+     "extensions": [
+      "mbox"
+     ],
+     "media_type": "application/mbox",
+     "name": "mbox",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mbox"
+      }
+     ],
+     "title": "Mbox"
+    },
+    {
+     "documentation": "SubRip subtitle file. Time-coded subtitles in plain text.\n",
+     "extensions": [
+      "srt"
+     ],
+     "media_type": "application/x-subrip",
+     "name": "srt",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "srt"
+      }
+     ],
+     "title": "SubRip"
+    },
+    {
+     "documentation": "WebVTT subtitle file. Web-standard subtitle format.\n",
+     "extensions": [
+      "vtt"
+     ],
+     "media_type": "text/vtt",
+     "name": "vtt",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "vtt"
+      }
+     ],
+     "title": "WebVTT"
+    },
+    {
+     "documentation": "Advanced SubStation Alpha subtitle file. Subtitle format with rich styling support.\n",
+     "extensions": [
+      "ass",
+      "ssa"
+     ],
+     "media_type": "text/x-ssa",
+     "name": "ass",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ass"
+      }
+     ],
+     "title": "Advanced SubStation"
+    },
+    {
+     "documentation": "Jupyter notebook. JSON document holding code cells, output, and markdown.\n",
+     "extensions": [
+      "ipynb"
+     ],
+     "media_type": "application/x-ipynb+json",
+     "name": "jupyter",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "jupyter"
+      }
+     ],
+     "title": "Jupyter Notebook"
+    },
+    {
+     "documentation": "JSON Schema document. Declares the shape of JSON values.\n",
+     "extensions": [
+      "json"
+     ],
+     "media_type": "application/schema+json",
+     "name": "json-schema",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "json-schema"
+      }
+     ],
+     "title": "JSON Schema"
+    },
+    {
+     "documentation": "Mermaid diagram source. Text-based diagram-as-code language.\n",
+     "extensions": [
+      "mmd"
+     ],
+     "media_type": "text/x-mermaid",
+     "name": "mermaid",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mermaid"
+      }
+     ],
+     "title": "Mermaid"
+    },
+    {
+     "documentation": "Graphviz DOT graph source.\n",
+     "extensions": [
+      "dot",
+      "gv"
+     ],
+     "media_type": "text/vnd.graphviz",
+     "name": "dot",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "dot"
+      }
+     ],
+     "title": "Graphviz DOT"
+    },
+    {
+     "documentation": "PDF (Portable Document Format). Canonical format for documents that must preserve\nvisual fidelity across systems. May contain selectable text, scanned images, or both.\n",
+     "extensions": [
+      "pdf"
+     ],
+     "media_type": "application/pdf",
+     "name": "pdf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pdf"
+      }
+     ],
+     "title": "PDF"
+    },
+    {
+     "documentation": "Microsoft Word legacy binary format.\n",
+     "extensions": [
+      "doc"
+     ],
+     "media_type": "application/msword",
+     "name": "doc",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "doc"
+      }
+     ],
+     "title": "Word DOC"
+    },
+    {
+     "documentation": "Microsoft Word Open XML format. ZIP container of XML parts.\n",
+     "extensions": [
+      "docx"
+     ],
+     "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     "name": "docx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "docx"
+      }
+     ],
+     "title": "Word DOCX"
+    },
+    {
+     "documentation": "Rich Text Format. Cross-platform formatted-text document format.\n",
+     "extensions": [
+      "rtf"
+     ],
+     "media_type": "application/rtf",
+     "name": "rtf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "rtf"
+      }
+     ],
+     "title": "RTF"
+    },
+    {
+     "documentation": "OpenDocument Text. ODF text document format used by LibreOffice and OpenOffice.\n",
+     "extensions": [
+      "odt"
+     ],
+     "media_type": "application/vnd.oasis.opendocument.text",
+     "name": "odt",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "odt"
+      }
+     ],
+     "title": "ODT"
+    },
+    {
+     "documentation": "OpenDocument Spreadsheet.\n",
+     "extensions": [
+      "ods"
+     ],
+     "media_type": "application/vnd.oasis.opendocument.spreadsheet",
+     "name": "ods",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ods"
+      }
+     ],
+     "title": "ODS"
+    },
+    {
+     "documentation": "OpenDocument Presentation.\n",
+     "extensions": [
+      "odp"
+     ],
+     "media_type": "application/vnd.oasis.opendocument.presentation",
+     "name": "odp",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "odp"
+      }
+     ],
+     "title": "ODP"
+    },
+    {
+     "documentation": "Microsoft Excel legacy binary spreadsheet format.\n",
+     "extensions": [
+      "xls"
+     ],
+     "media_type": "application/vnd.ms-excel",
+     "name": "xls",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "xls"
+      }
+     ],
+     "title": "Excel XLS"
+    },
+    {
+     "documentation": "Microsoft Excel Open XML spreadsheet format.\n",
+     "extensions": [
+      "xlsx"
+     ],
+     "media_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+     "name": "xlsx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "xlsx"
+      }
+     ],
+     "title": "Excel XLSX"
+    },
+    {
+     "documentation": "Microsoft PowerPoint legacy binary presentation format.\n",
+     "extensions": [
+      "ppt"
+     ],
+     "media_type": "application/vnd.ms-powerpoint",
+     "name": "ppt",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ppt"
+      }
+     ],
+     "title": "PowerPoint PPT"
+    },
+    {
+     "documentation": "Microsoft PowerPoint Open XML presentation format.\n",
+     "extensions": [
+      "pptx"
+     ],
+     "media_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+     "name": "pptx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pptx"
+      }
+     ],
+     "title": "PowerPoint PPTX"
+    },
+    {
+     "documentation": "Apple Keynote presentation format.\n",
+     "extensions": [
+      "key"
+     ],
+     "media_type": "application/vnd.apple.keynote",
+     "name": "keynote",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "keynote"
+      }
+     ],
+     "title": "Apple Keynote"
+    },
+    {
+     "documentation": "Apple Numbers spreadsheet format.\n",
+     "extensions": [
+      "numbers"
+     ],
+     "media_type": "application/vnd.apple.numbers",
+     "name": "numbers",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "numbers"
+      }
+     ],
+     "title": "Apple Numbers"
+    },
+    {
+     "documentation": "Apple Pages document format.\n",
+     "extensions": [
+      "pages"
+     ],
+     "media_type": "application/vnd.apple.pages",
+     "name": "pages",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pages"
+      }
+     ],
+     "title": "Apple Pages"
+    },
+    {
+     "documentation": "EPUB ebook format. ZIP container of XHTML and metadata.\n",
+     "extensions": [
+      "epub"
+     ],
+     "media_type": "application/epub+zip",
+     "name": "epub",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "epub"
+      }
+     ],
+     "title": "EPUB"
+    },
+    {
+     "documentation": "Mobipocket ebook format. Used by Amazon Kindle alongside AZW.\n",
+     "extensions": [
+      "mobi"
+     ],
+     "media_type": "application/x-mobipocket-ebook",
+     "name": "mobi",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mobi"
+      }
+     ],
+     "title": "Mobipocket"
+    },
+    {
+     "documentation": "DjVu document image format. Optimised for scanned documents \u2014 uses different\ncompression for text and continuous-tone background.\n",
+     "extensions": [
+      "djvu",
+      "djv"
+     ],
+     "media_type": "image/vnd.djvu",
+     "name": "djvu",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "djvu"
+      }
+     ],
+     "title": "DjVu"
+    },
+    {
+     "documentation": "TrueType font. Outline-font format originally developed by Apple.\n",
+     "extensions": [
+      "ttf"
+     ],
+     "media_type": "font/ttf",
+     "name": "ttf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ttf"
+      }
+     ],
+     "title": "TrueType"
+    },
+    {
+     "documentation": "OpenType font. Successor to TrueType with broader script support and richer\ntypographic features.\n",
+     "extensions": [
+      "otf"
+     ],
+     "media_type": "font/otf",
+     "name": "otf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "otf"
+      }
+     ],
+     "title": "OpenType"
+    },
+    {
+     "documentation": "Web Open Font Format. Compressed font format for the web.\n",
+     "extensions": [
+      "woff"
+     ],
+     "media_type": "font/woff",
+     "name": "woff",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "woff"
+      }
+     ],
+     "title": "WOFF"
+    },
+    {
+     "documentation": "Web Open Font Format version 2. Brotli-compressed; smaller files than WOFF.\n",
+     "extensions": [
+      "woff2"
+     ],
+     "media_type": "font/woff2",
+     "name": "woff2",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "woff2"
+      }
+     ],
+     "title": "WOFF2"
+    },
+    {
+     "documentation": "PNG (Portable Network Graphics) raster image. Lossless compression, supports alpha\ntransparency. Good default for screenshots, diagrams, and UI assets.\n",
+     "extensions": [
+      "png"
+     ],
+     "media_type": "image/png",
+     "name": "png",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "png"
+      }
+     ],
+     "title": "PNG"
+    },
+    {
+     "documentation": "JPEG (Joint Photographic Experts Group) raster image. Lossy compression optimised\nfor photographic content; small files at the cost of some quality. No transparency\nsupport.\n",
+     "extensions": [
+      "jpg",
+      "jpeg"
+     ],
+     "media_type": "image/jpeg",
+     "name": "jpeg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "jpeg"
+      }
+     ],
+     "title": "JPEG"
+    },
+    {
+     "documentation": "GIF (Graphics Interchange Format) raster image. Limited 256-colour palette, supports\nanimation and binary transparency. Common for short animated clips and simple\ngraphics.\n",
+     "extensions": [
+      "gif"
+     ],
+     "media_type": "image/gif",
+     "name": "gif",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gif"
+      }
+     ],
+     "title": "GIF"
+    },
+    {
+     "documentation": "BMP (Bitmap) raster image. Uncompressed or simply RLE-compressed; large files but\ntrivial to read. Windows-native format.\n",
+     "extensions": [
+      "bmp"
+     ],
+     "media_type": "image/bmp",
+     "name": "bmp",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "bmp"
+      }
+     ],
+     "title": "BMP"
+    },
+    {
+     "documentation": "TIFF (Tagged Image File Format) raster image. Supports lossless and lossy\ncompression, multi-page documents, and high bit-depth content. Standard in\npublishing and document scanning.\n",
+     "extensions": [
+      "tiff",
+      "tif"
+     ],
+     "media_type": "image/tiff",
+     "name": "tiff",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "tiff"
+      }
+     ],
+     "title": "TIFF"
+    },
+    {
+     "documentation": "WebP raster image. Modern format with both lossy and lossless modes, transparency,\nand animation. Smaller files than JPEG/PNG at comparable quality.\n",
+     "extensions": [
+      "webp"
+     ],
+     "media_type": "image/webp",
+     "name": "webp",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "webp"
+      }
+     ],
+     "title": "WebP"
+    },
+    {
+     "documentation": "AVIF (AV1 Image File Format) raster image. Based on the AV1 video codec; offers\nbetter compression than JPEG and WebP. Modern web-image format.\n",
+     "extensions": [
+      "avif"
+     ],
+     "media_type": "image/avif",
+     "name": "avif",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "avif"
+      }
+     ],
+     "title": "AVIF"
+    },
+    {
+     "documentation": "HEIC (High Efficiency Image Container). Apple's default photo format on iOS and\nmacOS. Based on HEVC; significantly smaller files than JPEG at comparable quality.\n",
+     "extensions": [
+      "heic",
+      "heif"
+     ],
+     "media_type": "image/heic",
+     "name": "heic",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "heic"
+      }
+     ],
+     "title": "HEIC"
+    },
+    {
+     "documentation": "ICO (Windows Icon) image. Container holding multiple resolutions of an icon for\ndisplay at different sizes.\n",
+     "extensions": [
+      "ico"
+     ],
+     "media_type": "image/vnd.microsoft.icon",
+     "name": "ico",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ico"
+      }
+     ],
+     "title": "ICO"
+    },
+    {
+     "documentation": "ICNS (Apple Icon Image) format. macOS-native icon container holding multiple\nresolutions and depths.\n",
+     "extensions": [
+      "icns"
+     ],
+     "media_type": "image/icns",
+     "name": "icns",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "icns"
+      }
+     ],
+     "title": "ICNS"
+    },
+    {
+     "documentation": "SVG (Scalable Vector Graphics). XML-based vector image format; renders crisply at\nany size. Common for icons, diagrams, and UI illustrations.\n",
+     "extensions": [
+      "svg"
+     ],
+     "media_type": "image/svg+xml",
+     "name": "svg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "svg"
+      }
+     ],
+     "title": "SVG"
+    },
+    {
+     "documentation": "PSD (Photoshop Document). Adobe Photoshop's native layered raster format.\n",
+     "extensions": [
+      "psd"
+     ],
+     "media_type": "image/vnd.adobe.photoshop",
+     "name": "psd",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "psd"
+      }
+     ],
+     "title": "PSD"
+    },
+    {
+     "documentation": "Camera raw image. Unprocessed sensor data from a digital camera; preserves maximum\ninformation for post-processing.\n",
+     "extensions": [
+      "raw"
+     ],
+     "media_type": "image/x-raw",
+     "name": "raw",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "raw"
+      }
+     ],
+     "title": "Camera RAW"
+    },
+    {
+     "documentation": "OpenEXR. High-dynamic-range raster image format used in film and visual-effects\nproduction.\n",
+     "extensions": [
+      "exr"
+     ],
+     "media_type": "image/x-exr",
+     "name": "exr",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "exr"
+      }
+     ],
+     "title": "OpenEXR"
+    },
+    {
+     "documentation": "Radiance HDR. High-dynamic-range image format for lighting and rendering pipelines.\n",
+     "extensions": [
+      "hdr"
+     ],
+     "media_type": "image/vnd.radiance",
+     "name": "hdr",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "hdr"
+      }
+     ],
+     "title": "Radiance HDR"
+    },
+    {
+     "documentation": "EPS (Encapsulated PostScript). Vector or raster image embedded in a self-contained\nPostScript document.\n",
+     "extensions": [
+      "eps"
+     ],
+     "media_type": "application/postscript",
+     "name": "eps",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "eps"
+      }
+     ],
+     "title": "EPS"
+    },
+    {
+     "documentation": "GGUF model artifact. llama.cpp's container format for quantised LLM weights with\nembedded metadata.\n",
+     "extensions": [
+      "gguf"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "gguf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gguf"
+      }
+     ],
+     "title": "GGUF"
+    },
+    {
+     "documentation": "Safetensors model artifact. Format for storing tensor weights without arbitrary\ncode execution risk; standard for HuggingFace-distributed models.\n",
+     "extensions": [
+      "safetensors"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "safetensors",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "safetensors"
+      }
+     ],
+     "title": "Safetensors"
+    },
+    {
+     "documentation": "PyTorch model artifact. Pickled tensor state-dict files; loadable into PyTorch.\n",
+     "extensions": [
+      "pt",
+      "pth",
+      "bin"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "pytorch",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "pytorch"
+      }
+     ],
+     "title": "PyTorch"
+    },
+    {
+     "documentation": "ONNX (Open Neural Network Exchange) model. Cross-framework model format runnable\nby multiple inference engines.\n",
+     "extensions": [
+      "onnx"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "onnx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "onnx"
+      }
+     ],
+     "title": "ONNX"
+    },
+    {
+     "documentation": "CoreML model artifact. Apple's on-device inference format.\n",
+     "extensions": [
+      "mlmodel",
+      "mlpackage"
+     ],
+     "media_type": "application/octet-stream",
+     "name": "coreml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "coreml"
+      }
+     ],
+     "title": "CoreML"
+    },
+    {
+     "documentation": "Wavefront OBJ. Plain-text 3D model format describing geometry; widely interchangeable.\n",
+     "extensions": [
+      "obj"
+     ],
+     "media_type": "model/obj",
+     "name": "obj",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "obj"
+      }
+     ],
+     "title": "Wavefront OBJ"
+    },
+    {
+     "documentation": "Autodesk FBX. 3D model and animation interchange format.\n",
+     "extensions": [
+      "fbx"
+     ],
+     "media_type": "model/fbx",
+     "name": "fbx",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "fbx"
+      }
+     ],
+     "title": "FBX"
+    },
+    {
+     "documentation": "STL (Stereolithography). 3D model format used in 3D printing.\n",
+     "extensions": [
+      "stl"
+     ],
+     "media_type": "model/stl",
+     "name": "stl",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "stl"
+      }
+     ],
+     "title": "STL"
+    },
+    {
+     "documentation": "GLB binary glTF. Self-contained binary 3D model format.\n",
+     "extensions": [
+      "glb"
+     ],
+     "media_type": "model/gltf-binary",
+     "name": "glb",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "glb"
+      }
+     ],
+     "title": "GLB"
+    },
+    {
+     "documentation": "glTF JSON 3D model. Text-based 3D model format with separate binary buffers.\n",
+     "extensions": [
+      "gltf"
+     ],
+     "media_type": "model/gltf+json",
+     "name": "gltf",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "gltf"
+      }
+     ],
+     "title": "glTF"
+    },
+    {
+     "documentation": "Plain UTF-8 text. The most generic textual file type.\n",
+     "extensions": [
+      "txt"
+     ],
+     "media_type": "text/plain",
+     "name": "txt",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "txt"
+      }
+     ],
+     "title": "Plain Text"
+    },
+    {
+     "documentation": "Markdown formatted text. Lightweight markup; widely used for documentation, READMEs,\nand authoring contexts.\n",
+     "extensions": [
+      "md",
+      "markdown"
+     ],
+     "media_type": "text/markdown",
+     "name": "md",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "md"
+      }
+     ],
+     "title": "Markdown"
+    },
+    {
+     "documentation": "reStructuredText. Lightweight markup language used by Python's Sphinx documentation\nsystem.\n",
+     "extensions": [
+      "rst"
+     ],
+     "media_type": "text/x-rst",
+     "name": "rst",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "rst"
+      }
+     ],
+     "title": "reStructuredText"
+    },
+    {
+     "documentation": "AsciiDoc markup format. Richer than Markdown; common in technical writing.\n",
+     "extensions": [
+      "adoc",
+      "asciidoc"
+     ],
+     "media_type": "text/asciidoc",
+     "name": "asciidoc",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "asciidoc"
+      }
+     ],
+     "title": "AsciiDoc"
+    },
+    {
+     "documentation": "Emacs Org-mode markup. Outline-based plain-text format with rich semantics for\nnotes, tasks, and document authoring.\n",
+     "extensions": [
+      "org"
+     ],
+     "media_type": "text/x-org",
+     "name": "org",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "org"
+      }
+     ],
+     "title": "Org-mode"
+    },
+    {
+     "documentation": "LaTeX source. Document-typesetting markup; standard for scientific publishing.\n",
+     "extensions": [
+      "tex",
+      "latex"
+     ],
+     "media_type": "application/x-latex",
+     "name": "latex",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "latex"
+      }
+     ],
+     "title": "LaTeX"
+    },
+    {
+     "documentation": "HTML markup. Hypertext document format for the web.\n",
+     "extensions": [
+      "html",
+      "htm"
+     ],
+     "media_type": "text/html",
+     "name": "html",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "html"
+      }
+     ],
+     "title": "HTML"
+    },
+    {
+     "documentation": "XML (Extensible Markup Language). Generic markup format; superset of many specialised\ndocument and configuration languages.\n",
+     "extensions": [
+      "xml"
+     ],
+     "name": "xml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "xml"
+      }
+     ],
+     "title": "XML"
+    },
+    {
+     "documentation": "CSS (Cascading Style Sheets). Style language for HTML documents.\n",
+     "extensions": [
+      "css"
+     ],
+     "media_type": "text/css",
+     "name": "css",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "css"
+      }
+     ],
+     "title": "CSS"
+    },
+    {
+     "documentation": "SCSS (Sassy CSS). CSS preprocessor with nesting, variables, and mixins.\n",
+     "extensions": [
+      "scss"
+     ],
+     "media_type": "text/x-scss",
+     "name": "scss",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "scss"
+      }
+     ],
+     "title": "SCSS"
+    },
+    {
+     "documentation": "Sass indented syntax \u2014 the original CSS-preprocessor format that predates SCSS.\nWhitespace-significant; semantically equivalent to SCSS but with a distinct\non-disk representation. Distinct file-type from `scss` because consumers\n(formatters, parsers) handle them differently.\n",
+     "extensions": [
+      "sass"
+     ],
+     "media_type": "text/x-sass",
+     "name": "sass",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "sass"
+      }
+     ],
+     "title": "Sass (Indented Syntax)"
+    },
+    {
+     "documentation": "LESS. CSS preprocessor; alternative to SCSS.\n",
+     "extensions": [
+      "less"
+     ],
+     "media_type": "text/x-less",
+     "name": "less",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "less"
+      }
+     ],
+     "title": "LESS"
+    },
+    {
+     "documentation": "Log file. Time-stamped textual records of events.\n",
+     "extensions": [
+      "log"
+     ],
+     "media_type": "text/plain",
+     "name": "log",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "log"
+      }
+     ],
+     "title": "Log file"
+    },
+    {
+     "documentation": "CSV (Comma-Separated Values). Tabular text format with field delimiter, RFC 4180\nquoting rules.\n",
+     "extensions": [
+      "csv"
+     ],
+     "name": "csv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "csv"
+      }
+     ],
+     "title": "CSV"
+    },
+    {
+     "documentation": "TSV (Tab-Separated Values). Tabular text format using tab as delimiter.\n",
+     "extensions": [
+      "tsv"
+     ],
+     "name": "tsv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "tsv"
+      }
+     ],
+     "title": "TSV"
+    },
+    {
+     "documentation": "PSV (Pipe-Separated Values). Tabular text format using `|` as delimiter.\n",
+     "extensions": [
+      "psv"
+     ],
+     "name": "psv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "psv"
+      }
+     ],
+     "title": "PSV"
+    },
+    {
+     "documentation": "A `.json` file on disk. The on-disk file-type half of a JSON file; the `fmt=json`\ncontent tag (and the MIME type) come from the data-format axis.\n",
+     "extensions": [
+      "json"
+     ],
+     "name": "json",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "json"
+      }
+     ],
+     "title": "JSON"
+    },
+    {
+     "documentation": "A `.yaml`/`.yml` file on disk. File-type half of a YAML file; `fmt=yaml` and the\nMIME type come from the data-format axis.\n",
+     "extensions": [
+      "yaml",
+      "yml"
+     ],
+     "name": "yaml",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "yaml"
+      }
+     ],
+     "title": "YAML"
+    },
+    {
+     "documentation": "A `.ndjson`/`.jsonl` file on disk. File-type half of a newline-delimited-JSON\nfile; `fmt=ndjson` and the MIME type come from the data-format axis.\n",
+     "extensions": [
+      "ndjson",
+      "jsonl"
+     ],
+     "name": "ndjson",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ndjson"
+      }
+     ],
+     "title": "NDJSON"
+    },
+    {
+     "documentation": "MP4 video container. Standard format for digital video distribution; typically holds\nH.264 or H.265 video and AAC audio.\n",
+     "extensions": [
+      "mp4"
+     ],
+     "media_type": "video/mp4",
+     "name": "mp4",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mp4"
+      }
+     ],
+     "title": "MP4"
+    },
+    {
+     "documentation": "QuickTime MOV container. Apple's video format; closely related to MP4.\n",
+     "extensions": [
+      "mov"
+     ],
+     "media_type": "video/quicktime",
+     "name": "mov",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mov"
+      }
+     ],
+     "title": "QuickTime MOV"
+    },
+    {
+     "documentation": "Matroska container. Open-format video container supporting many codecs and\narbitrary numbers of audio and subtitle tracks.\n",
+     "extensions": [
+      "mkv"
+     ],
+     "media_type": "video/x-matroska",
+     "name": "mkv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mkv"
+      }
+     ],
+     "title": "Matroska"
+    },
+    {
+     "documentation": "WebM container. Open-format video for web delivery; typically holds VP9 video and\nOpus audio.\n",
+     "extensions": [
+      "webm"
+     ],
+     "media_type": "video/webm",
+     "name": "webm",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "webm"
+      }
+     ],
+     "title": "WebM"
+    },
+    {
+     "documentation": "AVI (Audio Video Interleave). Microsoft's video container; older format with\nbroad legacy support.\n",
+     "extensions": [
+      "avi"
+     ],
+     "media_type": "video/x-msvideo",
+     "name": "avi",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "avi"
+      }
+     ],
+     "title": "AVI"
+    },
+    {
+     "documentation": "WMV (Windows Media Video). Microsoft's video codec and container.\n",
+     "extensions": [
+      "wmv"
+     ],
+     "media_type": "video/x-ms-wmv",
+     "name": "wmv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "wmv"
+      }
+     ],
+     "title": "WMV"
+    },
+    {
+     "documentation": "FLV (Flash Video). Adobe's video container; legacy format from the Flash era.\n",
+     "extensions": [
+      "flv"
+     ],
+     "media_type": "video/x-flv",
+     "name": "flv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "flv"
+      }
+     ],
+     "title": "FLV"
+    },
+    {
+     "documentation": "MPEG-1/MPEG-2 video. Older video formats used in DVDs and broadcast.\n",
+     "extensions": [
+      "mpg",
+      "mpeg"
+     ],
+     "media_type": "video/mpeg",
+     "name": "mpeg",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "mpeg"
+      }
+     ],
+     "title": "MPEG"
+    },
+    {
+     "documentation": "Ogg container with Theora video codec. Open-format video.\n",
+     "extensions": [
+      "ogv"
+     ],
+     "media_type": "video/ogg",
+     "name": "ogv",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ogv"
+      }
+     ],
+     "title": "Ogg Theora"
+    },
+    {
+     "documentation": "MPEG transport stream. Video container used in broadcast and HLS streaming.\n",
+     "extensions": [
+      "ts"
+     ],
+     "media_type": "video/mp2t",
+     "name": "ts",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "ts"
+      }
+     ],
+     "title": "MPEG Transport Stream"
+    },
+    {
+     "documentation": "3GP container. Mobile-phone video format, optimised for low bitrates.\n",
+     "extensions": [
+      "3gp"
+     ],
+     "media_type": "video/3gpp",
+     "name": "threegp",
+     "tags": [
+      {
+       "key": "ext",
+       "value": "threegp"
+      }
+     ],
+     "title": "3GP"
+    }
+   ],
+   "version": 2
+  },
+  "list-marker": {
+   "documentation": "## List marker\nPresence marker indicating the value's content is an ordered sequence at its\nroot: a JSON array, a multi-row CSV, a YAML sequence, a list of strings.\nIndependent of `record-marker` \u2014 a value can be both (a list of records),\neither alone, or neither.\n",
+   "name": "list-marker",
+   "title": "List Marker",
+   "values": [
+    {
+     "documentation": "The value's content is an ordered sequence. Consumers can expect to iterate\nelements in order.\n",
+     "name": "list",
+     "tags": [
+      {
+       "key": "list",
+       "value": "*"
+      }
+     ],
+     "title": "List"
+    }
+   ],
+   "version": 1
+  },
+  "medium": {
+   "documentation": "## Medium\nMedium tags declare the primary human-perceivable nature of a value: an image, audio,\na video, a document. Medium is what a person experiences when consuming the value, and\nevery file format of that medium conforms to the bare medium type \u2014 `media:ext=png;image`\nis a `media:image`. There are exactly these four, and a value is at most one of them.\n\nA medium is not a kind of data. Text (`enc=`), data formats (`fmt=`), numbers and\nbooleans carry no medium, and neither do files that hold something other than a\nmedium (an archive, a font, a model, a 3D mesh: the `file-kind` dim). A live feed or\na frame taken from a stream has its medium too, because it is still something to see\nor hear.\n",
+   "name": "medium",
+   "title": "Medium",
+   "values": [
+    {
+     "documentation": "The value is a visual artifact intended to be seen: a photo, screenshot, rendered\ndiagram, or icon. Caps that consume images (vision models, image describers) match\non this tag rather than on a specific format like PNG or JPEG.\n",
+     "name": "image",
+     "tags": [
+      {
+       "key": "image",
+       "value": "*"
+      }
+     ],
+     "title": "Image"
+    },
+    {
+     "documentation": "The value is an audio recording or stream intended to be heard. Caps for transcription,\nspeech recognition, and audio analysis match on this tag.\n",
+     "name": "audio",
+     "tags": [
+      {
+       "key": "audio",
+       "value": "*"
+      }
+     ],
+     "title": "Audio"
+    },
+    {
+     "documentation": "The value is a video \u2014 a time-sequenced visual stream, typically with synchronised\naudio. Caps for video processing, frame extraction, and video transcription match on\nthis tag.\n",
+     "name": "video",
+     "tags": [
+      {
+       "key": "video",
+       "value": "*"
+      }
+     ],
+     "title": "Video"
+    },
+    {
+     "documentation": "The value is a document \u2014 laid-out pages, sheets or slides in a binary container (pdf,\ndocx, epub, xlsx, pptx). Caps that take pages out of a document, or put them together,\nmatch on this tag rather than on a specific format. Writing kept as text (Markdown, RTF,\nHTML) is a text file and does not carry it.\n",
+     "name": "document",
+     "tags": [
+      {
+       "key": "document",
+       "value": "*"
+      }
+     ],
+     "title": "Document"
+    }
+   ],
+   "version": 2
+  },
+  "number-kind": {
+   "documentation": "## Number kind\nRefines a number with its number-system domain. A number without a number-kind\ntag is any number. Adding a kind narrows what arithmetic and comparison operations\nare well-defined on the value, and what a reader parses: an `integer` is read as a\nwhole number, never as a floating-point one. A true/false value is not a number;\nit is the `boolean` dim.\n",
+   "name": "number-kind",
+   "title": "Number Kind",
+   "values": [
+    {
+     "documentation": "A whole number, positive, negative, or zero. No fractional part. Suitable for counts,\nindices, ranks, and any quantity that cannot meaningfully take a decimal value.\n",
+     "name": "integer",
+     "tags": [
+      {
+       "key": "integer",
+       "value": "*"
+      }
+     ],
+     "title": "Integer"
+    },
+    {
+     "documentation": "A real-valued number with possible fractional part. Encoded as floating-point in\npractice. Suitable for measurements, probabilities, ratios, and any continuous\nquantity.\n",
+     "name": "real",
+     "tags": [
+      {
+       "key": "real",
+       "value": "*"
+      }
+     ],
+     "title": "Real"
+    },
+    {
+     "documentation": "A complex number with real and imaginary components. Used in scientific computing,\nsignal processing, and any context requiring two-dimensional numeric representation.\n",
+     "name": "complex",
+     "tags": [
+      {
+       "key": "complex",
+       "value": "*"
+      }
+     ],
+     "title": "Complex"
+    }
+   ],
+   "version": 2
+  },
+  "numeric": {
+   "documentation": "## Numeric\nThe value is a number: something to add, compare and order. A number is its own\nkind of value, never also text (`enc=`) or a data format (`fmt=`), so it reaches\nonly caps that take numbers; turning it into text, or text into a number, is a\ncap of its own.\n\nOn the wire a number is carried as its decimal text (`42`, `-3.5`, `1e-6`), which\nevery runtime writes and parses. The `number-kind` dim says which numbers\nare allowed; an integer-valued argument (a count, a size, a seed) is always\n`integer`.\n",
+   "name": "numeric",
+   "title": "Numeric",
+   "values": [
+    {
+     "documentation": "The value is a number, carried as its decimal text.\n",
+     "name": "numeric",
+     "tags": [
+      {
+       "key": "numeric",
+       "value": "*"
+      }
+     ],
+     "title": "Numeric"
+    }
+   ],
+   "version": 2
+  },
+  "plain-text": {
+   "documentation": "## Plain text\nThe value is text written to be read: prose, a page of a document, what OCR read\noff an image, a model's description or answer. Caps that read text as language\n(summarizing, classifying, embedding, prompting a model) take\n`media:enc=utf8;plain-text`; anything that is plain text matches them, whatever\nelse it says about itself (a `.txt` file, a document page, digitized text).\n\nPlain text always names its encoding (`enc=`), so a cap that receives it knows\nhow to decode it, and it is never a serialization format (`fmt=`). Source code,\nmarkup, configuration and serialized data carry `enc=` without `plain-text`; a\ncap that takes any UTF-8 string takes `media:enc=utf8` and receives those as well.\nWhat a format holds that is meant to be read reaches the language caps through a\ncap that extracts it for that format \u2014 a PDF's pages, an image's description \u2014\nwritten by the cartridge that works with the format.\n\nThe file types that are plain text are the prose formats: `.txt`, Markdown,\nreStructuredText, AsciiDoc, Org-mode and log files.\n",
+   "name": "plain-text",
+   "title": "Plain Text",
+   "values": [
+    {
+     "documentation": "The value is text written to be read.\n",
+     "name": "plain-text",
+     "tags": [
+      {
+       "key": "plain-text",
+       "value": "*"
+      }
+     ],
+     "title": "Plain Text"
+    }
+   ],
+   "version": 1
+  },
+  "record-marker": {
+   "documentation": "## Record marker\nPresence marker indicating the value's content is a key-value mapping at its\nroot: a JSON object, a CSV row with named columns, a TOML table, an INI file.\nIndependent of `list-marker` \u2014 a value can be both (a list of records),\neither alone, or neither.\n",
+   "name": "record-marker",
+   "title": "Record Marker",
+   "values": [
+    {
+     "documentation": "The value's content is a key-value mapping. Consumers can expect to address\nfields by name.\n",
+     "name": "record",
+     "tags": [
+      {
+       "key": "record",
+       "value": "*"
+      }
+     ],
+     "title": "Record"
+    }
+   ],
+   "version": 1
+  },
+  "role": {
+   "documentation": "## Role\nSemantic-role markers distinguish how a value is used in a flow from how it is\nstored. A textual file might be `code` (source code), `log` (log records), or\n`page` (a single document page). Role is attached during cap declaration to make\nrouting decisions explicit.\n",
+   "name": "role",
+   "title": "Role",
+   "values": [
+    {
+     "documentation": "The value is source code. Caps that operate on code (formatters, linters, parsers,\nLSP-style analysers) match on this tag rather than on a specific language.\n",
+     "name": "code",
+     "tags": [
+      {
+       "key": "code",
+       "value": "*"
+      }
+     ],
+     "title": "Source Code"
+    },
+    {
+     "documentation": "The value represents a single page extracted from a multi-page document.\n",
+     "name": "page",
+     "tags": [
+      {
+       "key": "page",
+       "value": "*"
+      }
+     ],
+     "title": "Document Page"
+    },
+    {
+     "documentation": "The value is the key half of a key-value pair. Used by caps that produce or\nconsume dict-like structures one entry at a time.\n",
+     "name": "key",
+     "tags": [
+      {
+       "key": "key",
+       "value": "*"
+      }
+     ],
+     "title": "Key"
+    },
+    {
+     "documentation": "The value is a separator string (delimiter, line ending, field boundary).\n",
+     "name": "separator",
+     "tags": [
+      {
+       "key": "separator",
+       "value": "*"
+      }
+     ],
+     "title": "Separator"
+    },
+    {
+     "documentation": "The value is a JSON Schema document \u2014 a JSON object whose contents declare the\nshape of other JSON values.\n",
+     "name": "json-schema",
+     "tags": [
+      {
+       "key": "json-schema",
+       "value": "*"
+      }
+     ],
+     "title": "JSON Schema"
+    }
+   ],
+   "version": 1
+  },
+  "security": {
+   "documentation": "## Security\nSecurity tags annotate values with handling requirements. Values tagged `secret`\nare treated as confidential \u2014 log redaction, masked display, and secure-channel\ntransport apply automatically.\n",
+   "name": "security",
+   "title": "Security",
+   "values": [
+    {
+     "documentation": "Sensitive credential or key material. Must not appear in logs or display surfaces\nin cleartext. Transmitted only over secure channels.\n",
+     "name": "secret",
+     "tags": [
+      {
+       "key": "secret",
+       "value": "*"
+      }
+     ],
+     "title": "Secret"
+    }
+   ],
+   "version": 1
+  }
+ },
+ "manifest_version": 13,
+ "media": {
+  "media:background-color;enc=utf8": {
+   "description": "Hex RGB matte color (#RRGGBB)",
+   "dims": [
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "documentation": "## Purpose\nThe matte color that transparent regions composite onto when converting into a format with no alpha channel (e.g. any source with transparency into JPEG).\n\n## When to use\nSet on convert-image caps that output JPEG when the source may carry transparency and white (the default) is not the intended backdrop.\n\n## Notes\nStrict format: `#RRGGBB` hex (the leading `#` is optional). Anything else is a hard error naming the expected format.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/background-color",
+   "title": "Background Color (UTF-8)",
+   "urn": "media:background-color;enc=utf8",
+   "validation": {
+    "max_length": 7,
+    "min_length": 6
+   },
+   "version": 3
+  },
+  "media:document": {
+   "description": "A document, regardless of file format. The bare `media:document` URN matches any document (pdf, docx, epub, etc.); format-specific variants like `media:document;ext=pdf` refine it.",
+   "dims": [
+    {
+     "dim": "medium",
+     "value": "document"
+    }
+   ],
+   "documentation": "## Purpose\nThe umbrella media URN for documents: laid-out pages, sheets or slides kept in a binary container. The abstract [Disbind Document Into Pages](https://capdag.com/browse/cap:disbind;in=media:document;out=\"media:enc=utf8;ext=txt;page;plain-text\") cap takes this type, and every per-format document URN (`media:document;ext=pdf`, `media:document;ext=docx`, `media:document;ext=epub`, ...) conforms to it.\n\n## When to use\nUse `media:document` for a cap that accepts any document without committing to a format, and for an abstract cap whose specializations are all document caps. A cap that reads one format only names that format.\n\n## Notes\nFormat-specific variants are produced by the `_document-file.toml` template (one entry per file-type \u00d7 medium=document). Writing kept as text \u2014 Markdown, reStructuredText, RTF, HTML \u2014 is a text file (`media:enc=utf8;ext=md;plain-text`), not this medium.",
+   "media_type": "application/octet-stream",
+   "title": "Document",
+   "urn": "media:document",
+   "version": 3
+  },
+  "media:document;ext=pdf": {
+   "dims": [
+    {
+     "dim": "file-type",
+     "value": "pdf"
+    },
+    {
+     "dim": "medium",
+     "value": "document"
+    }
+   ],
+   "extensions": [
+    "pdf"
+   ],
+   "media_type": "application/pdf",
+   "title": "PDF, Document",
+   "urn": "media:document;ext=pdf",
+   "version": 2
+  },
+  "media:enc=utf8": {
+   "description": "Any UTF-8 string (media:enc=utf8): prose, code, markup or a textual serialization alike",
+   "dims": [
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "media_type": "text/plain",
+   "title": "UTF-8",
+   "urn": "media:enc=utf8",
+   "version": 3
+  },
+  "media:enc=utf8;ext=log;plain-text": {
+   "dims": [
+    {
+     "dim": "file-type",
+     "value": "log"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "plain-text",
+     "value": "plain-text"
+    }
+   ],
+   "extensions": [
+    "log"
+   ],
+   "media_type": "text/plain",
+   "title": "Log file, UTF-8, Plain Text",
+   "urn": "media:enc=utf8;ext=log;plain-text",
+   "version": 4
+  },
+  "media:enc=utf8;ext=txt;page;plain-text": {
+   "description": "A single page of finalised plain text extracted from a multi-page document. Concrete text terminal \u2014 directly persistable as a `.txt` file.",
+   "dims": [
+    {
+     "dim": "role",
+     "value": "page"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "file-type",
+     "value": "txt"
+    },
+    {
+     "dim": "plain-text",
+     "value": "plain-text"
+    }
+   ],
+   "documentation": "## Purpose\n\nA per-page text payload produced by document-disbinding caps (PDF disbind,\nEPUB disbind, etc.). One stream item per page; each item is the full plain\ntext of that page.\n\n## When to use\n\n`media:enc=utf8;ext=txt;page;plain-text` is the output of `cap:disbind-pdf` and\nanalogous disbind caps. The composite URN carries:\n\n- `role = page` \u2014 the per-page sequence marker (so consumers know each item\n  is one page rather than the entire document concatenated);\n- `plain-text` \u2014 the finalised-text marker that opts into `cap:save-as-txt`'s\n  persistence path;\n- `file-type = txt` \u2014 binds the URN to the `.txt` extension and `text/plain`\n  MIME at the registry.\n\n## Notes\n\nThe text content is unstructured natural-language text as the disbinder\nextracted it. Order is preserved across the stream (page 1, page 2, \u2026).\nEach page is its own scalar; consumers that need the whole document as one\nblob should aggregate explicitly.",
+   "extensions": [
+    "txt"
+   ],
+   "media_type": "text/plain",
+   "title": "Document Page, UTF-8, Plain Text, Plain Text",
+   "urn": "media:enc=utf8;ext=txt;page;plain-text",
+   "version": 4
+  },
+  "media:enc=utf8;ext=txt;plain-text": {
+   "description": "Finalised plain text suitable for writing to a `.txt` file. The narrow concrete terminal type for generated or digitized text that is destined for disk persistence.",
+   "dims": [
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "file-type",
+     "value": "txt"
+    },
+    {
+     "dim": "plain-text",
+     "value": "plain-text"
+    }
+   ],
+   "documentation": "## Purpose\n\nMarks a text payload as **finished plain text intended for persistence**. It is\nstrictly more specific than `media:enc=utf8` (the generic UTF-8 text type) and is the\ncanonical input/output pair for the `save-as-txt` cap.\n\nThe `plain-text` marker exists to keep the planner's path-discovery from treating\nevery `media:enc=utf8` value as a candidate for `.txt` persistence. Without it, any\ntext-producing cap (PDF page extractor, JSON adapter, prompt loader) would\nappear as a feeder for `save-as-txt`, polluting the recommended-paths surface with\nnonsensical chains. The `plain-text` marker forces caps that genuinely produce\nuser-facing prose (LLM text-generation, OCR's digitized text, etc.) to opt in\nexplicitly, leaving intermediate text values out of the persistence path.\n\n## When to use\n\n- As `out` on caps that produce user-facing prose ready for disk: LLM\n  text-generation caps, document-summarisation caps, code-generation caps.\n- As `in` on caps that persist or display finalised text: `save-as-txt` is the\n  canonical example.\n\n## When NOT to use\n\n- For intermediate text values that downstream caps will consume (raw page\n  text from a PDF, JSON-as-text waiting for parsing, prompt strings). Those stay\n  on `media:enc=utf8`.\n- For structured text that carries its own format identity (Markdown, JSON, CSV,\n  XML). Those use their own concrete file-type markers.\n\n## Notes\n\n- The `file-type = \"txt\"` narrowing binds this URN to the `.txt` extension and\n  `text/plain` MIME type at the registry level \u2014 the writer needs no special\n  handling beyond the standard extension lookup.\n- The payload is UTF-8 text. No structure, no schema, no metadata side-channel.\n  Token counts, finish reasons, and the like belong on the streaming-record type\n  `media:enc=utf8;fmt=ndjson;llm-text-stream`; this type is the post-streaming, ready-to-save\n  artefact.",
+   "extensions": [
+    "txt"
+   ],
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/plain-text",
+   "title": "UTF-8, Plain Text, Plain Text",
+   "urn": "media:enc=utf8;ext=txt;plain-text",
+   "version": 5
+  },
+  "media:enc=utf8;file-path": {
+   "description": "File Path file system path",
+   "dims": [
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "documentation": "## Purpose\nCarries a single file system path as a plain-text string, used to identify the location of an input or output file on disk.\n\n## When to use\nUse this type when a machine needs to read from or write to a specific file, rather than receiving content inline. Prefer inline content media types when the file is small and the path adds unnecessary indirection.\n\n## Notes\nThe path must not contain null bytes. Relative or absolute paths are both valid; the interpretation is determined by the machine's runtime context. A cap that takes several files declares its input as a sequence and receives one path per item.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/file_path",
+   "title": "File Path (UTF-8)",
+   "urn": "media:enc=utf8;file-path",
+   "validation": {
+    "min_length": 1,
+    "pattern": "^[^\\0]+$"
+   },
+   "version": 4
+  },
+  "media:enc=utf8;fmt=csv;list;record": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "csv"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "list-marker",
+     "value": "list"
+    },
+    {
+     "dim": "record-marker",
+     "value": "record"
+    }
+   ],
+   "media_type": "text/csv",
+   "title": "CSV, UTF-8, List, Record",
+   "urn": "media:enc=utf8;fmt=csv;list;record",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=json": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "json"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "media_type": "application/json",
+   "title": "JSON, UTF-8",
+   "urn": "media:enc=utf8;fmt=json",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=json;list": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "json"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "list-marker",
+     "value": "list"
+    }
+   ],
+   "media_type": "application/json",
+   "title": "JSON, UTF-8, List",
+   "urn": "media:enc=utf8;fmt=json;list",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=json;list;record": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "json"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "list-marker",
+     "value": "list"
+    },
+    {
+     "dim": "record-marker",
+     "value": "record"
+    }
+   ],
+   "media_type": "application/json",
+   "title": "JSON, UTF-8, List, Record",
+   "urn": "media:enc=utf8;fmt=json;list;record",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=yaml": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "yaml"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "media_type": "application/yaml",
+   "title": "YAML, UTF-8",
+   "urn": "media:enc=utf8;fmt=yaml",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=yaml;list": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "yaml"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "list-marker",
+     "value": "list"
+    }
+   ],
+   "media_type": "application/yaml",
+   "title": "YAML, UTF-8, List",
+   "urn": "media:enc=utf8;fmt=yaml;list",
+   "version": 3
+  },
+  "media:enc=utf8;fmt=yaml;list;record": {
+   "dims": [
+    {
+     "dim": "data-format",
+     "value": "yaml"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    },
+    {
+     "dim": "list-marker",
+     "value": "list"
+    },
+    {
+     "dim": "record-marker",
+     "value": "record"
+    }
+   ],
+   "media_type": "application/yaml",
+   "title": "YAML, UTF-8, List, Record",
+   "urn": "media:enc=utf8;fmt=yaml;list;record",
+   "version": 3
+  },
+  "media:enc=utf8;index-range": {
+   "description": "Index Range value",
+   "dims": [
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "documentation": "## Purpose\nSpecifies a numeric range of indices in the format `N` (single index) or `N-M` (inclusive range from N to M), used to select a subset of items from an ordered collection.\n\n## When to use\nUse this type to select pages, lines, chunks, or records by position. Supply `5` to select index 5 only, or `2-7` to select indices 2 through 7 inclusive.\n\n## Notes\nPattern: `^\\d+(-\\d*)?$`. An open-ended range (e.g., `5-`) means \"from index 5 to the end\"; the machine must define this behavior. See [Outline Max Depth](https://capdag.com/browse/media:integer;numeric;outline-max-depth) for depth-based selection.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/index_range",
+   "title": "Index Range (UTF-8)",
+   "urn": "media:enc=utf8;index-range",
+   "validation": {
+    "pattern": "^\\d+(-\\d*)?$"
+   },
+   "version": 4
+  },
+  "media:enc=utf8;pdf-password;secret": {
+   "description": "Password for opening an encrypted PDF document.",
+   "dims": [
+    {
+     "dim": "security",
+     "value": "secret"
+    },
+    {
+     "dim": "encoding",
+     "value": "utf8"
+    }
+   ],
+   "documentation": "## Purpose\nCarries the password of an encrypted PDF between caps. Passed to the PDF engine for the call's duration only \u2014 never stored.\n\n## When to use\nUse this media type for any cap argument that opens PDFs (render-page-image, disbind, disbind-to-pdf, bind). Without it, an encrypted PDF fails hard with an error naming the `--password` flag; with a wrong password, the error says so explicitly.\n\n## Notes\n- The `secret` tag instructs UIs and logs to mask the value.\n- An empty string is treated as \"no password\".",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/pdf-password",
+   "title": "PDF Password (Secret, UTF-8)",
+   "urn": "media:enc=utf8;pdf-password;secret",
+   "validation": {
+    "max_length": 1024,
+    "min_length": 0
+   },
+   "version": 3
+  },
+  "media:ext=jpeg;image": {
+   "dims": [
+    {
+     "dim": "file-type",
+     "value": "jpeg"
+    },
+    {
+     "dim": "medium",
+     "value": "image"
+    }
+   ],
+   "extensions": [
+    "jpg",
+    "jpeg"
+   ],
+   "media_type": "image/jpeg",
+   "title": "JPEG, Image",
+   "urn": "media:ext=jpeg;image",
+   "version": 3
+  },
+  "media:ext=png;image": {
+   "dims": [
+    {
+     "dim": "file-type",
+     "value": "png"
+    },
+    {
+     "dim": "medium",
+     "value": "image"
+    }
+   ],
+   "extensions": [
+    "png"
+   ],
+   "media_type": "image/png",
+   "title": "PNG, Image",
+   "urn": "media:ext=png;image",
+   "version": 3
+  },
+  "media:integer;jpeg-quality;numeric": {
+   "description": "JPEG encode quality (1-100)",
+   "dims": [
+    {
+     "dim": "numeric",
+     "value": "numeric"
+    },
+    {
+     "dim": "number-kind",
+     "value": "integer"
+    }
+   ],
+   "documentation": "## Purpose\nControls the JPEG encoder's quality/size trade-off when producing JPEG output.\n\n## When to use\nSet on convert-image caps that output JPEG. Higher values preserve more detail at larger file sizes; 85 (the cap default) is a good archival-preview balance.\n\n## Notes\nValid range: 1-100.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/jpeg-quality",
+   "title": "JPEG Quality (Numeric, Integer)",
+   "urn": "media:integer;jpeg-quality;numeric",
+   "validation": {
+    "max": 100.0,
+    "min": 1.0
+   },
+   "version": 3
+  },
+  "media:integer;numeric": {
+   "description": "Numeric primitive (integer or real) optionally as a list",
+   "dims": [
+    {
+     "dim": "number-kind",
+     "value": "integer"
+    },
+    {
+     "dim": "numeric",
+     "value": "numeric"
+    }
+   ],
+   "media_type": "text/plain",
+   "title": "Integer, Numeric",
+   "urn": "media:integer;numeric",
+   "version": 2
+  },
+  "media:integer;numeric;page-image-height": {
+   "description": "Page Image Height numeric value",
+   "dims": [
+    {
+     "dim": "numeric",
+     "value": "numeric"
+    },
+    {
+     "dim": "number-kind",
+     "value": "integer"
+    }
+   ],
+   "documentation": "## Purpose\nSpecifies the pixel height to use when rendering a document page as an image. Controls the vertical resolution of the rasterized output.\n\n## When to use\nSet this parameter alongside [Page Image Width](https://capdag.com/browse/media:integer;numeric;page-image-width) when you need to control the full resolution of rendered pages. Increasing height improves vertical detail for tall or portrait-oriented documents.\n\n## Notes\nValid range: 50\u20134000 pixels. Aspect ratio handling is machine-specific. For most document types, setting only width and allowing the machine to infer height is simpler and avoids distortion.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/page_image_height",
+   "title": "Page Image Height (Numeric, Integer)",
+   "urn": "media:integer;numeric;page-image-height",
+   "validation": {
+    "max": 4000.0,
+    "min": 50.0
+   },
+   "version": 3
+  },
+  "media:integer;numeric;page-image-width": {
+   "description": "Page Image Width numeric value",
+   "dims": [
+    {
+     "dim": "numeric",
+     "value": "numeric"
+    },
+    {
+     "dim": "number-kind",
+     "value": "integer"
+    }
+   ],
+   "documentation": "## Purpose\nSpecifies the pixel width to use when rendering a document page as an image. Controls the horizontal resolution of the rasterized output.\n\n## When to use\nSet this parameter on page-rendering or PDF-to-image machines when the default resolution is too low for OCR or visual analysis, or too high for bandwidth-constrained pipelines.\n\n## Notes\nValid range: 50\u20134000 pixels. Pair with [Page Image Height](https://capdag.com/browse/media:integer;numeric;page-image-height) to set both dimensions. Aspect ratio enforcement is machine-specific; some machines may adjust one dimension to preserve proportions.",
+   "media_type": "text/plain",
+   "profile_uri": "https://capdag.com/schema/page_image_width",
+   "title": "Page Image Width (Numeric, Integer)",
+   "urn": "media:integer;numeric;page-image-width",
+   "validation": {
+    "max": 4000.0,
+    "min": 50.0
+   },
+   "version": 3
+  }
+ }
+}
