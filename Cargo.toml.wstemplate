@@ -44,11 +44,14 @@ features = ["derive"]
 version = "1.0"
 
 [dependencies.tagged-urn]
-{%- if env.MFR_LOCAL_LIBS %}
-# MFR_LOCAL_LIBS was set when this was rendered: the working copy in this
+{%- if env.MFR_LIBS == "working" %}
+# MFR_LIBS was "working" when this was rendered: the working copy in this
 # workspace rather than a published release. Re-render without it before
 # committing or releasing — a path resolves on this machine only.
 path = "{{ projects.tagged_urn_rs.path_from_here }}"
+{%- elif env.MFR_LIBS == "channel" %}
+# MFR_LIBS "channel": the release fetched under the build root, in place of the public one.
+version = "={{ projects.tagged_urn_rs.version }}"
 {%- else %}
 version = "={{ projects.tagged_urn_rs.latest_remote_version }}"
 {%- endif %}
@@ -56,9 +59,12 @@ version = "={{ projects.tagged_urn_rs.latest_remote_version }}"
 # The runtime the code generated from ../formal runs on (see ../lungo.toml). The
 # generated code is lungo's of the same version, so the runtime is pinned exactly.
 [dependencies.lungo]
-{%- if env.MFR_LOCAL_LIBS %}
-# MFR_LOCAL_LIBS: the working copy, as above.
+{%- if env.MFR_LIBS == "working" %}
+# MFR_LIBS "working": the working copy, as above.
 path = "{{ projects.lungo_rs.path_from_here }}/crates/lungo"
+{%- elif env.MFR_LIBS == "channel" %}
+# MFR_LIBS "channel": the release fetched under the build root, in place of the public one.
+version = "={{ projects.lungo_rs.version }}"
 {%- else %}
 version = "={{ projects.lungo_rs.latest_remote_version }}"
 {%- endif %}
@@ -187,3 +193,13 @@ edition = "2021"
 license = "MIT"
 name = "capdag"
 version = "{{ project.version }}"
+
+{%- if env.MFR_LIBS == "channel" %}
+
+# MFR_LIBS "channel": the libraries the graph pins by version, from the releases fetched under
+# the build root, in place of crates.io.
+[patch.crates-io]
+lungo = { path = "{{ build.root_from_here }}/libraries/lungo/{{ projects.lungo_rs.version }}/lungo-{{ projects.lungo_rs.version }}" }
+lungo-runtime = { path = "{{ build.root_from_here }}/libraries/lungo/{{ projects.lungo_rs.version }}/lungo-runtime-{{ projects.lungo_rs.version }}" }
+tagged-urn = { path = "{{ build.root_from_here }}/libraries/tagged-urn-rs/{{ projects.tagged_urn_rs.version }}/tagged-urn-{{ projects.tagged_urn_rs.version }}" }
+{%- endif %}
