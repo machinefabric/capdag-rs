@@ -2,7 +2,7 @@
   "lean_version": "4.34.1",
   "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
   "bir_version": 3,
-  "generator_version": "1.120.164",
+  "generator_version": "1.126.0",
   "runtime_abi": 3,
   "modules": [
     "Init.Prelude",
@@ -678,12 +678,13 @@
     "CapDAG.Bifaci.Flow",
     "CapDAG.Bifaci.Request",
     "CapDAG.Bifaci.Pools",
+    "CapDAG.Bifaci.Hold",
     "CapDAG.Run.Control",
     "CapDAG.Run.Step",
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 1925,
+  "declarations": 2085,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -803,6 +804,34 @@
       "rust_path": "bifaci::flow::reorder::start",
       "lean_type": "CapDAG.Bifaci.Flow.Reorder",
       "source": "CapDAG/Bifaci/Flow.lean:95:1"
+    },
+    {
+      "lean_name": "CapDAG.Bifaci.Hold.Held.initial",
+      "module": "CapDAG.Bifaci.Hold",
+      "rust_path": "bifaci::hold::held::initial",
+      "lean_type": "CapDAG.Bifaci.Hold.Held",
+      "source": "CapDAG/Bifaci/Hold.lean:57:1"
+    },
+    {
+      "lean_name": "CapDAG.Bifaci.Hold.arrive",
+      "module": "CapDAG.Bifaci.Hold",
+      "rust_path": "bifaci::hold::arrive",
+      "lean_type": "CapDAG.Bifaci.Hold.Bound → CapDAG.Bifaci.Hold.Held → CapDAG.Bifaci.Flow.FrameType → Nat → CapDAG.Bifaci.Hold.Arrival",
+      "source": "CapDAG/Bifaci/Hold.lean:73:1"
+    },
+    {
+      "lean_name": "CapDAG.Bifaci.Hold.fateOf",
+      "module": "CapDAG.Bifaci.Hold",
+      "rust_path": "bifaci::hold::fate_of",
+      "lean_type": "CapDAG.Bifaci.Hold.Bringing → CapDAG.Bifaci.Hold.Fate",
+      "source": "CapDAG/Bifaci/Hold.lean:98:1"
+    },
+    {
+      "lean_name": "CapDAG.Bifaci.Hold.whenUnrouted",
+      "module": "CapDAG.Bifaci.Hold",
+      "rust_path": "bifaci::hold::when_unrouted",
+      "lean_type": "Bool → Bool → CapDAG.Bifaci.Hold.Unrouted",
+      "source": "CapDAG/Bifaci/Hold.lean:40:1"
     },
     {
       "lean_name": "CapDAG.Bifaci.Pools.State.admit",

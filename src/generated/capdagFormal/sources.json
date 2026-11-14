@@ -1176,6 +1176,540 @@
     ]
   },
   {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.cancel.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      69,
+      3
+    ],
+    "end": [
+      70,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.ctorElim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      63,
+      1
+    ],
+    "end": [
+      71,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.ctorIdx",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.keep.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      65,
+      3
+    ],
+    "end": [
+      66,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Arrival.overflow.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      67,
+      3
+    ],
+    "end": [
+      68,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.ctorElim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      80,
+      1
+    ],
+    "end": [
+      88,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.ctorIdx",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.expired.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      86,
+      3
+    ],
+    "end": [
+      87,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.ofNat",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.provided.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      82,
+      3
+    ],
+    "end": [
+      83,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Bringing.refused.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      84,
+      3
+    ],
+    "end": [
+      85,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.ctorElim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      90,
+      1
+    ],
+    "end": [
+      96,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.ctorIdx",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.fail.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      94,
+      3
+    ],
+    "end": [
+      95,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.ofNat",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Fate.replay.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      92,
+      3
+    ],
+    "end": [
+      93,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.initial",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      57,
+      1
+    ],
+    "end": [
+      58,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Held.within",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      60,
+      1
+    ],
+    "end": [
+      61,
+      90
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.ctorElim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      32,
+      1
+    ],
+    "end": [
+      38,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.ctorIdx",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.hold.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      34,
+      3
+    ],
+    "end": [
+      35,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.ofNat",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.Unrouted.refuse.elim",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      36,
+      3
+    ],
+    "end": [
+      37,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.admit",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      105,
+      1
+    ],
+    "end": [
+      113,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.arrive",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      73,
+      1
+    ],
+    "end": [
+      78,
+      52
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.fateOf",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      98,
+      1
+    ],
+    "end": [
+      101,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqArrival",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      71,
+      18
+    ],
+    "end": [
+      71,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqArrival.decEq",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      71,
+      18
+    ],
+    "end": [
+      71,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqBound",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      49,
+      18
+    ],
+    "end": [
+      49,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqBound.decEq",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      49,
+      18
+    ],
+    "end": [
+      49,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqBringing",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      88,
+      18
+    ],
+    "end": [
+      88,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqFate",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      96,
+      18
+    ],
+    "end": [
+      96,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqHeld",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      55,
+      18
+    ],
+    "end": [
+      55,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqHeld.decEq",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      55,
+      18
+    ],
+    "end": [
+      55,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instDecidableEqUnrouted",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      38,
+      18
+    ],
+    "end": [
+      38,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprArrival",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      71,
+      12
+    ],
+    "end": [
+      71,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprArrival.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      71,
+      12
+    ],
+    "end": [
+      71,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprBound",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      49,
+      12
+    ],
+    "end": [
+      49,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprBound.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      49,
+      12
+    ],
+    "end": [
+      49,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprBringing",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      88,
+      12
+    ],
+    "end": [
+      88,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprBringing.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      88,
+      12
+    ],
+    "end": [
+      88,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprFate",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      96,
+      12
+    ],
+    "end": [
+      96,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprFate.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      96,
+      12
+    ],
+    "end": [
+      96,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprHeld",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      55,
+      12
+    ],
+    "end": [
+      55,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprHeld.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      55,
+      12
+    ],
+    "end": [
+      55,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprUnrouted",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      38,
+      12
+    ],
+    "end": [
+      38,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.instReprUnrouted.repr",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      38,
+      12
+    ],
+    "end": [
+      38,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Hold.whenUnrouted",
+    "file": "CapDAG/Bifaci/Hold.lean",
+    "start": [
+      40,
+      1
+    ],
+    "end": [
+      43,
+      53
+    ]
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Pools.Arrival.admitted.elim",
     "file": "CapDAG/Bifaci/Pools.lean",
     "start": [

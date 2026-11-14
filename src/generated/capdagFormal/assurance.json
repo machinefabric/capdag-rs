@@ -4,7 +4,7 @@
   "provenance": {
     "lean_version": "4.34.1",
     "lean_githash": "5045d0056413266e57c625dcd7c365b10e377c52",
-    "lungo_version": "1.120.164",
+    "lungo_version": "1.126.0",
     "bir_version": 3,
     "runtime_abi": 3
   },
@@ -1354,6 +1354,312 @@
         "end": {
           "line": 25,
           "column": 64
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.cancel_ends",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound) (h : CapDAG.Bifaci.Hold.Held) (size : Nat),\n  CapDAG.Bifaci.Hold.arrive b h CapDAG.Bifaci.Flow.FrameType.cancel size = CapDAG.Bifaci.Hold.Arrival.cancel",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "c652cf150bb19f1a8e05b7f69829b04a0ba1c0fd65a44837ee10b88300b1708c",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 39,
+          "column": 1
+        },
+        "end": {
+          "line": 43,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.cancel_only",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound) (h : CapDAG.Bifaci.Hold.Held) (frame : CapDAG.Bifaci.Flow.FrameType) (size : Nat),\n  CapDAG.Bifaci.Hold.arrive b h frame size = CapDAG.Bifaci.Hold.Arrival.cancel ↔\n    frame = CapDAG.Bifaci.Flow.FrameType.cancel",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "38c099eaa4841f818aa92034aa0b381d88cac4786e422e79fd14cc2a8e1a8c29",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 45,
+          "column": 1
+        },
+        "end": {
+          "line": 52,
+          "column": 19
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.hold_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.whenUnrouted"
+      ],
+      "specifications": [],
+      "statement": "∀ (canProvide replayed : Bool),\n  CapDAG.Bifaci.Hold.whenUnrouted canProvide replayed = CapDAG.Bifaci.Hold.Unrouted.hold ↔\n    canProvide = true ∧ replayed = false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "17f03f615c3214e229832b7c7919a6b70fa0690eeaebf7e31f29cbba05e971a7",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 14,
+          "column": 1
+        },
+        "end": {
+          "line": 19,
+          "column": 62
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.initial_within",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.Held.initial"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound), CapDAG.Bifaci.Hold.Held.within b CapDAG.Bifaci.Hold.Held.initial = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "057336dae0f5d82cb4ed4b6d159bcda9b01db325a298ba2d3c1534174bda29b7",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 34,
+          "column": 1
+        },
+        "end": {
+          "line": 37,
+          "column": 35
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.kept_counts",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound) (h next : CapDAG.Bifaci.Hold.Held) (frame : CapDAG.Bifaci.Flow.FrameType) (size : Nat),\n  CapDAG.Bifaci.Hold.arrive b h frame size = CapDAG.Bifaci.Hold.Arrival.keep next →\n    next.frames = h.frames + 1 ∧ next.bytes = h.bytes + size",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "71e88392490a6a520b2c610ead3a0f2a6d4961ea02833d6c902b3bbba3310758",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 66,
+          "column": 1
+        },
+        "end": {
+          "line": 77,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.kept_within",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound) (h next : CapDAG.Bifaci.Hold.Held) (frame : CapDAG.Bifaci.Flow.FrameType) (size : Nat),\n  CapDAG.Bifaci.Hold.arrive b h frame size = CapDAG.Bifaci.Hold.Arrival.keep next →\n    CapDAG.Bifaci.Hold.Held.within b next = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "029b5de447d45b7fe4d8292e1fc9f873b83a499a74a232b258b44ec6cfbe84c5",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 54,
+          "column": 1
+        },
+        "end": {
+          "line": 64,
+          "column": 16
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.no_provider_refused",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.whenUnrouted"
+      ],
+      "specifications": [],
+      "statement": "∀ (replayed : Bool), CapDAG.Bifaci.Hold.whenUnrouted false replayed = CapDAG.Bifaci.Hold.Unrouted.refuse",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "1d4e7d8c8893a371278637dc06a94306c24401b222bf967ae9b803158bf2291e",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 27,
+          "column": 1
+        },
+        "end": {
+          "line": 30,
+          "column": 25
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.overflow_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.arrive"
+      ],
+      "specifications": [],
+      "statement": "∀ (b : CapDAG.Bifaci.Hold.Bound) (h : CapDAG.Bifaci.Hold.Held) (frame : CapDAG.Bifaci.Flow.FrameType) (size : Nat),\n  frame ≠ CapDAG.Bifaci.Flow.FrameType.cancel →\n    (CapDAG.Bifaci.Hold.arrive b h frame size = CapDAG.Bifaci.Hold.Arrival.overflow ↔\n      ¬(h.frames + 1 ≤ b.frames ∧ h.bytes + size ≤ b.bytes))",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "35377a2eb3e66a7e3a2f64e9200a7ad9b0c2bbddae0a5ab0687e087532afc155",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 79,
+          "column": 1
+        },
+        "end": {
+          "line": 91,
+          "column": 17
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.replay_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.fateOf"
+      ],
+      "specifications": [],
+      "statement": "∀ (o : CapDAG.Bifaci.Hold.Bringing),\n  CapDAG.Bifaci.Hold.fateOf o = CapDAG.Bifaci.Hold.Fate.replay ↔ o = CapDAG.Bifaci.Hold.Bringing.provided",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "beca91ec4a46373b6cd0bd2df7434ca63e36ffa6fe8c12c691f8d4051fc86d98",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 140,
+          "column": 1
+        },
+        "end": {
+          "line": 144,
+          "column": 28
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.replay_refused",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Hold.whenUnrouted"
+      ],
+      "specifications": [],
+      "statement": "∀ (canProvide : Bool), CapDAG.Bifaci.Hold.whenUnrouted canProvide true = CapDAG.Bifaci.Hold.Unrouted.refuse",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "3528bedd2fe2af682fce46c01fda785a87d6ee5e1341b68c616e216b58b94a7c",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Hold.lean",
+        "start": {
+          "line": 21,
+          "column": 1
+        },
+        "end": {
+          "line": 25,
+          "column": 27
         }
       }
     },
@@ -5391,6 +5697,136 @@
         "end": {
           "line": 96,
           "column": 39
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.Held.initial",
+      "module": "CapDAG.Bifaci.Hold",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Hold.initial_within"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Hold.lean",
+        "start": {
+          "line": 57,
+          "column": 1
+        },
+        "end": {
+          "line": 58,
+          "column": 34
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.arrive",
+      "module": "CapDAG.Bifaci.Hold",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Hold.cancel_ends",
+        "CapDAG.Bifaci.Hold.cancel_only",
+        "CapDAG.Bifaci.Hold.kept_counts",
+        "CapDAG.Bifaci.Hold.kept_within",
+        "CapDAG.Bifaci.Hold.overflow_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Hold.lean",
+        "start": {
+          "line": 73,
+          "column": 1
+        },
+        "end": {
+          "line": 78,
+          "column": 52
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.fateOf",
+      "module": "CapDAG.Bifaci.Hold",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Hold.replay_iff"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Hold.lean",
+        "start": {
+          "line": 98,
+          "column": 1
+        },
+        "end": {
+          "line": 101,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Hold.whenUnrouted",
+      "module": "CapDAG.Bifaci.Hold",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Hold.hold_iff",
+        "CapDAG.Bifaci.Hold.no_provider_refused",
+        "CapDAG.Bifaci.Hold.replay_refused"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Hold.lean",
+        "start": {
+          "line": 40,
+          "column": 1
+        },
+        "end": {
+          "line": 43,
+          "column": 53
         }
       }
     },
