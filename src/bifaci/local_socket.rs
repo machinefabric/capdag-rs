@@ -285,39 +285,51 @@ mod windows {
     }
 
     impl AsyncRead for OwnedReadHalf {
+        /// Hands over what the read thread has received, and is `Ready` with
+        /// nothing added only at end-of-file.
+        ///
+        /// The bytes already in `buf` are the caller's, from earlier reads:
+        /// `read_exact` and `read_to_end` call again with the buffer part
+        /// filled. Whether this call read anything is what it ADDED. It used
+        /// to answer `Ready` whenever `buf` was not empty, even when the
+        /// channel had nothing yet, and the caller took that as the end of the
+        /// stream: a frame that arrived in two pieces was `UnexpectedEof`
+        /// (the relay's "connection closed unexpectedly"), and `read_to_end`
+        /// stopped after 128 chunks, where tokio's cooperative budget makes
+        /// the channel say `Pending`.
         fn poll_read(
             mut self: Pin<&mut Self>,
             cx: &mut Context<'_>,
             buf: &mut ReadBuf<'_>,
         ) -> Poll<io::Result<()>> {
-            while buf.remaining() > 0 {
-                if let Some(byte) = self.pending.pop_front() {
-                    buf.put_slice(&[byte]);
-                } else {
-                    break;
-                }
-            }
-
             if buf.remaining() == 0 {
                 return Poll::Ready(Ok(()));
             }
+            let this = &mut *self;
 
-            match Pin::new(&mut self.rx).poll_recv(cx) {
-                Poll::Pending => {
-                    if buf.filled().is_empty() {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(Ok(()))
-                    }
+            // What is left of a chunk larger than an earlier buffer comes first.
+            if !this.pending.is_empty() {
+                while buf.remaining() > 0 && !this.pending.is_empty() {
+                    let (front, _) = this.pending.as_slices();
+                    let take = front.len().min(buf.remaining());
+                    buf.put_slice(&front[..take]);
+                    this.pending.drain(..take);
                 }
+                return Poll::Ready(Ok(()));
+            }
+
+            match Pin::new(&mut this.rx).poll_recv(cx) {
+                // Nothing has come yet, and nothing was added.
+                Poll::Pending => Poll::Pending,
+                // The thread is gone after its last word: end-of-file, or the
+                // error an earlier read returned.
                 Poll::Ready(None) => Poll::Ready(Ok(())),
+                // The thread's end-of-file.
+                Poll::Ready(Some(Ok(bytes))) if bytes.is_empty() => Poll::Ready(Ok(())),
                 Poll::Ready(Some(Ok(bytes))) => {
-                    if bytes.is_empty() {
-                        return Poll::Ready(Ok(()));
-                    }
                     let take = bytes.len().min(buf.remaining());
                     buf.put_slice(&bytes[..take]);
-                    self.pending.extend(bytes[take..].iter().copied());
+                    this.pending.extend(&bytes[take..]);
                     Poll::Ready(Ok(()))
                 }
                 Poll::Ready(Some(Err(e))) => Poll::Ready(Err(e)),
@@ -337,7 +349,7 @@ mod windows {
 
     impl AsyncWrite for OwnedWriteHalf {
         fn poll_write(
-            mut self: Pin<&mut Self>,
+            self: Pin<&mut Self>,
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<io::Result<usize>> {
@@ -559,7 +571,45 @@ mod tests {
             .await
             .expect("the peer never read end-of-file")
             .expect("read to end");
-        assert_eq!(got.len(), accepted.len(), "the peer received bytes no write was answered for");
+        assert_eq!(got.len(), accepted.len(), "the peer received a different number of bytes than the writes answered for");
         assert!(got == accepted, "the peer received other bytes than the ones answered for");
+    }
+
+    /// TEST13140: a read that has part of what it asked for and waits for the
+    /// rest is not end-of-file.
+    ///
+    /// `read_exact` and `read_to_end` call `poll_read` again with the bytes
+    /// they already have in the buffer. The Windows read half, finding nothing
+    /// more to hand over yet, answered `Ready` without adding a byte whenever
+    /// that buffer was not empty — which they take as the end of the stream.
+    /// A frame that arrived in two pieces was read as `UnexpectedEof`, the
+    /// relay's "connection closed unexpectedly" (`MASTER_DIED`), and
+    /// `read_to_end` stopped after 128 chunks, when tokio's cooperative budget
+    /// made the channel say `Pending`.
+    #[tokio::test]
+    async fn test13140_a_read_waiting_for_more_is_not_end_of_file() {
+        let bound = std::time::Duration::from_secs(10);
+        let (left, right) = UnixStream::pair().expect("create AF_UNIX stream pair");
+        let (_left_read, mut left_write) = left.into_split();
+        let (mut right_read, _right_write) = right.into_split();
+
+        left_write.write_all(b"first half").await.expect("write the first half");
+        left_write.flush().await.expect("flush the first half");
+        let reader = tokio::spawn(async move {
+            let mut frame = [0u8; 22];
+            right_read.read_exact(&mut frame).await.map(|_| frame)
+        });
+
+        // The reader takes the first half and waits; only then does the rest come.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        left_write.write_all(b"-second half").await.expect("write the second half");
+        left_write.flush().await.expect("flush the second half");
+
+        let frame = tokio::time::timeout(bound, reader)
+            .await
+            .expect("the reader never finished")
+            .expect("the reader task panicked")
+            .expect("a read waiting for the second half was answered as end-of-file");
+        assert_eq!(&frame, b"first half-second half");
     }
 }
