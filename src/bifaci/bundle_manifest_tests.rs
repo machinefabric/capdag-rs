@@ -345,3 +345,113 @@ fn test1927_the_manifest_files_are_recognised_as_managed() {
     assert!(!is_manifest_file("something-else.json"));
     assert!(!is_manifest_file("bundle.json.bak"));
 }
+
+/// A staged tree as the build lays it out: `cart` 1.0.0 on `release`, its
+/// directory holding an entry point with `body`.
+fn staged_tree(root: &std::path::Path, body: &str) -> BTreeMap<StagedKey, StagedCartridge> {
+    let dir = cartridge_dir(root, &[("cart", body)]);
+    BTreeMap::from([(
+        ("cart".to_string(), "1.0.0".to_string(), "release".to_string()),
+        StagedCartridge { dir, fabric_manifest_version: 1 },
+    )])
+}
+
+/// The cap groups a cartridge advertised when the build asked it.
+fn advertised() -> Vec<crate::CapGroup> {
+    let urn = crate::CapUrn::from_string(r#"cap:in="media:enc=utf8";test;out="media:enc=utf8""#).unwrap();
+    let cap = crate::Cap::new(urn, "Test".to_string(), vec!["cmd".to_string()]);
+    vec![crate::CapGroup { name: "g".to_string(), caps: vec![cap], adapter_urns: Vec::new() }]
+}
+
+/// The manifest a build records for `staged`, with [`advertised`] as each
+/// cartridge's caps.
+fn recorded_for(environment: &str, staged: &BTreeMap<StagedKey, StagedCartridge>) -> BundleManifest {
+    let asked = staged
+        .iter()
+        .map(|(key, one)| (key.clone(), AskedCartridge { staged: one.clone(), cap_groups: advertised() }))
+        .collect();
+    manifest_for(environment, &asked).expect("record the manifest")
+}
+
+/// TEST1963: after a step rewrites the cartridges' bytes, the manifest is
+/// hashed again under what was recorded, and the caps are carried, not asked.
+///
+/// This is the macOS build: the build phase signs every bundled cartridge into
+/// the app sandbox after the manifest is recorded, and a cartridge signed so
+/// traps when anything but its app starts it. So the caps cannot be asked
+/// again, and the record's hashes describe bytes that are gone: a manifest
+/// signed with them would have every bundled cartridge refused at spawn.
+#[test]
+fn test1963_a_rewritten_bundle_is_hashed_again_under_its_recorded_caps() {
+    let root = tempdir().expect("a scratch directory");
+    let staged = staged_tree(root.path(), "the entry point as built");
+    let recorded = recorded_for("prod", &staged);
+    let dir = &staged.values().next().unwrap().dir;
+    let before = &recorded.cartridges[0].sha256;
+
+    // Signed for the platform: the same cartridge, other bytes.
+    fs::write(dir.join("cart"), "the entry point as built, and its platform signature").expect("re-sign");
+    assert!(
+        matches!(verify_content("cart", "1.0.0", dir, before), Err(BundleError::ContentMismatch { .. })),
+        "the recorded hash must no longer describe the rewritten cartridge"
+    );
+
+    let sealed = rehashed(&recorded, "prod", &staged).expect("the recorded set is still staged");
+    let entry = sealed.admit("cart", "1.0.0", "release").expect("still listed");
+    verify_content("cart", "1.0.0", dir, &entry.sha256).expect("the new hash is the rewritten bytes'");
+    assert_eq!(entry.cap_groups, advertised(), "the caps are the ones the record asked of the cartridge");
+    assert_eq!(entry.fabric_manifest_version, 1);
+    assert_eq!(sealed.environment, "prod");
+
+    // Hashing an unchanged tree again changes nothing, so a build whose
+    // platform rewrites no byte signs exactly what it recorded.
+    assert_eq!(rehashed(&sealed, "prod", &staged).expect("hash again").to_bytes().unwrap(), sealed.to_bytes().unwrap());
+}
+
+/// TEST1975: a manifest is hashed again only over the set it recorded, for the
+/// environment it recorded.
+///
+/// The record vouches for the caps of the cartridges it asked. A cartridge
+/// staged after it was never asked, one removed would be listed with nothing
+/// behind it, and one restaged against another fabric manifest version was
+/// built from other sources: carrying the record over any of them would sign
+/// caps nobody asked of those bytes.
+#[test]
+fn test1975_hashing_again_holds_the_tree_to_the_recorded_set() {
+    let root = tempdir().expect("a scratch directory");
+    let staged = staged_tree(root.path(), "the entry point");
+    let recorded = recorded_for("prod", &staged);
+    let key = staged.keys().next().unwrap().clone();
+
+    let mut added = staged.clone();
+    let other = root.path().join("other/2.0.0");
+    fs::create_dir_all(&other).unwrap();
+    added.insert(
+        ("other".to_string(), "2.0.0".to_string(), "release".to_string()),
+        StagedCartridge { dir: other, fabric_manifest_version: 1 },
+    );
+    assert!(matches!(
+        rehashed(&recorded, "prod", &added),
+        Err(BundleError::NotListed { ref name, .. }) if name == "other"
+    ));
+
+    let why = rehashed(&recorded, "prod", &BTreeMap::new()).expect_err("a recorded cartridge that is gone");
+    assert!(matches!(why, BundleError::NotStaged { ref name, .. } if name == "cart"), "{why}");
+    assert!(why.to_string().contains("capdag dev bundle-manifest"), "the refusal says how to record again: {why}");
+
+    let mut restaged = staged.clone();
+    restaged.get_mut(&key).unwrap().fabric_manifest_version = 2;
+    assert!(matches!(
+        rehashed(&recorded, "prod", &restaged),
+        Err(BundleError::FabricVersionRestaged { recorded: 1, staged: 2, .. })
+    ));
+
+    let mut other_channel = BTreeMap::new();
+    other_channel.insert(("cart".to_string(), "1.0.0".to_string(), "nightly".to_string()), staged[&key].clone());
+    assert!(matches!(rehashed(&recorded, "prod", &other_channel), Err(BundleError::WrongChannel { .. })));
+
+    assert!(matches!(
+        rehashed(&recorded, "staging", &staged),
+        Err(BundleError::WrongEnvironment { ref manifest, ref build }) if manifest == "prod" && build == "staging"
+    ));
+}

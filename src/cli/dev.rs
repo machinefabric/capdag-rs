@@ -1,6 +1,6 @@
 //! `capdag dev new | install`: making a cartridge, and running it before it is
-//! published. `hash-dir` and `bundle-manifest` are the build's own tools,
-//! hidden from the help.
+//! published. `hash-dir`, `bundle-manifest` and `bundle-rehash` are the build's
+//! own tools, hidden from the help.
 
 use std::path::PathBuf;
 
@@ -38,9 +38,18 @@ pub enum Command {
         #[arg(value_name = "DIR")]
         dir: PathBuf,
     },
-    /// Write the manifest a build ships beside its bundled cartridges
+    /// Record the manifest a build ships beside its bundled cartridges, before
+    /// they are signed for their platform
     #[command(hide = true, after_help = "Examples:\n  capdag dev bundle-manifest --root <dir> --environment <env>")]
     BundleManifest {
+        #[arg(long, value_name = "DIR")]
+        root: PathBuf,
+        #[arg(long, value_name = "ENV")]
+        environment: String,
+    },
+    /// Hash the recorded manifest's cartridges again, after a step rewrote them
+    #[command(hide = true, after_help = "Examples:\n  capdag dev bundle-rehash --root <dir> --environment <env>")]
+    BundleRehash {
         #[arg(long, value_name = "DIR")]
         root: PathBuf,
         #[arg(long, value_name = "ENV")]
@@ -65,6 +74,7 @@ pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
             Ok(Exit::Ok)
         }
         Command::BundleManifest { root, environment } => bundle_manifest(&root, &environment).await,
+        Command::BundleRehash { root, environment } => bundle_rehash(&root, &environment),
     }
 }
 
@@ -139,71 +149,125 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
 
 /// Record what a build ships: every cartridge staged under `root`, with the
 /// hash of its directory, the fabric manifest version it was built against,
-/// and the cap groups it advertises, in `bundle.json` there. The build signs
-/// it. Each cartridge is started once here, for its HELLO, so that no host has
-/// to start every bundled cartridge to learn its caps. A manifest listing
-/// nothing is refused: it would describe a bundle that verifies and hosts
-/// nothing.
+/// and the cap groups it advertises, in `bundle.json` there. Each cartridge is
+/// started once here, for its HELLO, so that no host has to start every
+/// bundled cartridge to learn its caps.
+///
+/// A build runs this as soon as the tree is staged, before it signs the
+/// cartridges for their platform: one signed into the macOS app sandbox traps
+/// when anything but its app starts it. After the last step that rewrites a
+/// byte, `bundle-rehash` takes the hashes again, and that is what is signed.
 async fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
-    if !root.is_dir() {
-        return Err(CliError::usage(format!("--root {}: no such directory", root.display())));
+    let mut asked = std::collections::BTreeMap::new();
+    for (key, dir) in staged_dirs(root)? {
+        let record = cartridge_record(&dir)?;
+        let entry = record.resolve_entry_point(&dir);
+        let cap_groups = crate::probe_cartridge_cap_groups(&entry).await.map_err(|e| {
+            CliError::failed(format!("{} {} could not be asked for its caps", record.name, record.version))
+                .context(e.to_string())
+                .hint("the manifest is recorded before the cartridges are signed for their platform; a cartridge signed into the macOS app sandbox cannot be started outside its app")
+        })?;
+        asked.insert(key, crate::AskedCartridge { staged: staged_cartridge(&dir, &record), cap_groups });
     }
-    let mut dirs = std::collections::BTreeMap::new();
-    collect_staged(root, &mut dirs)?;
-    let mut staged = std::collections::BTreeMap::new();
-    for (key, dir) in dirs {
-        let cartridge = staged_cartridge(&dir).await?;
-        staged.insert(key, cartridge);
-    }
-    if staged.is_empty() {
-        return Err(CliError::failed(format!("{} holds no staged cartridges", root.display()))
-            .context("a manifest listing nothing would describe a bundle that verifies and hosts nothing"));
-    }
-    let manifest = crate::bundle_manifest_for(environment, &staged)
+    let manifest = crate::bundle_manifest_for(environment, &asked)
         .map_err(|e| CliError::failed("the bundle manifest could not be made").context(e.to_string()))?;
+    write_bundle_manifest(root, &manifest, "recorded")?;
+    eprintln!("next: sign the cartridges for their platform, then run `capdag dev bundle-rehash` and sign what it writes");
+    Ok(Exit::Ok)
+}
+
+/// Take the hashes of the cartridges `root`'s recorded manifest lists again,
+/// after a step that rewrote their bytes, keeping the caps the record asked of
+/// them. Starts nothing: a cartridge signed for its platform may not start
+/// outside its app. The staged tree must be the set the record lists.
+fn bundle_rehash(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
+    let mut staged = std::collections::BTreeMap::new();
+    for (key, dir) in staged_dirs(root)? {
+        let record = cartridge_record(&dir)?;
+        staged.insert(key, staged_cartridge(&dir, &record));
+    }
+    let (path, _) = crate::bundle_manifest_paths(root);
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CliError::failed(format!("{} could not be read", path.display()))
+            .context(e.to_string())
+            .hint("record it first, before the cartridges are signed: capdag dev bundle-manifest --root <dir> --environment <env>")
+    })?;
+    let recorded: crate::BundleManifest = serde_json::from_slice(&bytes)
+        .map_err(|e| CliError::failed(format!("{} is not a bundle manifest", path.display())).context(e.to_string()))?;
+    if recorded.format != crate::BUNDLE_MANIFEST_FORMAT {
+        return Err(CliError::failed(format!("{} is not a bundle manifest", path.display())).context(format!(
+            "its format is '{}', and this capdag writes '{}'",
+            recorded.format,
+            crate::BUNDLE_MANIFEST_FORMAT
+        )));
+    }
+    let manifest = crate::bundle_manifest_rehashed(&recorded, environment, &staged)
+        .map_err(|e| CliError::failed("the bundle manifest could not be hashed again").context(e.to_string()))?;
+    write_bundle_manifest(root, &manifest, "rehashed")?;
+    eprintln!("next: sign it, and put the envelope at {}", crate::bundle_manifest_paths(root).1.display());
+    Ok(Exit::Ok)
+}
+
+/// Write `manifest` as `root`'s bundle manifest, say what it lists, and put its
+/// path alone on stdout, for the build to capture what to sign.
+fn write_bundle_manifest(root: &std::path::Path, manifest: &crate::BundleManifest, done: &str) -> CliResult<()> {
     let bytes = manifest
         .to_bytes()
         .map_err(|e| CliError::failed("the bundle manifest could not be written").context(e.to_string()))?;
     let (path, signature) = crate::bundle_manifest_paths(root);
     std::fs::write(&path, &bytes)
         .map_err(|e| CliError::failed(format!("{} could not be written", path.display())).context(e.to_string()))?;
-    // A signature of an earlier build describes bytes that are gone: left, it
+    // A signature of earlier bytes describes bytes that are gone: left, it
     // would be found, fail verification and read as tampering.
     let _ = std::fs::remove_file(&signature);
-    eprintln!("wrote {} — {} cartridge(s), environment {environment}", path.display(), manifest.cartridges.len());
+    eprintln!(
+        "{done} {} — {} cartridge(s), environment {}",
+        path.display(),
+        manifest.cartridges.len(),
+        manifest.environment
+    );
     for one in &manifest.cartridges {
         eprintln!("  {} {} [{}] {}", one.name, one.version, one.channel, one.sha256);
     }
-    eprintln!("next: sign it, and put the envelope at {}", signature.display());
-    // The path alone on stdout, for the build to capture what to sign.
     println!("{}", path.display());
-    Ok(Exit::Ok)
+    Ok(())
 }
 
-/// A staged cartridge, as its `cartridge.json` and its HELLO describe it.
-async fn staged_cartridge(dir: &std::path::Path) -> CliResult<crate::StagedCartridge> {
+/// A staged cartridge's `cartridge.json`.
+fn cartridge_record(dir: &std::path::Path) -> CliResult<crate::CartridgeJson> {
     let path = dir.join("cartridge.json");
     let bytes = std::fs::read(&path)
         .map_err(|e| CliError::failed(format!("{} could not be read", path.display())).context(e.to_string()))?;
-    let record: crate::CartridgeJson = serde_json::from_slice(&bytes)
-        .map_err(|e| CliError::failed(format!("{} is not a cartridge.json", path.display())).context(e.to_string()))?;
-    let entry = record.resolve_entry_point(dir);
-    let cap_groups = crate::probe_cartridge_cap_groups(&entry).await.map_err(|e| {
-        CliError::failed(format!("{} {} could not be asked for its caps", record.name, record.version))
-            .context(e.to_string())
-    })?;
-    Ok(crate::StagedCartridge {
-        dir: dir.to_path_buf(),
-        fabric_manifest_version: record.fabric_manifest_version,
-        cap_groups,
-    })
+    serde_json::from_slice(&bytes)
+        .map_err(|e| CliError::failed(format!("{} is not a cartridge.json", path.display())).context(e.to_string()))
+}
+
+/// A staged cartridge, as its `cartridge.json` describes it.
+fn staged_cartridge(dir: &std::path::Path, record: &crate::CartridgeJson) -> crate::StagedCartridge {
+    crate::StagedCartridge { dir: dir.to_path_buf(), fabric_manifest_version: record.fabric_manifest_version }
+}
+
+/// Every cartridge staged under a bundled-cartridges root, by what its
+/// directory path says it is. A root holding none is refused: a manifest
+/// listing nothing would describe a bundle that verifies and hosts nothing.
+fn staged_dirs(root: &std::path::Path) -> CliResult<std::collections::BTreeMap<crate::StagedKey, PathBuf>> {
+    if !root.is_dir() {
+        return Err(CliError::usage(format!("--root {}: no such directory", root.display())));
+    }
+    let mut dirs = std::collections::BTreeMap::new();
+    collect_staged(root, &mut dirs)?;
+    if dirs.is_empty() {
+        return Err(CliError::failed(format!("{} holds no staged cartridges", root.display()))
+            .context("a manifest listing nothing would describe a bundle that verifies and hosts nothing"));
+    }
+    Ok(dirs)
 }
 
 /// Every `{slug}/v{n}/{channel}/{name}/{version}/` directory under a staged
 /// bundled-cartridges root that holds a cartridge.
 fn collect_staged(
     root: &std::path::Path,
-    found: &mut std::collections::BTreeMap<(String, String, String), PathBuf>,
+    found: &mut std::collections::BTreeMap<crate::StagedKey, PathBuf>,
 ) -> CliResult<()> {
     let dirs = |at: &std::path::Path| -> CliResult<Vec<PathBuf>> {
         let entries = std::fs::read_dir(at)

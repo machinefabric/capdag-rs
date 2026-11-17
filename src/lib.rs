@@ -108,8 +108,9 @@ pub use fabric_manifest_version::FABRIC_MANIFEST_VERSION;
 // verification of registry-downloaded pure-binary artifacts and signed
 // manifests against the baked root public keys.
 pub use bifaci::bundle_manifest::{
-    manifest_for as bundle_manifest_for, manifest_paths as bundle_manifest_paths, BundleError,
-    BundleManifest, BundleProof, BundledCartridge, StagedCartridge, BUNDLE_MANIFEST_FILE,
+    manifest_for as bundle_manifest_for, manifest_paths as bundle_manifest_paths,
+    rehashed as bundle_manifest_rehashed, AskedCartridge, BundleError, BundleManifest,
+    BundleProof, BundledCartridge, StagedCartridge, StagedKey, BUNDLE_MANIFEST_FILE,
     BUNDLE_MANIFEST_FORMAT, BUNDLE_MANIFEST_SIG_FILE,
 };
 pub use bifaci::registry_verdict::{

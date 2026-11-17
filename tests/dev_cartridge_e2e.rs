@@ -288,3 +288,84 @@ fn test8107_the_command_asks_the_cartridge_that_inspects_a_file() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// The `bundle.json` under a bundled-cartridges root.
+fn read_bundle_manifest(root: &Path) -> serde_json::Value {
+    let bytes = std::fs::read(root.join("bundle.json")).expect("bundle.json was written");
+    serde_json::from_slice(&bytes).expect("bundle.json is JSON")
+}
+
+// TEST8056: a build records its bundle manifest before it signs the bundled
+// cartridges for their platform, and hashes it again afterwards without
+// starting them. On macOS the build phase signs each bundled cartridge into the
+// app sandbox, and a cartridge signed so traps when anything but its app starts
+// it: asking it for its caps then fails, and the build stopped there. The
+// stand-in here is a cartridge whose entry is rewritten, after the record, into
+// one that aborts as soon as it is started.
+#[test]
+fn test8056_a_bundle_signed_for_its_platform_is_hashed_again_without_starting_a_cartridge() {
+    assert!(
+        python_runtime_available(),
+        "this e2e requires the interpreter the runtime launches cartridges with to have \
+         capdag, tagged-urn, cbor2 and ops installed: install the workspace's \
+         requirements.txt with it (`python -m pip install -r requirements.txt`)"
+    );
+    let tmp = std::env::temp_dir().join(format!("capdag-bundle-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let home = tmp.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    // Staged as a build stages a bundled cartridge:
+    // `{slug}/v{n}/{channel}/{name}/{version}/`, its cartridge.json beside it.
+    let root = tmp.join("bundled-cartridges");
+    let fabric = capdag::FABRIC_MANIFEST_VERSION;
+    let dir = root.join(format!("dev/v{fabric}/nightly/json-inspector/0.1.0"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("cartridge.py");
+    std::fs::copy(crate_dir().join("tests/fixtures/json-inspector/cartridge.py"), &entry).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let record = serde_json::json!({
+        "name": "json-inspector", "version": "0.1.0", "channel": "nightly", "registry_url": null,
+        "entry": "cartridge.py", "installed_at": "2026-11-16T00:00:00Z", "installed_from": "bundle",
+        "fabric_manifest_version": fabric,
+    });
+    std::fs::write(dir.join("cartridge.json"), serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+    let root_arg = root.to_str().unwrap();
+
+    // Recorded as soon as it is staged: the cartridge is started once and its
+    // HELLO gives the caps.
+    let (_, ok, err) = run_capdag(&home, &["dev", "bundle-manifest", "--root", root_arg, "--environment", "dev"], None);
+    assert!(ok, "recording the staged bundle failed: {err}");
+    let recorded = read_bundle_manifest(&root);
+    let recorded_entry = &recorded["cartridges"][0];
+    assert_eq!(recorded_entry["name"], "json-inspector");
+    let groups = recorded_entry["cap_groups"].as_array().expect("cap_groups is a list");
+    assert_eq!(groups.len(), 1, "the HELLO's one cap group: {recorded_entry}");
+    assert_eq!(groups[0]["adapter_urns"][0], "media:enc=utf8;fmt=json", "{recorded_entry}");
+
+    // Signed for the platform: its bytes change, and it no longer starts.
+    std::fs::write(&entry, "#!/usr/bin/env python3\nimport os\nos.abort()\n").unwrap();
+    let (_, ok, err) = run_capdag(&home, &["dev", "bundle-manifest", "--root", root_arg, "--environment", "dev"], None);
+    assert!(!ok, "a cartridge that cannot start cannot be asked for its caps");
+    assert!(err.contains("json-inspector 0.1.0 could not be asked for its caps"), "{err}");
+
+    // Hashed again: nothing is started, the caps are the recorded ones, and
+    // the hash is the signed bytes'.
+    let (_, ok, err) = run_capdag(&home, &["dev", "bundle-rehash", "--root", root_arg, "--environment", "dev"], None);
+    assert!(ok, "hashing the signed bundle again failed: {err}");
+    let sealed = read_bundle_manifest(&root);
+    let sealed_entry = &sealed["cartridges"][0];
+    assert_eq!(sealed_entry["cap_groups"], recorded_entry["cap_groups"], "the caps are carried from the record");
+    assert_eq!(sealed_entry["fabric_manifest_version"], fabric);
+    let (hash, ok, err) = run_capdag(&home, &["dev", "hash-dir", dir.to_str().unwrap()], None);
+    assert!(ok, "{err}");
+    assert_eq!(sealed_entry["sha256"], hash.as_str(), "the hash is the signed directory's");
+    assert_ne!(sealed_entry["sha256"], recorded_entry["sha256"]);
+    assert!(!root.join("bundle.json.sig").exists(), "no signature of earlier bytes is left beside it");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

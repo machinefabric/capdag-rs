@@ -24,15 +24,22 @@
 //! bundled-cartridges/bundle.json.sig   ← certificates + signature over it
 //! ```
 //!
-//! It is produced at the END of a build, after every platform signing step, so
-//! there is no ordering problem left to have.
+//! It is made in two steps, because the two things it records become known at
+//! different times. The caps are asked of each cartridge as soon as the tree is
+//! staged ([`manifest_for`]), before any platform signing: a cartridge signed
+//! into the macOS app sandbox traps when anything but its app starts it. The
+//! hashes are taken again at the END of a build, after every step that
+//! rewrites a byte ([`rehashed`]), and that is what is signed, so no platform
+//! signing step can leave the manifest describing bytes that are gone.
 //!
 //! # What a host learns from it, and when it checks the bytes
 //!
 //! Each entry records, under the signature, everything discovery decides from:
 //! the cartridge's directory hash, the fabric manifest version it was built
 //! against, and the cap groups it advertises in its HELLO (recorded by the
-//! build, which starts each cartridge once to ask). So discovering a bundle
+//! build, which starts each cartridge once to ask as soon as the tree is
+//! staged, before any platform signing: see [`manifest_for`] and
+//! [`rehashed`]). So discovering a bundle
 //! reads one signed file: it neither hashes a cartridge nor starts one, and a
 //! command that lists or plans pays for no cartridge it does not run.
 //!
@@ -188,6 +195,24 @@ pub enum BundleError {
          did not record"
     )]
     NotListed { name: String, version: String },
+    #[error(
+        "the bundle manifest records {name} {version}, and the bundle no longer holds it. The \
+         tree was staged again after the manifest was recorded: record it again \
+         (`capdag dev bundle-manifest`) before the cartridges are signed"
+    )]
+    NotStaged { name: String, version: String },
+    #[error(
+        "the bundle manifest records {name} {version} as built against fabric manifest version \
+         {recorded}, and its cartridge.json now states {staged}. The tree was staged again after \
+         the manifest was recorded: record it again (`capdag dev bundle-manifest`) before the \
+         cartridges are signed"
+    )]
+    FabricVersionRestaged {
+        name: String,
+        version: String,
+        recorded: u32,
+        staged: u32,
+    },
     #[error(
         "the bundle manifest records {name} {version} for the '{recorded}' channel, and this \
          cartridge is on the '{found}' channel"
@@ -422,42 +447,122 @@ pub fn verify_content(name: &str, version: &str, version_dir: &Path, recorded: &
     Ok(())
 }
 
-/// A cartridge a build staged, and what it advertised when the build started it.
+/// A cartridge a build staged, as its `cartridge.json` states it.
 #[derive(Debug, Clone)]
 pub struct StagedCartridge {
     pub dir: PathBuf,
     pub fabric_manifest_version: u32,
+}
+
+/// A staged cartridge, and the cap groups it advertised when the build started
+/// it.
+#[derive(Debug, Clone)]
+pub struct AskedCartridge {
+    pub staged: StagedCartridge,
     pub cap_groups: Vec<crate::CapGroup>,
 }
 
-/// Build a manifest by hashing every cartridge directory a build staged.
+/// `(name, version, channel)`: what a staged cartridge is, as its directory
+/// path in the bundled-cartridges tree says.
+pub type StagedKey = (String, String, String);
+
+/// Record a manifest by hashing every cartridge directory a build staged, with
+/// the caps each advertised when the build started it.
 ///
-/// `staged` maps `(name, version, channel)` to the cartridge. Used by the
-/// build tooling (`capdag dev bundle-manifest`); kept here so the thing that
-/// WRITES the manifest and the thing that CHECKS it hash the same way by
-/// construction.
+/// Used by the build tooling (`capdag dev bundle-manifest`); kept here so the
+/// thing that WRITES the manifest and the thing that CHECKS it hash the same
+/// way by construction.
+///
+/// A build records the manifest as soon as the tree is staged, before any step
+/// that signs the cartridges for their platform: a cartridge signed into the
+/// macOS app sandbox can no longer be started outside the app, so nothing could
+/// ask it for its caps afterwards. Each later step that rewrites a byte is
+/// followed by [`rehashed`].
 pub fn manifest_for(
     environment: &str,
-    staged: &BTreeMap<(String, String, String), StagedCartridge>,
+    asked: &BTreeMap<StagedKey, AskedCartridge>,
 ) -> Result<BundleManifest, BundleError> {
     let mut cartridges = Vec::new();
-    for ((name, version, channel), cartridge) in staged {
-        let sha256 = super::cartridge_json::hash_cartridge_directory(&cartridge.dir).map_err(|source| {
-            BundleError::Unreadable {
-                path: cartridge.dir.clone(),
-                source,
-            }
-        })?;
-        cartridges.push(BundledCartridge {
-            name: name.clone(),
-            version: version.clone(),
-            channel: channel.clone(),
-            sha256,
-            fabric_manifest_version: cartridge.fabric_manifest_version,
-            cap_groups: cartridge.cap_groups.clone(),
+    for (key, cartridge) in asked {
+        cartridges.push(bundled(key, &cartridge.staged, cartridge.cap_groups.clone())?);
+    }
+    Ok(BundleManifest::new(environment, cartridges))
+}
+
+/// The manifest `recorded` describes, with every cartridge's directory hashed
+/// again as it is staged now.
+///
+/// What a build does after a step that rewrote the cartridges' bytes, such as
+/// signing them for their platform: the hashes the record took describe bytes
+/// that are gone, and the caps it took cannot be asked again, because the
+/// cartridges may no longer start outside their app. Nothing is started here.
+/// The caps are carried from the record, so the cartridge's own HELLO stays
+/// their only source.
+///
+/// The record vouches only for the cartridges it recorded, so the staged tree
+/// must be that same set: a cartridge staged since is refused as unlisted, one
+/// that is gone is refused, and so is one whose `cartridge.json` now names
+/// another fabric manifest version. Each of those means the tree was staged
+/// again after the record, and the record must be taken again from it.
+pub fn rehashed(
+    recorded: &BundleManifest,
+    environment: &str,
+    staged: &BTreeMap<StagedKey, StagedCartridge>,
+) -> Result<BundleManifest, BundleError> {
+    if recorded.environment != environment {
+        return Err(BundleError::WrongEnvironment {
+            manifest: recorded.environment.clone(),
+            build: environment.to_string(),
+        });
+    }
+    let mut cartridges = Vec::new();
+    for (key, cartridge) in staged {
+        let (name, version, channel) = key;
+        let entry = recorded.admit(name, version, channel)?;
+        if entry.fabric_manifest_version != cartridge.fabric_manifest_version {
+            return Err(BundleError::FabricVersionRestaged {
+                name: name.clone(),
+                version: version.clone(),
+                recorded: entry.fabric_manifest_version,
+                staged: cartridge.fabric_manifest_version,
+            });
+        }
+        cartridges.push(bundled(key, cartridge, entry.cap_groups.clone())?);
+    }
+    if let Some(gone) = recorded
+        .cartridges
+        .iter()
+        .find(|one| !staged.contains_key(&(one.name.clone(), one.version.clone(), one.channel.clone())))
+    {
+        return Err(BundleError::NotStaged {
+            name: gone.name.clone(),
+            version: gone.version.clone(),
         });
     }
     Ok(BundleManifest::new(environment, cartridges))
+}
+
+/// One staged cartridge's entry: its directory hashed as it is now, with the
+/// cap groups the build learned from its HELLO.
+fn bundled(
+    (name, version, channel): &StagedKey,
+    cartridge: &StagedCartridge,
+    cap_groups: Vec<crate::CapGroup>,
+) -> Result<BundledCartridge, BundleError> {
+    let sha256 = super::cartridge_json::hash_cartridge_directory(&cartridge.dir).map_err(|source| {
+        BundleError::Unreadable {
+            path: cartridge.dir.clone(),
+            source,
+        }
+    })?;
+    Ok(BundledCartridge {
+        name: name.clone(),
+        version: version.clone(),
+        channel: channel.clone(),
+        sha256,
+        fabric_manifest_version: cartridge.fabric_manifest_version,
+        cap_groups,
+    })
 }
 
 #[cfg(test)]
