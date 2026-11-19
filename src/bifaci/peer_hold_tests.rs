@@ -77,7 +77,8 @@ async fn read_argument(input: &mut mpsc::UnboundedReceiver<Frame>) -> Vec<u8> {
 
 /// Peer-calls [`PROVIDED_CAP`] with what it was given, `copies` times over,
 /// and answers `ok:<the peer's answer>`, or `err:<CODE>:<message>` with the
-/// ERR the peer call ended with.
+/// ERR the peer call ended with — followed by `|hint:<hint>` when that ERR
+/// carried one.
 #[derive(Debug)]
 struct Caller {
     copies: usize,
@@ -98,7 +99,10 @@ impl FrameHandler for Caller {
             Err(e) => format!("call:{e}"),
             Ok(response) => match response.collect_bytes().await {
                 Ok(answer) => format!("ok:{}", String::from_utf8_lossy(&answer)),
-                Err(StreamError::RemoteError { code, message, .. }) => format!("err:{code}:{message}"),
+                Err(StreamError::RemoteError { code, message, hint: None, .. }) => format!("err:{code}:{message}"),
+                Err(StreamError::RemoteError { code, message, hint: Some(hint), .. }) => {
+                    format!("err:{code}:{message}|hint:{hint}")
+                }
                 Err(e) => format!("stream:{e}"),
             },
         };
@@ -224,6 +228,15 @@ fn expiry() -> PeerRefusal {
         code: "TEST_PROVIDER_TIMEOUT".to_string(),
         class: crate::failure::AttributionClass::Environment,
         message: "testcartridge, which provides peer-provided, was not started in time".to_string(),
+        hint: Some("capdag cartridge install testcartridge, then run the command again".to_string()),
+    }
+}
+
+/// What [`Caller`] answers when its peer call ends with `refusal`'s ERR.
+fn answered_with(refusal: &PeerRefusal) -> String {
+    match &refusal.hint {
+        Some(hint) => format!("err:{}:{}|hint:{hint}", refusal.code, refusal.message),
+        None => format!("err:{}:{}", refusal.code, refusal.message),
     }
 }
 
@@ -250,6 +263,7 @@ impl PeerProvider for TestProvider {
                         code: "TEST_ATTACH_FAILED".to_string(),
                         class: crate::failure::AttributionClass::Internal,
                         message: e.to_string(),
+                        hint: None,
                     })
             }),
             on_expiry: expiry(),
@@ -348,23 +362,23 @@ async fn test463_held_peer_call_is_answered_once_its_provider_is_brought() {
 }
 
 // TEST464: A provider that cannot bring what serves the cap ends the held
-// call with its own ERR — its code and its message, which name what is
-// missing and what to do.
+// call with its own ERR — its code, its message naming what is missing, and
+// its hint, the command that brings it, as the ERR's own hint.
 #[tokio::test]
 async fn test464_refused_provision_ends_the_call_with_the_providers_err() {
     let refusal = PeerRefusal {
         code: "CARTRIDGE_INSTALL_FAILED".to_string(),
         class: crate::failure::AttributionClass::Environment,
-        message: "testcartridge provides peer-provided and is not installed; \
-                  install it with: capdag cartridge install testcartridge"
-            .to_string(),
+        message: "testcartridge provides peer-provided and is not installed".to_string(),
+        hint: Some("capdag cartridge install testcartridge".to_string()),
     };
     let (switch, _provider) =
         switch_with(Arc::new(Caller { copies: 1 }), Some(Bring::Refuse(refusal.clone())), ROOMY).await;
 
     assert_eq!(
         run_caller(&switch, "hello").await,
-        format!("err:{}:{}", refusal.code, refusal.message)
+        "err:CARTRIDGE_INSTALL_FAILED:testcartridge provides peer-provided and is not installed\
+         |hint:capdag cartridge install testcartridge"
     );
 }
 
@@ -386,7 +400,7 @@ async fn test465_held_call_ends_at_its_deadline_and_the_late_provider_serves_the
     let expired = expiry();
     assert_eq!(
         run_caller(&switch, "hello").await,
-        format!("err:{}:{}", expired.code, expired.message)
+        answered_with(&expired)
     );
     assert!(
         started.elapsed() < Duration::from_millis(1500),
@@ -471,7 +485,7 @@ async fn test469_provider_that_serves_something_else_ends_the_call_at_its_deadli
     let expired = expiry();
     assert_eq!(
         run_caller(&switch, "hello").await,
-        format!("err:{}:{}", expired.code, expired.message)
+        answered_with(&expired)
     );
     assert_eq!(provider.unwrap().asked.load(Ordering::SeqCst), 1);
 }

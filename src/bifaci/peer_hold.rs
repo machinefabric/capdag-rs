@@ -25,12 +25,15 @@ use crate::bifaci::frame::{Frame, FrameType, MessageId};
 /// Why a held request ends without its provider: the ERR its caller is
 /// answered with, in the vocabulary of every ERR (docs/failure-taxonomy.md).
 /// The message is for the person who reads the run's failure: it names what is
-/// missing and the command that brings it.
+/// missing; the hint, when there is something to do, is the command that
+/// brings it, and rides the ERR's own `hint` so whoever shows the failure
+/// shows it as the next thing to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerRefusal {
     pub code: String,
     pub class: crate::failure::AttributionClass,
     pub message: String,
+    pub hint: Option<String>,
 }
 
 impl PeerRefusal {
@@ -38,6 +41,9 @@ impl PeerRefusal {
     /// refusal.
     pub(crate) fn err_frame(&self, rid: &MessageId, xid: &MessageId) -> Frame {
         let mut frame = Frame::err(rid.clone(), &self.code, self.class, &self.message, None);
+        if let Some(hint) = &self.hint {
+            frame = frame.with_hint(hint);
+        }
         frame.routing_id = Some(xid.clone());
         frame
     }
@@ -246,6 +252,7 @@ impl Holds {
                  cartridge that provides it was being installed",
                 self.bound.frames, self.bound.bytes
             ),
+            hint: None,
         }
     }
 }

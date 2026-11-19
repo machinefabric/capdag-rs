@@ -49,7 +49,8 @@ pub enum StreamIoError {
     /// code + class when one arrived, `None` + `Internal` for engine-detected
     /// protocol violations. `arg_urn` is the emit source's argument
     /// attribution — the ERR frame's `arg_urn` when it carried one, `None`
-    /// otherwise (never inferred here).
+    /// otherwise (never inferred here). `hint` is the ERR frame's `hint`: what
+    /// a person does next, when the emit source said.
     #[error("Cap '{cap_urn}' failed: {details}")]
     Terminal {
         cap_urn: String,
@@ -57,6 +58,7 @@ pub enum StreamIoError {
         class: crate::failure::AttributionClass,
         details: String,
         arg_urn: Option<String>,
+        hint: Option<String>,
     },
 
     /// Writer failure — the `IncrementalWriter` returned an error while
@@ -1700,6 +1702,7 @@ impl TerminalOutput {
                         class: crate::failure::AttributionClass::Internal,
                         details: "response channel closed without END".to_string(),
                         arg_urn: None,
+                        hint: None,
                     }));
                 }
             };
@@ -1841,6 +1844,7 @@ impl TerminalOutput {
                                 frame.exit_code()
                             ),
                             arg_urn: None,
+                            hint: None,
                         }));
                     }
                     // A request that succeeded owes a stream for every
@@ -1887,6 +1891,10 @@ impl TerminalOutput {
                         details,
                         arg_urn: match frame.attribution_arg_urn() {
                             Ok(arg_urn) => arg_urn.map(str::to_string),
+                            Err(error) => return Some(Err(StreamIoError::Protocol(error))),
+                        },
+                        hint: match frame.error_hint() {
+                            Ok(hint) => hint.map(str::to_string),
                             Err(error) => return Some(Err(StreamIoError::Protocol(error))),
                         },
                     }));
@@ -2097,6 +2105,7 @@ pub async fn collect_response(
                                 class: crate::failure::AttributionClass::Internal,
                                 details,
                                 arg_urn: None,
+                                hint: None,
                             });
                         }
 
@@ -2206,6 +2215,10 @@ pub async fn collect_response(
                             .attribution_arg_urn()
                             .map_err(StreamIoError::Protocol)?
                             .map(str::to_string);
+                        let hint = frame
+                            .error_hint()
+                            .map_err(StreamIoError::Protocol)?
+                            .map(str::to_string);
                         emit_pipeline_log(
                             log_fn,
                             step_token_id,
@@ -2225,6 +2238,7 @@ pub async fn collect_response(
                             class,
                             details: msg,
                             arg_urn,
+                            hint,
                         });
                     }
                     FrameType::Log => {
@@ -2359,6 +2373,7 @@ pub async fn collect_response(
                     class: crate::failure::AttributionClass::Internal,
                     details,
                     arg_urn: None,
+                    hint: None,
                 });
             }
             Err(_timeout) => {

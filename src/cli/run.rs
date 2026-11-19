@@ -1314,6 +1314,12 @@ pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &Execution
             cli = cli.context(format!("code: {code} ({})", error.attribution_class()));
         }
     }
+    // The failure's own next step, when its emit source said one — a peer's
+    // refusal its step forwarded names the command that installs what is
+    // missing — and otherwise the one its class points to.
+    if let Some(hint) = error.failure_hint() {
+        return cli.hint(hint);
+    }
     cli = match (class, &name) {
         (AttributionClass::Input, Some(step)) => cli.hint(format!("see what {step} takes: capdag info {step}")),
         (AttributionClass::Environment, Some(step)) => {
@@ -1358,6 +1364,39 @@ fn one_line(message: &str) -> String {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    // TEST20152: a step whose cartridge's ERR carried a hint — a peer's
+    // refusal it forwarded, naming the command that installs the cartridge
+    // the peer call needed — ends with that hint as its `hint:` line, not the
+    // one its class would point to. Without a hint, the class's says it.
+    #[test]
+    fn test20152_a_failure_that_carries_a_hint_is_shown_with_it() {
+        let registry = FabricRegistry::new_for_test();
+        let strand = StrandPlan {
+            strand: 0,
+            plan: crate::planner::MachinePlan::new("summarize"),
+            node_names: std::collections::HashMap::new(),
+        };
+        let failure = |hint: Option<&str>| ExecutionError::CartridgeExecutionFailed {
+            cap_urn: r#"cap:in="media:enc=utf8";summarize;out="media:enc=utf8""#.to_string(),
+            code: Some("CARTRIDGE_INSTALL_FAILED".to_string()),
+            class: crate::failure::AttributionClass::Environment,
+            details: "ggufcartridge provides the inference cap and is not installed, and installing it failed"
+                .to_string(),
+            arg_urn: None,
+            hint: hint.map(str::to_string),
+        };
+
+        let hinted = explain(&registry, &strand, &failure(Some("capdag cartridge install ggufcartridge")), false);
+        assert_eq!(hinted.hint.as_deref(), Some("capdag cartridge install ggufcartridge"));
+        let shown = hinted.render(&crate::cli::term::Style::plain());
+        assert!(shown.ends_with("\nhint: capdag cartridge install ggufcartridge\n"), "{shown}");
+        assert!(shown.contains("ggufcartridge provides the inference cap"), "{shown}");
+
+        let plain = explain(&registry, &strand, &failure(None), false);
+        let hint = plain.hint.expect("an Environment failure points somewhere");
+        assert!(hint.starts_with("see which cartridge provides "), "{hint}");
+    }
 
     fn separated(line: &str) -> Vec<String> {
         let argv: Vec<String> = line.split(' ').map(str::to_string).collect();

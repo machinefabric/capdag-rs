@@ -248,6 +248,7 @@ fn failure(class: AttributionClass, code: &str, message: &str) -> Reply {
             class,
             details: message.to_string(),
             arg_urn: None,
+            hint: None,
         }),
     }
 }

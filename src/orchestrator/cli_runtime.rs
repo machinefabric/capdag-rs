@@ -743,11 +743,16 @@ impl PeerProvider for CliPeerProvider {
     }
 }
 
-/// The refusals a held peer call ends with. Each names what is missing and the
-/// command that brings it outside a run: the calling cartridge's failure shows
-/// it as the reason its step failed.
+/// The refusals a held peer call ends with. Each names what is missing, and
+/// its hint is the command that brings it outside a run when there is one: a
+/// calling cartridge that forwards the peer's error makes this refusal its
+/// step's failure, hint and all.
 fn refusal(code: &str, class: crate::failure::AttributionClass, message: String) -> PeerRefusal {
-    PeerRefusal { code: code.to_string(), class, message }
+    PeerRefusal { code: code.to_string(), class, message, hint: None }
+}
+
+fn hinted(refusal: PeerRefusal, hint: String) -> PeerRefusal {
+    PeerRefusal { hint: Some(hint), ..refusal }
 }
 
 fn run_over(cap_urn: &str) -> PeerRefusal {
@@ -759,13 +764,16 @@ fn run_over(cap_urn: &str) -> PeerRefusal {
 }
 
 fn registry_unreadable(cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
-    refusal(
-        "CARTRIDGE_REGISTRY_UNAVAILABLE",
-        crate::failure::AttributionClass::Environment,
-        format!(
-            "no cartridge this run hosts provides {cap_urn}, and the cartridge registry \
-             could not be read to find one: {error}"
+    hinted(
+        refusal(
+            "CARTRIDGE_REGISTRY_UNAVAILABLE",
+            crate::failure::AttributionClass::Environment,
+            format!(
+                "no cartridge this run hosts provides {cap_urn}, and the cartridge registry \
+                 could not be read to find one: {error}"
+            ),
         ),
+        "check the connection, then run the command again".to_string(),
     )
 }
 
@@ -786,24 +794,26 @@ fn not_provided(cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
 
 fn install_failed(id: &str, cap_urn: &str, error: &ExecutionError) -> PeerRefusal {
     if let Some((refused, dir)) = error.refused_cartridge() {
-        return refusal(
-            "CARTRIDGE_REFUSED",
-            crate::failure::AttributionClass::Environment,
-            format!(
-                "the installed {refused} in {}, which provides {cap_urn}, cannot be used: {}; \
-                 replace it with: capdag cartridge remove {refused} && capdag cartridge install {refused}",
-                dir.display(),
-                error.failure_reason()
+        return hinted(
+            refusal(
+                "CARTRIDGE_REFUSED",
+                crate::failure::AttributionClass::Environment,
+                format!(
+                    "the installed {refused} in {}, which provides {cap_urn}, cannot be used: {}",
+                    dir.display(),
+                    error.failure_reason()
+                ),
             ),
+            format!("capdag cartridge remove {refused} && capdag cartridge install {refused}"),
         );
     }
-    refusal(
-        "CARTRIDGE_INSTALL_FAILED",
-        crate::failure::AttributionClass::Environment,
-        format!(
-            "{id} provides {cap_urn} and is not installed, and installing it failed: {error}; \
-             install it with: capdag cartridge install {id}"
+    hinted(
+        refusal(
+            "CARTRIDGE_INSTALL_FAILED",
+            crate::failure::AttributionClass::Environment,
+            format!("{id} provides {cap_urn} and is not installed, and installing it failed: {error}"),
         ),
+        format!("capdag cartridge install {id}"),
     )
 }
 
@@ -816,23 +826,31 @@ fn start_failed(source: &PeerSource, cap_urn: &str, error: &ExecutionError) -> P
 }
 
 fn not_ready_in_time(source: &PeerSource, cap_urn: &str, deadline: std::time::Duration) -> PeerRefusal {
-    let message = match source {
-        PeerSource::Registry(id) => format!(
-            "{id}, which provides {cap_urn}, was not installed and started within {} s; \
-             install it with: capdag cartridge install {id}, then run this again",
-            deadline.as_secs()
+    let (message, hint) = match source {
+        PeerSource::Registry(id) => (
+            format!(
+                "{id}, which provides {cap_urn}, was not installed and started within {} s",
+                deadline.as_secs()
+            ),
+            Some(format!("capdag cartridge install {id}, then run the command again")),
         ),
-        PeerSource::Dev(path) => format!(
-            "the dev cartridge {}, which provides {cap_urn}, was not started within {} s",
-            path.display(),
-            deadline.as_secs()
+        PeerSource::Dev(path) => (
+            format!(
+                "the dev cartridge {}, which provides {cap_urn}, was not started within {} s",
+                path.display(),
+                deadline.as_secs()
+            ),
+            None,
         ),
     };
-    refusal(
-        crate::bifaci::peer_hold::PEER_PROVIDER_TIMEOUT,
-        crate::failure::AttributionClass::Environment,
-        message,
-    )
+    PeerRefusal {
+        hint,
+        ..refusal(
+            crate::bifaci::peer_hold::PEER_PROVIDER_TIMEOUT,
+            crate::failure::AttributionClass::Environment,
+            message,
+        )
+    }
 }
 
 fn provider_name(source: &PeerSource) -> String {

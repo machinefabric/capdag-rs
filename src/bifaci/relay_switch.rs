@@ -4916,6 +4916,7 @@ async fn bring_provider(
                     "no cartridge providing {cap_urn} was found within {} s",
                     deadline.as_secs()
                 ),
+                hint: None,
             })
         }
         Ok(Err(refusal)) => return Settlement::Refused(refusal),
@@ -4933,6 +4934,7 @@ async fn bring_provider(
                     code: "PEER_PROVIDER_FAILED".to_string(),
                     class: crate::failure::AttributionClass::Internal,
                     message: format!("bringing the provider of {cap_urn} stopped: {join}"),
+                    hint: None,
                 })
             }
         }
@@ -4942,6 +4944,7 @@ async fn bring_provider(
                     code: "PEER_PROVIDER_FAILED".to_string(),
                     class: crate::failure::AttributionClass::Internal,
                     message: "the relay switch closed while the provider was brought".to_string(),
+                    hint: None,
                 });
             };
             if switch.find_route_for_cap(cap_urn, None).await.is_some() {

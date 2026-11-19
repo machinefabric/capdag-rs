@@ -865,6 +865,21 @@ impl Frame {
         frame
     }
 
+    /// The same ERR frame with the emitter's `hint`: the next thing a person
+    /// does about the failure, such as the command that installs what is
+    /// missing (`capdag cartridge install ggufcartridge`). A hint is advice,
+    /// not identity: it changes neither the code nor the class. The key is
+    /// ABSENT when the emitter has none, never an empty string
+    /// (`../docs/12.2-frame-protocol.md`).
+    pub fn with_hint(mut self, hint: &str) -> Self {
+        assert_eq!(self.frame_type, FrameType::Err, "only an ERR frame carries a hint");
+        assert!(!hint.trim().is_empty(), "ERR hint must be nonempty when present");
+        self.meta
+            .get_or_insert_with(BTreeMap::new)
+            .insert("hint".to_string(), ciborium::Value::Text(hint.to_string()));
+        self
+    }
+
     /// Create a HEARTBEAT frame for health monitoring.
     /// Either side can send; receiver must respond with HEARTBEAT using the same ID.
     pub fn heartbeat(id: MessageId) -> Self {
@@ -1272,6 +1287,23 @@ impl Frame {
             }
             ciborium::Value::Text(_) => Err("diagnostic arg_urn must not be empty".to_string()),
             _ => Err("diagnostic arg_urn must be text when present".to_string()),
+        }
+    }
+
+    /// The emitter's hint on an ERR frame: what a person does next. `None`
+    /// when the emitter gave none; a hint that is not text, or is empty, is a
+    /// protocol violation by the emitter, never read as no hint.
+    pub fn error_hint(&self) -> Result<Option<&str>, String> {
+        if self.frame_type != FrameType::Err {
+            return Err(format!("{:?} frames do not carry a hint", self.frame_type));
+        }
+        let Some(value) = self.meta.as_ref().and_then(|meta| meta.get("hint")) else {
+            return Ok(None);
+        };
+        match value {
+            ciborium::Value::Text(hint) if !hint.trim().is_empty() => Ok(Some(hint.as_str())),
+            ciborium::Value::Text(_) => Err("ERR hint must not be empty".to_string()),
+            _ => Err("ERR hint must be text when present".to_string()),
         }
     }
 
@@ -2186,6 +2218,53 @@ mod tests {
         assert_eq!(decoded.error_message(), Some("prompt too large"));
     }
 
+    /// TEST7188: an ERR frame's hint — what a person does next — crosses the
+    /// wire codec verbatim beside code, class and message; an ERR without
+    /// one carries no `hint` key; a hint that is empty or not text is the
+    /// emitter's protocol violation, never read as no hint.
+    #[test]
+    fn test7188_err_frame_hint_round_trip() {
+        use crate::bifaci::io::{decode_frame, encode_frame};
+        use crate::failure::AttributionClass;
+
+        let frame = Frame::err(
+            MessageId::new_uuid(),
+            "CARTRIDGE_INSTALL_FAILED",
+            AttributionClass::Environment,
+            "ggufcartridge is not installed, and installing it failed",
+            None,
+        )
+        .with_hint("capdag cartridge install ggufcartridge");
+        let decoded = decode_frame(&encode_frame(&frame).expect("encode")).expect("decode");
+        assert_eq!(
+            decoded.meta.as_ref().expect("ERR frame has meta").get("hint"),
+            Some(&ciborium::Value::Text("capdag cartridge install ggufcartridge".to_string())),
+            "the wire meta map carries the hint key verbatim"
+        );
+        assert_eq!(decoded.error_hint(), Ok(Some("capdag cartridge install ggufcartridge")));
+        assert_eq!(decoded.error_code(), Some("CARTRIDGE_INSTALL_FAILED"));
+        assert_eq!(decoded.attribution_class(), Ok(AttributionClass::Environment));
+        assert_eq!(
+            decoded.error_message(),
+            Some("ggufcartridge is not installed, and installing it failed")
+        );
+
+        let plain = Frame::err(MessageId::new_uuid(), "X", AttributionClass::Internal, "m", None);
+        let plain = decode_frame(&encode_frame(&plain).expect("encode")).expect("decode");
+        assert!(!plain.meta.as_ref().unwrap().contains_key("hint"), "no hint, no key");
+        assert_eq!(plain.error_hint(), Ok(None));
+
+        let mut empty = plain.clone();
+        empty.meta.as_mut().unwrap().insert("hint".to_string(), ciborium::Value::Text(" ".to_string()));
+        assert!(empty.error_hint().is_err(), "an empty hint is a violation");
+        let mut number = plain;
+        number.meta.as_mut().unwrap().insert("hint".to_string(), ciborium::Value::Integer(1.into()));
+        assert!(number.error_hint().is_err(), "a hint that is not text is a violation");
+
+        let log = Frame::log(MessageId::new_uuid(), "warn", AttributionClass::Internal, "m", None);
+        assert!(log.error_hint().is_err(), "only an ERR carries a hint");
+    }
+
     // TEST7117: non-progress LOG carries the same source attribution tuple as
     // ERR, including an optional argument URN, through the actual wire codec.
     #[test]
@@ -2270,6 +2349,7 @@ mod tests {
             class: AttributionClass::Input,
             details: "prompt too large".to_string(),
             arg_urn: Some("media:prompt;textable".to_string()),
+            hint: None,
         };
         assert_eq!(attributed.failure_arg_urn(), Some("media:prompt;textable"));
         let unattributed = ExecutionError::CartridgeExecutionFailed {
@@ -2278,6 +2358,7 @@ mod tests {
             class: AttributionClass::Resource,
             details: "no VRAM".to_string(),
             arg_urn: None,
+            hint: None,
         };
         assert_eq!(unattributed.failure_arg_urn(), None);
         // A variant with no attribution channel is never about one argument.

@@ -217,7 +217,8 @@ pub enum ExecutionError {
     /// failures carry `None` + `Internal`. `arg_urn` is the emit source's
     /// argument attribution (the media URN of the ONE argument the failure
     /// is about), threaded from the ERR frame; `None` when the source did
-    /// not attribute — never inferred here.
+    /// not attribute — never inferred here. `hint` is what a person does
+    /// next, threaded from the ERR frame's `hint` when the source gave one.
     #[error("Cartridge execution failed for cap {cap_urn}: {details}")]
     CartridgeExecutionFailed {
         cap_urn: String,
@@ -225,6 +226,7 @@ pub enum ExecutionError {
         class: crate::failure::AttributionClass,
         details: String,
         arg_urn: Option<String>,
+        hint: Option<String>,
     },
 
     /// A cap emitted an output STREAM_START whose media URN violates its
@@ -365,6 +367,17 @@ impl ExecutionError {
         match self {
             ExecutionError::StepFailed { source, .. } => source.failure_arg_urn(),
             ExecutionError::CartridgeExecutionFailed { arg_urn, .. } => arg_urn.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// What a person does next, when the emit source put a hint on its ERR
+    /// frame. Every other variant returns `None` — never a guess; whoever
+    /// shows the failure says its own next step then.
+    pub fn failure_hint(&self) -> Option<&str> {
+        match self {
+            ExecutionError::StepFailed { source, .. } => source.failure_hint(),
+            ExecutionError::CartridgeExecutionFailed { hint, .. } => hint.as_deref(),
             _ => None,
         }
     }
@@ -624,6 +637,7 @@ pub(crate) fn topological_sort_steps(steps: &[ResolvedStep]) -> Result<Vec<usize
             class: crate::failure::AttributionClass::Internal,
             details: "Cycle detected in graph".to_string(),
             arg_urn: None,
+            hint: None,
         });
     }
 
@@ -974,6 +988,7 @@ impl CartridgeManager {
                 class: crate::failure::AttributionClass::Environment,
                 details: format!("Failed to spawn cartridge: {}", e),
                 arg_urn: None,
+                hint: None,
             })?;
 
         let stdin = child.stdin.take().unwrap();
@@ -1199,6 +1214,7 @@ impl CartridgeManager {
                     class: crate::failure::AttributionClass::Environment,
                     details: format!("Dev binary not found: {:?}", path),
                     arg_urn: None,
+                    hint: None,
                 });
             }
             return Ok(path);
@@ -1469,6 +1485,7 @@ impl CartridgeManager {
                     binary_path, e
                 ),
                 arg_urn: None,
+                hint: None,
             }
         })?;
         self.verify_binary_against_manifest(&registry_url, cartridge_id, &binary, &bytes)
@@ -1484,6 +1501,7 @@ impl CartridgeManager {
                     binary_path, e
                 ),
                 arg_urn: None,
+                hint: None,
             })
     }
 
@@ -3073,12 +3091,14 @@ async fn run_step_chain(
             class,
             details,
             arg_urn,
+            hint,
         } => ExecutionError::CartridgeExecutionFailed {
             cap_urn,
             code,
             class,
             details,
             arg_urn,
+            hint,
         }
         .at_step(&last_step_token_id),
         // An effect-contract violation keeps its typed identity (the audit
@@ -3834,6 +3854,7 @@ async fn forward_frames(
                                 class: crate::failure::AttributionClass::Internal,
                                 details,
                                 arg_urn: None,
+                                hint: None,
                             });
                         }
                         // A request that succeeded owes a stream for every
@@ -3959,6 +3980,15 @@ async fn forward_frames(
                                 ))
                             })?
                             .map(str::to_string);
+                        let hint = frame
+                            .error_hint()
+                            .map_err(|error| {
+                                ExecutionError::HostError(format!(
+                                    "Cap '{}' emitted an invalid ERR frame: {}",
+                                    prev_cap_urn, error
+                                ))
+                            })?
+                            .map(str::to_string);
                         if let Some(lfn) = &log_fn {
                             let mut record = PipelineLogRecord::attributed(
                                 prev_step_token_id,
@@ -3977,6 +4007,7 @@ async fn forward_frames(
                             class,
                             details: msg,
                             arg_urn,
+                            hint,
                         });
                     }
                     _ => {}
@@ -4672,6 +4703,7 @@ mod tests {
             class: AttributionClass::Resource,
             details: "disk full".to_string(),
             arg_urn: None,
+            hint: None,
         }
         .at_step(&"tok-7".parse().unwrap());
         let cause = CollateralCause::of(&failure);

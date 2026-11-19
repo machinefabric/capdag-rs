@@ -98,6 +98,10 @@ pub enum RuntimeError {
         /// "not about one argument"; no layer ever infers it downstream
         /// (docs/failure-taxonomy.md).
         arg_urn: Option<String>,
+        /// What a person does next, when the emit source can say: the
+        /// command that brings what is missing. Carried to the ERR frame's
+        /// `hint` and from there to whoever shows the failure.
+        hint: Option<String>,
     },
 
     #[error("Cap URN parse error: {0}")]
@@ -170,6 +174,17 @@ impl RuntimeError {
         }
     }
 
+    /// What a person does next, when the emit source said — or, for a peer's
+    /// error forwarded unchanged, when the peer's ERR said. `None` everywhere
+    /// else — never a guess.
+    pub fn failure_hint(&self) -> Option<&str> {
+        match self {
+            RuntimeError::Classified { hint, .. } => hint.as_deref(),
+            RuntimeError::Stream(StreamError::RemoteError { hint, .. }) => hint.as_deref(),
+            _ => None,
+        }
+    }
+
     /// The LEAF human reason — the origin's own message for classified
     /// failures, the Display chain otherwise.
     pub fn failure_reason(&self) -> String {
@@ -195,6 +210,7 @@ impl RuntimeError {
             class,
             message: message.into(),
             arg_urn: None,
+            hint: None,
         }
     }
 
@@ -208,6 +224,21 @@ impl RuntimeError {
             RuntimeError::Classified { arg_urn, .. } => *arg_urn = Some(urn.into()),
             other => panic!(
                 "with_arg_urn on unclassified RuntimeError::{:?} — attribute at a classified emit source only",
+                other
+            ),
+        }
+        self
+    }
+
+    /// Say what a person does next about a classified failure — the command
+    /// that brings what is missing. Only classified variants carry a hint;
+    /// calling this on any other variant is a contract violation and panics
+    /// (a hint without a classification cannot reach the wire).
+    pub fn with_hint(mut self, text: impl Into<String>) -> Self {
+        match &mut self {
+            RuntimeError::Classified { hint, .. } => *hint = Some(text.into()),
+            other => panic!(
+                "with_hint on unclassified RuntimeError::{:?} — give a hint at a classified emit source only",
                 other
             ),
         }
@@ -389,18 +420,21 @@ impl FrameStdout {
 pub type StreamMeta = BTreeMap<String, ciborium::Value>;
 
 /// Errors that can occur during stream operations.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum StreamError {
     /// The peer's ERR frame, kept STRUCTURAL: its machine-readable code, the
     /// failure class the peer's frame declared (docs/failure-taxonomy.md),
     /// its message, and the peer's argument attribution when its frame
-    /// carried one — never folded into prose.
+    /// carried one, and its hint when it gave one — never folded into prose.
+    /// A handler that cannot go on without the peer's answer returns this
+    /// error as it came (`?`), so its own ERR is the peer's.
     #[error("Remote error [{code}]: {message}")]
     RemoteError {
         code: String,
         class: crate::failure::AttributionClass,
         message: String,
         arg_urn: Option<String>,
+        hint: Option<String>,
     },
 
     #[error("Stream closed")]
@@ -424,17 +458,9 @@ pub enum StreamError {
     Protocol(String),
 }
 
-fn remote_error_fields(
-    frame: &Frame,
-) -> Result<
-    (
-        String,
-        crate::failure::AttributionClass,
-        String,
-        Option<String>,
-    ),
-    String,
-> {
+/// A peer's ERR frame as the structural error it is, or what is wrong with
+/// the frame.
+fn remote_error(frame: &Frame) -> Result<StreamError, String> {
     let code = frame
         .error_code()
         .ok_or_else(|| "ERR frame missing required text code".to_string())?
@@ -445,7 +471,8 @@ fn remote_error_fields(
         .to_string();
     let class = frame.attribution_class()?;
     let arg_urn = frame.attribution_arg_urn()?.map(str::to_string);
-    Ok((code, class, message, arg_urn))
+    let hint = frame.error_hint()?.map(str::to_string);
+    Ok(StreamError::RemoteError { code, class, message, arg_urn, hint })
 }
 
 /// Allows sending frames directly through the output channel.
@@ -2594,15 +2621,19 @@ impl FrameSender for CliFrameSender {
                 Ok(())
             }
             FrameType::Err => {
-                let (code, class, message, arg_urn) =
-                    remote_error_fields(&frame).map_err(RuntimeError::Protocol)?;
-                // Keep the frame's declared code/class/message structural —
+                let StreamError::RemoteError { code, class, message, arg_urn, hint } =
+                    remote_error(&frame).map_err(RuntimeError::Protocol)?
+                else {
+                    unreachable!("remote_error builds a RemoteError")
+                };
+                // Keep the frame's declared code/class/message/hint structural —
                 // CLI mode still owes the caller the real failure identity.
                 Err(RuntimeError::Classified {
                     code,
                     class,
                     message,
                     arg_urn,
+                    hint,
                 })
             }
             _ => {
@@ -4340,8 +4371,8 @@ fn demux_multi_stream(
                 }
 
                 FrameType::Err => {
-                    let (code, class, message, arg_urn) = match remote_error_fields(&frame) {
-                        Ok(fields) => fields,
+                    let error = match remote_error(&frame) {
+                        Ok(error) => error,
                         Err(message) => {
                             for (_, tx) in &stream_channels {
                                 let _ = tx.send(Err(StreamError::Protocol(message.clone())));
@@ -4352,20 +4383,10 @@ fn demux_multi_stream(
                     };
                     // Error all open streams
                     for (_, tx) in &stream_channels {
-                        let _ = tx.send(Err(StreamError::RemoteError {
-                            code: code.clone(),
-                            class,
-                            message: message.clone(),
-                            arg_urn: arg_urn.clone(),
-                        }));
+                        let _ = tx.send(Err(error.clone()));
                     }
                     stream_channels.clear();
-                    let _ = streams_tx.send(Err(StreamError::RemoteError {
-                        code,
-                        class,
-                        message,
-                        arg_urn,
-                    }));
+                    let _ = streams_tx.send(Err(error));
                     break;
                 }
 
@@ -4618,25 +4639,14 @@ fn demux_peer_response(
                     break;
                 }
                 FrameType::Err => {
-                    let (code, class, message, arg_urn) = match remote_error_fields(&frame) {
-                        Ok(fields) => fields,
+                    let error = match remote_error(&frame) {
+                        Ok(error) => error,
                         Err(message) => {
                             let _ = item_tx.send(protocol(message));
                             break;
                         }
                     };
-                    let _ = item_tx.send((
-                        PeerResponseItem::Data(
-                            Err(StreamError::RemoteError {
-                                code,
-                                class,
-                                message,
-                                arg_urn,
-                            }),
-                            None,
-                        ),
-                        None,
-                    ));
+                    let _ = item_tx.send((PeerResponseItem::Data(Err(error), None), None));
                     break;
                 }
                 _ => {}
@@ -5122,6 +5132,25 @@ fn is_identity_request(cap_urn: &str) -> bool {
 
 /// Dispatch an Op with a Request via WetContext.
 /// Ends every output on success (see [`ResponseOutputs::finish`]).
+/// The ERR frame a failed handler ends its request with: the failure's
+/// DECLARED identity (docs/failure-taxonomy.md) — code, class and argument
+/// attribution from the emit source when classified, HANDLER_ERROR/Internal/
+/// unattributed when the handler never declared one — and its hint when the
+/// emit source, or the peer whose error the handler forwarded, gave one.
+fn handler_err_frame(request_id: &MessageId, e: &RuntimeError) -> Frame {
+    let frame = Frame::err(
+        request_id.clone(),
+        e.failure_code().unwrap_or("HANDLER_ERROR"),
+        e.attribution_class(),
+        &e.failure_reason(),
+        e.failure_arg_urn(),
+    );
+    match e.failure_hint() {
+        Some(hint) => frame.with_hint(hint),
+        None => frame,
+    }
+}
+
 async fn dispatch_op(
     op: Box<dyn Op<()>>,
     input: InputPackage,
@@ -5144,6 +5173,7 @@ async fn dispatch_op(
                 class: e.attribution_class(),
                 message: e.failure_reason(),
                 arg_urn: e.failure_arg_urn().map(str::to_string),
+                hint: None,
             },
             None => RuntimeError::Handler(e.to_string()),
         }
@@ -5380,13 +5410,7 @@ fn spawn_handler(
                     request_id,
                     e
                 );
-                let mut err_frame = Frame::err(
-                    request_id.clone(),
-                    e.failure_code().unwrap_or("HANDLER_ERROR"),
-                    e.attribution_class(),
-                    &e.failure_reason(),
-                    e.failure_arg_urn(),
-                );
+                let mut err_frame = handler_err_frame(&request_id, &e);
                 err_frame.routing_id = routing_id;
                 if terminal.for_handler() {
                     let _ = sender.send(&err_frame);
@@ -5449,18 +5473,7 @@ fn spawn_handler(
                     request_id,
                     e
                 );
-                // The ERR frame carries the failure's DECLARED identity
-                // (docs/failure-taxonomy.md): the code, class, and argument
-                // attribution from the emit source when classified,
-                // HANDLER_ERROR/Internal/unattributed when the handler never
-                // declared one.
-                let mut err_frame = Frame::err(
-                    request_id.clone(),
-                    e.failure_code().unwrap_or("HANDLER_ERROR"),
-                    e.attribution_class(),
-                    &e.failure_reason(),
-                    e.failure_arg_urn(),
-                );
+                let mut err_frame = handler_err_frame(&request_id, &e);
                 err_frame.routing_id = routing_id;
                 let _ = sender.send(&err_frame);
             }
