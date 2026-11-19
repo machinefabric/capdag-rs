@@ -20,7 +20,7 @@ pub enum Command {
     #[command(after_help = "Examples:\n  \
         capdag model search qwen gguf\n  \
         capdag model search llava --pick          choose one; its spec is printed\n  \
-        capdag model pull $(capdag model search qwen --pick)")]
+        capdag model search qwen gguf --limit 5   the five that match best")]
     Search {
         /// Words to search for
         #[arg(value_name = "QUERY", required = true)]

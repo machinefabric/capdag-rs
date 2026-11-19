@@ -110,7 +110,7 @@ pub enum Command {
         cat report.pdf | capdag run disbind-pdf -o pages     piped input; pages written to pages/\n  \
         capdag run disbind-pdf report.pdf --index-range 1-5  the cap's own options, as it declares them\n  \
         capdag run pages.machine report.pdf -o out           a machine\n  \
-        capdag run pages.machine --input doc=@report.pdf     an input by its name in the machine\n\n\
+        capdag run pages.machine --input pdf=@report.pdf     an input by its name in the machine\n\n\
         A single result goes to stdout; several results are written as files, whose\n\
         paths are listed on stdout. Progress, logs and errors go to stderr.\n\n\
         Ctrl-C stops the run: nothing new starts, what started finishes and is written.\n\
@@ -184,7 +184,10 @@ pub enum CacheCommand {
 #[derive(Debug, Subcommand)]
 pub enum SelfCommand {
     /// Replace this capdag with its channel's latest release
-    #[command(after_help = "Examples:\n  capdag self update")]
+    #[command(after_help = "Examples:\n  capdag self update\n\n\
+        It updates a capdag installed from a downloaded release. A capdag built from source has\n\
+        no release to update from, and one installed by Homebrew, apt or dnf is updated by\n\
+        that; each says so and changes nothing.")]
     Update,
 }
 

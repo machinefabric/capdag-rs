@@ -12,8 +12,8 @@ use super::term::emit_record;
 pub enum Command {
     /// Start a cartridge project in any language capdag scaffolds
     #[command(after_help = "Examples:\n  \
-        capdag dev new sentiment --lang rust       a Rust project in ./sentiment\n  \
-        capdag dev new carts/sentiment --lang python")]
+        capdag dev new sentiment --lang python       a Python project in ./sentiment\n  \
+        capdag dev new carts/sentiment --lang rust   a Rust one, built before it is installed")]
     New {
         /// Where to make it; its last part is the cartridge's name
         #[arg(value_name = "PATH")]
