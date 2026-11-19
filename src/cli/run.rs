@@ -1404,7 +1404,7 @@ pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &Execution
             cli = cli.context(format!("code: {code} ({})", error.attribution_class()));
         }
     }
-    cli = match (class, &name) {
+    match (class, &name) {
         (AttributionClass::Input, Some(step)) => cli.hint(format!("see what {step} takes: capdag info {step}")),
         (AttributionClass::Environment, Some(step)) => {
             cli.hint(format!("see which cartridge provides {step}, and whether it is installed: capdag info {step}"))
@@ -1413,8 +1413,7 @@ pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &Execution
         (AttributionClass::User, _) => cli.hint("run it again to finish it"),
         (_, Some(step)) => cli.hint(format!("run it again with -v to see what {step}'s cartridge said; if it fails the same way, report it")),
         (_, None) => cli.hint("run it again with -v; if it fails the same way, report it"),
-    };
-    cli
+    }
 }
 
 /// An installed cartridge the run needs, and does not use: which one, why,
