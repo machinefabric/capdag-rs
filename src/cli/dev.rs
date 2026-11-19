@@ -68,7 +68,9 @@ pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
         Command::Install { dir } => install(ctx, &dir).await,
         Command::HashDir { dir } => {
             let hash = crate::hash_cartridge_directory(&dir).map_err(|e| {
-                CliError::failed(format!("{} could not be hashed", dir.display())).context(e.to_string())
+                CliError::failed(format!("{} could not be hashed", dir.display()))
+                    .context(e.to_string())
+                    .hint(format!("check that {} is a cartridge directory you may read", dir.display()))
             })?;
             println!("{hash}");
             Ok(Exit::Ok)
@@ -83,13 +85,20 @@ fn new(ctx: &Ctx, path: &std::path::Path, lang: &str) -> CliResult<Exit> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| CliError::usage(format!("'{}' names no directory to make", path.display())))?;
+        .ok_or_else(|| {
+            CliError::usage(format!("'{}' names no directory to make", path.display()))
+                .hint("name the project's directory, for example: capdag dev new my-cartridge")
+        })?;
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
     };
     let project = crate::dev::scaffold_cartridge(&name, language, &parent)
-        .map_err(|e| CliError::failed(format!("the project {} could not be made", path.display())).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("the project {} could not be made", path.display()))
+                .context(e.to_string())
+                .hint("give a directory that does not exist yet, inside one you may write: capdag dev new <dir>")
+        })?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "project", "dir": project.display().to_string(), "language": language.id }));
         return Ok(Exit::Ok);
@@ -113,7 +122,11 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
             .hint("build it first, as `capdag dev new` said; then run this again")
     })?;
     let manifest = crate::dev::read_entry_manifest(&entry)
-        .map_err(|e| CliError::failed("the cartridge's manifest could not be read").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the cartridge's manifest could not be read")
+                .context(e.to_string())
+                .hint("build the project again, as `capdag dev new` said, then run `capdag dev install` again")
+        })?;
     // A dev cartridge may declare caps the fabric does not know, but none of
     // its aliases may mean another cap upstream.
     let registry = ctx.registry().await?;
@@ -121,11 +134,19 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
         for cap in &group.caps {
             crate::dev::check_no_fabric_conflict(&registry, cap)
                 .await
-                .map_err(|e| CliError::failed("the cartridge's caps conflict with the fabric").context(e.to_string()))?;
+                .map_err(|e| {
+                    CliError::failed("the cartridge's caps conflict with the fabric")
+                        .context(e.to_string())
+                        .hint("give the cap named above an alias the fabric does not use, build the project again, then run `capdag dev install` again")
+                })?;
         }
     }
     let version_dir = crate::dev::stage_dev_cartridge(dir, &manifest, &ctx::user_cartridge_dir()?, crate::FABRIC_MANIFEST_VERSION)
-        .map_err(|e| CliError::failed("the cartridge could not be installed").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the cartridge could not be installed")
+                .context(e.to_string())
+                .hint("check that ~/.capdag/cartridges can be written, then run `capdag dev install` again")
+        })?;
     let alias = manifest
         .cap_groups
         .iter()
@@ -170,7 +191,11 @@ async fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult
         asked.insert(key, crate::AskedCartridge { staged: staged_cartridge(&dir, &record), cap_groups });
     }
     let manifest = crate::bundle_manifest_for(environment, &asked)
-        .map_err(|e| CliError::failed("the bundle manifest could not be made").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the bundle manifest could not be made")
+                .context(e.to_string())
+                .hint("fix what is said above in the staged tree, then run `capdag dev bundle-manifest` again")
+        })?;
     write_bundle_manifest(root, &manifest, "recorded")?;
     eprintln!("next: sign the cartridges for their platform, then run `capdag dev bundle-rehash` and sign what it writes");
     Ok(Exit::Ok)
@@ -192,17 +217,20 @@ fn bundle_rehash(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
             .context(e.to_string())
             .hint("record it first, before the cartridges are signed: capdag dev bundle-manifest --root <dir> --environment <env>")
     })?;
-    let recorded: crate::BundleManifest = serde_json::from_slice(&bytes)
-        .map_err(|e| CliError::failed(format!("{} is not a bundle manifest", path.display())).context(e.to_string()))?;
+    let record_again = "record it again, before the cartridges are signed: capdag dev bundle-manifest --root <dir> --environment <env>";
+    let recorded: crate::BundleManifest = serde_json::from_slice(&bytes).map_err(|e| {
+        CliError::failed(format!("{} is not a bundle manifest", path.display())).context(e.to_string()).hint(record_again)
+    })?;
     if recorded.format != crate::BUNDLE_MANIFEST_FORMAT {
         return Err(CliError::failed(format!("{} is not a bundle manifest", path.display())).context(format!(
             "its format is '{}', and this capdag writes '{}'",
             recorded.format,
             crate::BUNDLE_MANIFEST_FORMAT
-        )));
+        )))
+        .hint(record_again));
     }
     let manifest = crate::bundle_manifest_rehashed(&recorded, environment, &staged)
-        .map_err(|e| CliError::failed("the bundle manifest could not be hashed again").context(e.to_string()))?;
+        .map_err(|e| CliError::failed("the bundle manifest could not be hashed again").context(e.to_string()).hint(record_again))?;
     write_bundle_manifest(root, &manifest, "rehashed")?;
     eprintln!("next: sign it, and put the envelope at {}", crate::bundle_manifest_paths(root).1.display());
     Ok(Exit::Ok)
@@ -213,10 +241,18 @@ fn bundle_rehash(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
 fn write_bundle_manifest(root: &std::path::Path, manifest: &crate::BundleManifest, done: &str) -> CliResult<()> {
     let bytes = manifest
         .to_bytes()
-        .map_err(|e| CliError::failed("the bundle manifest could not be written").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the bundle manifest could not be written")
+                .context(e.to_string())
+                .hint("this is a defect in capdag: report it")
+        })?;
     let (path, signature) = crate::bundle_manifest_paths(root);
     std::fs::write(&path, &bytes)
-        .map_err(|e| CliError::failed(format!("{} could not be written", path.display())).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("{} could not be written", path.display()))
+                .context(e.to_string())
+                .hint(super::error::write_hint(&path, &e))
+        })?;
     // A signature of earlier bytes describes bytes that are gone: left, it
     // would be found, fail verification and read as tampering.
     let _ = std::fs::remove_file(&signature);
@@ -237,9 +273,16 @@ fn write_bundle_manifest(root: &std::path::Path, manifest: &crate::BundleManifes
 fn cartridge_record(dir: &std::path::Path) -> CliResult<crate::CartridgeJson> {
     let path = dir.join("cartridge.json");
     let bytes = std::fs::read(&path)
-        .map_err(|e| CliError::failed(format!("{} could not be read", path.display())).context(e.to_string()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| CliError::failed(format!("{} is not a cartridge.json", path.display())).context(e.to_string()))
+        .map_err(|e| {
+            CliError::failed(format!("{} could not be read", path.display()))
+                .context(e.to_string())
+                .hint(super::error::read_hint(&path, &e))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|e| {
+        CliError::failed(format!("{} is not a cartridge.json", path.display()))
+            .context(e.to_string())
+            .hint("stage the cartridge again from its build: this cartridge.json is damaged")
+    })
 }
 
 /// A staged cartridge, as its `cartridge.json` describes it.
@@ -252,13 +295,15 @@ fn staged_cartridge(dir: &std::path::Path, record: &crate::CartridgeJson) -> cra
 /// listing nothing would describe a bundle that verifies and hosts nothing.
 fn staged_dirs(root: &std::path::Path) -> CliResult<std::collections::BTreeMap<crate::StagedKey, PathBuf>> {
     if !root.is_dir() {
-        return Err(CliError::usage(format!("--root {}: no such directory", root.display())));
+        return Err(CliError::usage(format!("--root {}: no such directory", root.display()))
+            .hint("give --root the bundled-cartridges directory the build staged"));
     }
     let mut dirs = std::collections::BTreeMap::new();
     collect_staged(root, &mut dirs)?;
     if dirs.is_empty() {
         return Err(CliError::failed(format!("{} holds no staged cartridges", root.display()))
-            .context("a manifest listing nothing would describe a bundle that verifies and hosts nothing"));
+            .context("a manifest listing nothing would describe a bundle that verifies and hosts nothing")
+            .hint("stage the cartridges under it first, as <slug>/v<n>/<channel>/<name>/<version>/, then run this again"));
     }
     Ok(dirs)
 }
@@ -271,7 +316,11 @@ fn collect_staged(
 ) -> CliResult<()> {
     let dirs = |at: &std::path::Path| -> CliResult<Vec<PathBuf>> {
         let entries = std::fs::read_dir(at)
-            .map_err(|e| CliError::failed(format!("{} could not be read", at.display())).context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed(format!("{} could not be read", at.display()))
+                    .context(e.to_string())
+                    .hint(super::error::read_hint(at, &e))
+            })?;
         let mut out: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect();
         out.sort();
         Ok(out)

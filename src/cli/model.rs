@@ -60,7 +60,9 @@ pub async fn model(ctx: &Ctx, command: Command) -> CliResult<Exit> {
 
 fn json(alias: &str, bytes: &[u8]) -> CliResult<serde_json::Value> {
     serde_json::from_slice(bytes).map_err(|e| {
-        CliError::failed(format!("{alias} gave something other than JSON")).context(e.to_string())
+        CliError::failed(format!("{alias} gave something other than JSON"))
+            .context(e.to_string())
+            .hint("run it again with -v to see what the model cartridge said; if it does it again, report it")
     })
 }
 
@@ -194,7 +196,7 @@ mod tests {
     fn test20121_a_malformed_model_spec_is_refused_saying_what_one_is() {
         assert!(check_spec("hf:unsloth/Qwen3-4B-Instruct-2507-GGUF?include=x.gguf").is_ok());
         let error = check_spec("garbage").unwrap_err();
-        assert_eq!(error.problem, "'garbage' is not a model spec");
+        assert_eq!(error.problem(), "'garbage' is not a model spec");
         assert_eq!(error.exit, super::super::error::Exit::Usage);
         assert!(check_spec("hf:only-owner").is_err());
     }

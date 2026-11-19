@@ -31,6 +31,9 @@ use super::watch::{MapItems, RunWatch, StepState, Watch};
 use crate::orchestrator::observe::RunKey;
 use crate::orchestrator::run_control::{RunOutcome, RunPhase};
 
+/// What to do when the live view cannot hold the terminal.
+const WITHOUT_LIVE_VIEW: &str = "run it again with --progress plain, which shows the run a line per change";
+
 /// `--progress`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum ProgressChoice {
@@ -350,7 +353,7 @@ const KEYS_EVERY: Duration = Duration::from_millis(50);
 impl LiveView {
     fn open(style: Style) -> CliResult<Self> {
         crossterm::terminal::enable_raw_mode()
-            .map_err(|e| CliError::failed("the terminal could not be set up for the live view").context(e.to_string()))?;
+            .map_err(|e| CliError::failed("the terminal could not be set up for the live view").context(e.to_string()).hint(WITHOUT_LIVE_VIEW))?;
         let terminal = Terminal::with_options(
             InlineBackend::new(),
             TerminalOptions {
@@ -359,7 +362,7 @@ impl LiveView {
         )
         .map_err(|e| {
             let _ = crossterm::terminal::disable_raw_mode();
-            CliError::failed("the live view could not be drawn").context(e.to_string())
+            CliError::failed("the live view could not be drawn").context(e.to_string()).hint(WITHOUT_LIVE_VIEW)
         })?;
         Ok(Self {
             terminal,
@@ -409,7 +412,7 @@ impl LiveView {
         let width = self
             .terminal
             .size()
-            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?
+            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()).hint(WITHOUT_LIVE_VIEW))?
             .width;
         for line in said {
             let rows = rows_of(&strip_escapes(&line), width);
@@ -418,7 +421,7 @@ impl LiveView {
                 .insert_before(height, |buf| {
                     Paragraph::new(rows.iter().map(|row| Line::raw(row.clone())).collect::<Vec<_>>()).render(buf.area, buf)
                 })
-                .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?;
+                .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()).hint(WITHOUT_LIVE_VIEW))?;
         }
         let style = self.style;
         let selected = &mut self.selected;
@@ -430,7 +433,7 @@ impl LiveView {
                 let height = (lines.len() as u16).min(area.height);
                 frame.render_widget(Paragraph::new(lines), Rect { height, ..area });
             })
-            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?;
+            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()).hint(WITHOUT_LIVE_VIEW))?;
         Ok(())
     }
 

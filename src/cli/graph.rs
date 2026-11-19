@@ -79,9 +79,9 @@ pub async fn graph(ctx: &Ctx, args: GraphArgs) -> CliResult<Exit> {
         Format::Text => print_picture(ctx, &registry, &resolved, args.width).await?,
         Format::Mermaid | Format::Dot => {
             let working = std::env::current_dir()
-                .map_err(|e| CliError::failed("the working directory could not be read").context(e.to_string()))?;
+                .map_err(super::error::working_directory_unreadable)?;
             let id = crate::FileMachineSource::id_of(&args.machine)
-                .map_err(|e| CliError::failed("the machine file could not be read").context(e.to_string()))?;
+                .map_err(|e| super::error::machine_path_unusable(&args.machine, e))?;
             let plans = crate::orchestrator::build_plans_from_notation_from(
                 &notation,
                 registry.clone(),
@@ -89,7 +89,11 @@ pub async fn graph(ctx: &Ctx, args: GraphArgs) -> CliResult<Exit> {
                 Some(&id),
             )
             .await
-            .map_err(|e| CliError::failed(format!("{} could not be drawn", args.machine.display())).context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed(format!("{} could not be drawn", args.machine.display()))
+                    .context(e.to_string())
+                    .hint(format!("see what is wrong with it: capdag check {}", args.machine.display()))
+            })?;
             // By alias; by URN with `-v`.
             let urns = ctx.term.verbosity >= 1;
             let cap = |urn: &str| if urns { urn.to_string() } else { names::cap_urn(&registry, urn) };
@@ -133,21 +137,33 @@ async fn print_picture(
     let cap_name = |urn: &str| if urns { urn.to_string() } else { names::cap_urn(registry, urn) };
     let scenes = crate::tui::scene::planned_scenes(resolved, registry, &cap_name)
         .await
-        .map_err(|e| CliError::failed("the machine could not be drawn").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the machine could not be drawn")
+                .context(e)
+                .hint("draw it as a diagram instead with --format mermaid or --format dot; this is a defect in capdag, so report it")
+        })?;
     let mut stdout = std::io::stdout();
     for (strand, scene) in scenes.iter().enumerate() {
         let laid = match width {
             Some(width) => layout::fit(scene, width, i32::MAX, &[Arrangement::Rows, arrangement]),
             None => layout::layout(scene, &LayoutOptions { lod: Lod::Full, arrangement }),
         }
-        .map_err(|e| CliError::failed("the machine could not be laid out").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the machine could not be laid out")
+                .context(e.to_string())
+                .hint("give it more room with --width <columns>, or draw it with --format mermaid")
+        })?;
         if scenes.len() > 1 {
             let _ = writeln!(stdout, "part {}", strand + 1);
         }
         let picture = crate::tui::canvas::to_text(&crate::tui::canvas::render_whole(scene, &laid, &theme), colour);
         stdout
             .write_all(picture.as_bytes())
-            .map_err(|e| CliError::failed("the picture could not be written").context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed("the picture could not be written")
+                    .context(e.to_string())
+                    .hint("stdout closed or could not take it: send it to a terminal or a file, then run it again")
+            })?;
     }
     Ok(())
 }
@@ -187,7 +203,8 @@ pub async fn edit(ctx: &Ctx, args: EditArgs) -> CliResult<Exit> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => {
             return Err(CliError::failed(format!("the machine file '{}' could not be read", args.machine.display()))
-                .context(e.to_string()))
+                .context(e.to_string())
+                .hint(super::error::read_hint(&args.machine, &e)))
         }
     };
     let outcome = editor(ctx, args.machine.clone(), text, false, !args.inputs.is_empty()).await?;
@@ -227,28 +244,41 @@ async fn run_file(ctx: &Ctx, machine: PathBuf, inputs: Vec<String>, output: Opti
 async fn editor(ctx: &Ctx, path: PathBuf, text: String, read_only: bool, inputs_given: bool) -> CliResult<EditorOutcome> {
     let registry = ctx.registry().await?;
     let working = std::env::current_dir()
-        .map_err(|e| CliError::failed("the working directory could not be read").context(e.to_string()))?;
+        .map_err(super::error::working_directory_unreadable)?;
     // A new machine is known by where it will be written, so the machines it
     // includes are read beside it from the start.
     let machine_id = if path.is_file() {
         crate::FileMachineSource::id_of(&path)
-            .map_err(|e| CliError::failed(format!("'{}' could not be read", path.display())).context(e.to_string()))?
+            .map_err(|e| super::error::machine_path_unusable(&path, e))?
     } else {
         let parent = match path.parent() {
             Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
             _ => PathBuf::from("."),
         };
         let dir = std::fs::canonicalize(&parent).map_err(|e| {
-            CliError::failed(format!("the directory of '{}' could not be read", path.display())).context(e.to_string())
+            CliError::failed(format!("the directory of '{}' could not be read", path.display()))
+                .context(e.to_string())
+                .hint(format!("create {} first, or give the machine a path in a directory that exists", parent.display()))
         })?;
         let name = path
             .file_name()
-            .ok_or_else(|| CliError::usage(format!("'{}' names no file", path.display())))?;
+            .ok_or_else(|| {
+                CliError::usage(format!("'{}' names no file", path.display()))
+                    .hint("give the machine a file name, such as pages.machine")
+            })?;
         dir.join(name).to_string_lossy().into_owned()
     };
     let catalog = CatalogCap::from_registry(&registry)
         .await
-        .map_err(|e| CliError::failed("the capabilities could not be listed for the editor").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("the capabilities could not be listed for the editor")
+                .context(e)
+                .hint(if ctx.offline {
+                    "they are not all cached: run it once without --offline"
+                } else {
+                    "check the connection, then run it again"
+                })
+        })?;
     let spec = EditorSpec {
         path,
         text,
@@ -259,7 +289,14 @@ async fn editor(ctx: &Ctx, path: PathBuf, text: String, read_only: bool, inputs_
         catalog,
         inputs_given,
     };
-    edit_session(spec, settings(ctx))
-        .await
-        .map_err(|e| CliError::failed(if read_only { "the view stopped" } else { "the editor stopped" }).context(e.to_string()))
+    let shown = spec.path.display().to_string();
+    edit_session(spec, settings(ctx)).await.map_err(|e| {
+        CliError::failed(if read_only { "the view stopped" } else { "the editor stopped" })
+            .context(e.to_string())
+            .hint(if read_only {
+                format!("draw it without the terminal view: capdag graph {shown}")
+            } else {
+                format!("edit {shown} in any editor, then: capdag check {shown}")
+            })
+    })
 }

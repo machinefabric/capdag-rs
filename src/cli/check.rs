@@ -30,7 +30,9 @@ pub fn read_machine(path: &Path) -> CliResult<String> {
             .hint("`capdag plan <files> --to <type> --save <file>` writes one"));
     }
     std::fs::read_to_string(path).map_err(|e| {
-        CliError::failed(format!("the machine file '{}' could not be read", path.display())).context(e.to_string())
+        CliError::failed(format!("the machine file '{}' could not be read", path.display()))
+            .context(e.to_string())
+            .hint(super::error::read_hint(path, &e))
     })
 }
 
@@ -38,10 +40,8 @@ pub fn read_machine(path: &Path) -> CliResult<String> {
 /// and where. Machines it includes are read relative to it.
 pub async fn resolve(registry: &Arc<FabricRegistry>, path: &Path, notation: &str) -> CliResult<ResolvedNotation> {
     let working = std::env::current_dir()
-        .map_err(|e| CliError::failed("the working directory could not be read").context(e.to_string()))?;
-    let id = crate::FileMachineSource::id_of(path).map_err(|e| {
-        CliError::failed(format!("the machine file '{}' could not be read", path.display())).context(e.to_string())
-    })?;
+        .map_err(super::error::working_directory_unreadable)?;
+    let id = crate::FileMachineSource::id_of(path).map_err(|e| super::error::machine_path_unusable(path, e))?;
     let machines = crate::FileMachineSource::new(working);
     // Parsed first on its own, so a mistake in it is told by what it is — a
     // name that is no capability, a statement that does not parse — not by
@@ -53,9 +53,15 @@ pub async fn resolve(registry: &Arc<FabricRegistry>, path: &Path, notation: &str
     }
     ResolvedNotation::resolve_from(notation, registry.clone(), &machines, Some(&id))
         .await
-        .map_err(|e| {
-            CliError::failed(format!("{} is not a machine that can run", path.display())).context(e.to_string())
-        })
+        .map_err(|e| cannot_run(path, e))
+}
+
+/// A machine that parses and cannot run as written: what is wrong, and to fix
+/// it where it is said and check it again.
+pub fn cannot_run(path: &Path, error: impl std::fmt::Display) -> CliError {
+    CliError::failed(format!("{} is not a machine that can run", path.display()))
+        .context(error.to_string())
+        .hint(format!("fix what is said above in {}, then check it again: capdag check {}", path.display(), path.display()))
 }
 
 /// A machine that does not parse: what is wrong, and — for a name that is no
@@ -78,13 +84,15 @@ fn not_a_machine(registry: &FabricRegistry, path: &Path, error: &crate::machine:
 /// A machine, shown: its inputs, its steps in alias form, its outputs.
 pub async fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, path: &Path, notation: &str) -> CliResult<Exit> {
     let resolved = resolve(registry, path, notation).await?;
-    let failed = |e: crate::orchestrator::ParseOrchestrationError| {
-        CliError::failed(format!("{} is not a machine that can run", path.display())).context(e.to_string())
-    };
+    let failed = |e: crate::orchestrator::ParseOrchestrationError| cannot_run(path, e);
     let inputs = resolved.inputs().map_err(failed)?;
     let outputs = resolved.outputs().map_err(failed)?;
     let aliased = names::machine(registry, resolved.machine())
-        .map_err(|e| CliError::failed(format!("{} could not be written in alias form", path.display())).context(e))?;
+        .map_err(|e| {
+            CliError::failed(format!("{} could not be written in alias form", path.display()))
+                .context(e)
+                .hint(format!("this is a defect in capdag: report it, with {}", path.display()))
+        })?;
     if ctx.term.json {
         emit_record(&serde_json::json!({
             "type": "machine",

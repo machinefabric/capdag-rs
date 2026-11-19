@@ -116,7 +116,11 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let max_depth = args.depth.unwrap_or(p::PlanRequest::DEFAULT_MAX_DEPTH);
     let discovered = fab
         .discover_convergent_targets(&sources, max_depth)
-        .map_err(|e| CliError::failed(format!("what {what} can become could not be worked out")).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("what {what} can become could not be worked out"))
+                .context(e.to_string())
+                .hint("plan one kind of file at a time: capdag plan <file>; if one file fails the same way, report it")
+        })?;
     if discovered.targets.is_empty() {
         return Err(CliError::failed(format!("no capability takes {what}"))
             .hint("see which capabilities there are: capdag caps"));
@@ -147,7 +151,11 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let request = request(&args, sources.clone(), targets.clone())?;
     let outcome = fab
         .plan(&request, registry.as_ref())
-        .map_err(|e| CliError::failed("no machine could be planned").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("no machine could be planned")
+                .context(e.to_string())
+                .hint(format!("see what the files can become, and pick a target from it: capdag plan {}", args.files.join(" ")))
+        })?;
     let target_names = targets.iter().map(|t| names::media(&registry, t)).collect::<Vec<_>>().join(", ");
     if outcome.candidates.is_empty() {
         return Err(CliError::failed(format!("no machine makes {target_names} of {what}"))
@@ -207,7 +215,9 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                 .hint("pass --force to replace it, or --save another file"));
         }
         std::fs::write(path, format!("{}\n", machine.notation)).map_err(|e| {
-            CliError::failed(format!("the machine could not be saved to {}", path.display())).context(e.to_string())
+            CliError::failed(format!("the machine could not be saved to {}", path.display()))
+                .context(e.to_string())
+                .hint(super::error::write_hint(path, &e))
         })?;
         if ctx.term.json {
             emit_record(&serde_json::json!({ "type": "saved", "file": path.display().to_string(), "notation": machine.notation }));
@@ -234,10 +244,18 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         None => {
             let dir = std::env::temp_dir().join(format!("capdag-plan-{}", std::process::id()));
             std::fs::create_dir_all(&dir)
-                .map_err(|e| CliError::failed("a place for the planned machine could not be made").context(e.to_string()))?;
+                .map_err(|e| {
+                    CliError::failed("a place for the planned machine could not be made")
+                        .context(e.to_string())
+                        .hint(format!("save it instead, then run it: --save <file>, then capdag run <file> {}", args.files.join(" ")))
+                })?;
             let path = dir.join(format!("{}.machine", inputs::stem(&files[0])));
             std::fs::write(&path, &machine.notation)
-                .map_err(|e| CliError::failed("the planned machine could not be written").context(e.to_string()))?;
+                .map_err(|e| {
+                    CliError::failed("the planned machine could not be written")
+                        .context(e.to_string())
+                        .hint(format!("save it instead, then run it: --save <file>, then capdag run <file> {}", args.files.join(" ")))
+                })?;
             (path, Some(dir))
         }
     };
@@ -283,7 +301,8 @@ fn request(args: &Args, sources: Vec<p::SourceSpec>, targets: Vec<MediaUrn>) -> 
             Some(Ok(depth)) => p::ConvergenceLocation::AtDepth(depth),
             _ => {
                 return Err(CliError::usage(format!("--where '{other}' is not a place converging paths meet"))
-                    .context("it is auto, earliest, latest, source, target or depth=<n>"))
+                    .context("it is auto, earliest, latest, source, target or depth=<n>")
+                    .hint("for example: --where earliest, or --where depth=2"))
             }
         },
     };
@@ -480,9 +499,17 @@ impl Planned {
 async fn describe(registry: &Arc<FabricRegistry>, bundled: &[CapUrn], candidate: &p::PlanCandidate) -> CliResult<Planned> {
     let machine = crate::machine::parse_machine_async(&candidate.notation, registry)
         .await
-        .map_err(|e| CliError::failed("a planned machine could not be read back").context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed("a planned machine could not be read back")
+                .context(e.to_string())
+                .hint("this is a defect in capdag: report it, with the files and the --to you gave")
+        })?;
     let notation = names::machine(registry, &machine)
-        .map_err(|e| CliError::failed("a planned machine could not be written in alias form").context(e))?;
+        .map_err(|e| {
+            CliError::failed("a planned machine could not be written in alias form")
+                .context(e)
+                .hint("this is a defect in capdag: report it, with the files and the --to you gave")
+        })?;
     let mut model = false;
     let mut downloads = false;
     for strand in machine.strands() {

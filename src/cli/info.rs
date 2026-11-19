@@ -93,7 +93,11 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
         // The definition is written as the fabric publishes it, its fields in
         // their declared order: cartridges' builds embed it as it is.
         let definition = serde_json::to_string(cap)
-            .map_err(|e| CliError::failed(format!("{alias} could not be written as JSON")).context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed(format!("{alias} could not be written as JSON"))
+                    .context(e.to_string())
+                    .hint(format!("read it as text meanwhile: capdag info {alias}; this is a defect in capdag, so report it"))
+            })?;
         let head = serde_json::json!({
             "type": "cap",
             "alias": alias,
@@ -109,7 +113,11 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
     let media = |urn: &str| names::media_urn(registry, urn);
     let interface = InterfaceNames { cap: alias.clone(), media: &media, urns: ctx.term.verbosity >= 1 };
     let text = render_cap_interface(cap, &interface)
-        .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e))?;
+        .map_err(|e| {
+            CliError::failed(format!("{alias} could not be shown"))
+                .context(e)
+                .hint(format!("read its definition as JSON: capdag info {alias} --json"))
+        })?;
     print!("{text}");
     if let Some(description) = cap.cap_description.as_deref().filter(|d| !d.trim().is_empty()) {
         println!("\n{}", description.trim());
@@ -133,7 +141,7 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
                     None => println!("No cartridge in the registry provides it."),
                 }
             }
-            Err(e) => println!("Its cartridge could not be looked up: {}", e.problem),
+            Err(e) => println!("Its cartridge could not be looked up: {}. {}", e.problem(), e.hint()),
         },
     }
     let takes_input = synthesize_single_cap_notation(cap)
@@ -149,7 +157,9 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
 
 async fn show_media(ctx: &Ctx, registry: &crate::FabricRegistry, media: &crate::MediaUrn) -> CliResult<()> {
     let def = registry.get_media_def(&media.to_string()).await.map_err(|e| {
-        CliError::failed(format!("the media type {} could not be read", names::media(registry, media))).context(e.to_string())
+        CliError::failed(format!("the media type {} could not be read", names::media(registry, media)))
+            .context(e.to_string())
+            .hint(super::ctx::registry_hint(&e))
     })?;
     let caps = ctx.fabric_caps(registry).await?;
     let takes: Vec<String> = caps

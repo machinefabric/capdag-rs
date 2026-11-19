@@ -58,7 +58,7 @@ pub async fn bundled_caps() -> CliResult<Vec<CapUrn>> {
         crate::FABRIC_MANIFEST_VERSION,
     )
     .await
-    .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
+    .map_err(bundle_unreadable)?;
     Ok(found
         .into_iter()
         .flat_map(|cartridge| cartridge.cap_groups.into_iter().flat_map(|g| g.caps.into_iter().map(|c| c.urn)))
@@ -78,7 +78,7 @@ pub async fn bundled_providers(cap: &CapUrn) -> CliResult<Vec<crate::orchestrato
         cap,
     )
     .await
-    .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))
+    .map_err(bundle_unreadable)
 }
 
 /// The cartridges installed under the per-user root (registry and dev).
@@ -100,7 +100,11 @@ pub async fn installed() -> CliResult<Vec<DiscoveredCartridge>> {
     };
     discover_cartridges(&ctx::user_cartridge_dir()?, &identity)
         .await
-        .map_err(|e| CliError::failed("the installed cartridges could not be read").context(e.to_string()))
+        .map_err(|e| {
+            CliError::failed("the installed cartridges could not be read")
+                .context(e.to_string())
+                .hint("see which are installed with: capdag cartridge list; remove a broken one with: capdag cartridge remove <id>")
+        })
 }
 
 /// A cartridge manager bound to this build's registry, its manifest synced
@@ -144,7 +148,7 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
             registry,
         )
         .await
-        .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
+        .map_err(bundle_unreadable)?;
         for cartridge in bundled {
             rows.push(serde_json::json!({
                 "type": "cartridge",
@@ -237,7 +241,9 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
         }
         let suggestions = manager.suggestions_for_cap(&cap.urn.to_string()).await;
         let first = suggestions.first().ok_or_else(|| {
-            CliError::failed(format!("no cartridge in the registry provides {}", names::cap(&registry, &cap)))
+            let alias = names::cap(&registry, &cap);
+            CliError::failed(format!("no cartridge in the registry provides {alias}"))
+                .hint("find another capability that does the job with: capdag caps <words>; or provide this one from a cartridge of your own: capdag dev new <dir>, then capdag dev install <dir>")
         })?;
         first.cartridge_id.clone()
     };
@@ -248,7 +254,9 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
         // An install this capdag does not use is replaced only when the
         // person removes it: installing never overwrites one silently.
         Some((id, dir)) => super::run::refused_cartridge(id, dir, &e),
-        None => CliError::failed(format!("{cartridge_id} could not be installed")).context(e.to_string()),
+        None => CliError::failed(format!("{cartridge_id} could not be installed"))
+            .context(e.to_string())
+            .hint(format!("check the connection, then run `capdag cartridge install {cartridge_id}` again; if it keeps failing, report it")),
     })?;
     if ctx.term.json {
         emit_record(&serde_json::json!({
@@ -268,7 +276,11 @@ fn remove(ctx: &Ctx, id: &str) -> CliResult<Exit> {
     let removed = cartridge_dirs(&root, id)?;
     for dir in &removed {
         std::fs::remove_dir_all(dir)
-            .map_err(|e| CliError::failed(format!("{} could not be removed", dir.display())).context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed(format!("{} could not be removed", dir.display()))
+                    .context(e.to_string())
+                    .hint(super::error::write_hint(dir, &e))
+            })?;
     }
     if removed.is_empty() {
         let mut error = CliError::usage(format!("no installed cartridge is called '{id}'"));
@@ -311,6 +323,18 @@ fn subdirs(dir: &std::path::Path) -> CliResult<Vec<PathBuf>> {
         return Ok(Vec::new());
     }
     let entries = std::fs::read_dir(dir)
-        .map_err(|e| CliError::failed(format!("{} could not be read", dir.display())).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("{} could not be read", dir.display()))
+                .context(e.to_string())
+                .hint(super::error::read_hint(dir, &e))
+        })?;
     Ok(entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect())
+}
+
+/// The cartridges bundled beside this capdag could not be read: the install
+/// is damaged, or something changed it after it was built.
+fn bundle_unreadable(error: impl std::fmt::Display) -> CliError {
+    CliError::failed("the cartridges bundled with capdag could not be read")
+        .context(error.to_string())
+        .hint("reinstall capdag, with `capdag self update` or the package manager it came from: its bundled cartridges are damaged or were changed")
 }

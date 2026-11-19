@@ -205,7 +205,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                 let media = |urn: &str| names::media_urn(&registry, urn);
                 let interface = InterfaceNames { cap: names::cap(&registry, cap), media: &media, urns: ctx.term.verbosity >= 1 };
                 let text = render_cap_interface(cap, &interface).map_err(|e| {
-                    CliError::failed(format!("the interface of '{}' could not be shown", args.target)).context(e)
+                    CliError::failed(format!("the interface of '{}' could not be shown", args.target))
+                        .context(e)
+                        .hint(format!("read its definition instead: capdag info {} --json", args.target))
                 })?;
                 print!("{text}");
                 println!(
@@ -259,7 +261,9 @@ async fn runtime(
     dev_binaries.extend(dev_dir);
     let trace = match &args.trace {
         Some(path) => Some(crate::ProtocolTraceSink::open(&path.display().to_string()).await.map_err(|e| {
-            CliError::failed(format!("the trace file {} could not be opened", path.display())).context(e.to_string())
+            CliError::failed(format!("the trace file {} could not be opened", path.display()))
+                .context(e.to_string())
+                .hint("give --trace a file in a directory you may write")
         })?),
         None => None,
     };
@@ -298,19 +302,33 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
     let registry = ctx.registry().await?;
     let cap = registry.get_cap(alias).await.map_err(|e| match e {
         crate::FabricRegistryError::NotFound(_) => {
-            CliError::failed(format!("the capability {alias} is not in this fabric")).context(e.to_string())
+            CliError::failed(format!("the capability {alias} is not in this fabric"))
+                .context(e.to_string())
+                .hint(format!("{alias} is one capdag needs: leave out --fabric if you named another fabric, or update capdag with `capdag self update`"))
         }
         e => ctx::registry_failure(e),
     })?;
     let notation = synthesize_single_cap_notation(&cap)
-        .map_err(|e| CliError::failed(format!("'{alias}' cannot be run on its own")).context(e))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' cannot be run on its own"))
+                .context(e)
+                .hint(format!("run it in a machine: `capdag plan <file> --to <type>` finds machines, and `capdag info {alias}` says what it takes"))
+        })?;
     let resolved = ResolvedNotation::resolve(&notation, registry.clone())
         .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' could not be planned"))
+                .context(e.to_string())
+                .hint(format!("see what it takes and gives: capdag info {alias}; if that looks right, report it"))
+        })?;
     let strand = resolved
         .plan(0, &RunInputs::declared())
         .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' could not be planned"))
+                .context(e.to_string())
+                .hint(format!("see what it takes and gives: capdag info {alias}; if that looks right, report it"))
+        })?;
     let mut plan_inputs = HashMap::new();
     let mut is_sequence = HashMap::new();
     if let (Some(slot), Some(value)) = (strand.input_slots().get(SINGLE_CAP_INPUT_NODE).cloned(), input) {
@@ -339,7 +357,12 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
     let mut value: Vec<u8> = Vec::new();
     match execute(ctx, &registry, &args, runtime, vec![run], true, &mut value).await? {
         Exit::Run(RunOutcome::Completed) => Ok(value),
-        other => Err(CliError { exit: other, ..CliError::failed(format!("{alias} did not complete")) }),
+        other => {
+            let mut error = CliError::failed(format!("{alias} did not complete"))
+                .hint(format!("run the command again; with -v it says what {alias} did"));
+            error.exit = other;
+            Err(error)
+        }
     }
 }
 
@@ -348,7 +371,9 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
     let path = Path::new(token);
     if path.is_file() {
         let notation = std::fs::read_to_string(path).map_err(|e| {
-            CliError::failed(format!("the machine file '{token}' could not be read")).context(e.to_string())
+            CliError::failed(format!("the machine file '{token}' could not be read"))
+                .context(e.to_string())
+                .hint(super::error::read_hint(path, &e))
         })?;
         return Ok(Target::Machine { path: path.to_path_buf(), notation });
     }
@@ -359,7 +384,11 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
     let reference = match classify_cap_token(token) {
         Ok(CapToken::Urn(urn)) => urn,
         Ok(CapToken::Alias(alias)) => alias,
-        Err(e) => return Err(CliError::usage(format!("'{token}' is neither a capability nor a file")).context(e)),
+        Err(e) => {
+            return Err(CliError::usage(format!("'{token}' is neither a capability nor a file"))
+                .context(e)
+                .hint("give a capability's alias or URN, or a machine file's path; find capabilities with: capdag caps <words>"))
+        }
     };
     match registry.get_cap(&reference).await {
         Ok(cap) => return Ok(Target::Cap { cap, dev_dir: None }),
@@ -373,7 +402,11 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
         Ok(Some((cap, dir))) => {
             crate::dev::check_no_fabric_conflict(registry, &cap)
                 .await
-                .map_err(|e| CliError::failed(e.to_string()))?;
+                .map_err(|e| {
+                    CliError::failed(e.to_string()).hint(
+                        "give the dev cartridge's cap an alias the fabric does not use, build it again, then `capdag dev install` it again",
+                    )
+                })?;
             if ctx.term.verbosity >= 0 && !ctx.term.json {
                 eprintln!("'{token}' is not in the fabric: running the dev cartridge at {}", dir.display());
             }
@@ -382,7 +415,8 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
         }
         Ok(None) => Err(unknown_cap(registry, token, "capability or machine file").await),
         Err(e) => Err(CliError::failed(format!("the dev cartridges could not be read for '{token}'"))
-            .context(e.to_string())),
+            .context(e.to_string())
+            .hint("see which are installed with: capdag cartridge list; remove a broken one with: capdag cartridge remove <id>")),
     }
 }
 
@@ -459,7 +493,9 @@ async fn narrow_if_abstract(
         })?;
     let concrete = registry.get_cap(&concrete.to_string()).await.map_err(|e| match e {
         crate::FabricRegistryError::NotFound(_) => {
-            CliError::failed(format!("'{alias}' was narrowed to a cap the fabric does not hold")).context(e.to_string())
+            CliError::failed(format!("'{alias}' was narrowed to a cap the fabric does not hold"))
+                .context(e.to_string())
+                .hint("run a specific capability instead, found with: capdag caps --in <type>; and report this fabric defect")
         }
         e => ctx::registry_failure(e),
     })?;
@@ -483,7 +519,11 @@ enum CapInput {
 async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -> CliResult<Vec<PlannedRun>> {
     let alias = names::cap(registry, cap);
     let notation = synthesize_single_cap_notation(cap)
-        .map_err(|e| CliError::failed(format!("'{alias}' cannot be run on its own")).context(e))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' cannot be run on its own"))
+                .context(e)
+                .hint(format!("run it in a machine: `capdag plan <file> --to <type>` finds machines, and `capdag info {alias}` says what it takes"))
+        })?;
     let mut explicit: Vec<(String, String)> = Vec::new();
     for given in &args.args {
         let (name, value) = inputs::pair("--arg", given)?;
@@ -523,7 +563,8 @@ async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -
         .filter(|t| MediaUrn::from_string(t).map(|u| u.is_live_feed()).unwrap_or(false))
         .collect();
     if live.len() > 1 || (!live.is_empty() && invocation.input_paths.len() > live.len()) {
-        return Err(CliError::usage("a cap's run takes one live source, and no files beside it"));
+        return Err(CliError::usage("a cap's run takes one live source, and no files beside it")
+            .hint("run the live source on its own, and the files in a command of their own"));
     }
     let input = if !takes_input {
         CapInput::Nothing
@@ -540,9 +581,14 @@ async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -
         use std::io::Read;
         std::io::stdin()
             .read_to_end(&mut bytes)
-            .map_err(|e| CliError::failed("stdin could not be read").context(e.to_string()))?;
+            .map_err(|e| {
+                CliError::failed("stdin could not be read")
+                    .context(e.to_string())
+                    .hint(format!("give the input as a file instead: capdag run {alias} <file>"))
+            })?;
         if bytes.is_empty() {
-            return Err(CliError::usage(format!("stdin was empty: there is nothing to run '{alias}' on")));
+            return Err(CliError::usage(format!("stdin was empty: there is nothing to run '{alias}' on"))
+                .hint(format!("pipe something in, or give a file: capdag run {alias} <file>")));
         }
         CapInput::Stdin(bytes)
     } else {
@@ -557,7 +603,11 @@ async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -
 
     let resolved = ResolvedNotation::resolve(&notation, registry.clone())
         .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' could not be planned"))
+                .context(e.to_string())
+                .hint(format!("see what it takes and gives: capdag info {alias}; if that looks right, report it"))
+        })?;
     let run_inputs = match &input {
         CapInput::Live(_) => RunInputs {
             sequences: std::iter::once(SINGLE_CAP_INPUT_NODE.to_string()).collect(),
@@ -568,7 +618,11 @@ async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -
     let strand = resolved
         .plan(0, &run_inputs)
         .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
+        .map_err(|e| {
+            CliError::failed(format!("'{alias}' could not be planned"))
+                .context(e.to_string())
+                .hint(format!("see what it takes and gives: capdag info {alias}; if that looks right, report it"))
+        })?;
     let slot = strand.input_slots().get(SINGLE_CAP_INPUT_NODE).cloned();
     let cap_node = strand
         .plan
@@ -576,7 +630,10 @@ async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -
         .iter()
         .find(|(_, n)| matches!(n.node_type, ExecutionNodeType::Cap { .. }))
         .map(|(id, _)| id.clone())
-        .ok_or_else(|| CliError::failed(format!("the plan of '{alias}' has no step")))?;
+        .ok_or_else(|| {
+            CliError::failed(format!("the plan of '{alias}' has no step"))
+                .hint(format!("this is a defect in capdag: report it, naming {alias}"))
+        })?;
     let mut cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
     if !invocation.cap_arguments.is_empty() {
         cap_arguments.insert(cap_node, invocation.cap_arguments.clone());
@@ -666,7 +723,7 @@ async fn plan_machine_runs(
     let (machine_inputs, _outputs) = match (resolved.inputs(), resolved.outputs()) {
         (Ok(i), Ok(o)) => (i, o),
         (Err(e), _) | (_, Err(e)) => {
-            return Err(CliError::failed(format!("{label} is not a machine that can run")).context(e.to_string()))
+            return Err(super::check::cannot_run(path, e))
         }
     };
     let input_names = || -> String {
@@ -692,13 +749,21 @@ async fn plan_machine_runs(
                 let content = registry
                     .live_source_content_urn(&urn)
                     .await
-                    .map_err(|e| CliError::failed(format!("the live source '{token}' could not be looked up")).context(e.to_string()))?
+                    .map_err(|e| {
+                        CliError::failed(format!("the live source '{token}' could not be looked up"))
+                            .context(e.to_string())
+                            .hint(ctx::registry_hint(&e))
+                    })?
                     .ok_or_else(|| {
                         CliError::failed(format!("'{token}' is a live reference the fabric defines no source for"))
                             .hint("check the reference; `capdag info <alias>` shows a media type")
                     })?;
                 let content = MediaUrn::from_string(&content)
-                    .map_err(|e| CliError::failed(format!("the fabric's content for '{token}' is no media URN")).context(e.to_string()))?;
+                    .map_err(|e| {
+                        CliError::failed(format!("the fabric's content for '{token}' is no media URN"))
+                            .context(e.to_string())
+                            .hint("this is a defect in the fabric: report it, naming the live source")
+                    })?;
                 live_sources.push((urn.to_string(), content));
                 continue;
             }
@@ -718,7 +783,8 @@ async fn plan_machine_runs(
         let (name, value) = inputs::pair("--input", pair)?;
         if !machine_inputs.iter().any(|i| i.name == name) {
             return Err(CliError::usage(format!("the machine has no input named '{name}'"))
-                .context(format!("its inputs: {}", input_names())));
+                .context(format!("its inputs: {}", input_names()))
+                .hint("name one of its inputs: --input <name>=<value>"));
         }
         let bytes = inputs::value("--input", name, value)?;
         match given.entry(name.to_string()).or_insert_with(|| Given::Values(Vec::new())) {
@@ -771,10 +837,12 @@ async fn plan_machine_runs(
     for (reference, content) in &live_sources {
         let name = closest(content, &format!("the live source {reference}"), None)?;
         if file_inputs.iter().any(|(input, _, _)| input == &name) {
-            return Err(CliError::usage(format!("input '{name}' was given both files and the live source {reference}")));
+            return Err(CliError::usage(format!("input '{name}' was given both files and the live source {reference}"))
+                .hint("give the input files or the live source, in separate runs"));
         }
         if live_inputs.iter().any(|(input, _)| input == &name) {
-            return Err(CliError::usage(format!("input '{name}' was given two live sources")));
+            return Err(CliError::usage(format!("input '{name}' was given two live sources"))
+                .hint("give the input one live source per run"));
         }
         live_inputs.push((name, reference.clone()));
     }
@@ -850,7 +918,11 @@ async fn plan_machine_runs(
             let strand = resolved
                 .plan(strand_index, &RunInputs { sequences: of_strand, ..RunInputs::default() })
                 .await
-                .map_err(|e| CliError::failed(format!("{label} could not be planned")).context(e.to_string()))?;
+                .map_err(|e| {
+                    CliError::failed(format!("{label} could not be planned"))
+                        .context(e.to_string())
+                        .hint(format!("see what is wrong with it: capdag check {label}"))
+                })?;
             if index == 0 {
                 unbound_required_args(registry, &strand).await?;
             }
@@ -864,6 +936,7 @@ async fn plan_machine_runs(
                             crate::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(values).map_err(|e| {
                                 CliError::failed(format!("the {} values for input '{name}' could not be put together", values.len()))
                                     .context(e.to_string())
+                                    .hint(format!("give input '{name}' one value, or report this with the values you gave"))
                             })?,
                         ),
                         true,
@@ -894,8 +967,12 @@ async fn unbound_required_args(registry: &Arc<FabricRegistry>, strand: &StrandPl
     let requirements = crate::planner::MachinePlanBuilder::new(registry.clone())
         .analyze_plan_arguments(&strand.plan)
         .await
-        .map_err(|e| CliError::failed("the machine's steps could not be checked").context(e.to_string()))?;
-    let mut error: Option<CliError> = None;
+        .map_err(|e| {
+            CliError::failed("the machine's steps could not be checked")
+                .context(e.to_string())
+                .hint("check the connection, then run it again; if it keeps failing, report it with the machine")
+        })?;
+    let mut error: Option<super::error::Unhinted> = None;
     for step in &requirements.steps {
         for slot in &step.slots {
             if slot.is_required && slot.resolution == crate::planner::ArgumentResolution::RequiresUserInput {
@@ -916,6 +993,15 @@ async fn unbound_required_args(registry: &Arc<FabricRegistry>, strand: &StrandPl
         None => Ok(()),
         Some(e) => Err(e.hint("bind it in the machine: a constant in the wiring (`<arg>=<value>`), or a node given with --input")),
     }
+}
+
+/// The run said something the watch cannot place: an event for a run or step
+/// it does not know. What the run did is unaffected; what was shown of it is not
+/// the whole of it.
+fn unshowable(error: impl std::fmt::Display) -> CliError {
+    CliError::failed("the run reported something this command cannot show")
+        .context(error.to_string())
+        .hint("run it again with --progress plain to see each event as it comes; if this repeats, report it")
 }
 
 /// Run every planned run, one after another, its strands side by side.
@@ -977,7 +1063,7 @@ async fn execute(
                 Some(event) = events.recv() => {
                     match watch.apply(&event) {
                         Ok(row) => shower.changed(&watch, event.key, row),
-                        Err(e) => failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string())),
+                        Err(e) => failures.push(unshowable(e)),
                     }
                 }
                 key = shower.key() => {
@@ -1020,7 +1106,7 @@ async fn execute(
                             );
                             if let Some(token) = failed_at {
                                 if let Err(e) = watch.failed_at(key, &token) {
-                                    failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string()));
+                                    failures.push(unshowable(e));
                                 }
                             }
                             let outcome = if killed {
@@ -1038,12 +1124,16 @@ async fn execute(
                         }
                         Err(join) if join.is_cancelled() => (RunOutcome::Aborted, Vec::new()),
                         Err(join) => {
-                            failures.push(CliError::failed("a run ended unexpectedly").context(join.to_string()));
+                            failures.push(
+                                CliError::failed("a run ended unexpectedly")
+                                    .context(join.to_string())
+                                    .hint("run it again with -v; if it ends the same way, report it with what -v said"),
+                            );
                             (RunOutcome::Failed, Vec::new())
                         }
                     };
                     if let Err(e) = watch.end_run(key, outcome.clone()) {
-                        failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string()));
+                        failures.push(unshowable(e));
                     }
                     shower.run_ended(&watch, key, &outputs);
                     outcomes.push(outcome);
@@ -1320,7 +1410,7 @@ pub fn explain(registry: &FabricRegistry, strand: &StrandPlan, error: &Execution
             cli.hint(format!("see which cartridge provides {step}, and whether it is installed: capdag info {step}"))
         }
         (AttributionClass::Resource, _) => cli.hint("free memory or disk, or run fewer items at once, and run it again"),
-        (AttributionClass::User, _) => cli,
+        (AttributionClass::User, _) => cli.hint("run it again to finish it"),
         (_, Some(step)) => cli.hint(format!("run it again with -v to see what {step}'s cartridge said; if it fails the same way, report it")),
         (_, None) => cli.hint("run it again with -v; if it fails the same way, report it"),
     };

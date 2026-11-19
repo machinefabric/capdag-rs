@@ -93,7 +93,10 @@ pub fn not_chosen(question: &Question<'_>, choices: &[Choice]) -> CliError {
 async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style: super::term::Style) -> CliResult<usize> {
     use futures_util::StreamExt;
     const HEIGHT: u16 = 12;
-    let failed = |e: std::io::Error| CliError::failed("the picker could not be drawn").context(e.to_string());
+    let without_picker = format!("choose without the picker: {} <value>", question.flag);
+    let failed = |e: std::io::Error| {
+        CliError::failed("the picker could not be drawn").context(e.to_string()).hint(without_picker.clone())
+    };
     crossterm::terminal::enable_raw_mode().map_err(failed)?;
     let mut terminal = match Terminal::with_options(
         InlineBackend::new(),
@@ -125,7 +128,7 @@ async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style
             break Err(failed(e));
         }
         let Some(event) = events.next().await else {
-            break Err(CliError::failed("the terminal closed while choosing"));
+            break Err(CliError::failed("the terminal closed while choosing").hint(without_picker.clone()));
         };
         let Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) = event else { continue };
         if kind != KeyEventKind::Press {
@@ -255,9 +258,9 @@ mod tests {
         let question = Question { what: "the target", flag: "--to" };
         let error = not_chosen(&question, &[choice("txt", "plain text"), choice("png", "PNG image")]);
         assert_eq!(error.exit, super::super::error::Exit::Usage);
-        assert_eq!(error.problem, "2 options for the target, and none was chosen");
-        assert_eq!(error.context, ["--to txt  plain text", "--to png  PNG image"]);
-        assert_eq!(error.hint.as_deref(), Some("choose with --to <value>"));
+        assert_eq!(error.problem(), "2 options for the target, and none was chosen");
+        assert_eq!(error.context(), ["--to txt  plain text", "--to png  PNG image"]);
+        assert_eq!(error.hint(), "choose with --to <value>");
     }
 
     // TEST20119: typing filters by every word, in the label or the detail.

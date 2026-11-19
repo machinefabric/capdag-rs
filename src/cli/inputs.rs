@@ -24,7 +24,9 @@ pub fn expand(given: &str) -> CliResult<Vec<PathBuf>> {
     let path = PathBuf::from(given);
     if given.contains('*') || given.contains('?') {
         let pattern = glob::glob(given).map_err(|e| {
-            CliError::usage(format!("'{given}' is not a valid glob pattern")).context(e.to_string())
+            CliError::usage(format!("'{given}' is not a valid glob pattern"))
+                .context(e.to_string())
+                .hint("close every [ in the pattern, or give the files by name")
         })?;
         let mut files: Vec<PathBuf> = pattern.filter_map(Result::ok).filter(|p| p.is_file()).collect();
         if files.is_empty() {
@@ -36,7 +38,9 @@ pub fn expand(given: &str) -> CliResult<Vec<PathBuf>> {
     }
     if path.is_dir() {
         let entries = std::fs::read_dir(&path).map_err(|e| {
-            CliError::failed(format!("the directory '{given}' could not be read")).context(e.to_string())
+            CliError::failed(format!("the directory '{given}' could not be read"))
+                .context(e.to_string())
+                .hint(super::error::read_hint(&path, &e))
         })?;
         let mut files: Vec<PathBuf> = entries
             .filter_map(Result::ok)
@@ -75,7 +79,9 @@ fn is_content_file(path: &Path) -> bool {
 /// Read a file the run is given.
 pub fn read(path: &Path) -> CliResult<Vec<u8>> {
     std::fs::read(path).map_err(|e| {
-        CliError::failed(format!("'{}' could not be read", path.display())).context(e.to_string())
+        CliError::failed(format!("'{}' could not be read", path.display()))
+            .context(e.to_string())
+            .hint(super::error::read_hint(path, &e))
     })
 }
 
@@ -83,7 +89,9 @@ pub fn read(path: &Path) -> CliResult<Vec<u8>> {
 pub fn value(flag: &str, name: &str, given: &str) -> CliResult<Vec<u8>> {
     match given.strip_prefix('@') {
         Some(path) => std::fs::read(path).map_err(|e| {
-            CliError::failed(format!("{flag} {name}: '{path}' could not be read")).context(e.to_string())
+            CliError::failed(format!("{flag} {name}: '{path}' could not be read"))
+                .context(e.to_string())
+                .hint(super::error::read_hint(Path::new(path), &e))
         }),
         None => Ok(given.as_bytes().to_vec()),
     }
@@ -108,6 +116,7 @@ pub async fn detect(file: &Path, inspection: &Inspection) -> CliResult<MediaUrn>
     MediaUrn::from_string(found.primary()).map_err(|e| {
         CliError::failed(format!("'{}' was detected as an invalid media type", file.display()))
             .context(e.to_string())
+            .hint("the cartridge that inspected it gave no valid media URN: report it, with the file if you can")
     })
 }
 
@@ -121,8 +130,25 @@ pub fn detection_failure(file: &Path, error: crate::InputResolverError) -> CliEr
         crate::InputResolverError::NoExtension(_) => unknown()
             .context("the file has no extension to detect its type from")
             .hint("give the file its usual extension, or --input <name>=@<path>"),
-        other => CliError::failed(format!("the type of '{}' could not be detected", file.display()))
-            .context(other.to_string()),
+        other => {
+            use crate::InputResolverError as E;
+            let hint = match &other {
+                E::NotFound(path) => format!("check the path: nothing is at '{}'", path.display()),
+                E::PermissionDenied(path) => format!("you may not read '{}': change its permissions", path.display()),
+                E::IoError { path, error } => super::error::read_hint(path, error),
+                E::SymlinkCycle { path } => format!("the link '{}' leads back to itself: give the file it should point to", path.display()),
+                E::FabricUnavailable { .. } => "check the connection, then run the command again".to_string(),
+                E::InspectionFailed { .. } => {
+                    "run it again with -v to see what the inspecting cartridge said, or name the input explicitly with --input <name>=@<path>".to_string()
+                }
+                E::InvalidGlob { .. } | E::EmptyInput | E::NoFilesResolved | E::NoExtension(_) | E::UnknownExtension { .. } => {
+                    "give a file that exists, by its path".to_string()
+                }
+            };
+            CliError::failed(format!("the type of '{}' could not be detected", file.display()))
+                .context(other.to_string())
+                .hint(hint)
+        }
     }
 }
 
@@ -157,6 +183,7 @@ pub fn dev_binaries(given: &[PathBuf]) -> CliResult<Vec<PathBuf>> {
             let entries = std::fs::read_dir(path).map_err(|e| {
                 CliError::failed(format!("--dev-bin {}: the directory could not be read", path.display()))
                     .context(e.to_string())
+                    .hint(super::error::read_hint(path, &e))
             })?;
             let found: Vec<PathBuf> = entries
                 .filter_map(Result::ok)
@@ -167,11 +194,13 @@ pub fn dev_binaries(given: &[PathBuf]) -> CliResult<Vec<PathBuf>> {
                 return Err(CliError::usage(format!(
                     "--dev-bin {}: the directory holds no executable",
                     path.display()
-                )));
+                ))
+                .hint("make the cartridge executable (chmod +x <file>), or give --dev-bin the cartridge file itself"));
             }
             out.extend(found);
         } else {
-            return Err(CliError::usage(format!("--dev-bin {}: no such file or directory", path.display())));
+            return Err(CliError::usage(format!("--dev-bin {}: no such file or directory", path.display()))
+                .hint("give --dev-bin the path of a built cartridge, or a directory holding one"));
         }
     }
     Ok(out)
@@ -206,7 +235,7 @@ mod tests {
     #[test]
     fn test20115_inputs_name_what_is_missing() {
         let error = expand("no/such/file.pdf").unwrap_err();
-        assert_eq!(error.problem, "'no/such/file.pdf' does not exist");
+        assert_eq!(error.problem(), "'no/such/file.pdf' does not exist");
         assert_eq!(error.exit, super::super::error::Exit::Usage);
 
         let dir = tempfile::tempdir().unwrap();

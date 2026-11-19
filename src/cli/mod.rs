@@ -283,17 +283,14 @@ fn help(path: &[String]) -> CliResult<Exit> {
         at = match at.find_subcommand_mut(name) {
             Some(sub) => sub,
             None => {
-                let so_far = path[..depth].join(" ");
-                let mut error = CliError::usage(format!(
-                    "there is no command `capdag {}{name}`",
-                    if so_far.is_empty() { String::new() } else { format!("{so_far} ") }
-                ));
-                if let Some(near) = nearest(name, known.iter().map(String::as_str)) {
-                    error = error.hint(format!("did you mean `{near}`?"));
-                } else {
-                    error = error.context(format!("the commands are: {}", known.join(", ")));
-                }
-                return Err(error);
+                let parent: String = path[..depth].iter().map(|word| format!(" {word}")).collect();
+                let error = CliError::usage(format!("there is no command `capdag{parent} {name}`"));
+                return Err(match nearest(name, known.iter().map(String::as_str)) {
+                    Some(near) => error.hint(format!("did you mean `capdag help{parent} {near}`?")),
+                    None => error
+                        .context(format!("the commands are: {}", known.join(", ")))
+                        .hint(format!("`capdag help{parent}` says what each of them does")),
+                });
             }
         };
     }
@@ -367,8 +364,12 @@ async fn cache(ctx: &Ctx, command: CacheCommand) -> CliResult<Exit> {
     let dir = crate::FabricRegistry::clear_cache_of(&config, crate::FABRIC_MANIFEST_VERSION)
         .await
         .map_err(|e| {
+            let folder = dirs::cache_dir()
+                .map(|dir| dir.join("capdag").display().to_string())
+                .unwrap_or_else(|| "capdag's folder in your cache directory".to_string());
             CliError::failed(format!("the fabric cache of {} could not be cleared", config.anchor))
                 .context(e.to_string())
+                .hint(format!("fix what is said above and run `capdag cache clear` again, or remove {folder} by hand"))
         })?
         .display()
         .to_string();
@@ -403,7 +404,21 @@ async fn self_update(ctx: &Ctx) -> CliResult<Exit> {
     }
     let updated = crate::self_update::update(ctx::VERSION)
         .await
-        .map_err(|e| CliError::failed("capdag was not updated").context(e.to_string()))?;
+        .map_err(|e| {
+            use crate::self_update::UpdateError;
+            let hint = match &e {
+                UpdateError::Unavailable(_) => {
+                    "this capdag is not one that updates itself: update it as said above, or install a published release"
+                }
+                UpdateError::Untrusted(_) => {
+                    "nothing was installed: run `capdag self update` again later, and report it if it says the same"
+                }
+                UpdateError::Io { .. } => {
+                    "check that you may write the folder capdag is installed in, then run `capdag self update` again"
+                }
+            };
+            CliError::failed("capdag was not updated").context(e.to_string()).hint(hint)
+        })?;
     if ctx.term.json {
         term::emit_record(&serde_json::json!({
             "type": "self_update",

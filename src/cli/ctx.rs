@@ -123,7 +123,14 @@ pub fn nothing_by_that_name(error: FabricRegistryError) -> CliResult<()> {
 /// fetch, what was fetched, the URL, the status or what happened, and the
 /// fabric manifest version.
 pub fn registry_failure(error: FabricRegistryError) -> CliError {
-    let hint = match &error {
+    let hint = registry_hint(&error);
+    CliError::failed(error.to_string()).hint(hint)
+}
+
+/// What to do when the registry could not give a definition, by why it could
+/// not.
+pub fn registry_hint(error: &FabricRegistryError) -> &'static str {
+    match error {
         FabricRegistryError::FetchFailed(failure) => match failure.cause {
             FetchCause::Status(_) => "the registry refused the request: run the command again; if it keeps refusing, report it",
             FetchCause::TimedOut | FetchCause::DeadlineElapsed(_) | FetchCause::Transport(_) => {
@@ -132,8 +139,7 @@ pub fn registry_failure(error: FabricRegistryError) -> CliError {
         },
         FabricRegistryError::NetworkBlocked(_) => "it is not cached: run the command without --offline once",
         _ => "run the command again; if it keeps failing, report it",
-    };
-    CliError::failed(error.to_string()).hint(hint)
+    }
 }
 
 /// The fabric's host, for saying where it is.
@@ -194,7 +200,10 @@ fn fabric_unreachable(anchor: &str, error: &FabricRegistryError, offline: bool) 
 /// `{registry_slug}/{channel}/{name}/{version}/` tree every host uses.
 pub fn user_cartridge_dir() -> CliResult<PathBuf> {
     let home = dirs::home_dir()
-        .ok_or_else(|| CliError::failed("there is no home directory to keep cartridges in"))?;
+        .ok_or_else(|| {
+        CliError::failed("there is no home directory to keep cartridges in")
+            .hint(if cfg!(windows) { "set USERPROFILE to your home folder, then run the command again" } else { "set HOME to your home directory, then run the command again" })
+    })?;
     Ok(home.join(".capdag").join("cartridges"))
 }
 
