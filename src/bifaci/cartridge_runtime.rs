@@ -258,6 +258,7 @@ impl From<RuntimeError> for ops_rs::OpError {
                 class: e.attribution_class(),
                 message: e.failure_reason(),
                 arg_urn: e.failure_arg_urn().map(str::to_string),
+                hint: e.failure_hint().map(str::to_string),
             },
             None => ops_rs::OpError::ExecutionFailed(e.to_string()),
         }
@@ -861,6 +862,23 @@ impl PeerResponse {
         ));
         // Dropping `tx` here closes the channel so `recv()` returns None
         // after the single data item.
+        drop(tx);
+        Self {
+            rx,
+            grants: Vec::new(),
+        }
+    }
+
+    /// Construct a `PeerResponse` that ends with `error` before any data,
+    /// for use by stubbed peer invokers in tests: a peer that answered with
+    /// an ERR yields exactly one `Data(Err(error))` item, then closes.
+    ///
+    /// Production code MUST NOT call this, for the reason
+    /// [`PeerResponse::synthetic_text`] gives.
+    #[doc(hidden)]
+    pub fn synthetic_error(error: StreamError) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let _ = tx.send((PeerResponseItem::Data(Err(error), None), None));
         drop(tx);
         Self {
             rx,
@@ -5173,7 +5191,7 @@ async fn dispatch_op(
                 class: e.attribution_class(),
                 message: e.failure_reason(),
                 arg_urn: e.failure_arg_urn().map(str::to_string),
-                hint: None,
+                hint: e.failure_hint().map(str::to_string),
             },
             None => RuntimeError::Handler(e.to_string()),
         }
@@ -13374,6 +13392,60 @@ mod tests {
             }
             other => panic!("expected UnknownOutput, got {:?}", other.map(|_| ())),
         }
+    }
+
+    /// A handler whose peer call ended with `refusal`, which it cannot go
+    /// on without: it returns the peer's error as it came.
+    struct ForwardingOp {
+        refusal: StreamError,
+    }
+
+    #[async_trait]
+    impl Op<()> for ForwardingOp {
+        async fn perform(&self, _dry: &mut DryContext, _wet: &mut WetContext) -> OpResult<()> {
+            Err(RuntimeError::Stream(self.refusal.clone()).into())
+        }
+        fn metadata(&self) -> OpMetadata {
+            OpMetadata::builder("ForwardingOp").build()
+        }
+    }
+
+    // TEST7189: a handler that cannot go on without its peer's answer, and
+    // returns the peer's error as it came, ends its request with the peer's
+    // ERR — its code, class, message and hint — across the op boundary, not
+    // a HANDLER_ERROR of its own. A peer refused for a cartridge that is not
+    // installed thus names the command that installs it.
+    #[tokio::test]
+    async fn test7189_a_forwarded_peer_error_ends_the_request_as_the_peers_err() {
+        let refusal = StreamError::RemoteError {
+            code: "CARTRIDGE_INSTALL_FAILED".to_string(),
+            class: crate::failure::AttributionClass::Environment,
+            message: "ggufcartridge provides the inference cap and is not installed, and installing it failed"
+                .to_string(),
+            arg_urn: None,
+            hint: Some("capdag cartridge install ggufcartridge".to_string()),
+        };
+        let (tx, rx) = crossbeam_channel::unbounded();
+        drop(tx);
+        let error = dispatch_op(
+            Box::new(ForwardingOp { refusal }),
+            demux_multi_stream(rx, None, None, None),
+            ResponseOutputs::undeclared(OutputStream::discarding()),
+            Arc::new(NoPeerInvoker),
+            full_network(),
+        )
+        .await
+        .expect_err("the handler failed");
+
+        let frame = handler_err_frame(&MessageId::new_uuid(), &error);
+        assert_eq!(frame.error_code(), Some("CARTRIDGE_INSTALL_FAILED"));
+        assert_eq!(frame.attribution_class(), Ok(crate::failure::AttributionClass::Environment));
+        assert_eq!(
+            frame.error_message(),
+            Some("ggufcartridge provides the inference cap and is not installed, and installing it failed")
+        );
+        assert_eq!(frame.error_hint(), Ok(Some("capdag cartridge install ggufcartridge")));
+        assert_eq!(frame.attribution_arg_urn(), Ok(None));
     }
 
     /// An op that writes two residual rows and nothing else, or fails.

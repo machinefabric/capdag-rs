@@ -2332,6 +2332,7 @@ mod tests {
             class: AttributionClass::Input,
             message: "prompt too large".to_string(),
             arg_urn: Some("media:prompt;textable".to_string()),
+            hint: None,
         };
         assert_eq!(attributed.failure_arg_urn(), Some("media:prompt;textable"));
         let unattributed = ops_rs::OpError::Classified {
@@ -2339,6 +2340,7 @@ mod tests {
             class: AttributionClass::Input,
             message: "prompt too large".to_string(),
             arg_urn: None,
+            hint: None,
         };
         assert_eq!(unattributed.failure_arg_urn(), None);
 

@@ -303,6 +303,15 @@ impl CartridgeAdapterInvoker for RelaySwitchAdapterInvoker {
                             ),
                         }
                     })?;
+                    frame.error_hint().map_err(|error| {
+                        InputResolverError::InspectionFailed {
+                            path: file_path.to_path_buf(),
+                            reason: format!(
+                                "cartridge '{}' adapter-selection: {}",
+                                cartridge_id, error
+                            ),
+                        }
+                    })?;
                     return Err(InputResolverError::InspectionFailed {
                         path: file_path.to_path_buf(),
                         reason: format!(

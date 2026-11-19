@@ -164,6 +164,7 @@ impl From<NetworkRefused> for ops_rs::OpError {
             class: refused.class(),
             message: refused.to_string(),
             arg_urn: None,
+            hint: None,
         }
     }
 }
