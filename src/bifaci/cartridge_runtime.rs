@@ -258,7 +258,7 @@ impl From<RuntimeError> for ops_rs::OpError {
                 class: e.attribution_class(),
                 message: e.failure_reason(),
                 arg_urn: e.failure_arg_urn().map(str::to_string),
-                hint: e.failure_hint().map(str::to_string),
+                hint: None,
             },
             None => ops_rs::OpError::ExecutionFailed(e.to_string()),
         }
@@ -5191,7 +5191,7 @@ async fn dispatch_op(
                 class: e.attribution_class(),
                 message: e.failure_reason(),
                 arg_urn: e.failure_arg_urn().map(str::to_string),
-                hint: e.failure_hint().map(str::to_string),
+                hint: None,
             },
             None => RuntimeError::Handler(e.to_string()),
         }
