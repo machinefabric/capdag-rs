@@ -226,7 +226,7 @@ fn bundle_rehash(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
             "its format is '{}', and this capdag writes '{}'",
             recorded.format,
             crate::BUNDLE_MANIFEST_FORMAT
-        )))
+        ))
         .hint(record_again));
     }
     let manifest = crate::bundle_manifest_rehashed(&recorded, environment, &staged)
