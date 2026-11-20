@@ -333,7 +333,7 @@ fn subdirs(dir: &std::path::Path) -> CliResult<Vec<PathBuf>> {
 
 /// The cartridges bundled beside this capdag could not be read: the install
 /// is damaged, or something changed it after it was built.
-fn bundle_unreadable(error: impl std::fmt::Display) -> CliError {
+pub(super) fn bundle_unreadable(error: impl std::fmt::Display) -> CliError {
     CliError::failed("the cartridges bundled with capdag could not be read")
         .context(error.to_string())
         .hint("reinstall capdag, with `capdag self update` or the package manager it came from: its bundled cartridges are damaged or were changed")

@@ -136,6 +136,16 @@ impl CliError {
         }
     }
 
+    /// The same error with one more line of what was expected and what was
+    /// found; its hint stays.
+    pub fn with_context(mut self, line: impl Into<String>) -> CliError {
+        let line = line.into();
+        if !line.is_empty() {
+            self.context.push(line);
+        }
+        self
+    }
+
     /// What is wrong, in one sentence.
     pub fn problem(&self) -> &str {
         &self.problem

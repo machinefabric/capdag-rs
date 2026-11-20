@@ -95,7 +95,7 @@ impl Inspection {
                 crate::FABRIC_MANIFEST_VERSION,
             )
             .await
-            .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
+            .map_err(cartridge::bundle_unreadable)?;
             for hostable in bundled {
                 let (id, _, _) = hostable
                     .identity
@@ -127,6 +127,9 @@ impl Inspection {
                         let adapter = MediaUrn::from_string(&error.new_adapter_urn).map_err(|e| {
                             CliError::failed(format!("the cartridge '{id}' declares an adapter that is no media URN"))
                                 .context(e.to_string())
+                                .hint(format!(
+                                    "remove it with `capdag cartridge remove {id}`, and tell its author that each adapter it declares must be a media URN"
+                                ))
                         })?;
                         refused.push(Refused { adapter, cartridge_id: id.clone(), reason: error.to_string() });
                     }
@@ -174,7 +177,7 @@ impl Inspectors {
     fn explained(&self, file: &Path, error: InputResolverError) -> CliError {
         let mut failure = super::inputs::detection_failure(file, error);
         for reason in self.failures.lock().expect("the inspection failures' lock is poisoned").iter() {
-            failure = failure.context(reason.clone());
+            failure = failure.with_context(reason.clone());
         }
         failure
     }

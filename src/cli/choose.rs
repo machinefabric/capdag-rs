@@ -50,7 +50,8 @@ pub async fn choose(ctx: &Ctx, question: &Question<'_>, choices: &[Choice]) -> C
         return Ok(0);
     }
     if choices.is_empty() {
-        return Err(CliError::failed(format!("there is nothing to choose {} from", question.what)));
+        return Err(CliError::failed(format!("there is nothing to choose {} from", question.what))
+            .hint("report it, with the command you ran: a command says it found nothing before it asks you to choose"));
     }
     if ctx.term.json {
         for (index, choice) in choices.iter().enumerate() {
