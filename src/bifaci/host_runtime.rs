@@ -65,6 +65,25 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 const REAP_POLL: Duration = Duration::from_millis(20);
 const REAP_LIMIT: Duration = Duration::from_secs(10);
 
+/// How long a cartridge whose output has ended, and that the host did not
+/// end, is given to exit before the host takes it to be still running.
+///
+/// A process that crashes closes its output as it goes, and is collected a
+/// moment later: the end of the stream usually arrives first. Asked at once,
+/// the process was still there, so a crash was reported as "still running
+/// (killed)" with no exit status at all. On Windows a fail-fast crash is
+/// slower again, while the system records it. The process is asked every
+/// `REAP_POLL` until it has exited or this has passed.
+const EXIT_WAIT_LIMIT: Duration = Duration::from_secs(5);
+
+/// How long a dead cartridge's stderr is read for after its process has
+/// ended. The stream ends with the process, unless a process the cartridge
+/// started still holds it open.
+const STDERR_DRAIN_LIMIT: Duration = Duration::from_millis(500);
+
+/// How much of the end of a cartridge's stderr its death report carries.
+const STDERR_TAIL_LIMIT: usize = 2000;
+
 /// Kill a cartridge's process and collect its exit — by ASKING for it.
 ///
 /// `Child::kill().await` sends the signal and then waits to be TOLD the process
@@ -110,6 +129,283 @@ async fn kill_and_reap(child: &mut tokio::process::Child) {
             return;
         }
         tokio::time::sleep(REAP_POLL).await;
+    }
+}
+
+/// Wait, by asking, for a process whose output has ended to exit: its exit
+/// status, or `None` when it is still running after `limit`.
+async fn wait_for_exit(
+    child: &mut tokio::process::Child,
+    limit: Duration,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    let asked_from = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if asked_from.elapsed() >= limit {
+            return Ok(None);
+        }
+        tokio::time::sleep(REAP_POLL).await;
+    }
+}
+
+/// How a process ended, in words: its exit code, the signal that killed it, or
+/// on Windows the exception it ended with.
+fn describe_exit(status: &std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            let named = match signal_name(signal) {
+                Some(name) => format!("killed by signal {signal} ({name})"),
+                None => format!("killed by signal {signal}"),
+            };
+            return if status.core_dumped() {
+                format!("{named}, and dumped core")
+            } else {
+                named
+            };
+        }
+    }
+    match status.code() {
+        #[cfg(windows)]
+        Some(code) => describe_windows_exit_code(code as u32),
+        #[cfg(not(windows))]
+        Some(code) => format!("exit code {code}"),
+        // A unix status is a code or a signal; a stopped or continued process
+        // has not ended and is never reported here.
+        None => status.to_string(),
+    }
+}
+
+/// The name of a signal a process can be killed by.
+#[cfg(unix)]
+fn signal_name(signal: i32) -> Option<&'static str> {
+    const NAMES: &[(i32, &str)] = &[
+        (libc::SIGHUP, "SIGHUP"),
+        (libc::SIGINT, "SIGINT"),
+        (libc::SIGQUIT, "SIGQUIT"),
+        (libc::SIGILL, "SIGILL"),
+        (libc::SIGTRAP, "SIGTRAP"),
+        (libc::SIGABRT, "SIGABRT"),
+        (libc::SIGBUS, "SIGBUS"),
+        (libc::SIGFPE, "SIGFPE"),
+        (libc::SIGKILL, "SIGKILL"),
+        (libc::SIGUSR1, "SIGUSR1"),
+        (libc::SIGSEGV, "SIGSEGV"),
+        (libc::SIGUSR2, "SIGUSR2"),
+        (libc::SIGPIPE, "SIGPIPE"),
+        (libc::SIGALRM, "SIGALRM"),
+        (libc::SIGTERM, "SIGTERM"),
+        (libc::SIGXCPU, "SIGXCPU"),
+        (libc::SIGXFSZ, "SIGXFSZ"),
+        (libc::SIGSYS, "SIGSYS"),
+    ];
+    NAMES.iter().find(|(number, _)| *number == signal).map(|(_, name)| *name)
+}
+
+/// A Windows process's exit code, in words. A process that crashed ends with
+/// the exception that ended it as its exit code (a fail-fast with
+/// 0xC0000409, an access violation with 0xC0000005); a process the loader
+/// could not start ends with the status that stopped it. Both are named.
+/// Anything else is an exit code the program chose.
+#[cfg(any(windows, test))]
+fn describe_windows_exit_code(code: u32) -> String {
+    const EXCEPTIONS: &[(u32, &str)] = &[
+        (0x8000_0003, "STATUS_BREAKPOINT"),
+        (0xC000_0005, "STATUS_ACCESS_VIOLATION"),
+        (0xC000_001D, "STATUS_ILLEGAL_INSTRUCTION"),
+        (0xC000_0094, "STATUS_INTEGER_DIVIDE_BY_ZERO"),
+        (0xC000_00FD, "STATUS_STACK_OVERFLOW"),
+        (0xC000_0374, "STATUS_HEAP_CORRUPTION"),
+        (0xC000_0409, "STATUS_STACK_BUFFER_OVERRUN"),
+        (0xC000_0417, "STATUS_INVALID_CRUNTIME_PARAMETER"),
+        (0xC000_0420, "STATUS_ASSERTION_FAILURE"),
+    ];
+    const STATUSES: &[(u32, &str)] = &[
+        (0xC000_0135, "STATUS_DLL_NOT_FOUND"),
+        (0xC000_0139, "STATUS_ENTRYPOINT_NOT_FOUND"),
+        (0xC000_013A, "STATUS_CONTROL_C_EXIT"),
+        (0xC000_0142, "STATUS_DLL_INIT_FAILED"),
+    ];
+    let named = |table: &[(u32, &'static str)]| {
+        table.iter().find(|(number, _)| *number == code).map(|(_, name)| *name)
+    };
+    if let Some(name) = named(EXCEPTIONS) {
+        format!("exception 0x{code:08X} ({name})")
+    } else if let Some(name) = named(STATUSES) {
+        format!("status 0x{code:08X} ({name})")
+    } else if code >= 0x8000_0000 {
+        format!("exit code {} (0x{code:08X})", code as i32)
+    } else {
+        format!("exit code {code}")
+    }
+}
+
+/// How a cartridge's output stream ended, as its reader saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StreamEnd {
+    /// The stream ended between two frames.
+    Closed,
+    /// The stream broke: a read failed, or it ended part way through a frame.
+    Broken(String),
+    /// The cartridge wrote something that is not a frame.
+    Malformed(String),
+}
+
+impl StreamEnd {
+    fn from_read_error(error: &CborError) -> Self {
+        match error {
+            CborError::Io(_) | CborError::UnexpectedEof => StreamEnd::Broken(error.to_string()),
+            CborError::Encode(_)
+            | CborError::Decode(_)
+            | CborError::FrameTooLarge { .. }
+            | CborError::InvalidFrame(_)
+            | CborError::Protocol(_)
+            | CborError::Handshake(_) => StreamEnd::Malformed(error.to_string()),
+        }
+    }
+}
+
+/// How a dead cartridge's process ended.
+#[derive(Debug)]
+enum ProcessEnd {
+    /// It has no process: an attached cartridge.
+    NoProcess,
+    /// It exited, with this status.
+    Exited(std::process::ExitStatus),
+    /// It was still running when the host gave up on it, and the host killed it.
+    Killed,
+    /// Whether it had exited could not be asked.
+    Unknown(String),
+}
+
+/// What happened to a cartridge that died without the host ending it: how
+/// its output ended and how its process did, in one sentence that names it.
+fn death_report(cartridge: &str, stream: &StreamEnd, process: &ProcessEnd) -> String {
+    let waited = EXIT_WAIT_LIMIT.as_secs();
+    let ended = match process {
+        ProcessEnd::Exited(status) => {
+            format!("Cartridge {cartridge} exited unexpectedly ({})", describe_exit(status))
+        }
+        ProcessEnd::NoProcess => format!("Cartridge {cartridge} disconnected unexpectedly"),
+        ProcessEnd::Unknown(error) => format!(
+            "Cartridge {cartridge} stopped unexpectedly, and was killed because whether it had \
+             exited could not be read ({error})"
+        ),
+        ProcessEnd::Killed => {
+            return match stream {
+                StreamEnd::Closed => format!(
+                    "Cartridge {cartridge} closed its output and was still running {waited}s \
+                     later, so it was killed."
+                ),
+                StreamEnd::Broken(error) => format!(
+                    "Cartridge {cartridge} stopped answering: reading its output failed: \
+                     {error}, and it was still running {waited}s later, so it was killed."
+                ),
+                StreamEnd::Malformed(error) => format!(
+                    "Cartridge {cartridge} wrote output that is not a frame ({error}), so it \
+                     was killed."
+                ),
+            }
+        }
+    };
+    match stream {
+        StreamEnd::Closed => format!("{ended}."),
+        StreamEnd::Broken(error) => format!("{ended}: reading its output failed: {error}."),
+        StreamEnd::Malformed(error) => format!("{ended}: its output is not a frame: {error}."),
+    }
+}
+
+/// The end of what a cartridge wrote on stderr, kept for its death report.
+#[derive(Debug, Default)]
+struct StderrTail {
+    text: String,
+    /// Whether text before what is kept was dropped.
+    cut: bool,
+}
+
+impl StderrTail {
+    fn push(&mut self, line: &str) {
+        self.text.push_str(line);
+        if self.text.len() > STDERR_TAIL_LIMIT {
+            let mut cut_at = self.text.len() - STDERR_TAIL_LIMIT;
+            while !self.text.is_char_boundary(cut_at) {
+                cut_at += 1;
+            }
+            self.text.drain(..cut_at);
+            self.cut = true;
+        }
+    }
+
+    fn report(&self) -> String {
+        let text = self.text.trim_end();
+        if self.cut {
+            format!("[earlier output cut]\n{text}")
+        } else {
+            text.to_string()
+        }
+    }
+}
+
+/// A cartridge's stderr as it is forwarded: the end of it, and the task that
+/// forwards it, which ends when the stream does.
+struct StderrForwarder {
+    tail: Arc<std::sync::Mutex<StderrTail>>,
+    task: JoinHandle<()>,
+}
+
+impl StderrForwarder {
+    /// Forward `stderr` to the host log line by line, keeping its end.
+    ///
+    /// A line that is not UTF-8 is forwarded with its bytes replaced, rather
+    /// than ending the forwarding: a crashing process writes what it writes.
+    fn start(stderr: tokio::process::ChildStderr, cartridge_path: PathBuf) -> Self {
+        let tail = Arc::new(std::sync::Mutex::new(StderrTail::default()));
+        let kept = tail.clone();
+        let task = tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut reader = tokio::io::BufReader::new(stderr);
+            let mut line = Vec::new();
+            loop {
+                line.clear();
+                match reader.read_until(b'\n', &mut line).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let text = String::from_utf8_lossy(&line);
+                        kept.lock().expect("the stderr tail is never poisoned").push(&text);
+                        let text = text.trim_end();
+                        if !text.is_empty() {
+                            tracing::debug!(
+                                cartridge = %cartridge_path.display(),
+                                "[cartridge stderr] {text}"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        tracing::debug!(
+                            cartridge = %cartridge_path.display(),
+                            %error,
+                            "[cartridge stderr] the stream could not be read further"
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+        Self { tail, task }
+    }
+
+    /// What the cartridge wrote, once its process has ended: read until the
+    /// stream ends, or for `STDERR_DRAIN_LIMIT` when something else holds it
+    /// open.
+    async fn finish(mut self) -> String {
+        if tokio::time::timeout(STDERR_DRAIN_LIMIT, &mut self.task).await.is_err() {
+            self.task.abort();
+        }
+        let tail = self.tail.lock().expect("the stderr tail is never poisoned");
+        tail.report()
     }
 }
 
@@ -481,6 +777,8 @@ enum CartridgeEvent {
     Death {
         cartridge_idx: usize,
         generation: u64,
+        /// How the stream ended.
+        stream: StreamEnd,
     },
 }
 
@@ -541,8 +839,9 @@ struct ManagedCartridge {
     removed: bool,
     /// Pending heartbeats sent to this cartridge (ID → sent time).
     pending_heartbeats: HashMap<MessageId, Instant>,
-    /// Stderr handle for capturing crash output.
-    stderr_handle: Option<tokio::process::ChildStderr>,
+    /// The process's stderr, forwarded to the host log, and its end kept
+    /// for the report of the process's death.
+    stderr: Option<StderrForwarder>,
     /// Last death error message (includes stderr if available). Used for ERR frames
     /// sent when attempting to write to a dead cartridge.
     last_death_message: Option<String>,
@@ -625,7 +924,7 @@ impl ManagedCartridge {
             hello_failed: false,
             removed: false,
             pending_heartbeats: HashMap::new(),
-            stderr_handle: None,
+            stderr: None,
             last_death_message: None,
             shutdown_reason: None,
             memory_footprint_mb: 0,
@@ -757,7 +1056,7 @@ impl ManagedCartridge {
             hello_failed,
             removed: false,
             pending_heartbeats: HashMap::new(),
-            stderr_handle: None,
+            stderr: None,
             last_death_message: None,
             shutdown_reason: None,
             memory_footprint_mb: 0,
@@ -797,7 +1096,7 @@ impl ManagedCartridge {
             hello_failed: false,
             removed: false,
             pending_heartbeats: HashMap::new(),
-            stderr_handle: None,
+            stderr: None,
             last_death_message: None,
             shutdown_reason: None,
             memory_footprint_mb: 0,
@@ -1647,8 +1946,8 @@ impl CartridgeHostRuntime {
                                 break Err(e);
                             }
                         }
-                        CartridgeEvent::Death { cartridge_idx, generation } => {
-                            if let Err(e) = self.handle_cartridge_death(cartridge_idx, generation, &outbound_tx).await {
+                        CartridgeEvent::Death { cartridge_idx, generation, stream } => {
+                            if let Err(e) = self.handle_cartridge_death(cartridge_idx, generation, Some(stream), &outbound_tx).await {
                                 break Err(e);
                             }
 
@@ -2471,14 +2770,17 @@ impl CartridgeHostRuntime {
     ///    "CARTRIDGE_UNHEALTHY" and retire the full process generation.
     /// 4. **`Some(AppExit)`**: Clean shutdown. No ERR frames — the relay
     ///    connection is closing anyway.
+    ///
+    /// `stream` is how the cartridge's output ended, as its reader saw it, or
+    /// `None` when the host is ending a cartridge whose output is still open
+    /// (a heartbeat timeout), which always has a shutdown reason.
     async fn handle_cartridge_death(
         &mut self,
         cartridge_idx: usize,
         generation: u64,
+        stream: Option<StreamEnd>,
         outbound_tx: &mpsc::UnboundedSender<Frame>,
     ) -> Result<(), AsyncHostError> {
-        use tokio::io::AsyncReadExt;
-
         if self
             .cartridges
             .get(cartridge_idx)
@@ -2490,8 +2792,8 @@ impl CartridgeHostRuntime {
 
         // Scope the mutable borrow of the cartridge so we can access self later.
         let reason;
-        let stderr_content;
-        let exit_info: String;
+        let process_end;
+        let stderr_forwarder;
         let reader_handle;
         let writer_handle;
         // Capture observer payload before we mutate state and clear the
@@ -2521,65 +2823,44 @@ impl CartridgeHostRuntime {
             // a fresh process.
             cartridge.restart_count = cartridge.restart_count.saturating_add(1);
             reason = cartridge.shutdown_reason.take();
+            stderr_forwarder = cartridge.stderr.take();
 
-            // Capture stderr content BEFORE killing the process
-            let mut captured = String::new();
-            if let Some(ref mut stderr) = cartridge.stderr_handle {
-                let mut buf = vec![0u8; 4096];
-                loop {
-                    match tokio::time::timeout(Duration::from_millis(100), stderr.read(&mut buf))
-                        .await
-                    {
-                        Ok(Ok(0)) => break,
-                        Ok(Ok(n)) => {
-                            if let Ok(s) = std::str::from_utf8(&buf[..n]) {
-                                captured.push_str(s);
-                            }
-                            if captured.len() > 2000 {
-                                captured.truncate(2000);
-                                captured.push_str("... [truncated]");
-                                break;
-                            }
+            // How the process ended. One the host ended itself has been killed
+            // and collected already. One whose output ended on its own is given
+            // time to exit, since a crash closes its output before it is
+            // collected; one that wrote something that is not a frame is not
+            // going to exit for it, and is ended now.
+            process_end = match cartridge.process.take() {
+                None => ProcessEnd::NoProcess,
+                Some(mut child) => {
+                    let wait = match (&reason, &stream) {
+                        (None, Some(StreamEnd::Closed | StreamEnd::Broken(_))) => EXIT_WAIT_LIMIT,
+                        _ => Duration::ZERO,
+                    };
+                    match wait_for_exit(&mut child, wait).await {
+                        Ok(Some(status)) => ProcessEnd::Exited(status),
+                        Ok(None) => {
+                            kill_and_reap(&mut child).await;
+                            ProcessEnd::Killed
                         }
-                        Ok(Err(_)) | Err(_) => break,
+                        Err(error) => {
+                            kill_and_reap(&mut child).await;
+                            ProcessEnd::Unknown(error.to_string())
+                        }
                     }
                 }
-            }
-            cartridge.stderr_handle = None;
-
-            // Capture exit status and kill the process if it's still around
-            if let Some(ref mut child) = cartridge.process {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::process::ExitStatusExt;
-                            if let Some(sig) = status.signal() {
-                                exit_info = format!("killed by signal {}", sig);
-                            } else {
-                                exit_info = format!("exit code {}", status.code().unwrap_or(-1));
-                            }
-                        }
-                        #[cfg(not(unix))]
-                        {
-                            exit_info = format!("exit code {:?}", status.code());
-                        }
-                    }
-                    Ok(None) => {
-                        // Still running — kill it
-                        kill_and_reap(child).await;
-                        exit_info = "still running (killed)".to_string();
-                    }
-                    Err(e) => {
-                        exit_info = format!("try_wait failed: {}", e);
-                    }
-                }
-            } else {
-                exit_info = String::new();
-            }
-            cartridge.process = None;
-            stderr_content = captured;
+            };
         }
+        let stderr_content = match stderr_forwarder {
+            Some(forwarder) => forwarder.finish().await,
+            None => String::new(),
+        };
+        let exit_info = match &process_end {
+            ProcessEnd::NoProcess => String::new(),
+            ProcessEnd::Exited(status) => describe_exit(status),
+            ProcessEnd::Killed => "killed by the host".to_string(),
+            ProcessEnd::Unknown(error) => format!("its exit status could not be read: {error}"),
+        };
 
         if let Some(handle) = writer_handle {
             let _ = handle.await;
@@ -2700,24 +2981,16 @@ impl CartridgeHostRuntime {
         let err_info: Option<(&str, crate::failure::AttributionClass, String)> = match &reason {
             None => {
                 // Unexpected death — genuine crash mid-flight
-                let exit_suffix = if exit_info.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({})", exit_info)
-                };
+                let stream = stream.as_ref().expect(
+                    "a cartridge the host ends itself always has a shutdown reason; \
+                     one with none died on its own, and its reader saw how its output ended",
+                );
+                let cartridge = self.cartridges[cartridge_idx].path.display();
+                let what = death_report(&cartridge.to_string(), stream, &process_end);
                 let error_message = if stderr_content.is_empty() {
-                    format!(
-                        "Cartridge {} exited unexpectedly{}.",
-                        self.cartridges[cartridge_idx].path.display(),
-                        exit_suffix
-                    )
+                    what
                 } else {
-                    format!(
-                        "Cartridge {} exited unexpectedly{}. stderr:\n{}",
-                        self.cartridges[cartridge_idx].path.display(),
-                        exit_suffix,
-                        stderr_content
-                    )
+                    format!("{what} stderr:\n{stderr_content}")
                 };
                 Some((
                     "CARTRIDGE_DIED",
@@ -3192,37 +3465,12 @@ impl CartridgeHostRuntime {
         let stderr = child.stderr.take();
 
         // Forward cartridge stderr to the host tracing output, line by line. A
-        // cartridge that dies ("Master died — Connection closed unexpectedly")
-        // prints its panic / abort message on stderr; draining and discarding
-        // those lines (as this did) hides every cartridge-side crash and leaves
-        // only the relay's after-the-fact "master died" with no cause. Emitted at
-        // debug on this module's target, which the scenario harness's default
-        // filter (`capdag::bifaci::host_runtime=debug`) captures into the saved
-        // test log so cartridge crashes are diagnosable from the log alone.
-        if let Some(cartridge_stderr) = stderr {
-            let cartridge_path = cartridge.path.clone();
-            tokio::spawn(async move {
-                use tokio::io::AsyncBufReadExt;
-                let mut reader = tokio::io::BufReader::new(cartridge_stderr);
-                let mut line = String::new();
-                loop {
-                    line.clear();
-                    match reader.read_line(&mut line).await {
-                        Ok(0) | Err(_) => break, // EOF or read error: cartridge closed stderr
-                        Ok(_) => {
-                            let text = line.trim_end();
-                            if !text.is_empty() {
-                                tracing::debug!(
-                                    cartridge = %cartridge_path.display(),
-                                    "[cartridge stderr] {text}"
-                                );
-                            }
-                        }
-                    }
-                }
-            });
-        }
-        let stderr: Option<tokio::process::ChildStderr> = None; // Already consumed above
+        // cartridge that dies prints its panic or abort message on stderr;
+        // the lines go to the host log at debug on this module's target, which
+        // the scenario harness's default filter
+        // (`capdag::bifaci::host_runtime=debug`) captures into the saved test
+        // log, and the end of it is kept for the report of the death.
+        let stderr = stderr.map(|stderr| StderrForwarder::start(stderr, cartridge.path.clone()));
 
         // HELLO handshake — bounded by a hard timeout so a cartridge
         // that fails to start its CBOR-mode reader cannot hold up the
@@ -3377,7 +3625,7 @@ impl CartridgeHostRuntime {
         cartridge.writer_tx = Some(writer_tx);
         cartridge.reader_handle = Some(rh);
         cartridge.writer_handle = Some(wh);
-        cartridge.stderr_handle = stderr;
+        cartridge.stderr = stderr;
         cartridge.last_death_message = None; // Clear any previous death message
         // Given before the request it was spawned for is forwarded: the
         // writer channel is ordered, so the policy precedes it.
@@ -3537,7 +3785,7 @@ impl CartridgeHostRuntime {
 
         for (cartridge_idx, generation) in timed_out {
             self.cartridges[cartridge_idx].shutdown_reason = Some(ShutdownReason::HeartbeatTimeout);
-            self.handle_cartridge_death(cartridge_idx, generation, outbound_tx)
+            self.handle_cartridge_death(cartridge_idx, generation, None, outbound_tx)
                 .await?;
         }
 
@@ -3879,18 +4127,18 @@ impl CartridgeHostRuntime {
                         }
                     }
                     Ok(None) => {
-                        // EOF — cartridge closed stdout
                         let _ = event_tx.send(CartridgeEvent::Death {
                             cartridge_idx,
                             generation,
+                            stream: StreamEnd::Closed,
                         });
                         break;
                     }
-                    Err(_) => {
-                        // Read error — treat as death
+                    Err(error) => {
                         let _ = event_tx.send(CartridgeEvent::Death {
                             cartridge_idx,
                             generation,
+                            stream: StreamEnd::from_read_error(&error),
                         });
                         break;
                     }
@@ -4530,6 +4778,29 @@ mod tests {
         assert_eq!(result.len(), 3000);
         assert_eq!(&result[..1000], &chunk1_data);
         assert_eq!(&result[1000..], &chunk2_data);
+    }
+
+    // TEST13212: a Windows process's exit code is told apart: a crash names the
+    // exception it ended with, a process the loader could not start names the
+    // status that stopped it, and any other code is the program's own, shown
+    // signed and in hex when its high bit is set.
+    #[test]
+    fn test13212_a_windows_exit_code_names_its_exception() {
+        assert_eq!(
+            describe_windows_exit_code(0xC000_0409),
+            "exception 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN)"
+        );
+        assert_eq!(
+            describe_windows_exit_code(0xC000_0005),
+            "exception 0xC0000005 (STATUS_ACCESS_VIOLATION)"
+        );
+        assert_eq!(
+            describe_windows_exit_code(0xC000_0135),
+            "status 0xC0000135 (STATUS_DLL_NOT_FOUND)"
+        );
+        assert_eq!(describe_windows_exit_code(0xFFFF_FFFF), "exit code -1 (0xFFFFFFFF)");
+        assert_eq!(describe_windows_exit_code(3), "exit code 3");
+        assert_eq!(describe_windows_exit_code(0), "exit code 0");
     }
 
     // TEST243: Test AsyncHostError variants display correct error messages
@@ -7778,7 +8049,7 @@ mod tests {
         let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel();
 
         runtime
-            .handle_cartridge_death(0, 6, &outbound_tx)
+            .handle_cartridge_death(0, 6, None, &outbound_tx)
             .await
             .expect("stale death event must be ignored");
         assert!(runtime.cartridges[0].running);
@@ -7787,7 +8058,7 @@ mod tests {
 
         runtime.cartridges[0].shutdown_reason = Some(ShutdownReason::HeartbeatTimeout);
         runtime
-            .handle_cartridge_death(0, 7, &outbound_tx)
+            .handle_cartridge_death(0, 7, None, &outbound_tx)
             .await
             .expect("current generation must be retired");
 
@@ -7843,7 +8114,7 @@ mod tests {
         runtime.cartridges[idx].shutdown_reason = Some(ShutdownReason::HeartbeatTimeout);
         tokio::time::timeout(
             Duration::from_secs(5),
-            runtime.handle_cartridge_death(idx, generation, &outbound_tx),
+            runtime.handle_cartridge_death(idx, generation, None, &outbound_tx),
         )
         .await
         .expect("retiring a silent cartridge must not wait on the cartridge")

@@ -35,6 +35,7 @@ const SHOUT: &str = r#"cap:in="media:enc=utf8";test-dag-shout;out="media:dag-sho
 const JOIN: &str = r#"cap:in="media:enc=utf8";test-dag-join;out="media:dag-joined;enc=utf8""#;
 const PAIR: &str = r#"cap:in="media:enc=utf8";test-dag-pair;out="media:dag-pair;enc=utf8""#;
 const FLAKY: &str = r#"cap:in="media:enc=utf8";test-dag-flaky;out="media:dag-flaky;enc=utf8""#;
+const DIE: &str = r#"cap:in="media:enc=utf8";test-die;out="media:died;enc=utf8""#;
 
 /// The headers of every cap the DAG tests wire, each under its short name.
 fn dag_headers() -> String {
@@ -785,6 +786,62 @@ async fn test12801_a_retryable_failure_is_attempted_again() {
         .expect("a failure of the input stands");
     assert_eq!(error.attribution_class(), AttributionClass::Input);
     assert!(error.failure_reason().contains("attempt 1"), "it was asked once: {error}");
+}
+
+/// Run the cartridge's `test-die` the way `how` says, and the reason the run
+/// failed with. The cartridge says on stderr that it is dying, writes the start
+/// of a frame, and dies before the rest of it. The reason names the cartridge,
+/// the read error and what it wrote on stderr, and never calls it still running.
+async fn die(how: &str) -> capdag::ExecutionError {
+    let machines = Machines::new(TAG);
+    let notation = format!("[die {DIE}][(a, how=\"{how}\") -> die -> out]");
+    let error = machines
+        .run(&notation, &[("a", Given::One(b"a"))])
+        .await
+        .err()
+        .expect("a cartridge that dies mid-frame fails its step");
+    assert_eq!(error.failure_code(), Some("CARTRIDGE_DIED"), "{error}");
+    let reason = error.failure_reason();
+    assert!(reason.contains("testcartridge"), "the death names the cartridge: {reason}");
+    assert!(
+        reason.contains("reading its output failed: Unexpected end of stream"),
+        "the death names the read error the host saw: {reason}"
+    );
+    assert!(!reason.contains("still running"), "the process had exited: {reason}");
+    let stderr = reason
+        .split_once(" stderr:\n")
+        .map(|(_, stderr)| stderr)
+        .unwrap_or_else(|| panic!("the death carries the cartridge's stderr: {reason}"));
+    assert!(
+        stderr.lines().any(|line| line == format!("test-die is dying: {how}")),
+        "the cartridge's last words are in it: {reason}"
+    );
+    error
+}
+
+// TEST13210: a cartridge that writes part of a frame and exits is reported
+// with the read error the host saw and the code it exited with — not only as
+// having exited unexpectedly, and never as still running.
+#[tokio::test]
+async fn test13210_a_cartridge_that_exits_mid_frame_is_reported_with_its_read_error_and_exit_code() {
+    let error = die("exit:3").await;
+    assert!(error.failure_reason().contains("exit code 3"), "{error}");
+}
+
+// TEST13211: a cartridge that aborts mid-frame is reported with the read error
+// and how the process ended: on Unix the signal that killed it, on Windows the
+// fail-fast exception it ended with.
+#[tokio::test]
+async fn test13211_a_cartridge_that_aborts_mid_frame_is_reported_with_its_signal_or_exception() {
+    let error = die("abort").await;
+    let reason = error.failure_reason();
+    #[cfg(unix)]
+    assert!(reason.contains("killed by signal 6 (SIGABRT)"), "{reason}");
+    #[cfg(windows)]
+    assert!(
+        reason.contains("exception 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN)"),
+        "{reason}"
+    );
 }
 
 // TEST12802: `on_error=absent` tolerates a step that failed for good. In a
