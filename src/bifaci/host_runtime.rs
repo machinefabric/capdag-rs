@@ -330,6 +330,29 @@ impl CartridgeProcessHandle {
 // ERROR TYPES
 // =============================================================================
 
+/// Why the relay could not take a frame the host wrote to it.
+#[derive(Debug)]
+enum RelayWriteFailure {
+    /// The engine hung up: the relay is closed.
+    HungUp,
+    /// The relay could not take the frame for any other reason.
+    Failed(String),
+}
+
+/// Whether a failed relay write says the engine hung up: the connection's far
+/// end is closed (BrokenPipe, ConnectionReset) or gone (NotConnected).
+fn relay_hung_up(e: &CborError) -> bool {
+    matches!(
+        e,
+        CborError::Io(io) if matches!(
+            io.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::NotConnected
+        )
+    )
+}
+
 /// Errors that can occur in the async cartridge host runtime.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum AsyncHostError {
@@ -1580,7 +1603,8 @@ impl CartridgeHostRuntime {
         // Spawn outbound writer task (runtime → relay). A frame it cannot
         // write is reported on `relay_write_failed`, and the session ends on
         // it below.
-        let (relay_write_failed_tx, mut relay_write_failed) = mpsc::unbounded_channel::<String>();
+        let (relay_write_failed_tx, mut relay_write_failed) =
+            mpsc::unbounded_channel::<RelayWriteFailure>();
         let outbound_writer = tokio::spawn(Self::outbound_writer_loop(
             relay_write,
             outbound_rx,
@@ -1668,12 +1692,27 @@ impl CartridgeHostRuntime {
                     }
                 }
 
-                // A frame the relay could not take ends the session: it is
-                // lost, and every frame after it would be too, so the
-                // engine would wait on answers this host can no longer
-                // give.
-                Some(detail) = relay_write_failed.recv() => {
-                    break Err(AsyncHostError::Io(format!("relay write failed: {}", detail)));
+                // A frame the relay could not take. An engine that hung up
+                // closed the relay: that is the relay ending, as when its
+                // read side ends, and the cartridges are served until they
+                // are done. Any other failure ends the session: the frame is
+                // lost, and every frame after it would be too, so the engine
+                // would wait on answers this host can no longer give. Once
+                // the relay has ended, a write that fails is its ending, not
+                // news.
+                Some(failure) = relay_write_failed.recv(), if relay_connected => {
+                    match failure {
+                        RelayWriteFailure::Failed(detail) => {
+                            break Err(AsyncHostError::Io(format!("relay write failed: {}", detail)));
+                        }
+                        RelayWriteFailure::HungUp => {
+                            relay_connected = false;
+                            let all_cartridges_dead = self.cartridges.iter().all(|p| !p.running);
+                            if all_cartridges_dead {
+                                break Ok(());
+                            }
+                        }
+                    }
                 }
 
                 // Frames from relay reader task (cancel-safe: channel recv is cancel-safe)
@@ -3919,14 +3958,22 @@ impl CartridgeHostRuntime {
     async fn outbound_writer_loop<W: AsyncWrite + Unpin>(
         relay_write: W,
         mut rx: mpsc::UnboundedReceiver<Frame>,
-        failed: mpsc::UnboundedSender<String>,
+        failed: mpsc::UnboundedSender<RelayWriteFailure>,
     ) {
         let mut writer = FrameWriter::new(relay_write);
         while let Some(frame) = rx.recv().await {
             if let Err(e) = writer.write(&frame).await {
-                // Said, never swallowed: the run loop ends the session on it.
-                // Nobody left to tell means the run loop has already ended.
-                let _ = failed.send(format!("{:?} for {} could not be written: {}", frame.frame_type, frame.id, e));
+                // Said, never swallowed: the run loop acts on it. Nobody left
+                // to tell means the run loop has already ended.
+                let failure = if relay_hung_up(&e) {
+                    RelayWriteFailure::HungUp
+                } else {
+                    RelayWriteFailure::Failed(format!(
+                        "{:?} for {} could not be written: {}",
+                        frame.frame_type, frame.id, e
+                    ))
+                };
+                let _ = failed.send(failure);
                 break;
             }
         }
@@ -5264,14 +5311,68 @@ mod tests {
         assert_eq!(answer.routing_id, Some(MessageId::Uint(1)));
     }
 
+    /// A relay transport whose every write fails while the relay is still
+    /// there: not a hang-up, a fault.
+    struct FaultingRelayWrite;
+
+    impl AsyncWrite for FaultingRelayWrite {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::task::Poll::Ready(Err(std::io::Error::other("the relay transport faulted")))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
     // TEST7193: a frame the host cannot write to its relay ends its session
     // with the failure named. The writer used to stop on the error without a
     // word while the host went on reading the relay, so the engine waited
     // for answers the host could no longer give. Here the relay's read side
-    // stays open and sends nothing; the host's first frame — its initial
-    // RelayNotify — cannot be written.
+    // stays open and sends nothing, and its write side faults: the host's
+    // first frame — its initial RelayNotify — cannot be written.
     #[tokio::test]
     async fn test7193_failed_relay_write_ends_the_host_session() {
+        let (relay_read, _engine_side_kept_open) = tokio::io::duplex(1024);
+
+        let mut runtime = CartridgeHostRuntime::new();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            runtime.run(relay_read, FaultingRelayWrite, || vec![]),
+        )
+        .await
+        .expect("a host whose relay cannot take its frames ends its session");
+        let err = outcome.expect_err("the session ends with the failed write");
+        assert!(
+            err.to_string().contains("relay write failed")
+                && err.to_string().contains("the relay transport faulted"),
+            "the session's end names the failed write: {err}"
+        );
+    }
+
+    // TEST7194: a write that fails because the engine hung up is the relay
+    // closing, as when its read side ends: the session ends cleanly, not with
+    // a failed write. An engine that closes the relay makes the host's next
+    // write fail with a broken pipe, often before the host has read the
+    // relay's end; that used to end the session with "relay write failed".
+    // Here the engine has closed its reading end and the relay's read side
+    // stays open, so only the write can say the engine is gone.
+    #[tokio::test]
+    async fn test7194_relay_write_to_a_hung_up_engine_ends_the_session_cleanly() {
         let (relay_read, _engine_side_kept_open) = tokio::io::duplex(1024);
         let (relay_write, engine_read) = tokio::io::duplex(1024);
         drop(engine_read);
@@ -5282,11 +5383,10 @@ mod tests {
             runtime.run(relay_read, relay_write, || vec![]),
         )
         .await
-        .expect("a host whose relay cannot take its frames ends its session");
-        let err = outcome.expect_err("the session ends with the failed write");
+        .expect("a host whose engine hung up ends its session");
         assert!(
-            err.to_string().contains("relay write failed"),
-            "the session's end names the failed write: {err}"
+            outcome.is_ok(),
+            "an engine that hung up closed the relay; the session ends cleanly: {outcome:?}"
         );
     }
 
