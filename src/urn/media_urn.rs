@@ -695,31 +695,31 @@ impl MediaUrn {
     /// Check if this represents image data.
     /// Returns true if the "image" marker tag is present.
     pub fn is_image(&self) -> bool {
-        self.get_tag("image").is_some()
+        self.has_marker_tag("image")
     }
 
     /// Check if this represents audio data.
     /// Returns true if the "audio" marker tag is present.
     pub fn is_audio(&self) -> bool {
-        self.get_tag("audio").is_some()
+        self.has_marker_tag("audio")
     }
 
     /// Check if this represents video data.
     /// Returns true if the "video" marker tag is present.
     pub fn is_video(&self) -> bool {
-        self.get_tag("video").is_some()
+        self.has_marker_tag("video")
     }
 
     /// Check if this represents numeric data.
     /// Returns true if the "numeric" marker tag is present.
     pub fn is_numeric(&self) -> bool {
-        self.get_tag("numeric").is_some()
+        self.has_marker_tag("numeric")
     }
 
     /// Check if this represents boolean data.
     /// Returns true if the "bool" marker tag is present.
     pub fn is_bool(&self) -> bool {
-        self.get_tag("bool").is_some()
+        self.has_marker_tag("bool")
     }
 
     /// Check if this represents a void (no data) type — the **unit
@@ -1742,6 +1742,36 @@ mod debug_tests {
                 .unwrap_or_else(|e| panic!("{input} must parse: it does not say void, got {e:?}"));
             assert!(!urn.is_void(), "{input} is not void");
             assert_eq!(urn.get_tag("enc"), Some("utf8"), "{input} keeps its other tags");
+        }
+    }
+
+    // TEST1812: every marker predicate reads its marker, never the key's presence. For each marker x, the predicate is true for media:x and false for media:!x (must not have x) and media:?x (x left open); the negated predicates (is_scalar, is_opaque) are the reverse.
+    #[test]
+    fn test1812_marker_predicates_read_the_marker() {
+        let predicates: [(&str, fn(&MediaUrn) -> bool); 10] = [
+            ("list", MediaUrn::is_list),
+            ("record", MediaUrn::is_record),
+            ("image", MediaUrn::is_image),
+            ("audio", MediaUrn::is_audio),
+            ("video", MediaUrn::is_video),
+            ("numeric", MediaUrn::is_numeric),
+            ("bool", MediaUrn::is_bool),
+            ("void", MediaUrn::is_void),
+            ("file-path", MediaUrn::is_file_path),
+            ("live", MediaUrn::is_live_feed),
+        ];
+        let parse = |s: String| MediaUrn::from_string(&s).unwrap_or_else(|e| panic!("{s}: {e:?}"));
+        for (marker, predicate) in predicates {
+            assert!(predicate(&parse(format!("media:{marker}"))), "media:{marker}");
+            assert!(!predicate(&parse(format!("media:!{marker}"))), "media:!{marker}");
+            assert!(!predicate(&parse(format!("media:?{marker}"))), "media:?{marker}");
+        }
+        let negated: [(&str, fn(&MediaUrn) -> bool); 2] =
+            [("list", MediaUrn::is_scalar), ("record", MediaUrn::is_opaque)];
+        for (marker, predicate) in negated {
+            assert!(!predicate(&parse(format!("media:{marker}"))), "media:{marker}");
+            assert!(predicate(&parse(format!("media:!{marker}"))), "media:!{marker}");
+            assert!(predicate(&parse(format!("media:?{marker}"))), "media:?{marker}");
         }
     }
 }
