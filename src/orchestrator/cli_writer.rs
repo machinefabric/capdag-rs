@@ -372,19 +372,23 @@ mod tests {
         let mut blob = writer("step_a", "0.step_a");
         blob.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
         blob.on_chunk_payload(&cbor_bytes(b"one"), None).await.unwrap();
+        blob.on_stream_end().await.unwrap();
         let blob = blob.finish();
         let mut items = writer("step_a.rest", "1.step_a.rest");
         items.on_stream_start(Some(true), "media:x", None, None).await.unwrap();
         items.on_chunk_payload(&cbor_bytes(b"i0"), None).await.unwrap();
         items.on_chunk_payload(&cbor_bytes(b"i1"), None).await.unwrap();
+        items.on_stream_end().await.unwrap();
         let items = items.finish();
         let mut named = writer("step_a", "2.step_a");
         named.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
         named.on_chunk_payload(&cbor_bytes(b"kept"), None).await.unwrap();
+        named.on_stream_end().await.unwrap();
         let named = named.finish();
         let mut other = writer("step_b", "3.step_b");
         other.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
         other.on_chunk_payload(&cbor_bytes(b"other"), None).await.unwrap();
+        other.on_stream_end().await.unwrap();
         let other = other.finish();
 
         // One part is given its name; and the user has a file of their own
