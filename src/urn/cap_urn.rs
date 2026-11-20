@@ -837,10 +837,17 @@ impl CapUrn {
         // serves the request with the chosen cap's key, since the model keeps
         // the first of equal keys.
         let key = crate::formal::exec::ranking_key(chosen, request.formal.clone());
-        candidates.iter().position(|c| {
+        let position = candidates.iter().position(|c| {
             c.is_dispatchable(request)
                 && crate::formal::exec::ranking_key(c.formal.clone(), request.formal.clone()) == key
-        })
+        });
+        match position {
+            Some(position) => Some(position),
+            None => panic!(
+                "capdag: the model chose a cap to serve {} that is none of the candidates",
+                request
+            ),
+        }
     }
 
     /// Whether this candidate COULD serve `request`: not guaranteed, not
@@ -1340,24 +1347,37 @@ impl<'de> Deserialize<'de> for CapUrn {
     }
 }
 
-/// Cap matching and selection utilities
+/// Choosing among registered caps for a request, as the proved ranking does
+/// (`CapDAG.Exec.select`): only the caps that serve the request
+/// ([`CapUrn::is_dispatchable`]) are considered, the one whose specificity is
+/// closest to the request's ranks first (an exact match, then the nearest
+/// refinement, then the nearest fallback), and of caps that rank alike the
+/// first registered comes first. `caps` is in registration order.
 pub struct CapMatcher;
 
 impl CapMatcher {
-    /// Find the most specific cap that accepts a request
+    /// The cap the ranking chooses to serve `request` ([`CapUrn::select`]),
+    /// or `None` when no cap serves it.
     pub fn find_best_match<'a>(caps: &'a [CapUrn], request: &CapUrn) -> Option<&'a CapUrn> {
-        caps.iter()
-            .filter(|cap| request.accepts(cap))
-            .max_by_key(|cap| cap.specificity())
+        CapUrn::select(caps, request).map(|index| &caps[index])
     }
 
-    /// Find all caps that match a request, sorted by specificity
+    /// Every cap that serves `request`, in ranking order: the one
+    /// [`find_best_match`](Self::find_best_match) chooses first, and caps that
+    /// rank alike in registration order.
     pub fn find_all_matches<'a>(caps: &'a [CapUrn], request: &CapUrn) -> Vec<&'a CapUrn> {
-        let mut matches: Vec<&CapUrn> = caps.iter().filter(|cap| request.accepts(cap)).collect();
-
-        // Sort by specificity (most specific first)
-        matches.sort_by_key(|cap| std::cmp::Reverse(cap.specificity()));
-        matches
+        let mut ranked: Vec<_> = caps
+            .iter()
+            .filter(|cap| cap.is_dispatchable(request))
+            .map(|cap| {
+                let key =
+                    crate::formal::exec::ranking_key(cap.formal.clone(), request.formal.clone());
+                (key, cap)
+            })
+            .collect();
+        // A stable sort, so caps of equal key keep their registration order.
+        ranked.sort_by(|a, b| a.0.cmp(&b.0));
+        ranked.into_iter().map(|(_, cap)| cap).collect()
     }
 
     /// Check if two cap sets overlap (any pair is comparable)
@@ -2022,19 +2042,30 @@ mod tests {
         assert!(!cap5.accepts(&cap1));
     }
 
-    // TEST025: Test find_best_match returns most specific matching cap
+    // TEST025: find_best_match chooses the serving cap closest to the request: an exact match over a refinement
     #[test]
     fn test025_best_match() {
         let caps = vec![
             CapUrn::from_string(&test_urn("op")).unwrap(),
-            CapUrn::from_string(&test_urn("generate")).unwrap(),
             CapUrn::from_string(&test_urn("generate;ext=pdf")).unwrap(),
+            CapUrn::from_string(&test_urn("generate")).unwrap(),
         ];
 
         let request = CapUrn::from_string(&test_urn("generate")).unwrap();
+        // Both generate caps serve the request; the pdf one is more specific.
+        assert!(caps[1].is_dispatchable(&request));
+        assert!(caps[2].is_dispatchable(&request));
+        assert!(caps[1].specificity() > caps[2].specificity());
+
         let best = CapMatcher::find_best_match(&caps, &request).unwrap();
 
-        // Most specific cap that accepts the request
+        // The exact match wins over the more specific refinement, though it is
+        // registered after it.
+        assert_eq!(best, &caps[2]);
+
+        // A refinement is chosen when nothing matches exactly.
+        let without_exact = vec![caps[0].clone(), caps[1].clone()];
+        let best = CapMatcher::find_best_match(&without_exact, &request).unwrap();
         assert_eq!(best.get_tag("ext"), Some(&"pdf".to_string()));
     }
 
@@ -3002,23 +3033,84 @@ mod tier_tests {
         assert!(result.is_err());
     }
 
-    // TEST563: CapMatcher::find_all_matches returns all matching caps sorted by specificity
+    // TEST563: CapMatcher::find_all_matches returns every serving cap in ranking order, closest to the request first
     #[test]
     fn test563_find_all_matches() {
         let caps = vec![
-            CapUrn::from_string(r#"cap:in=media:void;out=media:void;test"#).unwrap(),
             CapUrn::from_string(r#"cap:ext=pdf;in=media:void;out=media:void;test"#).unwrap(),
+            CapUrn::from_string(r#"cap:in=media:void;out=media:void;test"#).unwrap(),
             CapUrn::from_string(r#"cap:different;in=media:void;out=media:void"#).unwrap(),
         ];
 
         let request = CapUrn::from_string(r#"cap:in=media:void;out=media:void;test"#).unwrap();
         let matches = CapMatcher::find_all_matches(&caps, &request);
 
-        // Should find 2 matches (test and test;ext=pdf), not different
-        assert_eq!(matches.len(), 2);
-        // Sorted by specificity descending: ext=pdf first (more specific)
-        assert!(matches[0].specificity() >= matches[1].specificity());
-        assert_eq!(matches[0].get_tag("ext"), Some(&"pdf".to_string()));
+        // The two test caps serve the request; the different one does not.
+        // The exact match ranks before the more specific refinement.
+        assert_eq!(matches, vec![&caps[1], &caps[0]]);
+    }
+
+    // TEST477: CapMatcher keeps the first registered of candidates the ranking cannot tell apart
+    #[test]
+    fn test477_matcher_first_registered_of_equal_rank_wins() {
+        let zeta = CapUrn::from_string(
+            r#"cap:engine=zeta;in="media:document;ext=pdf";out="media:ext=png;image";thumbnail"#,
+        )
+        .unwrap();
+        let alpha = CapUrn::from_string(
+            r#"cap:engine=alpha;in="media:document;ext=pdf";out="media:ext=png;image";thumbnail"#,
+        )
+        .unwrap();
+        let request = CapUrn::from_string(
+            r#"cap:in="media:document;ext=pdf";out="media:ext=png;image";thumbnail"#,
+        )
+        .unwrap();
+        // Both serve the request, and they rank alike.
+        assert!(zeta.is_dispatchable(&request));
+        assert!(alpha.is_dispatchable(&request));
+        assert_eq!(zeta.specificity(), alpha.specificity());
+
+        let caps = vec![zeta.clone(), alpha.clone()];
+        assert_eq!(CapMatcher::find_best_match(&caps, &request), Some(&zeta));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&zeta, &alpha]);
+
+        let caps = vec![alpha.clone(), zeta.clone()];
+        assert_eq!(CapMatcher::find_best_match(&caps, &request), Some(&alpha));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&alpha, &zeta]);
+    }
+
+    // TEST484: CapMatcher chooses among the caps that serve the request, never among those the request accepts as a pattern
+    #[test]
+    fn test484_matcher_ranks_serving_caps_not_accepted_ones() {
+        let request = CapUrn::from_string(
+            r#"cap:extract;in="media:document;ext=pdf";out=media:record"#,
+        )
+        .unwrap();
+        // Takes any document, so it takes the pdf the request sends.
+        let broader = CapUrn::from_string(r#"cap:extract;in=media:document;out=media:record"#)
+            .unwrap();
+        // Takes only a version-2 pdf, so not every pdf the request may send.
+        let narrower = CapUrn::from_string(
+            r#"cap:extract;in="media:document;ext=pdf;v=2";out=media:record"#,
+        )
+        .unwrap();
+
+        assert!(broader.is_dispatchable(&request));
+        assert!(!narrower.is_dispatchable(&request));
+        // Read as a pattern, the request fits the narrower cap and not the
+        // broader one, and the narrower one is the more specific.
+        assert!(request.accepts(&narrower));
+        assert!(!request.accepts(&broader));
+        assert!(narrower.specificity() > broader.specificity());
+
+        let caps = vec![broader.clone(), narrower.clone()];
+        assert_eq!(CapMatcher::find_best_match(&caps, &request), Some(&broader));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&broader]);
+
+        // Nothing serves when only the narrower cap is registered.
+        let caps = vec![narrower.clone()];
+        assert_eq!(CapMatcher::find_best_match(&caps, &request), None);
+        assert!(CapMatcher::find_all_matches(&caps, &request).is_empty());
     }
 
     // TEST564: CapMatcher::are_compatible detects bidirectional overlap
