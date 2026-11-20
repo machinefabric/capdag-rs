@@ -445,7 +445,9 @@ impl MediaUrn {
     /// - The `void` marker tag is combined with any other tag.
     ///   `media:void` is atomic — the type-theoretic unit `()` —
     ///   and admits no refinements. Reasons or labels belong on
-    ///   the cap URN's non-directional tags or in cap args.
+    ///   the cap URN's non-directional tags or in cap args. Only the
+    ///   marker is atomic: `media:!void;…` and `media:?void;…` do not
+    ///   say void and combine like any other tag.
     pub fn new(urn: TaggedUrn) -> Result<Self, MediaUrnError> {
         if urn.prefix() != Self::PREFIX {
             return Err(MediaUrnError::InvalidPrefix {
@@ -453,7 +455,7 @@ impl MediaUrn {
                 actual: urn.prefix().to_string(),
             });
         }
-        if urn.tags().contains_key("void") && urn.tags().len() > 1 {
+        if urn.tags().get("void").map_or(false, |v| v == "*") && urn.tags().len() > 1 {
             let extra_tags: Vec<String> = urn
                 .tags()
                 .keys()
@@ -724,9 +726,11 @@ impl MediaUrn {
     /// type** in the type-theoretic reading. `media:void` is the
     /// nullary value; a cap with `media:void` on a side has no
     /// meaningful data on that side. It is NOT "invalid" or "absent".
+    ///
+    /// True only for the `void` marker (`void`, stored as `*`): `media:!void`
+    /// says the media must not be void, and `media:?void` leaves it open.
     pub fn is_void(&self) -> bool {
-        // Check for "void" marker tag
-        self.0.tags().contains_key("void")
+        self.has_marker_tag("void")
     }
 
     /// Check if this is the **top** media URN — the universal
@@ -1034,11 +1038,14 @@ mod tests {
             .is_none()); // "media:record"
     }
 
-    // TEST068: Test is_void returns true when void flag or type=void tag is present
+    // TEST068: is_void is true only for the void marker: media:void; not media:!void (must not be void), media:?void (unconstrained), a URN with no void tag, or media:
     #[test]
     fn test068_is_void() {
         assert!(MediaUrn::from_string("media:void").unwrap().is_void());
+        assert!(!MediaUrn::from_string("media:!void").unwrap().is_void());
+        assert!(!MediaUrn::from_string("media:?void").unwrap().is_void());
         assert!(!MediaUrn::from_string("media:string").unwrap().is_void());
+        assert!(!MediaUrn::from_string("media:").unwrap().is_void());
     }
 
     // TEST071: Test to_string roundtrip ensures serialization and deserialization preserve URN structure
@@ -1718,6 +1725,23 @@ mod debug_tests {
                     parsed.to_string()
                 ),
             }
+        }
+    }
+
+    // TEST1811: atomicity belongs to the void marker alone. media:void;enc=utf8 is refused with VoidNotAtomic, naming enc; media:!void;enc=utf8 (must not be void) and media:?void;enc=utf8 (void left open) name void without the marker, so each parses as an ordinary media URN that is not void.
+    #[test]
+    fn test1811_void_atomicity_reads_the_marker() {
+        match MediaUrn::from_string("media:void;enc=utf8") {
+            Err(MediaUrnError::VoidNotAtomic { extra_tags }) => {
+                assert_eq!(extra_tags, vec!["enc".to_string()])
+            }
+            other => panic!("media:void;enc=utf8: expected VoidNotAtomic, got {other:?}"),
+        }
+        for input in ["media:!void;enc=utf8", "media:?void;enc=utf8"] {
+            let urn = MediaUrn::from_string(input)
+                .unwrap_or_else(|e| panic!("{input} must parse: it does not say void, got {e:?}"));
+            assert!(!urn.is_void(), "{input} is not void");
+            assert_eq!(urn.get_tag("enc"), Some("utf8"), "{input} keeps its other tags");
         }
     }
 }
