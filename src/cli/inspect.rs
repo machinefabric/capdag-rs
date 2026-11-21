@@ -155,7 +155,7 @@ impl Inspectors {
         let candidates = registry.file_media_for_extension(extension).await.map_err(ctx::registry_failure)?;
         for refused in &self.refused {
             let under = candidates.iter().any(|def| {
-                MediaUrn::from_string(&def.urn).is_ok_and(|urn| urn.conforms_to(&refused.adapter).unwrap_or(false))
+                MediaUrn::from_string(&def.urn).is_ok_and(|urn| urn.conforms_to(&refused.adapter))
             });
             if under {
                 return Err(CliError::failed(format!(

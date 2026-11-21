@@ -149,9 +149,9 @@ struct Inner {
 impl Inner {
     /// Whether the machine binds the argument `urn` of step `token_id`.
     fn is_bound(&self, token_id: &str, urn: &MediaUrn) -> bool {
-        self.bound.get(token_id).is_some_and(|bound| {
-            bound.iter().any(|b| b.is_equivalent(urn).unwrap_or(false))
-        })
+        self.bound
+            .get(token_id)
+            .is_some_and(|bound| bound.iter().any(|b| b.is_equivalent(urn)))
     }
 }
 
@@ -402,7 +402,7 @@ impl RunArgumentLedger {
                 // value.
                 let existing = entries.iter_mut().find(|(stored, _)| {
                     MediaUrn::from_string(stored)
-                        .map(|s| s.is_equivalent(&urn).unwrap_or(false))
+                        .map(|s| s.is_equivalent(&urn))
                         .unwrap_or(false)
                 });
                 match existing {

@@ -644,8 +644,7 @@ mod tests {
             Err(PlanViewError::MissingMediaDef(urn)) => assert!(
                 MediaUrn::from_string(&urn)
                     .unwrap()
-                    .is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap())
-                    .unwrap(),
+                    .is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap()),
                 "the error names the media it lacks, not {urn}"
             ),
             other => panic!("a missing media definition is refused, not {other:?}"),

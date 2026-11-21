@@ -64,7 +64,6 @@ fn backend_for(reference: &MediaUrn) -> Option<Backend> {
         MediaUrn::from_string(pattern)
             .expect("BUG: capture family constant is an invalid media URN")
             .accepts(reference)
-            .unwrap_or(false)
     };
     if matches(MEDIA_LIVE_SYNTHETIC) {
         Some(Backend::Synthetic)

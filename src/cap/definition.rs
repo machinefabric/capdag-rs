@@ -215,7 +215,7 @@ impl CapArg {
         use crate::urn::media_urn::MediaUrn;
         self.sources.iter().any(|s| match s {
             ArgSource::Stdin { stdin } => MediaUrn::from_string(stdin)
-                .map(|u| u.is_equivalent(in_spec).unwrap_or(false))
+                .map(|u| u.is_equivalent(in_spec))
                 .unwrap_or(false),
             _ => false,
         })
@@ -919,10 +919,7 @@ impl Cap {
         let void_media =
             crate::urn::media_urn::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
                 .expect("MEDIA_VOID is a valid MediaUrn");
-        let input_is_sequence = if in_spec
-            .is_equivalent(&void_media)
-            .expect("cap registry invariant: cardinality media URNs are comparable")
-            || self.args.is_empty()
+        let input_is_sequence = if in_spec.is_equivalent(&void_media) || self.args.is_empty()
         {
             // Void input, or a cap that declares no arguments at all — the
             // published `discard` cap (`cap:out=media:void`, the terminal
@@ -1109,7 +1106,7 @@ impl Cap {
         let out_spec = crate::urn::media_urn::MediaUrn::from_string(self.urn.out_spec()).ok()?;
         self.outputs.iter().find(|output| {
             crate::urn::media_urn::MediaUrn::from_string(&output.media_urn)
-                .map(|urn| urn.is_equivalent(&out_spec).unwrap_or(false))
+                .map(|urn| urn.is_equivalent(&out_spec))
                 .unwrap_or(false)
         })
     }
@@ -1119,7 +1116,7 @@ impl Cap {
         let wanted = crate::urn::media_urn::MediaUrn::from_string(media_urn).ok()?;
         self.outputs.iter().find(|output| {
             crate::urn::media_urn::MediaUrn::from_string(&output.media_urn)
-                .map(|urn| urn.is_equivalent(&wanted).unwrap_or(false))
+                .map(|urn| urn.is_equivalent(&wanted))
                 .unwrap_or(false)
         })
     }

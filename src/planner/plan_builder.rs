@@ -82,7 +82,7 @@ impl MachinePlanBuilder {
                 if let crate::ArgSource::Stdin { stdin } = source {
                     let equivalent = MediaUrn::from_string(stdin)
                         .ok()
-                        .is_some_and(|stdin| stdin.is_equivalent(&in_spec).unwrap_or(false));
+                        .is_some_and(|stdin| stdin.is_equivalent(&in_spec));
                     if equivalent {
                         return true;
                     }
@@ -183,12 +183,7 @@ impl MachinePlanBuilder {
                      never guesses; supply one entry per input anchor"
                 ))
             })?;
-            if !given.media.conforms_to(declared).map_err(|e| {
-                PlannerError::InvalidInput(format!(
-                    "comparing '{}' with input anchor {anchor}'s type '{declared}': {e}",
-                    given.media
-                ))
-            })? {
+            if !given.media.conforms_to(declared) {
                 return Err(PlannerError::InvalidInput(format!(
                     "the run binds '{}' to input anchor {anchor}, which takes '{declared}'",
                     given.media
@@ -226,7 +221,7 @@ impl MachinePlanBuilder {
                 .iter()
                 .position(|arg| {
                     MediaUrn::from_string(&arg.media_urn)
-                        .map(|urn| urn.is_equivalent(&binding.cap_arg_media_urn).unwrap_or(false))
+                        .map(|urn| urn.is_equivalent(&binding.cap_arg_media_urn))
                         .unwrap_or(false)
                 })
                 .ok_or_else(|| {
@@ -315,7 +310,7 @@ impl MachinePlanBuilder {
                     cap.urn.in_spec()
                 ))
             })?;
-            let takes_input = !in_spec_urn.is_equivalent(&void_media).unwrap_or(false);
+            let takes_input = !in_spec_urn.is_equivalent(&void_media);
             let main_arg_index = if takes_input {
                 Some(
                     cap.args
@@ -593,10 +588,7 @@ impl MachinePlanBuilder {
                 PlannerError::InvalidPath(format!("cap '{cap_urn_str}' out= URN invalid: {e}"))
             })?;
             for output in &edge.outputs {
-                let is_main = output
-                    .output_media_urn
-                    .is_equivalent(&declared_out)
-                    .unwrap_or(false);
+                let is_main = output.output_media_urn.is_equivalent(&declared_out);
                 if is_main {
                     node_runtime.insert(output.node, out_media.clone());
                     producer.insert(output.node, cap_node_id.clone());

@@ -271,8 +271,7 @@ pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
         .urn
         .in_media_urn()
         .map_err(|e| format!("cap {} declares an invalid input: {e}", cap.urn))?
-        .is_equivalent(&void)
-        .unwrap_or(false);
+        .is_equivalent(&void);
     let stdin_count = cap
         .get_args()
         .iter()
@@ -504,9 +503,7 @@ fn resolve_media_urn<'a>(
         .iter()
         .filter(|arg| {
             MediaUrn::from_string(&arg.media_urn)
-                .ok()
-                .and_then(|declared| declared.is_equivalent(&requested).ok())
-                .unwrap_or(false)
+                .is_ok_and(|declared| declared.is_equivalent(&requested))
         })
         .collect();
     match matches.as_slice() {

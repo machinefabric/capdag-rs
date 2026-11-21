@@ -155,7 +155,7 @@ async fn show_media(ctx: &Ctx, registry: &crate::FabricRegistry, media: &crate::
     let takes: Vec<String> = caps
         .iter()
         .filter(|cap| !cap.aliases.is_empty())
-        .filter(|cap| cap.urn.in_media_urn().is_ok_and(|input| media.conforms_to(&input).unwrap_or(false)))
+        .filter(|cap| cap.urn.in_media_urn().is_ok_and(|input| media.conforms_to(&input)))
         .map(|cap| names::cap(registry, cap))
         .collect();
     let alias = names::media(registry, media);
