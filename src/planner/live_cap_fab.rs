@@ -1829,6 +1829,44 @@ mod tests {
         assert_eq!(cap_target.unwrap().min_path_length, 1);
     }
 
+    // TEST7216: a source is read complete: a JSON record file, which does not
+    // mention `list`, takes the edge of a cap whose input refuses lists, though
+    // as a type it may be a list; a JSON list does not.
+    #[test]
+    fn test7216_a_source_takes_an_edge_it_satisfies() {
+        let mut graph = LiveCapFab::new();
+        let cap = make_test_cap(
+            "media:enc=utf8;fmt=json;record;!list",
+            "media:enc=utf8;fmt=yaml;record",
+            "record_to_yaml",
+            "Record To YAML",
+        );
+        graph.add_cap(&cap);
+        graph.set_bookends(&all_bookends(&[cap.clone()]));
+
+        let yaml = MediaUrn::from_string("media:enc=utf8;fmt=yaml;record").unwrap();
+        let record = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;record").unwrap();
+        let input = MediaUrn::from_string("media:enc=utf8;fmt=json;record;!list").unwrap();
+        assert!(!record.conforms_to(&input).unwrap(), "as a type the file may be a list");
+
+        let targets = graph.get_reachable_targets(&record, false, 5);
+        let reached = targets
+            .iter()
+            .find(|t| t.media_def.is_equivalent(&yaml).unwrap_or(false))
+            .expect("the record file takes the edge to YAML");
+        assert_eq!(reached.min_path_length, 1);
+        assert_eq!(graph.find_paths_to_exact_target(&record, &yaml, false, 5, 10).len(), 1);
+
+        let list = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;list;record").unwrap();
+        assert!(
+            graph
+                .get_reachable_targets(&list, false, 5)
+                .iter()
+                .all(|t| !t.media_def.is_equivalent(&yaml).unwrap_or(false)),
+            "a list does not take an edge that refuses lists"
+        );
+    }
+
     // TEST1151: Exact target lookup prefers the direct singular or list-producing path over longer alternatives.
     #[test]
     fn test1151_exact_vs_conformance_matching() {

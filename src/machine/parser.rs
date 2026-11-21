@@ -626,6 +626,13 @@ fn include_machines(
         }
     }
 
+    // A node some step produces holds what that step gives, a complete thing;
+    // every other node holds the type the text wrote for it.
+    let produced: HashSet<String> = wirings
+        .iter()
+        .flat_map(|w| w.targets.iter().map(|(_, node)| node.clone()))
+        .collect();
+
     let mut uses: HashMap<String, usize> = HashMap::new();
     let mut written: Vec<RawWiring> = Vec::with_capacity(wirings.len());
     for (w, node_media) in wirings.into_iter().zip(media_of) {
@@ -664,7 +671,7 @@ fn include_machines(
             }
             if let RawValue::Node(node) = &member.value {
                 let source = &node_media[node];
-                if !source.conforms_to(accepts).unwrap_or(false) {
+                if !super::resolve::source_fits(source, produced.contains(node), accepts) {
                     return Err(MachineAbstractionError::SourceDoesNotConformToMachineInput {
                         position,
                         alias: alias.clone(),
@@ -694,9 +701,11 @@ fn include_machines(
                 .filter(|(name, _)| !bound.contains_key(name))
                 .collect();
             let sources: Vec<MediaUrn> = unnamed.iter().map(|node| node_media[*node].clone()).collect();
+            let given: Vec<bool> = unnamed.iter().map(|node| produced.contains(*node)).collect();
             let accepts: Vec<MediaUrn> = free.iter().map(|(_, media)| media.clone()).collect();
             let pairs = super::resolve::match_sources_to_args(
                 &sources,
+                &given,
                 &accepts,
                 &vec![false; accepts.len()],
                 None,

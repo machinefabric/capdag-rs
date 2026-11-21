@@ -1045,7 +1045,7 @@ pub(crate) fn match_sources_to_args(
 /// gave (`given`) is a complete thing: what it does not mention it does not
 /// have, so it fits a type it satisfies. A source the text or an input anchor
 /// typed is a type, and fits a type it conforms to (04 §Complete things).
-fn source_fits(source: &MediaUrn, given: bool, accepts: &MediaUrn) -> bool {
+pub(crate) fn source_fits(source: &MediaUrn, given: bool, accepts: &MediaUrn) -> bool {
     if given {
         source.satisfies(accepts)
     } else {
@@ -1410,7 +1410,7 @@ mod tests {
         // single pair.
         let sources = vec![media("media:document;ext=pdf")];
         let args = vec![media("media:document;ext=pdf")];
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None)
+        let pairs = match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None)
             .expect("trivial single-source match must succeed");
         assert_eq!(pairs.len(), 1);
         assert!(pairs[0].0.is_equivalent(&media("media:document;ext=pdf")).unwrap());
@@ -1426,7 +1426,7 @@ mod tests {
         // assigned to that arg with distance > 0.
         let sources = vec![media("media:enc=utf8;page")];
         let args = vec![media("media:enc=utf8")];
-        let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None)
+        let pairs = match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None)
             .expect("more-specific source must be matched to its arg");
         assert!(pairs[0].0.is_equivalent(&media("media:enc=utf8")).unwrap());
         assert!(pairs[0]
@@ -1444,14 +1444,14 @@ mod tests {
         let sources = vec![media("media:numeric")];
         let args = vec![media("media:enc=utf8")];
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 0 })
         );
         // It is the source that fits nothing that is named, wherever it stands.
         let sources = vec![media("media:enc=utf8;page"), media("media:numeric")];
         let args = vec![media("media:enc=utf8"), media("media:enc=utf8;page")];
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 1 })
         );
     }
@@ -1478,7 +1478,7 @@ mod tests {
         ];
         let args = vec![media("media:ext=png;image"), media("media:enc=utf8")];
         let pairs =
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None).unwrap();
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None).unwrap();
         assert_eq!(pairs.len(), 2);
         // Pairs are sorted by cap_arg_media_urn structurally.
         // image;png and enc=utf8: structural Ord places
@@ -1504,13 +1504,13 @@ mod tests {
         // order the sources stand in.
         for ordered in [sources.clone(), vec![sources[1].clone(), sources[0].clone()]] {
             let pairs =
-                match_sources_to_args(&ordered, &args, &vec![false; args.len()], None).unwrap();
+                match_sources_to_args(&ordered, &[false, false], &args, &vec![false; args.len()], None).unwrap();
             assert_eq!(pairs.len(), 2);
             assert!(pairs[0].0 < pairs[1].0);
         }
         let file_things = vec![media("media:file-path"), media("media:file;sample")];
         let by_parts =
-            match_sources_to_args(&file_things, &file_things, &[false, false], None).unwrap();
+            match_sources_to_args(&file_things, &[false, false], &file_things, &[false, false], None).unwrap();
         assert_eq!(
             by_parts.iter().map(|(arg, _)| arg.to_string()).collect::<Vec<_>>(),
             vec![media("media:file;sample").to_string(), media("media:file-path").to_string()]
@@ -1521,7 +1521,7 @@ mod tests {
         let page = vec![media("media:enc=utf8;page")];
         let (general, exact) = (media("media:enc=utf8"), media("media:enc=utf8;page"));
         for either in [vec![general.clone(), exact.clone()], vec![exact.clone(), general.clone()]] {
-            let pairs = match_sources_to_args(&page, &either, &[false, false], None).unwrap();
+            let pairs = match_sources_to_args(&page, &[false], &either, &[false, false], None).unwrap();
             assert_eq!(pairs.len(), 1);
             assert!(
                 pairs[0].0.is_equivalent(&exact).unwrap(),
@@ -1545,7 +1545,7 @@ mod tests {
         let args = vec![media("media:enc=utf8"), media("media:enc=utf8")];
         // Both are left open, and each could go to either arg.
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (1, vec![0, 1])] })
         );
 
@@ -1554,7 +1554,7 @@ mod tests {
         let sources = vec![media("media:enc=utf8"), media("media:numeric"), media("media:enc=utf8")];
         let args = vec![media("media:enc=utf8"), media("media:enc=utf8"), media("media:numeric")];
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (2, vec![0, 1])] })
         );
     }
@@ -1571,7 +1571,7 @@ mod tests {
         // Every source has somewhere to go and one of them must go without:
         // the first stands for it.
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 0 })
         );
 
@@ -1582,7 +1582,7 @@ mod tests {
             media("media:document;ext=pdf"),
         ];
         assert_eq!(
-            match_sources_to_args(&sources, &args, &vec![false; args.len()], None),
+            match_sources_to_args(&sources, &vec![false; sources.len()], &args, &vec![false; args.len()], None),
             Err(MatchFailure::Unmatched { source: 1 })
         );
     }
@@ -1977,6 +1977,71 @@ mod tests {
         );
     }
 
+    // TEST7217: a node a step gives is read complete when it is bound: a JSON
+    // record, which does not mention `list`, binds to an input that refuses
+    // lists, at a distance below zero, and is preferred to an input that takes
+    // any text. The same type written for an input of the machine is a type,
+    // which may be a list, and binds to neither.
+    #[test]
+    fn test7217_a_given_node_binds_by_satisfaction_at_a_negative_distance() {
+        let record = media("media:enc=utf8;ext=json;fmt=json;record");
+        let no_list = media("media:enc=utf8;fmt=json;record;!list");
+        let text = media("media:enc=utf8");
+        assert!(record.specificity() < no_list.specificity(), "the distance is below zero");
+
+        let sources = vec![record.clone()];
+        for args in [vec![no_list.clone(), text.clone()], vec![text.clone(), no_list.clone()]] {
+            let pairs = match_sources_to_args(&sources, &[true], &args, &[false, false], None)
+                .expect("a given record binds to the closest input it satisfies");
+            assert_eq!(pairs.len(), 1);
+            assert!(pairs[0].0.is_equivalent(&no_list).unwrap(), "bound to {}", pairs[0].0);
+        }
+        assert_eq!(
+            match_sources_to_args(&sources, &[false], &[no_list.clone()], &[false], None),
+            Err(MatchFailure::Unmatched { source: 0 })
+        );
+
+        // Through the resolver: a step that gives the record feeds one whose
+        // input refuses lists.
+        let make = "cap:in=media:enc=utf8;make-record;out=\"media:enc=utf8;ext=json;fmt=json;record\"";
+        let to_yaml = "cap:in=\"media:enc=utf8;fmt=json;record;!list\";to-yaml;out=\"media:enc=utf8;fmt=yaml;record\"";
+        let registry = registry_with(vec![
+            build_cap(make, "make", &["media:enc=utf8"], "media:enc=utf8;ext=json;fmt=json;record"),
+            build_cap(
+                to_yaml,
+                "to yaml",
+                &["media:enc=utf8;fmt=json;record;!list"],
+                "media:enc=utf8;fmt=yaml;record",
+            ),
+        ]);
+        let wiring = |token: &str, cap_urn: &str, source: NodeId, target: NodeId| PreInternedWiring {
+            token_id: token.parse().unwrap(),
+            foreach_identity: ForEachIdentity::MintIfRequired,
+            cap_urn: CapUrn::from_string(cap_urn).unwrap(),
+            named_sources: Vec::new(),
+            source_node_ids: vec![source],
+            targets: vec![(None, target)],
+            policy: StepPolicy::default(),
+            included_as: Vec::new(),
+        };
+        let nodes = vec![text.clone(), record.clone(), media("media:enc=utf8;fmt=yaml;record")];
+        let strand = resolve_pre_interned(
+            nodes,
+            &[wiring("tok-1", make, 0, 1), wiring("tok-2", to_yaml, 1, 2)],
+            &registry,
+            0,
+        )
+        .expect("the given record feeds the step that refuses lists");
+        assert_eq!(strand.edges().len(), 2);
+
+        // The record as an input of the machine: a type, which may be a list.
+        let nodes = vec![record.clone(), media("media:enc=utf8;fmt=yaml;record")];
+        assert!(matches!(
+            resolve_pre_interned(nodes, &[wiring("tok-3", to_yaml, 0, 1)], &registry, 0),
+            Err(MachineAbstractionError::UnmatchedSourceInCapArgs { .. })
+        ));
+    }
+
     // TEST1138: EdgeAssignmentBinding list is sorted by cap_arg_media_urn for canonical form.
     // A two-source cap whose args are added in reverse-alphabetical order must still produce
     // bindings sorted alphabetically by cap_arg_media_urn, enabling canonical comparison
@@ -2091,7 +2156,7 @@ mod tests {
         ];
         let args = vec![media("media:enc=utf8")];
         let arg_seq = vec![true];
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None)
+        let pairs = match_sources_to_args(&sources, &vec![false; sources.len()], &args, &arg_seq, None)
             .expect("three sources must gather into the sequence arg");
         assert_eq!(pairs.len(), 3, "one binding per gathered source");
         for (arg, src) in &pairs {
@@ -2111,7 +2176,7 @@ mod tests {
         ];
         let args = vec![media("media:enc=utf8;page"), media("media:enc=utf8")];
         let arg_seq = vec![false, true];
-        let pairs = match_sources_to_args(&sources, &args, &arg_seq, None)
+        let pairs = match_sources_to_args(&sources, &vec![false; sources.len()], &args, &arg_seq, None)
             .expect("unique injection must resolve");
         assert_eq!(pairs.len(), 2);
         // The page source must claim the scalar page arg (injection), NOT be
@@ -2140,7 +2205,7 @@ mod tests {
         // not become a gather.
         let pages = vec![media("media:enc=utf8;page"), media("media:enc=utf8;page")];
         assert_eq!(
-            match_sources_to_args(&pages, &args, &[true, false], None),
+            match_sources_to_args(&pages, &vec![false; pages.len()], &args, &[true, false], None),
             Err(MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (1, vec![0, 1])] })
         );
     }
@@ -2163,7 +2228,7 @@ mod tests {
             media("media:chunk;enc=utf8"),
         ];
         let arg_seq = vec![true, true];
-        let err = match_sources_to_args(&sources, &args, &arg_seq, None).unwrap_err();
+        let err = match_sources_to_args(&sources, &vec![false; sources.len()], &args, &arg_seq, None).unwrap_err();
         assert_eq!(
             err,
             MatchFailure::Ambiguous { undecided: vec![(0, vec![0, 1]), (1, vec![0, 1]), (2, vec![0, 1])] },

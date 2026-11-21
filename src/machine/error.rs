@@ -327,8 +327,9 @@ pub enum MachineAbstractionError {
         members: Vec<UndecidedMember>,
     },
 
-    /// A named member's URN does not conform to the type of the machine
-    /// input it names.
+    /// A named member does not fit the type of the machine input it names: a
+    /// node a step gave does not satisfy it, or a node the text typed does not
+    /// conform to it.
     #[error("statement {position}: input '{name}' of machine '{alias}' holds '{accepts}', and its source is '{source_urn}'")]
     SourceDoesNotConformToMachineInput {
         position: usize,
