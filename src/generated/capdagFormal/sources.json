@@ -3384,14 +3384,68 @@
     ]
   },
   {
-    "lean_name": "CapDAG.Detect.Rules.ctorElim",
+    "lean_name": "CapDAG.Detect.AdapterChoice.ambiguous.elim",
     "file": "CapDAG/Detect.lean",
     "start": [
-      41,
+      330,
+      3
+    ],
+    "end": [
+      330,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.ctorElim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      324,
       1
     ],
     "end": [
-      49,
+      331,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.ctorIdx",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.one.elim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      329,
+      3
+    ],
+    "end": [
+      329,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.uncovered.elim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      328,
+      3
+    ],
+    "end": [
+      328,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.Rules.ctorElim",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      50,
+      1
+    ],
+    "end": [
+      58,
       29
     ]
   },
@@ -3405,11 +3459,11 @@
     "lean_name": "CapDAG.Detect.Rules.met.elim",
     "file": "CapDAG/Detect.lean",
     "start": [
-      45,
+      54,
       3
     ],
     "end": [
-      46,
+      55,
       8
     ]
   },
@@ -3423,11 +3477,11 @@
     "lean_name": "CapDAG.Detect.Rules.unmet.elim",
     "file": "CapDAG/Detect.lean",
     "start": [
-      47,
+      56,
       3
     ],
     "end": [
-      48,
+      57,
       10
     ]
   },
@@ -3435,35 +3489,95 @@
     "lean_name": "CapDAG.Detect.Rules.unruled.elim",
     "file": "CapDAG/Detect.lean",
     "start": [
-      43,
+      52,
       3
     ],
     "end": [
-      44,
+      53,
       12
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.adapterFor",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      485,
+      1
+    ],
+    "end": [
+      492,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instDecidableEqAdapterChoice",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      331,
+      12
+    ],
+    "end": [
+      331,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instDecidableEqAdapterChoice.decEq",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      331,
+      12
+    ],
+    "end": [
+      331,
+      23
     ]
   },
   {
     "lean_name": "CapDAG.Detect.instDecidableEqRules",
     "file": "CapDAG/Detect.lean",
     "start": [
-      49,
+      58,
       12
     ],
     "end": [
-      49,
+      58,
       23
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instReprAdapterChoice",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      331,
+      25
+    ],
+    "end": [
+      331,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Detect.instReprAdapterChoice.repr",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      331,
+      25
+    ],
+    "end": [
+      331,
+      29
     ]
   },
   {
     "lean_name": "CapDAG.Detect.instReprRules",
     "file": "CapDAG/Detect.lean",
     "start": [
-      49,
+      58,
       25
     ],
     "end": [
-      49,
+      58,
       29
     ]
   },
@@ -3471,11 +3585,11 @@
     "lean_name": "CapDAG.Detect.instReprRules.repr",
     "file": "CapDAG/Detect.lean",
     "start": [
-      49,
+      58,
       25
     ],
     "end": [
-      49,
+      58,
       29
     ]
   },
@@ -3483,11 +3597,11 @@
     "lean_name": "CapDAG.Detect.mostSpecific",
     "file": "CapDAG/Detect.lean",
     "start": [
-      154,
+      163,
       1
     ],
     "end": [
-      156,
+      165,
       36
     ]
   },
@@ -3495,11 +3609,11 @@
     "lean_name": "CapDAG.Detect.primary",
     "file": "CapDAG/Detect.lean",
     "start": [
-      176,
+      185,
       1
     ],
     "end": [
-      178,
+      187,
       66
     ]
   },
@@ -3507,11 +3621,11 @@
     "lean_name": "CapDAG.Detect.stands",
     "file": "CapDAG/Detect.lean",
     "start": [
-      106,
+      115,
       1
     ],
     "end": [
-      113,
+      122,
       68
     ]
   },
@@ -6120,6 +6234,18 @@
     ]
   },
   {
+    "lean_name": "List.get?Internal",
+    "file": "<lean>/Init/GetElem.lean",
+    "start": [
+      320,
+      1
+    ],
+    "end": [
+      326,
+      23
+    ]
+  },
+  {
     "lean_name": "List.hasDecEq",
     "file": "<lean>/Init/Prelude.lean",
     "start": [
@@ -7260,14 +7386,20 @@
     ]
   },
   {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.adapterFor.match_1.splitter",
+    "file": "CapDAG/Detect.lean",
+    "start": null,
+    "end": null
+  },
+  {
     "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.best",
     "file": "CapDAG/Detect.lean",
     "start": [
-      168,
+      177,
       1
     ],
     "end": [
-      174,
+      183,
       94
     ]
   },
@@ -7284,14 +7416,62 @@
     "end": null
   },
   {
-    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.strictly",
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.covers",
     "file": "CapDAG/Detect.lean",
     "start": [
-      91,
+      339,
       1
     ],
     "end": [
-      92,
+      342,
+      18
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.finer",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      351,
+      1
+    ],
+    "end": [
+      353,
+      67
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.matching",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      418,
+      1
+    ],
+    "end": [
+      420,
+      53
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.minimal",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      422,
+      1
+    ],
+    "end": [
+      424,
+      95
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Detect.0.CapDAG.Detect.strictly",
+    "file": "CapDAG/Detect.lean",
+    "start": [
+      100,
+      1
+    ],
+    "end": [
+      101,
       60
     ]
   },

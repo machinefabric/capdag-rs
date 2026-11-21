@@ -150,6 +150,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Detect.AdapterChoice",
+    "kind": "type",
+    "rust_path": "detect::AdapterChoice",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Detect.Candidate",
     "kind": "type",
     "rust_path": "detect::Candidate",
@@ -490,6 +496,12 @@
     "kind": "function",
     "rust_path": "bifaci::request::write",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.adapterFor",
+    "kind": "function",
+    "rust_path": "detect::adapter_for",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Detect.mostSpecific",
@@ -1402,6 +1414,42 @@
     "kind": "constructor",
     "rust_path": "bifaci::request::Write::Suppress",
     "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.uncovered",
+    "kind": "constructor",
+    "rust_path": "detect::AdapterChoice::Uncovered",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.one",
+    "kind": "constructor",
+    "rust_path": "detect::AdapterChoice::One",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.one.i",
+    "kind": "field",
+    "rust_path": "detect::AdapterChoice::One.i",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.ambiguous",
+    "kind": "constructor",
+    "rust_path": "detect::AdapterChoice::Ambiguous",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.ambiguous.i",
+    "kind": "field",
+    "rust_path": "detect::AdapterChoice::Ambiguous.i",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Detect.AdapterChoice.ambiguous.j",
+    "kind": "field",
+    "rust_path": "detect::AdapterChoice::Ambiguous.j",
+    "renamed": false
   },
   {
     "lean_name": "CapDAG.Detect.Candidate.mk",
