@@ -186,9 +186,9 @@ impl InputStructure {
                 if has_record {
                     base_urn.to_string()
                 } else {
-                    // Add record marker (wildcard value)
+                    // Add the record marker
                     media_urn
-                        .with_tag("record", "*")
+                        .with_tag("record", tagged_urn::Constraint::Present)
                         .unwrap_or_else(|e| panic!("Failed to add record marker: {}", e))
                         .to_string()
                 }

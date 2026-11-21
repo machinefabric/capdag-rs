@@ -19,7 +19,7 @@ use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 use std::collections::BTreeMap;
 use std::fmt;
-use tagged_urn::TaggedUrn;
+use tagged_urn::{Constraint, TaggedUrn, TaggedUrnError};
 
 /// How a registered cap answers a [`CapQuery`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,9 +67,10 @@ impl fmt::Display for CapQuery {
 }
 
 /// The cap-tag pattern a query asks for: `cap:` with these tags. An empty map
-/// asks for none.
-fn tag_pattern(tags: &BTreeMap<String, String>) -> TaggedUrn {
-    TaggedUrn::new(CapUrn::PREFIX.to_string(), tags.clone())
+/// asks for none; a key that is no identifier, or a constraint no URN writes,
+/// is refused.
+fn tag_pattern(tags: &BTreeMap<String, Constraint>) -> Result<TaggedUrn, TaggedUrnError> {
+    TaggedUrn::new(CapUrn::PREFIX, tags.clone())
 }
 
 impl CapQuery {
@@ -93,38 +94,48 @@ impl CapQuery {
 
     /// Caps that GIVE `output`, whatever they take, with the cap-tags `tags`
     /// asks for (none, if empty).
-    pub fn producing(output: &MediaUrn, tags: &BTreeMap<String, String>) -> Self {
-        Self {
+    pub fn producing(
+        output: &MediaUrn,
+        tags: &BTreeMap<String, Constraint>,
+    ) -> Result<Self, TaggedUrnError> {
+        Ok(Self {
             formal: crate::formal::exec::query_producing(
                 output.inner().formal().clone(),
-                tag_pattern(tags).formal().clone(),
+                tag_pattern(tags)?.formal().clone(),
             ),
             asked: format!("anything giving {output}"),
-        }
+        })
     }
 
     /// Caps that TAKE `input`, whatever they give: what this input can become
     /// in one step.
-    pub fn consuming(input: &MediaUrn, tags: &BTreeMap<String, String>) -> Self {
-        Self {
+    pub fn consuming(
+        input: &MediaUrn,
+        tags: &BTreeMap<String, Constraint>,
+    ) -> Result<Self, TaggedUrnError> {
+        Ok(Self {
             formal: crate::formal::exec::query_consuming(
                 input.inner().formal().clone(),
-                tag_pattern(tags).formal().clone(),
+                tag_pattern(tags)?.formal().clone(),
             ),
             asked: format!("anything taking {input}"),
-        }
+        })
     }
 
     /// Caps that take `input` and give `output`: nothing unknown.
-    pub fn between(input: &MediaUrn, output: &MediaUrn, tags: &BTreeMap<String, String>) -> Self {
-        Self {
+    pub fn between(
+        input: &MediaUrn,
+        output: &MediaUrn,
+        tags: &BTreeMap<String, Constraint>,
+    ) -> Result<Self, TaggedUrnError> {
+        Ok(Self {
             formal: crate::formal::exec::query_between(
                 input.inner().formal().clone(),
                 output.inner().formal().clone(),
-                tag_pattern(tags).formal().clone(),
+                tag_pattern(tags)?.formal().clone(),
             ),
             asked: format!("anything taking {input} and giving {output}"),
-        }
+        })
     }
 
     /// Whether `cap` is guaranteed to be what is asked.
@@ -160,7 +171,7 @@ mod tests {
         MediaUrn::from_string(s).unwrap_or_else(|e| panic!("{s}: {e}"))
     }
 
-    fn no_tags() -> BTreeMap<String, String> {
+    fn no_tags() -> BTreeMap<String, Constraint> {
         BTreeMap::new()
     }
 
@@ -189,7 +200,7 @@ mod tests {
     /// found none. The unknown side asks nothing; the stated side is held to.
     #[test]
     fn test12368_a_question_may_leave_a_side_unknown() {
-        let wants_jpeg = CapQuery::producing(&media("media:ext=jpeg;image"), &no_tags());
+        let wants_jpeg = CapQuery::producing(&media("media:ext=jpeg;image"), &no_tags()).unwrap();
         assert_eq!(wants_jpeg.grade(&to_jpeg()), MatchGrade::Exact);
         assert!(wants_jpeg.admits(&to_jpeg()), "whatever it takes: a png here");
         // "Some image" is not a jpeg, and not excluded: possible, never routed on.
@@ -198,14 +209,14 @@ mod tests {
         assert_eq!(wants_jpeg.grade(&pages()), MatchGrade::None);
 
         // Asked for any image, a jpeg is guaranteed to be one, not exactly it.
-        let wants_image = CapQuery::producing(&media("media:image"), &no_tags());
+        let wants_image = CapQuery::producing(&media("media:image"), &no_tags()).unwrap();
         assert_eq!(wants_image.grade(&to_jpeg()), MatchGrade::Guaranteed);
         assert_eq!(wants_image.grade(&some_image()), MatchGrade::Exact);
         // A cap that gives `media:` promises no image at all.
         assert!(!wants_image.admits(&passes_through()));
 
         // What can a pdf become? Whatever takes a pdf — or takes anything.
-        let has_pdf = CapQuery::consuming(&media("media:document;ext=pdf"), &no_tags());
+        let has_pdf = CapQuery::consuming(&media("media:document;ext=pdf"), &no_tags()).unwrap();
         assert!(has_pdf.admits(&pages()) && has_pdf.admits(&some_image()));
         assert!(has_pdf.admits(&passes_through()), "it takes anything, a pdf included");
         assert!(!has_pdf.admits(&to_jpeg()), "a png converter does not take a pdf");
@@ -213,7 +224,8 @@ mod tests {
 
         // Both sides stated is the typed call.
         let pdf_to_image =
-            CapQuery::between(&media("media:document;ext=pdf"), &media("media:image"), &no_tags());
+            CapQuery::between(&media("media:document;ext=pdf"), &media("media:image"), &no_tags())
+                .unwrap();
         assert!(pdf_to_image.admits(&some_image()));
         assert!(!pdf_to_image.admits(&pages()) && !pdf_to_image.admits(&to_jpeg()));
     }
@@ -226,16 +238,18 @@ mod tests {
     /// about.
     #[test]
     fn test12369_a_query_s_tags_are_asked_of_the_tags_a_cap_has() {
-        let tagged = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
-            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        let tagged = |pairs: &[(&str, Constraint)]| -> BTreeMap<String, Constraint> {
+            pairs.iter().map(|(k, c)| (k.to_string(), c.clone())).collect()
         };
         let any_image = media("media:image");
 
-        let converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", "*")]));
+        let converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::Present)]))
+            .unwrap();
         assert!(converters.admits(&to_jpeg()));
         assert!(!converters.admits(&some_image()), "it renders; it is not tagged convert-image");
 
-        let not_converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", "!")]));
+        let not_converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::Absent)]))
+            .unwrap();
         assert!(not_converters.admits(&some_image()), "it does not have the tag");
         assert!(!not_converters.admits(&to_jpeg()), "it has it");
         assert_eq!(not_converters.grade(&to_jpeg()), MatchGrade::None);
