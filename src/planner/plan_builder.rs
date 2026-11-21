@@ -784,8 +784,9 @@ pub struct StepArgumentRequirements {
     /// declares no restriction (i.e., doesn't load a model at all).
     #[serde(default)]
     pub supported_model_types: Vec<String>,
-    /// Default model spec literal declared in the cap's capfab toml.
-    /// `None` when the cap has no default model.
+    /// The model a run of the cap uses when none is named: its model-spec
+    /// argument's default (`Cap::default_model_spec`). `None` when the cap
+    /// takes no model spec or declares no default.
     #[serde(default)]
     pub default_model_spec: Option<String>,
 }
@@ -934,7 +935,9 @@ impl MachinePlanBuilder {
                 arguments,
                 slots,
                 supported_model_types: cap.supported_model_types.clone(),
-                default_model_spec: cap.default_model_spec.clone(),
+                default_model_spec: cap
+                    .default_model_spec()
+                    .map_err(|e| PlannerError::InvalidInput(e.to_string()))?,
             });
         }
 

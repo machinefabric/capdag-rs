@@ -491,7 +491,11 @@ async fn describe(registry: &Arc<FabricRegistry>, bundled: &[CapUrn], candidate:
                 .get_cap(&edge.cap_urn.to_string())
                 .await
                 .map_err(super::ctx::registry_failure)?;
-            model |= cap.default_model_spec.is_some();
+            // A cap that takes a model spec runs a model, default or not.
+            model |= cap
+                .model_spec_arg()
+                .map_err(|e| CliError::failed("a planned machine could not be described").context(e.to_string()))?
+                .is_some();
             downloads |= !bundled.iter().any(|b| b.is_equivalent(&edge.cap_urn));
         }
     }
