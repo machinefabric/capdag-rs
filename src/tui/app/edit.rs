@@ -366,7 +366,7 @@ impl Editor {
         self.spec
             .catalog
             .iter()
-            .filter(|cap| media.is_none_or(|m| cap.input.accepts(m).unwrap_or(false)))
+            .filter(|cap| media.is_none_or(|m| cap.input.accepts(m)))
             .map(|cap| Command {
                 name: cap.title.clone(),
                 keys: cap.alias.clone().unwrap_or_default(),

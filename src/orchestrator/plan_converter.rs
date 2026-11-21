@@ -118,7 +118,7 @@ pub fn steps_to_resolved_graph(
             })?;
             let taken = inputs.iter().any(|input: &StepInput| {
                 crate::MediaUrn::from_string(&input.stream_urn)
-                    .map(|other| other.is_equivalent(&urn).unwrap_or(false))
+                    .map(|other| other.is_equivalent(&urn))
                     .unwrap_or(false)
             });
             if taken {

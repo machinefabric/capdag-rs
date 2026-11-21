@@ -769,8 +769,8 @@ pub fn validate_cap_outputs(cap: &Cap) -> Result<(), ValidationError> {
         .urn
         .in_media_urn()
         .map_err(|e| schema(format!("RULE22: Failed to parse in= spec: {}", e)))?;
-    let out_is_void = out_media.is_equivalent(&void_media).unwrap_or(false);
-    let in_is_void = in_media.is_equivalent(&void_media).unwrap_or(false);
+    let out_is_void = out_media.is_equivalent(&void_media);
+    let in_is_void = in_media.is_equivalent(&void_media);
 
     // RULE19: names
     let mut names: Vec<(&str, &str)> = Vec::new();
@@ -802,7 +802,7 @@ pub fn validate_cap_outputs(cap: &Cap) -> Result<(), ValidationError> {
                 output.media_urn, e
             ))
         })?;
-        if identities.iter().any(|seen| seen.is_equivalent(&urn).unwrap_or(false)) {
+        if identities.iter().any(|seen| seen.is_equivalent(&urn)) {
             return Err(schema(format!(
                 "RULE20: Duplicate output media_urn '{}'",
                 output.media_urn
@@ -824,7 +824,7 @@ pub fn validate_cap_outputs(cap: &Cap) -> Result<(), ValidationError> {
     let main: Vec<usize> = identities
         .iter()
         .enumerate()
-        .filter(|(_, urn)| urn.is_equivalent(&out_media).unwrap_or(false))
+        .filter(|(_, urn)| urn.is_equivalent(&out_media))
         .map(|(index, _)| index)
         .collect();
     if main.len() != 1 {
@@ -1031,7 +1031,7 @@ pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
         })?;
     let void_media = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
         .expect("MEDIA_VOID is a valid MediaUrn");
-    let in_is_void = in_media.is_equivalent(&void_media).unwrap_or(false);
+    let in_is_void = in_media.is_equivalent(&void_media);
 
     if in_is_void && !stdin_urns.is_empty() {
         return Err(ValidationError::InvalidCapSchema {
@@ -1047,7 +1047,7 @@ pub fn validate_cap_args(cap: &Cap) -> Result<(), ValidationError> {
         // tagged URNs, never as strings.
         let matches_in = stdin_urns.iter().any(|stdin| {
             crate::MediaUrn::from_string(stdin)
-                .map(|urn| urn.is_equivalent(&in_media).unwrap_or(false))
+                .map(|urn| urn.is_equivalent(&in_media))
                 .unwrap_or(false)
         });
         if !matches_in {

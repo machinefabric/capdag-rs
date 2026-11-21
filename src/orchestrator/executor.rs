@@ -2354,7 +2354,7 @@ pub async fn run_dag_on_context(
             let declared = last_contract
                 .outputs()
                 .iter()
-                .position(|o| !o.main && o.urn.is_equivalent(&urn).unwrap_or(false))
+                .position(|o| !o.main && o.urn.is_equivalent(&urn))
                 .ok_or_else(|| {
                     ExecutionError::HostError(format!(
                         "step '{}' takes output '{}', which cap '{}' does not declare beside \
@@ -3367,10 +3367,7 @@ async fn send_step_input(
                 step.cap_urn
             ))
         })?;
-        if sent_urns
-            .iter()
-            .any(|sent| sent.is_equivalent(&urn).unwrap_or(false))
-        {
+        if sent_urns.iter().any(|sent| sent.is_equivalent(&urn)) {
             return Err(ExecutionError::HostError(format!(
                 "cap '{}' would receive two input streams with the same URN '{urn_str}'; \
                  each stream carries a distinct URN — a cap has one main input, each arg \
@@ -3652,15 +3649,7 @@ async fn forward_frames(
                         // arg it feeds is a declared type. So it is asked to
                         // SATISFY the type, not to refine it as one type refines
                         // another.
-                        let conforms =
-                            produced_urn.satisfies(&target_arg_urn).map_err(|e| {
-                                ExecutionError::HostError(format!(
-                                    "pipelined forward: cap '{}' output URN '{}' could not \
-                                     be compared to downstream arg URN '{}': {}",
-                                    prev_cap_urn, produced_urn_str, next_in_media, e
-                                ))
-                            })?;
-                        if !conforms {
+                        if !produced_urn.satisfies(&target_arg_urn) {
                             return Err(ExecutionError::HostError(format!(
                                 "pipelined forward: cap '{}' output stream URN '{}' does \
                                  not conform to the downstream declared arg URN '{}'",

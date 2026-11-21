@@ -1160,13 +1160,13 @@ mod tests {
         assert!(urn.has_marker_tag("llm"), "must have llm tag");
         assert!(urn.has_marker_tag("ml-model"), "must have ml-model tag");
         assert!(
-            in_spec.is_equivalent(&expected_in).unwrap(),
+            in_spec.is_equivalent(&expected_in),
             "in_spec '{}' must be MEDIA_PLAIN_TEXT '{}'",
             urn.in_spec(),
             MEDIA_PLAIN_TEXT
         );
         assert!(
-            out_spec.is_equivalent(&expected_out).unwrap(),
+            out_spec.is_equivalent(&expected_out),
             "out_spec '{}' must be MEDIA_TXT '{}'",
             urn.out_spec(),
             MEDIA_TXT
@@ -1299,7 +1299,7 @@ mod tests {
         let in_urn = MediaUrn::from_string(urn.in_spec()).expect("in_spec should parse");
         let expected_in = MediaUrn::from_string(MEDIA_STRING).expect("MEDIA_STRING should parse");
         assert!(
-            in_urn.conforms_to(&expected_in).unwrap(),
+            in_urn.conforms_to(&expected_in),
             "in_spec '{}' should conform to '{}'",
             urn.in_spec(),
             MEDIA_STRING
@@ -1310,7 +1310,7 @@ mod tests {
         let expected_out =
             MediaUrn::from_string(MEDIA_INTEGER).expect("MEDIA_INTEGER should parse");
         assert!(
-            out_urn.conforms_to(&expected_out).unwrap(),
+            out_urn.conforms_to(&expected_out),
             "out_spec '{}' should conform to '{}'",
             urn.out_spec(),
             MEDIA_INTEGER
@@ -1355,7 +1355,7 @@ mod tests {
         let expected_in =
             MediaUrn::from_string(MEDIA_JSON_VALUE).expect("MEDIA_JSON_VALUE should parse");
         assert!(
-            in_urn.conforms_to(&expected_in).unwrap(),
+            in_urn.conforms_to(&expected_in),
             "in_spec '{}' should conform to '{}'",
             urn.in_spec(),
             MEDIA_JSON_VALUE
@@ -1365,7 +1365,7 @@ mod tests {
         let expected_out =
             MediaUrn::from_string(MEDIA_YAML_VALUE).expect("MEDIA_YAML_VALUE should parse");
         assert!(
-            out_urn.conforms_to(&expected_out).unwrap(),
+            out_urn.conforms_to(&expected_out),
             "out_spec '{}' should conform to '{}'",
             urn.out_spec(),
             MEDIA_YAML_VALUE
@@ -1399,7 +1399,7 @@ mod tests {
         let expected_out =
             crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_ADAPTER_SELECTION).unwrap();
         assert!(
-            out_urn.conforms_to(&expected_out).unwrap(),
+            out_urn.conforms_to(&expected_out),
             "out_spec '{}' should conform to adapter-selection URN",
             out
         );

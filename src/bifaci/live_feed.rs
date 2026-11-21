@@ -532,9 +532,7 @@ impl LiveFamilies {
                  a feed delivers content"
             )));
         }
-        let overlaps = |a: &MediaUrn, b: &MediaUrn| {
-            a.accepts(b).unwrap_or(false) || b.accepts(a).unwrap_or(false)
-        };
+        let overlaps = |a: &MediaUrn, b: &MediaUrn| a.accepts(b) || b.accepts(a);
         for device in crate::capture::DEVICE_FAMILIES {
             let device_urn = MediaUrn::from_string(device)
                 .expect("BUG: a device family constant is an invalid media URN");
@@ -563,7 +561,7 @@ impl LiveFamilies {
     fn find(&self, reference: &MediaUrn) -> Option<&LiveFamily> {
         self.families
             .iter()
-            .find(|family| family.pattern.accepts(reference).unwrap_or(false))
+            .find(|family| family.pattern.accepts(reference))
     }
 
     /// The content a reference's feed delivers: a registered family's, else a
