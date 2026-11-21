@@ -114,7 +114,10 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
     if let Some(description) = cap.cap_description.as_deref().filter(|d| !d.trim().is_empty()) {
         println!("\n{}", description.trim());
     }
-    if let Some(model) = &cap.default_model_spec {
+    let default_model = cap
+        .default_model_spec()
+        .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e.to_string()))?;
+    if let Some(model) = default_model {
         println!("\nRuns a model: {model} by default (--model-spec chooses another)");
     }
     println!();

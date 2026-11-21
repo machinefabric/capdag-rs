@@ -1155,19 +1155,19 @@ mod tests {
             "media:enc=utf8;ext=txt;image-description;plain-text",
         ] {
             let m = MediaUrn::from_string(urn).unwrap();
-            assert!(m.conforms_to(&plain).unwrap(), "{} is plain text", urn);
+            assert!(m.conforms_to(&plain), "{} is plain text", urn);
         }
         for urn in [MEDIA_STRING, MEDIA_HTML, MEDIA_JSON, MEDIA_YAML, MEDIA_CSV, "media:code;enc=utf8;python"] {
             let m = MediaUrn::from_string(urn).unwrap();
-            assert!(!m.conforms_to(&plain).unwrap(), "{} is not plain text", urn);
+            assert!(!m.conforms_to(&plain), "{} is not plain text", urn);
         }
         for urn in [MEDIA_PLAIN_TEXT, MEDIA_TXT, MEDIA_HTML, MEDIA_JSON, MEDIA_JSON_LIST, MEDIA_YAML, MEDIA_CSV] {
             let m = MediaUrn::from_string(urn).unwrap();
-            assert!(m.conforms_to(&string).unwrap(), "{} is a UTF-8 string", urn);
+            assert!(m.conforms_to(&string), "{} is a UTF-8 string", urn);
         }
         for urn in [MEDIA_BOOLEAN, MEDIA_INTEGER, MEDIA_PNG, MEDIA_OBJECT] {
             let m = MediaUrn::from_string(urn).unwrap();
-            assert!(!m.conforms_to(&string).unwrap(), "{} is not characters", urn);
+            assert!(!m.conforms_to(&string), "{} is not characters", urn);
         }
     }
 
@@ -1179,22 +1179,19 @@ mod tests {
         let pdf_listing = MediaUrn::from_string(MEDIA_PDF).unwrap(); // "media:document;ext=pdf"
         let pdf_requirement = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         assert!(pdf_listing
-            .conforms_to(&pdf_requirement)
-            .expect("MediaUrn prefix mismatch impossible"));
+            .conforms_to(&pdf_requirement));
 
         // Markdown listing conforms to md requirement (PRIMARY type naming)
         let md_listing = MediaUrn::from_string(MEDIA_MD).unwrap(); // "media:enc=utf8;ext=md;plain-text"
         let md_requirement = MediaUrn::from_string("media:ext=md;plain-text").unwrap();
         assert!(md_listing
-            .conforms_to(&md_requirement)
-            .expect("MediaUrn prefix mismatch impossible"));
+            .conforms_to(&md_requirement));
 
         // Same URNs should conform to each other
         let string_urn = MediaUrn::from_string(MEDIA_STRING).unwrap();
         let string_req = MediaUrn::from_string(MEDIA_STRING).unwrap();
         assert!(string_urn
-            .conforms_to(&string_req)
-            .expect("MediaUrn prefix mismatch impossible"));
+            .conforms_to(&string_req));
     }
 
     // TEST075: Test accepts with implicit wildcards where handlers with fewer tags can handle more requests
@@ -1202,15 +1199,15 @@ mod tests {
     fn test075_matching() {
         let handler = MediaUrn::from_string("media:string").unwrap();
         let request = MediaUrn::from_string("media:string").unwrap();
-        assert!(handler.accepts(&request).unwrap());
+        assert!(handler.accepts(&request));
 
         // Handler with fewer tags can handle more requests (implicit wildcards)
         let general_handler = MediaUrn::from_string("media:string").unwrap();
-        assert!(general_handler.accepts(&request).unwrap());
+        assert!(general_handler.accepts(&request));
 
         // Same URN should accept
         let same = MediaUrn::from_string("media:string").unwrap();
-        assert!(handler.accepts(&same).unwrap());
+        assert!(handler.accepts(&same));
     }
 
     // TEST076: Test specificity increases with more tags for ranking conformance
@@ -1267,15 +1264,15 @@ mod debug_tests {
         let obj_urn = MediaUrn::from_string(MEDIA_OBJECT).unwrap();
 
         assert!(
-            str_urn.conforms_to(&str_urn).unwrap(),
+            str_urn.conforms_to(&str_urn),
             "string conforms to string"
         );
         assert!(
-            obj_urn.conforms_to(&obj_urn).unwrap(),
+            obj_urn.conforms_to(&obj_urn),
             "object conforms to object"
         );
         assert!(
-            !obj_urn.conforms_to(&str_urn).unwrap(),
+            !obj_urn.conforms_to(&str_urn),
             "MEDIA_OBJECT should NOT conform to MEDIA_STRING (missing enc=utf8)"
         );
     }
@@ -1294,7 +1291,7 @@ mod debug_tests {
         // to_string() alphabetizes tags, so compare via roundtrip parsing instead
         let reparsed = MediaUrn::from_string(&urn.to_string()).expect("roundtrip must parse");
         assert!(
-            urn.conforms_to(&reparsed).unwrap(),
+            urn.conforms_to(&reparsed),
             "roundtrip must conform to original"
         );
     }
@@ -1309,7 +1306,7 @@ mod debug_tests {
         assert!(urn.is_record(), "model-path must have record marker");
         let reparsed = MediaUrn::from_string(&urn.to_string()).expect("roundtrip must parse");
         assert!(
-            urn.conforms_to(&reparsed).unwrap(),
+            urn.conforms_to(&reparsed),
             "roundtrip must conform to original"
         );
     }
@@ -1325,7 +1322,7 @@ mod debug_tests {
         let path = MediaUrn::from_string(MEDIA_PATH_OUTPUT).unwrap();
         // They must NOT conform to each other (different types)
         assert!(
-            !avail.conforms_to(&path).unwrap_or(true),
+            !avail.conforms_to(&path),
             "availability must not conform to path"
         );
     }
@@ -1353,12 +1350,12 @@ mod debug_tests {
         let pdf = MediaUrn::from_string(MEDIA_PDF).unwrap();
         assert!(image.is_image());
         assert!(!document.is_image());
-        assert!(png.conforms_to(&image).unwrap());
-        assert!(pdf.conforms_to(&document).unwrap());
-        assert!(!png.conforms_to(&document).unwrap());
-        assert!(!pdf.conforms_to(&image).unwrap());
+        assert!(png.conforms_to(&image));
+        assert!(pdf.conforms_to(&document));
+        assert!(!png.conforms_to(&document));
+        assert!(!pdf.conforms_to(&image));
         // The medium is wider than any one format of it.
-        assert!(!image.conforms_to(&png).unwrap());
+        assert!(!image.conforms_to(&png));
     }
 
     // TEST547: is_audio returns true only when audio marker tag is present
@@ -1544,7 +1541,7 @@ mod debug_tests {
     fn test852_lub_identical() {
         let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone(), pdf.clone()]);
-        assert!(lub.is_equivalent(&pdf).unwrap());
+        assert!(lub.is_equivalent(&pdf));
     }
 
     // TEST853: LUB promotes a shared key with differing values to must-have-any.
@@ -1558,13 +1555,13 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[pdf.clone(), png.clone()]);
         let expected = MediaUrn::from_string("media:ext").unwrap();
         assert!(
-            lub.is_equivalent(&expected).unwrap(),
+            lub.is_equivalent(&expected),
             "LUB of ext=pdf and ext=png;image should be media:ext but got {}",
             lub.to_string()
         );
         // Join soundness: every input conforms to the join.
-        assert!(pdf.conforms_to(&lub).unwrap());
-        assert!(png.conforms_to(&lub).unwrap());
+        assert!(pdf.conforms_to(&lub));
+        assert!(png.conforms_to(&lub));
     }
 
     // TEST853b: LUB of URNs sharing NO keys at all is the universal type.
@@ -1575,7 +1572,7 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[a, b]);
         let universal = MediaUrn::from_string("media:").unwrap();
         assert!(
-            lub.is_equivalent(&universal).unwrap(),
+            lub.is_equivalent(&universal),
             "LUB of disjoint-key URNs should be media: but got {}",
             lub.to_string()
         );
@@ -1592,7 +1589,7 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[text_list, text_record]);
         let expected = MediaUrn::from_string("media:enc=utf8").unwrap();
         assert!(
-            lub.is_equivalent(&expected).unwrap(),
+            lub.is_equivalent(&expected),
             "LUB should be media:enc=utf8 but got {}",
             lub.to_string()
         );
@@ -1606,7 +1603,7 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[json_list, json_scalar]);
         let expected = MediaUrn::from_string("media:enc=utf8;fmt=json").unwrap();
         assert!(
-            lub.is_equivalent(&expected).unwrap(),
+            lub.is_equivalent(&expected),
             "LUB should drop list tag, got {}",
             lub.to_string()
         );
@@ -1617,7 +1614,7 @@ mod debug_tests {
     fn test856_lub_empty() {
         let lub = MediaUrn::least_upper_bound(&[]);
         let universal = MediaUrn::from_string("media:").unwrap();
-        assert!(lub.is_equivalent(&universal).unwrap());
+        assert!(lub.is_equivalent(&universal));
     }
 
     // TEST857: LUB of single input returns that input
@@ -1625,7 +1622,7 @@ mod debug_tests {
     fn test857_lub_single() {
         let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone()]);
-        assert!(lub.is_equivalent(&pdf).unwrap());
+        assert!(lub.is_equivalent(&pdf));
     }
 
     // TEST858: LUB with three+ inputs narrows correctly
@@ -1640,13 +1637,13 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[a.clone(), b.clone(), c.clone()]);
         let expected = MediaUrn::from_string("media:enc=utf8;fmt;list").unwrap();
         assert!(
-            lub.is_equivalent(&expected).unwrap(),
+            lub.is_equivalent(&expected),
             "LUB should be media:enc=utf8;fmt;list but got {}",
             lub.to_string()
         );
-        assert!(a.conforms_to(&lub).unwrap());
-        assert!(b.conforms_to(&lub).unwrap());
-        assert!(c.conforms_to(&lub).unwrap());
+        assert!(a.conforms_to(&lub));
+        assert!(b.conforms_to(&lub));
+        assert!(c.conforms_to(&lub));
     }
 
     // TEST859: LUB with valued tags (non-marker) that differ promotes the key
@@ -1657,7 +1654,7 @@ mod debug_tests {
         let lub = MediaUrn::least_upper_bound(&[v1, v2]);
         let expected = MediaUrn::from_string("media:ext;image").unwrap();
         assert!(
-            lub.is_equivalent(&expected).unwrap(),
+            lub.is_equivalent(&expected),
             "LUB should promote conflicting ext to must-have-any, got {}",
             lub.to_string()
         );

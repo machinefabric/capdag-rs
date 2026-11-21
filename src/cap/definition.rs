@@ -559,13 +559,27 @@ pub struct Cap {
     /// see runnable models. Empty means the cap accepts any
     /// architecture (or has no model dependency).
     pub supported_model_types: Vec<String>,
+}
 
-    /// Default model spec literal used when the cap is invoked without
-    /// an explicit model-spec argument. Persisted as the unaltered
-    /// input form — modelcartridge applies any architecture-driven
-    /// filter adjustments at download time without changing this
-    /// identity. Empty means the cap has no default model.
-    pub default_model_spec: Option<String>,
+/// Why a cap's model-spec argument cannot be told: the cap declares more than
+/// one, an argument's media URN does not parse, or the default it declares is
+/// not a string.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ModelSpecArgError {
+    #[error("cap '{cap_urn}' declares two model-spec arguments, '{first}' and '{second}'")]
+    TwoModelSpecArgs {
+        cap_urn: String,
+        first: String,
+        second: String,
+    },
+    #[error("cap '{cap_urn}' argument '{arg}' has a media URN that does not parse: {error}")]
+    UnparseableArg {
+        cap_urn: String,
+        arg: String,
+        error: String,
+    },
+    #[error("cap '{cap_urn}' model-spec argument '{arg}' declares a default that is not a string")]
+    DefaultNotAString { cap_urn: String, arg: String },
 }
 
 impl Serialize for Cap {
@@ -631,10 +645,6 @@ impl Serialize for Cap {
             state.serialize_field("supported_model_types", &self.supported_model_types)?;
         }
 
-        if self.default_model_spec.is_some() {
-            state.serialize_field("default_model_spec", &self.default_model_spec)?;
-        }
-
         state.end()
     }
 }
@@ -667,8 +677,6 @@ impl<'de> Deserialize<'de> for Cap {
             registered_by: Option<RegisteredBy>,
             #[serde(default)]
             supported_model_types: Vec<String>,
-            #[serde(default)]
-            default_model_spec: Option<String>,
         }
 
         let wire = CapWire::deserialize(deserializer)?;
@@ -712,12 +720,58 @@ impl<'de> Deserialize<'de> for Cap {
             metadata_json: wire.metadata_json,
             registered_by: wire.registered_by,
             supported_model_types: wire.supported_model_types,
-            default_model_spec: wire.default_model_spec,
         })
     }
 }
 
 impl Cap {
+    /// The cap's model-spec argument: the one whose media URN conforms to
+    /// `MEDIA_MODEL_SPEC`, or `None` when the cap takes no model spec. A cap
+    /// that declares two is an error naming it.
+    pub fn model_spec_arg(&self) -> Result<Option<&CapArg>, ModelSpecArgError> {
+        let model_spec = crate::urn::media_urn::MediaUrn::from_string(crate::urn::media_urn::MEDIA_MODEL_SPEC)
+            .expect("MEDIA_MODEL_SPEC is a valid media URN");
+        let mut found: Option<&CapArg> = None;
+        for arg in &self.args {
+            let urn = crate::urn::media_urn::MediaUrn::from_string(&arg.media_urn).map_err(|e| {
+                ModelSpecArgError::UnparseableArg {
+                    cap_urn: self.urn.to_string(),
+                    arg: arg.media_urn.clone(),
+                    error: e.to_string(),
+                }
+            })?;
+            if !urn.conforms_to(&model_spec) {
+                continue;
+            }
+            if let Some(first) = found {
+                return Err(ModelSpecArgError::TwoModelSpecArgs {
+                    cap_urn: self.urn.to_string(),
+                    first: first.media_urn.clone(),
+                    second: arg.media_urn.clone(),
+                });
+            }
+            found = Some(arg);
+        }
+        Ok(found)
+    }
+
+    /// The model a run of this cap uses when none is named: its model-spec
+    /// argument's `default_value`, the value a run applies. `None` when the cap
+    /// takes no model spec, or its model-spec argument declares no default.
+    pub fn default_model_spec(&self) -> Result<Option<String>, ModelSpecArgError> {
+        let Some(arg) = self.model_spec_arg()? else {
+            return Ok(None);
+        };
+        match &arg.default_value {
+            None => Ok(None),
+            Some(serde_json::Value::String(spec)) => Ok(Some(spec.clone())),
+            Some(_) => Err(ModelSpecArgError::DefaultNotAString {
+                cap_urn: self.urn.to_string(),
+                arg: arg.media_urn.clone(),
+            }),
+        }
+    }
+
     /// Create a new cap
     pub fn new(urn: CapUrn, title: String, aliases: Vec<String>) -> Self {
         Self {
@@ -735,7 +789,6 @@ impl Cap {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -761,7 +814,6 @@ impl Cap {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -787,7 +839,6 @@ impl Cap {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -814,7 +865,6 @@ impl Cap {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -835,7 +885,6 @@ impl Cap {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -865,7 +914,6 @@ impl Cap {
             metadata_json,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -2179,5 +2227,41 @@ mod tests {
             Some(false),
             "CapOutput must write is_sequence even when false"
         );
+    }
+
+    // TEST1983: a cap's default model is its model-spec argument's default,
+    // the value a run uses; a cap with no model-spec argument has none, and a
+    // cap that declares two is an error naming it. A body that still carries a
+    // stored `default_model_spec` is read, and the stored value is not used.
+    #[test]
+    fn test1983_the_default_model_is_the_model_spec_arguments_default() {
+        let cap = |args: serde_json::Value, extra: &str| -> Cap {
+            serde_json::from_str(&format!(
+                r#"{{"urn":"cap:in=\"media:enc=utf8;plain-text\";generate;out=\"media:enc=utf8;ext=txt;plain-text\"","title":"Generate","aliases":["generate"],"args":{args}{extra}}}"#
+            ))
+            .expect("a cap parses")
+        };
+        let prompt = serde_json::json!({"media_urn": "media:enc=utf8;plain-text", "name": "prompt", "required": true, "sources": [{"stdin": "media:enc=utf8;plain-text"}]});
+        let model = |name: &str, default: Option<&str>| {
+            let mut arg = serde_json::json!({"media_urn": "media:candle;enc=utf8;llm;model-spec", "name": name, "required": false, "sources": [{"cli_flag": format!("--{name}")}]});
+            if let Some(default) = default {
+                arg["default_value"] = serde_json::json!(default);
+            }
+            arg
+        };
+
+        let with_default = cap(serde_json::json!([prompt, model("model-spec", Some("hf:a/b"))]), "");
+        assert_eq!(with_default.default_model_spec().unwrap(), Some("hf:a/b".to_string()));
+        assert_eq!(with_default.model_spec_arg().unwrap().map(|a| a.name.as_str()), Some("model-spec"));
+
+        let no_model = cap(serde_json::json!([prompt]), "");
+        assert_eq!(no_model.default_model_spec().unwrap(), None);
+        assert!(no_model.model_spec_arg().unwrap().is_none());
+
+        let two = cap(serde_json::json!([prompt, model("model-a", None), model("model-b", None)]), "");
+        assert!(matches!(two.default_model_spec(), Err(ModelSpecArgError::TwoModelSpecArgs { .. })));
+
+        let stored = cap(serde_json::json!([prompt]), r#","default_model_spec":"hf:stored/model""#);
+        assert_eq!(stored.default_model_spec().unwrap(), None, "a stored default is not the cap's");
     }
 }
