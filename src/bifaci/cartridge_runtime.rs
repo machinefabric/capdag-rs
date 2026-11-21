@@ -3106,10 +3106,7 @@ fn extract_effective_payload(
             RuntimeError::Handler(format!("Invalid argument media URN '{}': {}", urn_str, e))
         })?;
 
-        if !file_path_base
-            .accepts(&arg_urn)
-            .map_err(|e| RuntimeError::Handler(format!("URN matching failed: {}", e)))?
-        {
+        if !file_path_base.accepts(&arg_urn) {
             continue;
         }
 
@@ -3319,10 +3316,7 @@ fn build_cli_foreach_iterations(
         let arg_urn = MediaUrn::from_string(&urn_str).map_err(|e| {
             RuntimeError::Handler(format!("Invalid argument media URN '{}': {}", urn_str, e))
         })?;
-        if !file_path_base
-            .accepts(&arg_urn)
-            .map_err(|e| RuntimeError::Handler(format!("URN matching failed: {}", e)))?
-        {
+        if !file_path_base.accepts(&arg_urn) {
             continue;
         }
 
