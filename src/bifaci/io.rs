@@ -978,12 +978,98 @@ pub(crate) fn identity_nonce() -> Vec<u8> {
     buf
 }
 
+/// The frames of an identity probe for request `rid` on routing id `xid`:
+/// REQ(CAP_IDENTITY), STREAM_START, one CHUNK carrying the nonce wrapped as one
+/// CBOR byte string, STREAM_END(1) and END. The handshake's verification and
+/// every relay-switch probe send exactly these; the writer or the caller
+/// assigns their seq.
+pub(crate) fn identity_probe_frames(rid: &MessageId, xid: &MessageId) -> Vec<Frame> {
+    use crate::standard::caps::CAP_IDENTITY;
+    let stream_id = "identity-verify".to_string();
+    let mut cbor_nonce = Vec::new();
+    ciborium::into_writer(&Value::Bytes(identity_nonce()), &mut cbor_nonce)
+        .expect("BUG: failed to CBOR-encode nonce");
+    let checksum = Frame::compute_checksum(&cbor_nonce);
+    let mut frames = vec![
+        Frame::req(rid.clone(), CAP_IDENTITY, vec![], "application/cbor"),
+        Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), Some(false)),
+        Frame::chunk(rid.clone(), stream_id.clone(), 0, cbor_nonce, 0, checksum),
+        Frame::stream_end(rid.clone(), stream_id, 1),
+        Frame::end(rid.clone(), None),
+    ];
+    for frame in &mut frames {
+        frame.routing_id = Some(xid.clone());
+    }
+    frames
+}
+
+/// The judge of an identity echo, frame by frame: each CHUNK must carry a CBOR
+/// byte string, their concatenation at END must be the nonce, and an ERR is
+/// the probe failing. The handshake's verification and every relay-switch
+/// probe judge the echo the same way.
+#[derive(Debug, Default)]
+pub(crate) struct IdentityEcho {
+    bytes: Vec<u8>,
+}
+
+impl IdentityEcho {
+    /// `Ok(Some(()))` when the echo is complete and right, `Ok(None)` while it
+    /// goes on, and the error naming what is wrong otherwise.
+    pub(crate) fn accept(&mut self, frame: &Frame) -> Result<Option<()>, String> {
+        match frame.frame_type {
+            FrameType::Chunk => {
+                let payload = frame.payload.as_deref().unwrap_or_default();
+                let value: Value = ciborium::from_reader(payload)
+                    .map_err(|e| format!("Failed to decode CBOR chunk: {}", e))?;
+                match value {
+                    Value::Bytes(bytes) => {
+                        self.bytes.extend_from_slice(&bytes);
+                        Ok(None)
+                    }
+                    other => Err(format!("Expected bytes chunk, got {:?}", other)),
+                }
+            }
+            FrameType::End => {
+                let nonce = identity_nonce();
+                if self.bytes == nonce {
+                    Ok(Some(()))
+                } else {
+                    Err(format!(
+                        "Identity verification failed: payload mismatch (expected {} bytes, got {})",
+                        nonce.len(),
+                        self.bytes.len()
+                    ))
+                }
+            }
+            FrameType::Err => {
+                let code = frame
+                    .error_code()
+                    .ok_or_else(|| "ERR frame missing required text code".to_string())?;
+                let msg = frame
+                    .error_message()
+                    .ok_or_else(|| "ERR frame missing required text message".to_string())?;
+                Err(format!("Identity verification failed: [{code}] {msg}"))
+            }
+            // Control/side-channel frames are legal ANYWHERE during the probe
+            // (12.4: LOG interleaves without affecting data flow; CREDIT and
+            // HEARTBEAT are the control plane the writer gate itself exempts,
+            // L4). A cartridge crediting its probe input as it consumes (L10)
+            // must not fail identity verification.
+            FrameType::StreamStart
+            | FrameType::StreamEnd
+            | FrameType::Log
+            | FrameType::Credit
+            | FrameType::Heartbeat => Ok(None),
+            other => Err(format!("Identity verification: unexpected frame type {:?}", other)),
+        }
+    }
+}
+
 /// Verify a connection by invoking the identity capability.
 ///
-/// Sends a REQ with CAP_IDENTITY carrying the "bifaci" nonce with proper
-/// XID and seq assignment, then verifies the response echoes it back unchanged.
-/// This proves the entire protocol stack works end-to-end before the connection
-/// is considered live.
+/// Sends the identity probe (`identity_probe_frames`) with proper XID and seq
+/// assignment, then judges the echo (`IdentityEcho`). This proves the entire
+/// protocol stack works end-to-end before the connection is considered live.
 ///
 /// Must be called after handshake, before any other traffic.
 pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
@@ -991,121 +1077,20 @@ pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     writer: &mut FrameWriter<W>,
 ) -> Result<(), CborError> {
     use crate::bifaci::frame::SeqAssigner;
-    use crate::standard::caps::CAP_IDENTITY;
 
-    let nonce = identity_nonce();
-    let req_id = MessageId::new_uuid();
-    let stream_id = "identity-verify".to_string();
-    let xid = MessageId::Uint(0);
     let mut seq = SeqAssigner::new();
+    for mut frame in identity_probe_frames(&MessageId::new_uuid(), &MessageId::Uint(0)) {
+        seq.assign(&mut frame);
+        writer.write(&frame).await?;
+    }
 
-    // Send REQ (empty payload) with XID + seq
-    let mut req = Frame::req(req_id.clone(), CAP_IDENTITY, vec![], "application/cbor");
-    req.routing_id = Some(xid.clone());
-    seq.assign(&mut req);
-    writer.write(&req).await?;
-
-    // Send request body: STREAM_START → CHUNK → STREAM_END → END
-    let mut stream_start = Frame::stream_start(
-        req_id.clone(),
-        stream_id.clone(),
-        "media:".to_string(),
-        None,
-    );
-    stream_start.routing_id = Some(xid.clone());
-    seq.assign(&mut stream_start);
-    writer.write(&stream_start).await?;
-
-    // CBOR-encode nonce before checksumming (protocol v2: CHUNK payload = CBOR-encoded data)
-    let mut cbor_nonce = Vec::new();
-    ciborium::into_writer(&Value::Bytes(nonce.clone()), &mut cbor_nonce)
-        .expect("BUG: failed to CBOR-encode nonce");
-    let checksum = Frame::compute_checksum(&cbor_nonce);
-    let mut chunk = Frame::chunk(
-        req_id.clone(),
-        stream_id.clone(),
-        0,
-        cbor_nonce,
-        0,
-        checksum,
-    );
-    chunk.routing_id = Some(xid.clone());
-    seq.assign(&mut chunk);
-    writer.write(&chunk).await?;
-
-    let mut stream_end = Frame::stream_end(req_id.clone(), stream_id, 1);
-    stream_end.routing_id = Some(xid.clone());
-    seq.assign(&mut stream_end);
-    writer.write(&stream_end).await?;
-
-    let mut end = Frame::end(req_id.clone(), None);
-    end.routing_id = Some(xid.clone());
-    seq.assign(&mut end);
-    writer.write(&end).await?;
-
-    // Read response — expect STREAM_START → CHUNK(s) → STREAM_END → END
-    // Each CHUNK payload is CBOR-encoded (protocol v2), decode each and concatenate
-    let mut cbor_chunks = Vec::new();
+    let mut echo = IdentityEcho::default();
     loop {
         let frame = reader.read().await?.ok_or_else(|| {
             CborError::Protocol("Connection closed during identity verification".to_string())
         })?;
-
-        match frame.frame_type {
-            FrameType::StreamStart => {}
-            FrameType::Chunk => {
-                if let Some(cbor_payload) = frame.payload {
-                    // Decode CBOR chunk
-                    let value: Value = ciborium::from_reader(&cbor_payload[..]).map_err(|e| {
-                        CborError::Protocol(format!("Failed to decode CBOR chunk: {}", e))
-                    })?;
-                    if let Value::Bytes(bytes) = value {
-                        cbor_chunks.push(bytes);
-                    } else {
-                        return Err(CborError::Protocol(format!(
-                            "Expected bytes chunk, got {:?}",
-                            value
-                        )));
-                    }
-                }
-            }
-            FrameType::StreamEnd => {}
-            FrameType::End => {
-                // Concatenate all decoded chunks
-                let accumulated: Vec<u8> = cbor_chunks.into_iter().flatten().collect();
-                if accumulated != nonce {
-                    return Err(CborError::Protocol(format!(
-                        "Identity verification failed: payload mismatch (expected {} bytes, got {})",
-                        nonce.len(),
-                        accumulated.len()
-                    )));
-                }
-                return Ok(());
-            }
-            FrameType::Err => {
-                let code = frame.error_code().ok_or_else(|| {
-                    CborError::Protocol("ERR frame missing required text code".to_string())
-                })?;
-                let msg = frame.error_message().ok_or_else(|| {
-                    CborError::Protocol("ERR frame missing required text message".to_string())
-                })?;
-                return Err(CborError::Protocol(format!(
-                    "Identity verification failed: [{code}] {msg}"
-                )));
-            }
-            // Control/side-channel frames are legal ANYWHERE during the
-            // probe (spec 12.4: LOG interleaves without affecting data
-            // flow; CREDIT/HEARTBEAT are the control plane the writer
-            // gate itself exempts, L4). A cartridge crediting its
-            // probe input as it consumes (L10) must not fail identity
-            // verification.
-            FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-            other => {
-                return Err(CborError::Protocol(format!(
-                    "Identity verification: unexpected frame type {:?}",
-                    other
-                )));
-            }
+        if echo.accept(&frame).map_err(CborError::Protocol)?.is_some() {
+            return Ok(());
         }
     }
 }

@@ -54,7 +54,7 @@
 //! - Each execute_fanin spawns its own pump that cooperatively routes frames
 
 use crate::bifaci::frame::{CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
-use crate::bifaci::io::{identity_nonce, CborError, FrameReader, FrameWriter};
+use crate::bifaci::io::{identity_probe_frames, CborError, FrameReader, FrameWriter, IdentityEcho};
 use crate::bifaci::local_socket::{OwnedReadHalf, OwnedWriteHalf, UnixStream};
 use crate::bifaci::peer_hold::{
     Arrived, Holds, PeerHoldBound, PeerProvider, PeerRefusal, Released, Settlement,
@@ -912,82 +912,23 @@ impl RelaySwitch {
                 let xid_val = xid_counter.fetch_add(1, Ordering::SeqCst) + 1;
                 let xid = MessageId::Uint(xid_val);
 
-                use crate::standard::caps::CAP_IDENTITY;
-
-                let nonce = identity_nonce();
                 let req_id = MessageId::new_uuid();
-                let stream_id = "identity-verify".to_string();
-
-                let mut req = Frame::req(req_id.clone(), CAP_IDENTITY, vec![], "application/cbor");
-                req.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut req);
-                socket_writer.write(&req).await.map_err(|e| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: identity verification send failed: {}",
-                        master_idx, e
-                    ))
-                })?;
-
-                let mut ss = Frame::stream_start(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    "media:".to_string(),
-                    None,
-                );
-                ss.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut ss);
-                socket_writer.write(&ss).await.map_err(|e| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: identity verification send failed: {}",
-                        master_idx, e
-                    ))
-                })?;
-
-                let checksum = Frame::compute_checksum(&nonce);
-                let mut chunk = Frame::chunk(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    0,
-                    nonce.clone(),
-                    0,
-                    checksum,
-                );
-                chunk.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut chunk);
-                socket_writer.write(&chunk).await.map_err(|e| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: identity verification send failed: {}",
-                        master_idx, e
-                    ))
-                })?;
-
-                let mut se = Frame::stream_end(req_id.clone(), stream_id, 1);
-                se.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut se);
-                socket_writer.write(&se).await.map_err(|e| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: identity verification send failed: {}",
-                        master_idx, e
-                    ))
-                })?;
-
-                let mut end = Frame::end(req_id.clone(), None);
-                end.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut end);
-                socket_writer.write(&end).await.map_err(|e| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: identity verification send failed: {}",
-                        master_idx, e
-                    ))
-                })?;
-
+                for mut frame in identity_probe_frames(&req_id, &xid) {
+                    seq_assigner.assign(&mut frame);
+                    socket_writer.write(&frame).await.map_err(|e| {
+                        RelaySwitchError::Protocol(format!(
+                            "master {}: identity verification send failed: {}",
+                            master_idx, e
+                        ))
+                    })?;
+                }
                 seq_assigner.remove(&FlowKey {
                     rid: req_id.clone(),
                     xid: Some(xid.clone()),
                 });
 
-                // Read response — expect STREAM_START → CHUNK(s) → STREAM_END → END
-                let mut accumulated = Vec::new();
+                // Read the echo, judged as the handshake judges it.
+                let mut echo = IdentityEcho::default();
                 loop {
                     let frame = socket_reader
                         .read()
@@ -1004,67 +945,30 @@ impl RelaySwitch {
                                 master_idx
                             ))
                         })?;
-
-                    match frame.frame_type {
-                        FrameType::RelayNotify => {
-                            // CartridgeHostRuntime sends the full RelayNotify (with all caps)
-                            // through RelaySlave during identity verification. Update caps.
-                            caps_payload = frame
-                                .relay_notify_manifest()
-                                .map_err(|e| {
-                                    RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e))
-                                })?
-                                .to_vec();
-                            payload = parse_relay_notify_payload(&caps_payload)?;
-                            caps = payload.cap_urns();
-                            limits = frame.relay_notify_limits().map_err(|e| {
+                    if frame.frame_type == FrameType::RelayNotify {
+                        // CartridgeHostRuntime sends the full RelayNotify (with all caps)
+                        // through RelaySlave during identity verification. Update caps.
+                        caps_payload = frame
+                            .relay_notify_manifest()
+                            .map_err(|e| {
                                 RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e))
-                            })?;
-                        }
-                        FrameType::StreamStart => {}
-                        FrameType::Chunk => {
-                            if let Some(payload) = frame.payload {
-                                accumulated.extend_from_slice(&payload);
-                            }
-                        }
-                        FrameType::StreamEnd => {}
-                        FrameType::End => {
-                            if accumulated != nonce {
-                                return Err(RelaySwitchError::Protocol(format!(
-                                    "master {}: identity verification payload mismatch (expected {} bytes, got {})",
-                                    master_idx, nonce.len(), accumulated.len()
-                                )));
-                            }
-                            break;
-                        }
-                        FrameType::Err => {
-                            let code = frame.error_code().ok_or_else(|| {
-                                RelaySwitchError::Protocol(
-                                    "ERR frame missing required text code".to_string(),
-                                )
-                            })?;
-                            let msg = frame.error_message().ok_or_else(|| {
-                                RelaySwitchError::Protocol(
-                                    "ERR frame missing required text message".to_string(),
-                                )
-                            })?;
+                            })?
+                            .to_vec();
+                        payload = parse_relay_notify_payload(&caps_payload)?;
+                        caps = payload.cap_urns();
+                        limits = frame.relay_notify_limits().map_err(|e| {
+                            RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e))
+                        })?;
+                        continue;
+                    }
+                    match echo.accept(&frame) {
+                        Ok(Some(())) => break,
+                        Ok(None) => {}
+                        Err(e) => {
                             return Err(RelaySwitchError::Protocol(format!(
-                                "master {}: identity verification failed: [{code}] {msg}",
-                                master_idx
-                            )));
-                        }
-                        // Control/side-channel frames are legal ANYWHERE during the
-                        // probe (spec 12.4: LOG interleaves without affecting data
-                        // flow; CREDIT/HEARTBEAT are the control plane the writer
-                        // gate itself exempts, L4). A cartridge crediting its
-                        // probe input as it consumes (L10) must not fail identity
-                        // verification.
-                        FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-                        other => {
-                            return Err(RelaySwitchError::Protocol(format!(
-                                "master {}: identity verification: unexpected frame type {:?}",
-                                master_idx, other
-                            )));
+                                "master {}: identity verification: {}",
+                                master_idx, e
+                            )))
                         }
                     }
                 }
@@ -2554,48 +2458,22 @@ impl RelaySwitch {
         .await
         .map_err(|e| format!("identity probe registration failed: {}", e))?;
 
-        let nonce = identity_nonce();
-        let stream_id = "identity-verify-runtime".to_string();
-
         // Inner async block that runs the probe round-trip. Wrapped
         // so the function tail can clean up the registered channel
         // and routing maps regardless of which branch produced the
         // outcome.
         let probe_outcome = async {
-            // Build and send the probe frames. All five carry the
-            // same (xid, rid) so the master returns its echo on the
-            // same flow.
-            let mut req = Frame::req(rid.clone(), CAP_IDENTITY, vec![], "application/cbor");
-            req.routing_id = Some(xid.clone());
-            let mut ss =
-                Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), None);
-            ss.routing_id = Some(xid.clone());
-            let checksum = Frame::compute_checksum(&nonce);
-            let mut chunk = Frame::chunk(
-                rid.clone(),
-                stream_id.clone(),
-                0,
-                nonce.clone(),
-                0,
-                checksum,
-            );
-            chunk.routing_id = Some(xid.clone());
-            let mut se = Frame::stream_end(rid.clone(), stream_id.clone(), 1);
-            se.routing_id = Some(xid.clone());
-            let mut end = Frame::end(rid.clone(), None);
-            end.routing_id = Some(xid.clone());
-
-            for mut frame in [req, ss, chunk, se, end] {
+            // Send the probe frames. All five carry the same (xid, rid)
+            // so the master returns its echo on the same flow.
+            for mut frame in identity_probe_frames(&rid, &xid) {
                 self.write_to_master_idx(master_idx, &mut frame)
                     .await
                     .map_err(|e| format!("identity probe send failed: {}", e))?;
             }
 
-            // Drain response frames. Cartridge contract: the
-            // identity handler echoes the nonce back as STREAM_START
-            // + CHUNK(nonce) + STREAM_END + END.
+            // Drain the echo, judged as the handshake judges it.
             let started_at = Instant::now();
-            let mut accumulated = Vec::new();
+            let mut echo = IdentityEcho::default();
             loop {
                 let elapsed = started_at.elapsed();
                 let remaining = RUNTIME_PROBE_TIMEOUT
@@ -2619,43 +2497,8 @@ impl RelaySwitch {
                         ));
                     }
                 };
-                match frame.frame_type {
-                    FrameType::StreamStart => {}
-                    FrameType::Chunk => {
-                        if let Some(payload) = frame.payload {
-                            accumulated.extend_from_slice(&payload);
-                        }
-                    }
-                    FrameType::StreamEnd => {}
-                    FrameType::End => {
-                        if accumulated != nonce {
-                            return Err(format!(
-                                "identity probe payload mismatch (expected {} bytes, got {})",
-                                nonce.len(),
-                                accumulated.len()
-                            ));
-                        }
-                        return Ok(());
-                    }
-                    FrameType::Err => {
-                        let code = frame
-                            .error_code()
-                            .ok_or_else(|| "ERR frame missing required text code".to_string())?;
-                        let msg = frame
-                            .error_message()
-                            .ok_or_else(|| "ERR frame missing required text message".to_string())?;
-                        return Err(format!("identity probe failed: [{}] {}", code, msg));
-                    }
-                    // Control/side-channel frames are legal ANYWHERE during the
-                    // probe (spec 12.4: LOG interleaves without affecting data
-                    // flow; CREDIT/HEARTBEAT are the control plane the writer
-                    // gate itself exempts, L4). A cartridge crediting its
-                    // probe input as it consumes (L10) must not fail identity
-                    // verification.
-                    FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-                    other => {
-                        return Err(format!("identity probe: unexpected frame type {:?}", other));
-                    }
+                if echo.accept(&frame)?.is_some() {
+                    return Ok(());
                 }
             }
         }
@@ -3060,11 +2903,7 @@ impl RelaySwitch {
             let probe_started_at = std::time::Instant::now();
             let xid = MessageId::Uint(self.xid_counter.fetch_add(1, Ordering::SeqCst) + 1);
 
-            use crate::standard::caps::CAP_IDENTITY;
-
-            let nonce = identity_nonce();
             let req_id = MessageId::new_uuid();
-            let stream_id = "identity-verify".to_string();
 
             // Wrap the probe so any failure is captured as a typed
             // attachment-error message rather than aborting master
@@ -3073,68 +2912,22 @@ impl RelaySwitch {
             // still joins so its installed_cartridges are visible to the
             // inventory aggregate.
             let probe_result: Result<(), String> = async {
-                let mut req = Frame::req(req_id.clone(), CAP_IDENTITY, vec![], "application/cbor");
-                req.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut req);
-                socket_writer
-                    .write(&req)
-                    .await
-                    .map_err(|e| format!("identity send failed (REQ): {}", e))?;
-
-                let mut ss = Frame::stream_start(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    "media:".to_string(),
-                    None,
-                );
-                ss.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut ss);
-                socket_writer
-                    .write(&ss)
-                    .await
-                    .map_err(|e| format!("identity send failed (StreamStart): {}", e))?;
-
-                let checksum = Frame::compute_checksum(&nonce);
-                let mut chunk = Frame::chunk(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    0,
-                    nonce.clone(),
-                    0,
-                    checksum,
-                );
-                chunk.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut chunk);
-                socket_writer
-                    .write(&chunk)
-                    .await
-                    .map_err(|e| format!("identity send failed (Chunk): {}", e))?;
-
-                let mut se = Frame::stream_end(req_id.clone(), stream_id.clone(), 1);
-                se.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut se);
-                socket_writer
-                    .write(&se)
-                    .await
-                    .map_err(|e| format!("identity send failed (StreamEnd): {}", e))?;
-
-                let mut end = Frame::end(req_id.clone(), None);
-                end.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut end);
-                socket_writer
-                    .write(&end)
-                    .await
-                    .map_err(|e| format!("identity send failed (End): {}", e))?;
-
+                for mut frame in identity_probe_frames(&req_id, &xid) {
+                    seq_assigner.assign(&mut frame);
+                    socket_writer
+                        .write(&frame)
+                        .await
+                        .map_err(|e| format!("identity send failed ({:?}): {}", frame.frame_type, e))?;
+                }
                 seq_assigner.remove(&FlowKey {
                     rid: req_id.clone(),
                     xid: Some(xid.clone()),
                 });
 
-                // Read response — bounded by the global probe timeout
-                // so a hung cold-start never blocks master
-                // registration.
-                let mut accumulated = Vec::new();
+                // Read the echo — bounded by the global probe timeout so a
+                // hung cold-start never blocks master registration — and
+                // judge it as the handshake judges it.
+                let mut echo = IdentityEcho::default();
                 loop {
                     let elapsed = probe_started_at.elapsed();
                     let remaining = IDENTITY_PROBE_TIMEOUT
@@ -3159,65 +2952,23 @@ impl RelaySwitch {
                             ));
                         }
                     };
-
-                    match frame.frame_type {
-                        FrameType::RelayNotify => {
-                            caps_payload = frame
-                                .relay_notify_manifest()
-                                .map_err(|e| format!("RelayNotify: {}", e))?
-                                .to_vec();
-                            payload = parse_relay_notify_payload(&caps_payload)
-                                .map_err(|e| format!("RelayNotify reparse failed: {}", e))?;
-                            caps = payload.cap_urns();
-                            limits = frame
-                                .relay_notify_limits()
-                                .map_err(|e| format!("RelayNotify: {}", e))?;
-                        }
-                        FrameType::StreamStart => {}
-                        FrameType::Chunk => {
-                            if let Some(payload) = frame.payload {
-                                accumulated.extend_from_slice(&payload);
-                            }
-                        }
-                        FrameType::StreamEnd => {}
-                        FrameType::End => {
-                            if accumulated != nonce {
-                                return Err(format!(
-                                    "identity payload mismatch (expected {} bytes, got {})",
-                                    nonce.len(),
-                                    accumulated.len()
-                                ));
-                            }
-                            break;
-                        }
-                        FrameType::Err => {
-                            let code = frame
-                                .error_code()
-                                .ok_or_else(|| "ERR frame missing required text code".to_string())?;
-                            let msg = frame
-                                .error_message()
-                                .ok_or_else(|| "ERR frame missing required text message".to_string())?;
-                            return Err(format!(
-                                "identity failed: [{}] {}",
-                                code, msg
-                            ));
-                        }
-                        // Control/side-channel frames are legal ANYWHERE during the
-                        // probe (spec 12.4: LOG interleaves without affecting data
-                        // flow; CREDIT/HEARTBEAT are the control plane the writer
-                        // gate itself exempts, L4). A cartridge crediting its
-                        // probe input as it consumes (L10) must not fail identity
-                        // verification.
-                        FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-                        other => {
-                            return Err(format!(
-                                "identity: unexpected frame type {:?}",
-                                other
-                            ));
-                        }
+                    if frame.frame_type == FrameType::RelayNotify {
+                        caps_payload = frame
+                            .relay_notify_manifest()
+                            .map_err(|e| format!("RelayNotify: {}", e))?
+                            .to_vec();
+                        payload = parse_relay_notify_payload(&caps_payload)
+                            .map_err(|e| format!("RelayNotify reparse failed: {}", e))?;
+                        caps = payload.cap_urns();
+                        limits = frame
+                            .relay_notify_limits()
+                            .map_err(|e| format!("RelayNotify: {}", e))?;
+                        continue;
+                    }
+                    if echo.accept(&frame)?.is_some() {
+                        return Ok(());
                     }
                 }
-                Ok(())
             }
             .await;
 
@@ -4018,6 +3769,10 @@ impl RelaySwitch {
     /// while the switch's [`PeerProvider`] brings one, or refused with
     /// NO_HANDLER — as the model decides (`formal/CapDAG/Bifaci/Hold.lean`).
     /// `replayed` is a REQ that was held before: it is never held again.
+    ///
+    /// No router admission permit is taken: a parent holding one while it waits
+    /// for this child could deadlock its chain; the provider's own pools queue
+    /// the request (17.2).
     async fn route_peer_request(
         &self,
         source_idx: usize,
@@ -5307,6 +5062,331 @@ mod tests {
         writer.write(&end).await.unwrap();
 
         (reader, writer)
+    }
+
+    /// How a test responder echoes an identity probe.
+    #[derive(Clone, Copy)]
+    enum Echo {
+        /// The probe's value as two CBOR byte strings (3 bytes, then the rest).
+        SplitBytes,
+        /// A CBOR text "bifaci" — the nonce's content, but not a byte string.
+        Text,
+    }
+
+    /// Read one identity probe and answer it as `echo` says.
+    async fn answer_identity_probe<R, W>(reader: &mut FrameReader<R>, writer: &mut FrameWriter<W>, echo: Echo)
+    where
+        R: tokio::io::AsyncRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let req = reader.read().await.unwrap().expect("the identity REQ");
+        assert_eq!(req.frame_type, FrameType::Req);
+        let mut value = Vec::new();
+        loop {
+            let frame = reader.read().await.unwrap().expect("the probe's frames");
+            match frame.frame_type {
+                FrameType::Chunk => {
+                    match ciborium::from_reader::<ciborium::Value, _>(frame.payload.as_deref().unwrap()).unwrap() {
+                        ciborium::Value::Bytes(bytes) => value.extend(bytes),
+                        other => panic!("the probe carries its nonce as a byte string, got {other:?}"),
+                    }
+                }
+                FrameType::End => break,
+                _ => {}
+            }
+        }
+        let payloads: Vec<ciborium::Value> = match echo {
+            Echo::SplitBytes => vec![
+                ciborium::Value::Bytes(value[..3].to_vec()),
+                ciborium::Value::Bytes(value[3..].to_vec()),
+            ],
+            Echo::Text => vec![ciborium::Value::Text("bifaci".to_string())],
+        };
+        let stream = "identity-echo".to_string();
+        let mut seq = SeqAssigner::new();
+        let mut frames = vec![Frame::stream_start(req.id.clone(), stream.clone(), "media:".to_string(), Some(false))];
+        for (i, value) in payloads.iter().enumerate() {
+            let mut payload = Vec::new();
+            ciborium::into_writer(value, &mut payload).unwrap();
+            let checksum = Frame::compute_checksum(&payload);
+            frames.push(Frame::chunk(req.id.clone(), stream.clone(), i as u64, payload, i as u64, checksum));
+        }
+        frames.push(Frame::stream_end(req.id.clone(), stream, payloads.len() as u64));
+        frames.push(Frame::end(req.id.clone(), None));
+        for mut frame in frames {
+            frame.routing_id = req.routing_id.clone();
+            seq.assign(&mut frame);
+            writer.write(&frame).await.unwrap();
+        }
+    }
+
+    // TEST7194: the handshake's identity verification and the relay switch's
+    // probe judge an echo alike: the nonce echoed as two CBOR byte strings (3
+    // and 4 bytes) passes both, and a CBOR text "bifaci" fails both, naming
+    // "Expected bytes chunk".
+    #[tokio::test]
+    async fn test7194_identity_echo_judged_alike() {
+        for (echo, passes) in [(Echo::SplitBytes, true), (Echo::Text, false)] {
+            // The handshake's verification.
+            let (host_side, cartridge_side) = tokio::io::duplex(64 * 1024);
+            let (host_r, host_w) = tokio::io::split(host_side);
+            let (cart_r, cart_w) = tokio::io::split(cartridge_side);
+            let responder = tokio::spawn(async move {
+                let mut reader = FrameReader::new(cart_r);
+                let mut writer = FrameWriter::new(cart_w);
+                answer_identity_probe(&mut reader, &mut writer, echo).await;
+            });
+            let mut reader = FrameReader::new(host_r);
+            let mut writer = FrameWriter::new(host_w);
+            let verified = crate::bifaci::io::verify_identity(&mut reader, &mut writer).await;
+            responder.await.unwrap();
+            match (passes, verified) {
+                (true, Ok(())) => {}
+                (false, Err(e)) => assert!(e.to_string().contains("Expected bytes chunk"), "{e}"),
+                (_, other) => panic!("verify_identity: unexpected {other:?}"),
+            }
+
+            // The relay switch's probe when a master joins.
+            let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+            let slave = tokio::spawn(async move {
+                let (read_half, write_half) = slave_sock.into_split();
+                let mut reader = FrameReader::new(BufReader::new(read_half));
+                let mut writer = FrameWriter::new(BufWriter::new(write_half));
+                let mut identity = crate::standard::caps::identity_cap();
+                identity.urn = crate::CapUrn::from_string(CAP_IDENTITY).unwrap();
+                let record = InstalledCartridgeRecord {
+                    registry_url: None,
+                    channel: crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
+                    id: "cart".to_string(),
+                    version: "1.0.0".to_string(),
+                    sha256: "aa".repeat(32),
+                    cap_groups: vec![crate::bifaci::manifest::CapGroup {
+                        name: "default".to_string(),
+                        caps: vec![identity],
+                        adapter_urns: Vec::new(),
+                    }],
+                    attachment_error: None,
+                    runtime_stats: None,
+                    lifecycle: CartridgeLifecycle::Operational,
+                };
+                let manifest = serde_json::to_vec(&RelayNotifyCapabilitiesPayload::new(vec![record])).unwrap();
+                writer.write(&Frame::relay_notify(&manifest, &Limits::default())).await.unwrap();
+                expect_policy(&mut reader).await;
+                answer_identity_probe(&mut reader, &mut writer, echo).await;
+                hold_until_hangup(&mut reader).await;
+            });
+            let joined = RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy()).await;
+            match (passes, joined) {
+                (true, Ok(_)) => {}
+                (false, Err(e)) => assert!(e.to_string().contains("Expected bytes chunk"), "{e}"),
+                (_, Ok(_)) => panic!("the switch must refuse a text echo"),
+                (_, Err(e)) => panic!("the switch must take a split byte-string echo: {e}"),
+            }
+            slave.abort();
+        }
+    }
+
+    // TEST22116: the engine sends a sequence item split across CHUNKs at
+    // max_chunk, as a cartridge's emit_list_item does: a 40-byte item at
+    // max_chunk 16 goes as three chunks numbered 0, 1, 2, none longer than 16
+    // bytes, whose concatenation is the item, and STREAM_END counts three. A
+    // scalar input stream states is_sequence false.
+    #[tokio::test]
+    async fn test22116_engine_splits_sequence_items_at_max_chunk() {
+        use crate::orchestrator::stream_io::send_one_stream;
+        const SERVED: &str = "cap:in=\"media:void\";test;out=\"media:void\"";
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (frames_tx, frames_rx) = tokio::sync::oneshot::channel::<Vec<Frame>>();
+        let slave = tokio::spawn(async move {
+            let (mut reader, _writer) = slave_notify_with_identity(
+                slave_sock,
+                &serde_json::json!(["cap:effect=none", SERVED]),
+                &Limits::default(),
+            )
+            .await;
+            let mut frames = Vec::new();
+            let mut ends = 0;
+            while ends < 2 {
+                let frame = reader.read().await.unwrap().expect("the engine's frames");
+                if frame.frame_type == FrameType::End {
+                    ends += 1;
+                }
+                frames.push(frame);
+            }
+            let _ = frames_tx.send(frames);
+            hold_until_hangup(&mut reader).await;
+        });
+        let switch = Arc::new(
+            RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy())
+                .await
+                .unwrap(),
+        );
+
+        // One CBOR item of exactly 40 bytes: a byte string of 38 (2-byte header).
+        let mut item = Vec::new();
+        ciborium::into_writer(&ciborium::Value::Bytes(vec![7u8; 38]), &mut item).unwrap();
+        assert_eq!(item.len(), 40);
+        let sequence_rid = MessageId::new_uuid();
+        switch.send_to_master(Frame::req(sequence_rid.clone(), SERVED, vec![], "application/cbor"), None).await.unwrap();
+        send_one_stream(&switch, &sequence_rid, "media:", &item, None, true, 16, None).await.unwrap();
+        switch.send_to_master(Frame::end(sequence_rid.clone(), None), None).await.unwrap();
+        let scalar_rid = MessageId::new_uuid();
+        switch.send_to_master(Frame::req(scalar_rid.clone(), SERVED, vec![], "application/cbor"), None).await.unwrap();
+        send_one_stream(&switch, &scalar_rid, "media:", b"abc", None, false, 16, None).await.unwrap();
+        switch.send_to_master(Frame::end(scalar_rid.clone(), None), None).await.unwrap();
+
+        let frames = tokio::time::timeout(std::time::Duration::from_secs(5), frames_rx)
+            .await
+            .expect("the master receives both requests")
+            .unwrap();
+        let of = |rid: &MessageId| frames.iter().filter(|f| &f.id == rid).cloned().collect::<Vec<_>>();
+        let sequence = of(&sequence_rid);
+        let chunks: Vec<&Frame> = sequence.iter().filter(|f| f.frame_type == FrameType::Chunk).collect();
+        assert_eq!(chunks.len(), 3, "a 40-byte item at max_chunk 16 is three chunks");
+        let mut joined = Vec::new();
+        for (i, chunk) in chunks.iter().enumerate() {
+            assert_eq!(chunk.chunk_index, Some(i as u64));
+            let payload = chunk.payload.as_deref().unwrap();
+            assert!(payload.len() <= 16, "chunk {i} is {} bytes", payload.len());
+            joined.extend_from_slice(payload);
+        }
+        assert_eq!(joined, item, "the fragments concatenate to the item");
+        let stream_end = sequence.iter().find(|f| f.frame_type == FrameType::StreamEnd).unwrap();
+        assert_eq!(stream_end.chunk_count, Some(3));
+        let sequence_start = sequence.iter().find(|f| f.frame_type == FrameType::StreamStart).unwrap();
+        assert_eq!(sequence_start.is_sequence, Some(true));
+        let scalar_start = of(&scalar_rid).into_iter().find(|f| f.frame_type == FrameType::StreamStart).unwrap();
+        assert_eq!(scalar_start.is_sequence, Some(false), "a scalar input stream states it");
+
+        drop(switch);
+        slave.abort();
+    }
+
+    // TEST7193: a peer request takes no router admission permit. With the
+    // serving cartridge's `all` pool at capacity one and that one permit held
+    // by an engine call, a peer REQ for the same cap from another master's
+    // cartridge still reaches the serving master at once, while a second
+    // engine call stays queued.
+    #[tokio::test]
+    async fn test7193_peer_request_takes_no_admission_permit() {
+        const SERVED: &str = "cap:in=\"media:void\";test;out=\"media:void\"";
+        let (engine_sock0, slave_sock0) = UnixStream::pair().unwrap();
+        let (engine_sock1, slave_sock1) = UnixStream::pair().unwrap();
+        let (engine_seen_tx, engine_seen_rx) = tokio::sync::oneshot::channel();
+        let (peer_seen_tx, peer_seen_rx) = tokio::sync::oneshot::channel::<Frame>();
+        let (send_peer_tx, send_peer_rx) = tokio::sync::oneshot::channel::<()>();
+
+        let server = tokio::spawn(async move {
+            let (mut reader, mut writer) = slave_notify_with_identity(
+                slave_sock0,
+                &serde_json::json!(["cap:effect=none", SERVED]),
+                &Limits::default(),
+            )
+            .await;
+            let capacity_one = serde_json::json!({
+                "installed_cartridges": [{
+                    "registry_url": null,
+                    "channel": "release",
+                    "id": "server-cartridge",
+                    "version": "0.0.0",
+                    "sha256": "0".repeat(64),
+                    "runtime_stats": {
+                        "running": true,
+                        "pools": test_pool_states_json(&["cap:effect=none", SERVED], 1, 0),
+                        "active_request_count": 0,
+                        "peer_request_count": 0,
+                        "memory_footprint_mb": 0,
+                        "memory_rss_mb": 0,
+                        "restart_count": 0
+                    },
+                    "cap_groups": [{
+                        "name": "test",
+                        "caps": [
+                            {"urn": "cap:effect=none", "title": "identity", "aliases": ["identity"], "args": []},
+                            {"urn": SERVED, "title": "test", "aliases": ["test"], "args": []}
+                        ],
+                        "adapter_urns": []
+                    }]
+                }]
+            });
+            writer
+                .write(&Frame::relay_notify(&serde_json::to_vec(&capacity_one).unwrap(), &Limits::default()))
+                .await
+                .unwrap();
+            let mut engine_seen_tx = Some(engine_seen_tx);
+            let mut peer_seen_tx = Some(peer_seen_tx);
+            while let Ok(Some(frame)) = reader.read().await {
+                if frame.frame_type != FrameType::Req {
+                    continue;
+                }
+                if let Some(tx) = engine_seen_tx.take() {
+                    let _ = tx.send(());
+                } else if let Some(tx) = peer_seen_tx.take() {
+                    let _ = tx.send(frame);
+                }
+            }
+        });
+        let caller = tokio::spawn(async move {
+            let (mut reader, mut writer) = slave_notify_with_identity(
+                slave_sock1,
+                &serde_json::json!(["cap:effect=none"]),
+                &Limits::default(),
+            )
+            .await;
+            send_peer_rx.await.unwrap();
+            writer
+                .write(&Frame::req(MessageId::new_uuid(), SERVED, vec![], "application/cbor"))
+                .await
+                .unwrap();
+            hold_until_hangup(&mut reader).await;
+        });
+
+        let switch = Arc::new(
+            RelaySwitch::new(
+                wrap_with_test_ids(vec![engine_sock0, engine_sock1]),
+                test_fabric_registry(),
+                test_policy(),
+            )
+            .await
+            .unwrap(),
+        );
+        // Consume the capacity update before the engine calls.
+        switch.read_from_masters().await.unwrap();
+
+        let (_held, _held_rx) = switch
+            .execute_cap(SERVED, vec![], "application/cbor")
+            .await
+            .unwrap();
+        engine_seen_rx.await.unwrap();
+        let queued_switch = switch.clone();
+        let second_call = tokio::spawn(async move {
+            queued_switch.execute_cap(SERVED, vec![], "application/cbor").await
+        });
+        tokio::task::yield_now().await;
+        assert!(!second_call.is_finished(), "the second engine call waits for the one permit");
+
+        send_peer_tx.send(()).unwrap();
+        let peer = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let mut peer_seen_rx = peer_seen_rx;
+            loop {
+                switch.pump_one().await.unwrap();
+                match peer_seen_rx.try_recv() {
+                    Ok(frame) => break frame,
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => tokio::task::yield_now().await,
+                    Err(e) => panic!("the server task ended before the peer REQ arrived: {e}"),
+                }
+            }
+        })
+        .await
+        .expect("the peer REQ reaches the serving master while the only permit is held");
+        let peer_cap = crate::CapUrn::from_string(peer.cap.as_deref().expect("a REQ names its cap")).unwrap();
+        assert!(peer_cap.is_equivalent(&crate::CapUrn::from_string(SERVED).unwrap()), "{peer_cap}");
+        assert!(!second_call.is_finished(), "the second engine call still waits");
+
+        second_call.abort();
+        drop(switch);
+        server.abort();
+        caller.abort();
     }
 
     // TEST7113: a capacity-one cartridge owns only the active body. If that

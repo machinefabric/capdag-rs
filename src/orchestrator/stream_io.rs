@@ -394,11 +394,11 @@ impl ResponseAudit {
             }
         }
 
-        // An emission that does not state its cardinality mode is an empty
-        // stream (no items were ever written): it can be neither a lie about
-        // sequence mode nor unbounded in any consequential way — but an
-        // unbounded flag on it is still a contract question.
-        let emitted_is_sequence = frame.is_sequence.unwrap_or(output.shape.is_sequence);
+        // Every stream a cap's output opens states its cardinality: one that
+        // does not is a breach of the output contract, not assumed to match.
+        let emitted_is_sequence = frame.is_sequence.ok_or_else(|| {
+            self.breach(format!("the stream for output '{}' does not state is_sequence", named))
+        })?;
         let emitted_unbounded = frame.is_unbounded();
         let sequence_lie = emitted_is_sequence != output.shape.is_sequence;
         let boundedness_lie = emitted_unbounded && !output.shape.streaming;
@@ -972,6 +972,22 @@ const SPOOL_READ_WINDOW: usize = 256 * 1024;
 /// while keeping only a bounded window of the file in memory. The file holds
 /// the `node_data` byte form written by [`SpoolWriter`].
 #[allow(clippy::too_many_arguments)]
+/// The negotiated chunk size a sender cuts by: a zero `max_chunk` is a broken
+/// negotiation, refused rather than raised to one.
+fn nonzero_max_chunk(max_chunk: usize) -> Result<usize, StreamIoError> {
+    if max_chunk == 0 {
+        return Err(StreamIoError::Protocol("max_chunk is 0".into()));
+    }
+    Ok(max_chunk)
+}
+
+/// The CHUNK payloads one sequence item is sent as: its CBOR bytes cut at
+/// `max_chunk`, by every sender alike (12.4); the receiver reassembles them
+/// into the item.
+fn item_fragments(item: &[u8], max_chunk: usize) -> Result<std::slice::Chunks<'_, u8>, StreamIoError> {
+    Ok(item.chunks(nonzero_max_chunk(max_chunk)?))
+}
+
 pub async fn send_file_stream(
     switch: &Arc<RelaySwitch>,
     rid: &MessageId,
@@ -1014,7 +1030,7 @@ pub async fn send_file_stream(
         rid.clone(),
         stream_id.clone(),
         media_urn.to_string(),
-        if is_sequence { Some(true) } else { None },
+        Some(is_sequence),
     );
     ss.meta = meta;
     switch
@@ -1056,12 +1072,14 @@ pub async fn send_file_stream(
                 }
                 let consumed = cursor.position() as usize;
                 let item: Vec<u8> = buf.drain(..consumed).collect();
-                acquire(credit).await?;
-                let chunk = send_chunk(item);
-                switch
-                    .send_to_master(chunk, None)
-                    .await
-                    .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                for fragment in item_fragments(&item, max_chunk)? {
+                    acquire(credit).await?;
+                    let chunk = send_chunk(fragment.to_vec());
+                    switch
+                        .send_to_master(chunk, None)
+                        .await
+                        .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                }
             }
         }
         if !buf.is_empty() {
@@ -1073,7 +1091,7 @@ pub async fn send_file_stream(
             )));
         }
     } else {
-        let mut read_buf = vec![0u8; max_chunk.max(1)];
+        let mut read_buf = vec![0u8; nonzero_max_chunk(max_chunk)?];
         let mut sent_any = false;
         loop {
             let n = file.read(&mut read_buf).await.map_err(|e| {
@@ -1248,13 +1266,17 @@ pub async fn send_gathered_stream(
                                 ))
                             })?;
                         let end = cursor.position() as usize;
-                        send_payload!(data[start..end].to_vec());
+                        for fragment in item_fragments(&data[start..end], max_chunk)? {
+                            send_payload!(fragment.to_vec());
+                        }
                     }
                 } else {
                     let mut payload = Vec::new();
                     ciborium::into_writer(&ciborium::Value::Bytes(data), &mut payload)
                         .map_err(|e| StreamIoError::CborEncode(format!("{}", e)))?;
-                    send_payload!(payload);
+                    for fragment in item_fragments(&payload, max_chunk)? {
+                        send_payload!(fragment.to_vec());
+                    }
                 }
             }
             GatherMember::Spooled { path, is_sequence } => {
@@ -1291,7 +1313,9 @@ pub async fn send_gathered_stream(
                             }
                             let consumed = cursor.position() as usize;
                             let item: Vec<u8> = buf.drain(..consumed).collect();
-                            send_payload!(item);
+                            for fragment in item_fragments(&item, max_chunk)? {
+                                send_payload!(fragment.to_vec());
+                            }
                         }
                     }
                     if !buf.is_empty() {
@@ -1318,7 +1342,7 @@ pub async fn send_gathered_stream(
                         .len();
                     send_payload!(cbor_bytes_header(len));
                     let mut sent: u64 = 0;
-                    let mut read_buf = vec![0u8; max_chunk.max(1)];
+                    let mut read_buf = vec![0u8; nonzero_max_chunk(max_chunk)?];
                     loop {
                         let n = file.read(&mut read_buf).await.map_err(|e| {
                             StreamIoError::Protocol(format!(
@@ -1387,6 +1411,7 @@ pub async fn send_one_stream(
     max_chunk: usize,
     credit: Option<(&crate::bifaci::credit::CreditRouter, u64)>,
 ) -> Result<(), StreamIoError> {
+    let max_chunk = nonzero_max_chunk(max_chunk)?;
     let stream_id = uuid::Uuid::new_v4().to_string();
 
     // Flow-control window for this stream (L9): the receiving cartridge's
@@ -1423,7 +1448,7 @@ pub async fn send_one_stream(
         rid.clone(),
         stream_id.clone(),
         media_urn.to_string(),
-        if is_sequence { Some(true) } else { None },
+        Some(is_sequence),
     );
     ss.meta = meta;
     switch
@@ -1448,21 +1473,23 @@ pub async fn send_one_stream(
                 let end_pos = cursor.position() as usize;
                 let item_cbor = &data[start_pos..end_pos];
 
-                acquire(credit).await?;
-                let checksum = Frame::compute_checksum(item_cbor);
-                let chunk = Frame::chunk(
-                    rid.clone(),
-                    stream_id.clone(),
-                    chunk_index,
-                    item_cbor.to_vec(),
-                    chunk_index,
-                    checksum,
-                );
-                switch
-                    .send_to_master(chunk, None)
-                    .await
-                    .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
-                chunk_index += 1;
+                for fragment in item_fragments(item_cbor, max_chunk)? {
+                    acquire(credit).await?;
+                    let checksum = Frame::compute_checksum(fragment);
+                    let chunk = Frame::chunk(
+                        rid.clone(),
+                        stream_id.clone(),
+                        chunk_index,
+                        fragment.to_vec(),
+                        chunk_index,
+                        checksum,
+                    );
+                    switch
+                        .send_to_master(chunk, None)
+                        .await
+                        .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                    chunk_index += 1;
+                }
             }
         }
     } else {
@@ -3331,6 +3358,43 @@ mod tests {
         }
     }
 
+    // TEST8213: a response STREAM_START that does not state is_sequence is an
+    // output-contract breach naming is_sequence, under a scalar contract and
+    // under a sequence contract alike: it is not assumed to match.
+    #[tokio::test]
+    async fn test8213_stream_without_is_sequence_breaches_the_contract() {
+        let rid = MessageId::new_uuid();
+        for shape in [SCALAR_CONTRACT, OutputContract { is_sequence: true, streaming: false }] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tx.send(Frame::stream_start(rid.clone(), "out".to_string(), "media:".to_string(), None)).unwrap();
+            tx.send(chunk(&rid, b"payload")).unwrap();
+            tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
+            tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+            drop(tx);
+            let result = collect_terminal_output(
+                rx,
+                None,
+                "cap:echo;effect=none",
+                &contract("cap:echo;effect=none", shape),
+                &"step_test".parse().unwrap(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                5,
+                None,
+            )
+            .await;
+            match result {
+                Err(StreamIoError::OutputContract { detail, .. }) => {
+                    assert!(detail.contains("is_sequence"), "{detail}")
+                }
+                other => panic!("a stream without is_sequence must breach the contract, got {other:?}"),
+            }
+        }
+    }
+
     // TEST1957: the stream-contract audit fires at receipt, on the same
     // STREAM_START as the effect audit: an UNBOUNDED emission from an output
     // declared `streaming: false`, and an emission whose cardinality mode
@@ -3361,6 +3425,7 @@ mod tests {
             let (tx, rx) = mpsc::unbounded_channel();
             tx.send(first).unwrap();
             tx.send(chunk(&rid, b"payload")).unwrap();
+            tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
             tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
             drop(tx);
             collect_terminal_output(

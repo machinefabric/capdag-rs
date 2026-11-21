@@ -138,7 +138,7 @@ impl ResponseWriter {
             MessageId::Uint(0),
             stream_id.clone(),
             media_urn.to_string(),
-            None,
+            Some(false),
         );
         start.meta = meta;
         self.send(start);
@@ -499,7 +499,7 @@ impl FrameHandler for IdentityHandler {
             MessageId::Uint(0),
             stream_id.clone(),
             "media:".to_string(),
-            None,
+            Some(false),
         ));
 
         let checksum = Frame::compute_checksum(&data);
@@ -1594,6 +1594,57 @@ mod tests {
 
         let resp_end = reader.read().await.unwrap().unwrap();
         assert_eq!(resp_end.frame_type, FrameType::End);
+
+        drop(writer);
+        drop(reader);
+        host_task.await.unwrap().unwrap();
+    }
+
+    // TEST7201: every response stream the in-process host opens states its
+    // cardinality: a handler's emit_response stream and the identity echo
+    // each open with is_sequence false, so the engine's output audit can
+    // hold them to the declared shape.
+    #[tokio::test]
+    async fn test7201_response_streams_state_is_sequence() {
+        let cap_urn = "cap:in=\"media:text\";echo;out=\"media:text\"";
+        let handlers = vec![(
+            "echo".to_string(),
+            vec![make_test_cap(cap_urn)],
+            Arc::new(EchoHandler) as Arc<dyn FrameHandler>,
+        )];
+        let host = InProcessCartridgeHost::new(InProcessHostIdentity::for_test("in-process-test"), handlers);
+        let (host_sock, test_sock) = UnixStream::pair().unwrap();
+        let (host_read, host_write) = host_sock.into_split();
+        let (test_read, test_write) = test_sock.into_split();
+        let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+        let mut reader = FrameReader::new(BufReader::new(test_read));
+        let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
+        let _notify = reader.read().await.unwrap().unwrap();
+
+        for (xid, cap, stream, media, payload) in [
+            (1u64, cap_urn, "arg0", "media:text", cbor_bytes_payload(b"hello")),
+            (2u64, CAP_IDENTITY, "identity-verify", "media:", crate::bifaci::io::identity_nonce()),
+        ] {
+            let rid = MessageId::new_uuid();
+            let mut req = Frame::req(rid.clone(), cap, vec![], "application/cbor");
+            req.routing_id = Some(MessageId::Uint(xid));
+            writer.write(&req).await.unwrap();
+            writer.write(&Frame::stream_start(rid.clone(), stream.to_string(), media.to_string(), None)).await.unwrap();
+            let checksum = Frame::compute_checksum(&payload);
+            writer.write(&Frame::chunk(rid.clone(), stream.to_string(), 0, payload, 0, checksum)).await.unwrap();
+            writer.write(&Frame::stream_end(rid.clone(), stream.to_string(), 1)).await.unwrap();
+            writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+
+            let start = reader.read().await.unwrap().unwrap();
+            assert_eq!(start.frame_type, FrameType::StreamStart, "{cap}");
+            assert_eq!(start.is_sequence, Some(false), "{cap}: the response stream states it is scalar");
+            loop {
+                if reader.read().await.unwrap().unwrap().frame_type == FrameType::End {
+                    break;
+                }
+            }
+        }
 
         drop(writer);
         drop(reader);
