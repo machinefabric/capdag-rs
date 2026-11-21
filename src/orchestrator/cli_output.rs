@@ -48,10 +48,10 @@ pub fn extension_for_media(media_urn: &str) -> String {
     let Ok(parsed) = MediaUrn::from_string(media_urn) else {
         return "bin".to_string();
     };
-    if let Some(ext) = parsed.get_tag("ext") {
+    if let Some(ext) = parsed.exact_value("ext") {
         return ext.to_string();
     }
-    if let Some(fmt) = parsed.get_tag("fmt") {
+    if let Some(fmt) = parsed.exact_value("fmt") {
         return fmt.to_string();
     }
     if parsed.get_tag("enc").is_some() {
