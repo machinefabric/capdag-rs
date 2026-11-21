@@ -13754,6 +13754,48 @@ mod tests {
         Frame::chunk(rid.clone(), stream.to_string(), 0, cbor, index, checksum)
     }
 
+    // TEST7202: a caller that does not read a peer's response grants nothing
+    // beyond the initial window; the chunks it then reads are granted back.
+    #[tokio::test]
+    async fn test7202_unread_peer_response_is_not_granted() {
+        let rid = MessageId::new_uuid();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(Frame::stream_start(rid.clone(), "r".into(), "media:enc=utf8".into(), Some(false)))
+            .unwrap();
+        for i in 0..4u64 {
+            tx.send(value_chunk(&rid, "r", i, ciborium::Value::Bytes(vec![i as u8]))).unwrap();
+        }
+        tx.send(Frame::stream_end(rid.clone(), "r".into(), 4)).unwrap();
+        tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+        drop(tx);
+        let (sender, sent) = MockFrameSender::new();
+        let mut response = demux_peer_response(
+            rx,
+            Some(PeerGrantSource { sender: Arc::new(sender), rid: rid.clone(), initial_credit: 4 }),
+        );
+        let granted = || -> u64 {
+            sent.lock()
+                .unwrap()
+                .iter()
+                .filter(|f| f.frame_type == FrameType::Credit)
+                .filter_map(|f| f.credit)
+                .sum()
+        };
+
+        // The demux has every frame and nothing has been read.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(granted(), 0, "a response nobody has read is granted nothing beyond the initial window");
+
+        let mut items = 0;
+        while let Some(item) = response.recv().await {
+            if matches!(item, PeerResponseItem::Data(Ok(_), _)) {
+                items += 1;
+            }
+        }
+        assert_eq!(items, 4, "the caller reads the whole response");
+        assert_eq!(granted(), 4, "the chunks the caller reads are granted back");
+    }
+
     // TEST12730: a peer call's response has one stream per output the callee
     // answers on. The stream that names no output is the callee's main output:
     // its items are the response's data. A stream that names an output yields
