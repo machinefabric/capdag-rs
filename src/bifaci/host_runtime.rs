@@ -7523,7 +7523,7 @@ mod tests {
                 loop {
                     match r.read().await {
                         Ok(Some(f)) if f.frame_type == FrameType::RelayNotify => {
-                            let bytes = f.relay_notify_manifest().unwrap_or_default();
+                            let bytes = f.relay_notify_manifest().expect("a RelayNotify carries its manifest");
                             let payload: RelayNotifyCapabilitiesPayload =
                                 serde_json::from_slice(bytes).unwrap();
                             return payload

@@ -1621,6 +1621,8 @@ pub struct TerminalOutput {
     /// Audits every STREAM_START emission against the cap's declared
     /// effect contract before its items are yielded.
     effect_audit: ResponseAudit,
+    /// The response's frames in order, by the proved model (12.4).
+    flow: crate::bifaci::request_state::ReceivedFlow,
 }
 
 impl TerminalOutput {
@@ -1651,6 +1653,7 @@ impl TerminalOutput {
             ended: false,
             unbounded: false,
             effect_audit,
+            flow: crate::bifaci::request_state::ReceivedFlow::new(),
         })
     }
 
@@ -1703,6 +1706,13 @@ impl TerminalOutput {
                     }));
                 }
             };
+            if let Err(violation) = self.flow.receive(&frame) {
+                self.ended = true;
+                return Some(Err(StreamIoError::Protocol(format!(
+                    "response of cap '{}': {}",
+                    self.cap_urn, violation
+                ))));
+            }
             match frame.frame_type {
                 FrameType::StreamStart => {
                     // Effect audit at receipt: the emission must satisfy the
@@ -2016,6 +2026,8 @@ pub async fn collect_response(
     // operator knows the cap is alive-but-quiet, without log-spam every
     // 500 ms. The flag resets to false the next time any frame arrives.
     let mut activity_warning_logged = false;
+    // The response's frames in order, by the proved model (12.4).
+    let mut flow = crate::bifaci::request_state::ReceivedFlow::new();
 
     loop {
         let frame = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
@@ -2028,6 +2040,9 @@ pub async fn collect_response(
                 }
                 // Re-arm the warn-once gate for any subsequent silence.
                 activity_warning_logged = false;
+                flow.receive(&frame).map_err(|violation| {
+                    StreamIoError::Protocol(format!("response of cap '{}': {}", cap_urn, violation))
+                })?;
                 match frame.frame_type {
                     FrameType::Chunk => {
                         timer.touch();

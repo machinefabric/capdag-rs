@@ -72,14 +72,13 @@ fn test12375_frame_types_are_the_models() {
     assert_eq!(table.len(), FrameType::ALL.len(), "the model and the runtime name the same types");
     let mut wrong = Vec::new();
     for row in table {
-        let code = uint(&row["code"]) as u8;
-        let Some(frame_type) = FrameType::from_u8(code) else {
+        let code = uint(&row["code"]);
+        let Some(frame_type) = FrameType::from_code(code) else {
             wrong.push(format!("wire number {code} names no frame type here"));
             continue;
         };
-        let model_code = crate::formal::bifaci::flow::frame_type::code(frame_type.model());
-        if model_code.to_u64() != Some(u64::from(code)) {
-            wrong.push(format!("{frame_type:?} ({code}) is mapped to the model's type {model_code}"));
+        if frame_type.code() != code {
+            wrong.push(format!("{frame_type:?} ({code}) is numbered {}", frame_type.code()));
         }
         if frame_type.is_flow() != row["flow"].as_bool().unwrap() {
             wrong.push(format!("{frame_type:?}: flow is {}", frame_type.is_flow()));
@@ -328,7 +327,7 @@ fn test12381_the_writer_gate_follows_the_model() {
             script["written"].as_array().unwrap().iter().map(|w| w.as_bool().unwrap()).collect();
         let mut written = Vec::new();
         for code in frames {
-            let frame_type = FrameType::from_u8(uint(code) as u8).unwrap();
+            let frame_type = FrameType::from_code(uint(code)).unwrap();
             written.push(matches!(
                 write_gated(
                     frame_of(frame_type, &rid),
@@ -464,7 +463,7 @@ fn test12382_request_table_follows_the_model() {
             false,
             uint(&row["remaining"]),
         );
-        let frame_type = FrameType::from_u8(uint(&row["frame"]) as u8).unwrap();
+        let frame_type = FrameType::from_code(uint(&row["frame"])).unwrap();
         let mut frame = match frame_type {
             FrameType::Credit => {
                 Frame::credit(rid.clone(), None, uint(&row["granted"]), CreditDirection::Response)

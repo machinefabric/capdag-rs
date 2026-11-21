@@ -886,17 +886,14 @@ impl RelaySwitch {
 
             let mut caps_payload = notify_frame
                 .relay_notify_manifest()
-                .ok_or_else(|| {
-                    RelaySwitchError::Protocol(format!(
-                        "master {}: RelayNotify has no manifest",
-                        master_idx
-                    ))
-                })?
+                .map_err(|e| RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e)))?
                 .to_vec();
 
             let mut payload = parse_relay_notify_payload(&caps_payload)?;
             let mut caps = payload.cap_urns();
-            let mut limits = notify_frame.relay_notify_limits().unwrap_or_default();
+            let mut limits = notify_frame
+                .relay_notify_limits()
+                .map_err(|e| RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e)))?;
 
             // The policy goes first, before the identity probe or anything
             // routed: the host gives it to each cartridge it connects.
@@ -1012,14 +1009,17 @@ impl RelaySwitch {
                         FrameType::RelayNotify => {
                             // CartridgeHostRuntime sends the full RelayNotify (with all caps)
                             // through RelaySlave during identity verification. Update caps.
-                            if let Some(manifest) = frame.relay_notify_manifest() {
-                                caps_payload = manifest.to_vec();
-                                payload = parse_relay_notify_payload(&caps_payload)?;
-                                caps = payload.cap_urns();
-                            }
-                            if let Some(l) = frame.relay_notify_limits() {
-                                limits = l;
-                            }
+                            caps_payload = frame
+                                .relay_notify_manifest()
+                                .map_err(|e| {
+                                    RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e))
+                                })?
+                                .to_vec();
+                            payload = parse_relay_notify_payload(&caps_payload)?;
+                            caps = payload.cap_urns();
+                            limits = frame.relay_notify_limits().map_err(|e| {
+                                RelaySwitchError::Protocol(format!("master {}: {}", master_idx, e))
+                            })?;
                         }
                         FrameType::StreamStart => {}
                         FrameType::Chunk => {
@@ -3006,12 +3006,7 @@ impl RelaySwitch {
 
         let caps_payload = notify_frame
             .relay_notify_manifest()
-            .ok_or_else(|| {
-                RelaySwitchError::Protocol(format!(
-                    "new master {}: RelayNotify has no manifest",
-                    master_idx
-                ))
-            })?
+            .map_err(|e| RelaySwitchError::Protocol(format!("new master {}: {}", master_idx, e)))?
             .to_vec();
 
         // Diagnostic — what did the master announce in its initial
@@ -3021,7 +3016,9 @@ impl RelaySwitch {
         let mut caps_payload = caps_payload;
         let mut payload = parse_relay_notify_payload(&caps_payload)?;
         let mut caps = payload.cap_urns();
-        let mut limits = notify_frame.relay_notify_limits().unwrap_or_default();
+        let mut limits = notify_frame
+            .relay_notify_limits()
+            .map_err(|e| RelaySwitchError::Protocol(format!("new master {}: {}", master_idx, e)))?;
 
         // The current policy goes first, before the identity probe or
         // anything routed. `set_policy` holds the add-master lock this call
@@ -3165,15 +3162,16 @@ impl RelaySwitch {
 
                     match frame.frame_type {
                         FrameType::RelayNotify => {
-                            if let Some(manifest) = frame.relay_notify_manifest() {
-                                caps_payload = manifest.to_vec();
-                                payload = parse_relay_notify_payload(&caps_payload)
-                                    .map_err(|e| format!("RelayNotify reparse failed: {}", e))?;
-                                caps = payload.cap_urns();
-                            }
-                            if let Some(l) = frame.relay_notify_limits() {
-                                limits = l;
-                            }
+                            caps_payload = frame
+                                .relay_notify_manifest()
+                                .map_err(|e| format!("RelayNotify: {}", e))?
+                                .to_vec();
+                            payload = parse_relay_notify_payload(&caps_payload)
+                                .map_err(|e| format!("RelayNotify reparse failed: {}", e))?;
+                            caps = payload.cap_urns();
+                            limits = frame
+                                .relay_notify_limits()
+                                .map_err(|e| format!("RelayNotify: {}", e))?;
                         }
                         FrameType::StreamStart => {}
                         FrameType::Chunk => {
@@ -4404,8 +4402,14 @@ impl RelaySwitch {
 
             FrameType::RelayNotify => {
                 // Capability update from host — update our cap table.
-                let caps_payload = frame.relay_notify_manifest().ok_or_else(|| {
-                    RelaySwitchError::Protocol("RelayNotify has no payload".to_string())
+                // Both are read before anything is changed: a RelayNotify
+                // missing either, or with a limit that is not a positive
+                // integer, ends the master and leaves what it last said.
+                let caps_payload = frame.relay_notify_manifest().map_err(|e| {
+                    RelaySwitchError::Protocol(format!("master {}: {}", source_idx, e))
+                })?;
+                let new_limits = frame.relay_notify_limits().map_err(|e| {
+                    RelaySwitchError::Protocol(format!("master {}: {}", source_idx, e))
                 })?;
 
                 let payload = parse_relay_notify_payload(caps_payload)?;
@@ -4446,9 +4450,7 @@ impl RelaySwitch {
                         *master.installed_cartridges.write().await = payload.installed_cartridges;
                         *master.host_protocol_stats.write().await = payload.host_protocol_stats;
                         *master.manifest.write().await = caps_payload.to_vec();
-                        if let Some(new_limits) = frame.relay_notify_limits() {
-                            *master.limits.write().await = new_limits;
-                        }
+                        *master.limits.write().await = new_limits;
                         if probe_required {
                             master.healthy.store(false, Ordering::SeqCst);
                             *master.last_error.write().await = Some(
@@ -8300,6 +8302,68 @@ mod tests {
         let bytes = serde_json::to_vec(&bare).unwrap();
         let parsed = parse_relay_notify_payload(&bytes).expect("bare payload parses");
         assert!(parsed.host_protocol_stats.is_none());
+    }
+
+    // TEST7199: Every RelayNotify carries all four limits as positive integers:
+    // a master whose first RelayNotify says max_chunk 0 is not taken
+    // (RelaySwitch::new fails naming max_chunk), and a later RelayNotify
+    // missing initial_credit is a protocol error naming it, leaving the limits
+    // the master last announced.
+    #[tokio::test]
+    async fn test7199_relay_notify_limits_required_every_time() {
+        let with_limit = |key: &str, value: Option<ciborium::Value>| {
+            let manifest = serde_json::to_vec(&RelayNotifyCapabilitiesPayload::new(vec![])).unwrap();
+            let mut frame = Frame::relay_notify(&manifest, &Limits::default());
+            let meta = frame.meta.as_mut().unwrap();
+            match value {
+                Some(v) => meta.insert(key.to_string(), v),
+                None => meta.remove(key),
+            };
+            frame
+        };
+
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let first = with_limit("max_chunk", Some(ciborium::Value::Integer(0.into())));
+        let slave = tokio::spawn(async move {
+            let (read_half, write_half) = slave_sock.into_split();
+            let mut reader = FrameReader::new(BufReader::new(read_half));
+            let mut writer = FrameWriter::new(BufWriter::new(write_half));
+            writer.write(&first).await.unwrap();
+            hold_until_hangup(&mut reader).await;
+        });
+        match RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy()).await {
+            Err(RelaySwitchError::Protocol(msg)) => assert!(msg.contains("max_chunk"), "{msg}"),
+            Err(other) => panic!("a zero max_chunk must be a protocol error, got {other:?}"),
+            Ok(_) => panic!("a master announcing max_chunk 0 must not be taken"),
+        }
+        slave.await.unwrap();
+
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let announced = Limits { max_frame: 2_000_000, ..Limits::default() };
+        let update = with_limit("initial_credit", None);
+        let (sent_tx, sent_rx) = tokio::sync::oneshot::channel();
+        let slave = tokio::spawn(async move {
+            let (mut reader, mut writer) =
+                slave_notify_with_identity(slave_sock, &serde_json::json!(["cap:effect=none"]), &announced)
+                    .await;
+            writer.write(&update).await.unwrap();
+            let _ = sent_tx.send(());
+            hold_until_hangup(&mut reader).await;
+        });
+        let switch = RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy())
+            .await
+            .expect("a master announcing every limit is taken");
+        assert_eq!(switch.limits().await.max_frame, 2_000_000);
+        sent_rx.await.unwrap();
+        match switch.read_from_masters().await {
+            Err(RelaySwitchError::Protocol(msg)) => assert!(msg.contains("initial_credit"), "{msg}"),
+            other => panic!("a RelayNotify missing initial_credit must be a protocol error, got {other:?}"),
+        }
+        let kept = switch.limits().await;
+        assert_eq!(kept.max_frame, 2_000_000, "the limits last announced are kept");
+        assert_eq!(kept.initial_credit, Limits::default().initial_credit);
+        drop(switch);
+        slave.await.unwrap();
     }
 
     // TEST7196: A RelayNotify that advertises caps must name the identity cap
