@@ -1484,13 +1484,17 @@ fn push_cap_urn_properties(md: &mut String, cap_urn: &CapUrn) {
     md.push_str("| Property | Value |\n|----------|-------|\n");
     md.push_str(&format!("| in | `{}` |\n", cap_urn.in_spec()));
     md.push_str(&format!("| out | `{}` |\n", cap_urn.out_spec()));
-    // `cap_urn.tags` is a `BTreeMap<String, String>` — the
-    // iteration order is alphabetical by key, which is
-    // stable and reader-friendly. These are the non-
-    // direction cap tags (the `CapUrn` parser strips `in` /
-    // `out` out of `tags` and into separate fields).
-    for (key, value) in cap_urn.tags() {
-        md.push_str(&format!("| {} | `{}` |\n", key, value));
+    // The cap-tags, in key order, each written as the tag reads in the
+    // cap's canonical text (`key=value`, `key`, `!key`, …). The direction
+    // and the effect are not cap-tags; they are the rows above.
+    for (key, constraint) in cap_urn.tags() {
+        let written = tagged_urn::TaggedUrn::new(
+            "cap",
+            std::iter::once((key.clone(), constraint.clone())).collect(),
+        )
+        .expect("a cap-tag a cap holds is one a tagged URN writes")
+        .tags_to_string();
+        md.push_str(&format!("| {} | `{}` |\n", key, written));
     }
 }
 

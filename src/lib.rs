@@ -71,7 +71,10 @@ pub mod urn;
 pub use ops_rs::failure;
 pub use ops_rs::failure::AttributionClass;
 
-// URN types
+// URN types. A tag is the constraint it writes — tagged-urn's own type, as
+// CapUrn's and MediaUrn's tag accessors take and give it — and TaggedUrn is
+// what writes one as text.
+pub use tagged_urn::{Constraint, TaggedUrn};
 pub use urn::cap_query::*;
 pub use urn::cap_urn::*;
 pub use urn::media_urn::*;

@@ -381,7 +381,7 @@ impl MediaKind {
         if marker("numeric") || marker("integer") {
             return MediaKind::Numeric;
         }
-        let fmt = urn.get_tag("fmt");
+        let fmt = urn.exact_value("fmt");
         if fmt == Some("csv") || marker("list") {
             return MediaKind::Table;
         }
@@ -389,7 +389,7 @@ impl MediaKind {
             return MediaKind::Record;
         }
         if urn
-            .get_tag("ext")
+            .exact_value("ext")
             .is_some_and(|ext| TEXT_EXTENSIONS.contains(&ext))
         {
             return MediaKind::Text;
