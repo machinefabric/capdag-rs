@@ -65,7 +65,7 @@ use crate::urn::media_urn::MediaUrn;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::io::{BufReader, BufWriter};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{error, info, warn};
@@ -123,8 +123,8 @@ impl From<std::io::Error> for RelaySwitchError {
 // RoutingEntry lives in `request_state` — the unified per-request state module
 // shared by every routing runtime (L7).
 use crate::bifaci::request_state::{
-    AdmissionController, AdmissionKey, AdmissionPermit, FrameDirection, RequestState, RequestTable,
-    RoutingEntry, TerminalKind, TerminatedSummary,
+    AdmissionController, AdmissionKey, AdmissionPermit, FrameDirection, RequestKey, RequestState,
+    RequestTable, RoutingEntry, TerminalKind, TerminatedSummary,
 };
 use crate::bifaci::stats::DropCounters;
 
@@ -611,6 +611,10 @@ struct MasterConnection {
     connected_at: std::sync::Mutex<Instant>,
     /// Last error message (if unhealthy)
     last_error: RwLock<Option<String>>,
+    /// The identity probe this master's health waits on, while one is
+    /// open. Only its answer settles the master; the answer of a probe
+    /// it replaced (a reattach, a later probe) is ignored.
+    identity_probe: std::sync::Mutex<Option<RequestKey>>,
 }
 
 impl std::fmt::Debug for MasterConnection {
@@ -728,20 +732,22 @@ pub struct RelaySwitch {
     /// the switch goes away. Empty until `start_background_pump` is
     /// called exactly once after the switch is Arc-wrapped.
     background_pump_handle: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
-    /// Queue of master indexes whose advertised cap set transitioned
-    /// from empty to non-empty since the last identity probe. The
-    /// background pump drains this queue and runs end-to-end identity
-    /// probes against each named master, gating cap-table publication
-    /// on probe success — the runtime counterpart to the synchronous
-    /// `add_master` probe that fires at handshake. We push from
-    /// `handle_master_frame`'s RelayNotify-update branch and consume
-    /// from a dedicated task in `start_background_pump`.
-    pending_identity_probes_tx: mpsc::UnboundedSender<usize>,
+    /// Queue of identity probes for the probe driver: masters whose
+    /// advertised cap set went from empty to non-empty (pushed from
+    /// `handle_master_frame`'s RelayNotify-update branch), and
+    /// `add_master` probes left unanswered at the end of their window.
+    /// Consumed by the task `spawn_identity_probe_driver` starts, which
+    /// gates cap-table publication on each probe's answer.
+    pending_identity_probes_tx: mpsc::UnboundedSender<IdentityProbeJob>,
     /// Receive end of the probe queue, owned by the relay so we can
     /// hand it to the background pump's verification task at startup.
     /// `Mutex<Option<…>>` so the pump can `take` it exactly once;
     /// re-call attempts are caller-error.
-    pending_identity_probes_rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<usize>>>,
+    pending_identity_probes_rx: std::sync::Mutex<Option<mpsc::UnboundedReceiver<IdentityProbeJob>>>,
+    /// How long an identity probe may go unanswered before its master is
+    /// reported overdue ([`IDENTITY_PROBE_WINDOW`]). The probe stays open
+    /// after it.
+    identity_probe_window: std::sync::Mutex<Duration>,
     /// Serialises [`RelaySwitch::add_master`] so concurrent
     /// registrations (in particular the steady-state Mac-app
     /// reconnect path racing engine startup) cannot pick the same
@@ -767,6 +773,141 @@ enum Inbound {
     Frame(usize, Result<Frame, CborError>),
     /// Bringing the provider of held peer request `rid` ended.
     Settled(MessageId, Settlement),
+}
+
+impl Inbound {
+    /// What a master's reader hands the frame loop for one read.
+    fn from_read(master_idx: usize, read: Result<Option<Frame>, CborError>) -> Self {
+        match read {
+            Ok(Some(frame)) => Inbound::Frame(master_idx, Ok(frame)),
+            Ok(None) => Inbound::Frame(master_idx, Err(CborError::UnexpectedEof)),
+            Err(e) => Inbound::Frame(master_idx, Err(e)),
+        }
+    }
+}
+
+/// How long an identity probe may go unanswered before its master is
+/// reported overdue. Starting the cartridge that answers identity is part of
+/// the round trip, and a cold start can outlast any fixed bound, so the
+/// window does not end the probe: past it the master is reported overdue,
+/// stays unverified, and the answer, whenever it comes, settles it.
+pub const IDENTITY_PROBE_WINDOW: Duration = Duration::from_secs(30);
+
+/// A job for the identity-probe driver.
+enum IdentityProbeJob {
+    /// Probe this master through the switch (its advertised caps went from
+    /// empty to non-empty).
+    Probe(usize),
+    /// Wait for the answer to a probe already sent: `add_master`'s, left
+    /// unanswered when its window ended.
+    Await(OpenIdentityProbe),
+}
+
+/// An identity probe the switch has sent and whose answer it waits for. Its
+/// answer arrives through the request table on `answers`.
+struct OpenIdentityProbe {
+    master_idx: usize,
+    key: RequestKey,
+    answers: mpsc::UnboundedReceiver<Frame>,
+    nonce: Vec<u8>,
+    /// The echo received so far.
+    echoed: Vec<u8>,
+    sent_at: Instant,
+    window: Duration,
+    /// Whether the master has been reported overdue.
+    overdue: bool,
+}
+
+/// Where a master's reader hands what it reads until `add_master` has
+/// committed the master's slot (`Some`), or nothing, and the reads go to the
+/// switch's frame loop (`None`). `add_master` waits on its identity probe
+/// through this rather than reading the socket itself, so the end of the
+/// probe's window never abandons a read part-way through a frame; the reader
+/// is the only reader of the socket.
+type ReaderDiversion =
+    Arc<std::sync::Mutex<Option<mpsc::UnboundedSender<Result<Option<Frame>, CborError>>>>>;
+
+/// Start the task that reads a master's socket until it closes, handing
+/// each read to the probe the diversion names, or to the frame loop.
+fn spawn_master_reader(
+    master_idx: usize,
+    mut reader: FrameReader<BufReader<OwnedReadHalf>>,
+    frame_tx: mpsc::UnboundedSender<Inbound>,
+    diversion: ReaderDiversion,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let read = reader.read().await;
+            match &read {
+                Ok(Some(_)) => {}
+                Ok(None) => warn!("[RelaySwitch] master {} reader: socket closed (EOF)", master_idx),
+                Err(e) => error!("[RelaySwitch] master {} reader: socket error: {}", master_idx, e),
+            }
+            let last = !matches!(read, Ok(Some(_)));
+            // Handed on under the diversion's lock, so a diversion that ends
+            // forwards what it holds before any later read passes it.
+            let handed_on = {
+                let diverted = diversion.lock().expect("reader diversion mutex poisoned");
+                match diverted.as_ref() {
+                    Some(probe) => probe.send(read).is_ok(),
+                    None => frame_tx.send(Inbound::from_read(master_idx, read)).is_ok(),
+                }
+            };
+            if !handed_on {
+                warn!("[RelaySwitch] master {} reader: nobody receives its frames", master_idx);
+                break;
+            }
+            if last {
+                break;
+            }
+        }
+    })
+}
+
+/// What one frame of an identity probe's answer does to the probe: the
+/// answer is STREAM_START, CHUNK(nonce)…, STREAM_END, END, or an ERR.
+/// `None` while the answer is still coming.
+fn identity_answer_step(frame: &Frame, nonce: &[u8], echoed: &mut Vec<u8>) -> Option<Result<(), String>> {
+    match frame.frame_type {
+        FrameType::StreamStart | FrameType::StreamEnd => None,
+        FrameType::Chunk => {
+            if let Some(payload) = &frame.payload {
+                echoed.extend_from_slice(payload);
+            }
+            None
+        }
+        FrameType::End => Some(if echoed.as_slice() == nonce {
+            Ok(())
+        } else {
+            Err(format!(
+                "identity payload mismatch (expected {} bytes, got {})",
+                nonce.len(),
+                echoed.len()
+            ))
+        }),
+        FrameType::Err => Some(Err(match (frame.error_code(), frame.error_message()) {
+            (Some(code), Some(msg)) => format!("identity failed: [{}] {}", code, msg),
+            (None, _) => "identity failed: ERR frame missing required text code".to_string(),
+            (Some(_), None) => "identity failed: ERR frame missing required text message".to_string(),
+        })),
+        // Control/side-channel frames are legal ANYWHERE during the
+        // probe (spec 12.4: LOG interleaves without affecting data
+        // flow; CREDIT/HEARTBEAT are the control plane the writer
+        // gate itself exempts, L4). A cartridge crediting its
+        // probe input as it consumes (L10) must not fail identity
+        // verification.
+        FrameType::Log | FrameType::Credit | FrameType::Heartbeat => None,
+        other => Some(Err(format!("identity: unexpected frame type {:?}", other))),
+    }
+}
+
+/// What a master still waiting on its identity probe reports.
+fn identity_probe_overdue_message(master_idx: usize, window: Duration) -> String {
+    format!(
+        "master {}: identity probe unanswered after {:?} — the master stays unverified until the host answers it \
+         (the cartridge answering identity is still starting, or the probe or its answer was lost on the way)",
+        master_idx, window
+    )
 }
 
 /// A switch's [`PeerProvider`] and the requests held while it brings one.
@@ -1086,45 +1227,18 @@ impl RelaySwitch {
                 reader_handle: Mutex::new(None), // Spawned in phase 2
                 connected_at: std::sync::Mutex::new(Instant::now()),
                 last_error: RwLock::new(None),
+                identity_probe: std::sync::Mutex::new(None),
             });
         }
 
         // Phase 2: All masters verified — spawn reader tasks
         for (master_idx, socket_reader) in pending_readers {
-            let tx = frame_tx.clone();
-            let reader_handle = tokio::spawn(async move {
-                let mut reader = socket_reader;
-                loop {
-                    match reader.read().await {
-                        Ok(Some(frame)) => {
-                            if tx.send(Inbound::Frame(master_idx, Ok(frame))).is_err() {
-                                tracing::warn!(
-                                    "[RelaySwitch] master {} reader: frame_tx closed",
-                                    master_idx
-                                );
-                                break;
-                            }
-                        }
-                        Ok(None) => {
-                            tracing::warn!(
-                                "[RelaySwitch] master {} reader: socket closed (EOF)",
-                                master_idx
-                            );
-                            let _ = tx.send(Inbound::Frame(master_idx, Err(CborError::UnexpectedEof)));
-                            break;
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "[RelaySwitch] master {} reader: socket error: {}",
-                                master_idx,
-                                e
-                            );
-                            let _ = tx.send(Inbound::Frame(master_idx, Err(e)));
-                            break;
-                        }
-                    }
-                }
-            });
+            let reader_handle = spawn_master_reader(
+                master_idx,
+                socket_reader,
+                frame_tx.clone(),
+                Arc::new(std::sync::Mutex::new(None)),
+            );
             // `reader_handle` is `Mutex<Option<…>>`; lock briefly
             // to install the freshly-spawned task. No `await` is
             // crossed while the inner Mutex is held.
@@ -1136,7 +1250,7 @@ impl RelaySwitch {
             serde_json::to_vec(&Vec::<String>::new())
                 .expect("empty capability snapshot must serialize"),
         );
-        let (probes_tx, probes_rx) = mpsc::unbounded_channel::<usize>();
+        let (probes_tx, probes_rx) = mpsc::unbounded_channel::<IdentityProbeJob>();
         let switch = Self {
             masters: RwLock::new(masters),
             cap_table: RwLock::new(Vec::new()),
@@ -1168,6 +1282,7 @@ impl RelaySwitch {
             background_pump_handle: std::sync::Mutex::new(Vec::new()),
             pending_identity_probes_tx: probes_tx,
             pending_identity_probes_rx: std::sync::Mutex::new(Some(probes_rx)),
+            identity_probe_window: std::sync::Mutex::new(IDENTITY_PROBE_WINDOW),
             add_master_lock: tokio::sync::Mutex::new(()),
             policy: std::sync::Mutex::new(policy),
             peer_providing: std::sync::OnceLock::new(),
@@ -1323,18 +1438,21 @@ impl RelaySwitch {
     }
 
     /// Spawn the runtime identity-probe driver. It owns the
-    /// `pending_identity_probes_rx` receiver (taken once) and serially
-    /// probes each master that flipped from empty caps to non-empty caps
-    /// in the last RelayNotify update; on success it flips the master
-    /// healthy and rebuilds the cap table so its caps become routable, on
-    /// failure it keeps the master unhealthy and stamps `last_error`.
+    /// `pending_identity_probes_rx` receiver (taken once) and runs each
+    /// job in a task of its own: a probe of a master that flipped from
+    /// empty caps to non-empty caps in the last RelayNotify update, or the
+    /// wait for the answer to an `add_master` probe left unanswered at the
+    /// end of its window. An answer flips the master healthy and rebuilds
+    /// the cap table so its caps become routable; a failure keeps the
+    /// master unhealthy and stamps `last_error`. A probe unanswered after
+    /// its window is reported overdue and stays open, so a probe waiting
+    /// on a slow host never holds back another master's.
     ///
-    /// Probes run in their own task so they never block the caller's frame
-    /// loop — the probe writes via `write_to_master_idx`, the caller's
-    /// master-read loop (the background pump, or a host process's own
-    /// multiplexer) still drives master reads, and the response routes back
-    /// through the request entry's external response channel that
-    /// `run_identity_probe_via_relay` registers.
+    /// Probes never block the caller's frame loop — the probe writes via
+    /// `write_to_master_idx`, the caller's master-read loop (the background
+    /// pump, or a host process's own multiplexer) still drives master
+    /// reads, and the response routes back through the request entry's
+    /// external response channel the probe registered.
     ///
     /// `start_background_pump` calls this. A host that runs its OWN
     /// master-read loop (e.g. the interop router process, which forwards
@@ -1357,57 +1475,33 @@ impl RelaySwitch {
                 if stop_probe.load(Ordering::Relaxed) {
                     break;
                 }
-                let master_idx = match rx.recv().await {
-                    Some(idx) => idx,
+                let job = match rx.recv().await {
+                    Some(job) => job,
                     None => break, // sender dropped — relay torn down
                 };
-                let Some(switch) = weak_probe.upgrade() else {
-                    break;
-                };
-                match switch.run_identity_probe_via_relay(master_idx).await {
-                    Ok(()) => {
-                        // Probe passed — flip the master back to healthy and
-                        // rebuild the cap table so its caps become routable.
-                        // We held the master unhealthy from the moment caps
-                        // went non-empty until verification completed; this
-                        // is the natural reverse.
-                        let masters = switch.masters.read().await;
-                        if let Some(master) = masters.get(master_idx) {
-                            master.healthy.store(true, Ordering::SeqCst);
-                            master.last_error.write().await.take();
+                // The probe's task holds the switch only weakly: one waiting
+                // on a host that never answers must not keep it alive.
+                let weak = weak_probe.clone();
+                tokio::spawn(async move {
+                    let probe = match job {
+                        IdentityProbeJob::Await(probe) => probe,
+                        IdentityProbeJob::Probe(master_idx) => {
+                            let Some(switch) = weak.upgrade() else {
+                                return;
+                            };
+                            match switch.open_identity_probe(master_idx).await {
+                                Ok(probe) => probe,
+                                Err((key, detail)) => {
+                                    switch
+                                        .settle_identity_probe(master_idx, &key, Err(detail), Duration::ZERO, false)
+                                        .await;
+                                    return;
+                                }
+                            }
                         }
-                        drop(masters);
-                        switch.rebuild_cap_table().await;
-                        switch.rebuild_capabilities().await;
-                        info!(
-                            target: "relay_switch",
-                            master_idx = master_idx,
-                            "[RelaySwitch] runtime identity probe passed — master is now healthy"
-                        );
-                    }
-                    Err(detail) => {
-                        // Probe failed — keep the master unhealthy and stamp
-                        // `last_error` so the inventory surface shows the
-                        // reason. The master's caps stay published as-is
-                        // (they came from the host's RelayNotify), but
-                        // `cap_table` skips unhealthy masters during dispatch
-                        // so engine REQs won't route here.
-                        tracing::error!(
-                            target: "relay_switch",
-                            master_idx = master_idx,
-                            error = %detail,
-                            "[RelaySwitch] runtime identity probe FAILED — master remains unhealthy"
-                        );
-                        let masters = switch.masters.read().await;
-                        if let Some(master) = masters.get(master_idx) {
-                            master.healthy.store(false, Ordering::SeqCst);
-                            *master.last_error.write().await = Some(detail);
-                        }
-                        drop(masters);
-                        switch.rebuild_cap_table().await;
-                        switch.rebuild_capabilities().await;
-                    }
-                }
+                    };
+                    Self::await_identity_answer(weak, probe).await;
+                });
             }
         }))
     }
@@ -2515,164 +2609,234 @@ impl RelaySwitch {
         Ok((xid, rx))
     }
 
-    /// Run an end-to-end identity probe against an already-registered
-    /// master, using the relay's normal frame routing (writes via
-    /// `write_to_master_idx`, response collected via the same
-    /// unified-request-table machinery as `execute_cap`).
+    /// How long an identity probe may go unanswered before its master is
+    /// reported overdue.
+    fn identity_probe_window(&self) -> Duration {
+        *self
+            .identity_probe_window
+            .lock()
+            .expect("identity_probe_window mutex poisoned")
+    }
+
+    /// Shorten the identity probe window, so a test can watch a probe
+    /// outlast it.
+    #[cfg(test)]
+    pub(crate) fn set_identity_probe_window(&self, window: Duration) {
+        *self
+            .identity_probe_window
+            .lock()
+            .expect("identity_probe_window mutex poisoned") = window;
+    }
+
+    /// Send an end-to-end identity probe to an already-registered master,
+    /// using the relay's normal frame routing (writes via
+    /// `write_to_master_idx`, the answer collected through the same
+    /// unified request table as `execute_cap`).
     ///
-    /// This is the post-registration counterpart to the synchronous
-    /// probe `add_master` runs at handshake time. It is required for
-    /// any RelayNotify update that transitions a master's cap set
-    /// from empty to non-empty: `add_master` skipped the probe at the
-    /// initial empty advertisement, so the runtime path must not let
-    /// the master start serving caps without proving its handler
-    /// chain answers identity end-to-end.
+    /// This is the post-registration counterpart to the probe `add_master`
+    /// sends at handshake time. It is required for any RelayNotify update
+    /// that transitions a master's cap set from empty to non-empty:
+    /// `add_master` skipped the probe at the initial empty advertisement,
+    /// so the master must not start serving caps without proving its
+    /// handler chain answers identity end-to-end.
     ///
-    /// On success returns `Ok(())`. On failure returns a typed error
-    /// string suitable for `MasterConnection.last_error`.
-    async fn run_identity_probe_via_relay(&self, master_idx: usize) -> Result<(), String> {
+    /// The probe becomes the master's open probe before anything is sent.
+    /// A probe that could not be sent is returned with why, to be settled.
+    async fn open_identity_probe(
+        &self,
+        master_idx: usize,
+    ) -> Result<OpenIdentityProbe, (RequestKey, String)> {
         use crate::standard::caps::CAP_IDENTITY;
-        use std::time::Duration;
 
-        const RUNTIME_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
-
-        // Build (xid, rid) and a one-shot response channel keyed by
-        // them. The frame loop's request-table channel lookup
-        // delivers the master's reply frames here.
         let xid = MessageId::Uint(self.xid_counter.fetch_add(1, Ordering::SeqCst) + 1);
         let rid = MessageId::new_uuid();
         let key = (xid.clone(), rid.clone());
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<Frame>();
-        self.register_external(
-            key.clone(),
-            master_idx,
-            tx,
-            Some(CAP_IDENTITY.to_string()),
-            None,
-        )
-        .await
-        .map_err(|e| format!("identity probe registration failed: {}", e))?;
+        {
+            let masters = self.masters.read().await;
+            let Some(master) = masters.get(master_idx) else {
+                return Err((key, format!("master {}: identity probe for a master that does not exist", master_idx)));
+            };
+            *master
+                .identity_probe
+                .lock()
+                .expect("identity_probe mutex poisoned") = Some(key.clone());
+        }
+
+        let (tx, answers) = mpsc::unbounded_channel::<Frame>();
+        if let Err(e) = self
+            .register_external(key.clone(), master_idx, tx, Some(CAP_IDENTITY.to_string()), None)
+            .await
+        {
+            return Err((key, format!("master {}: identity probe registration failed: {}", master_idx, e)));
+        }
 
         let nonce = identity_nonce();
         let stream_id = "identity-verify-runtime".to_string();
+        let mut req = Frame::req(rid.clone(), CAP_IDENTITY, vec![], "application/cbor");
+        req.routing_id = Some(xid.clone());
+        let mut ss = Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), None);
+        ss.routing_id = Some(xid.clone());
+        let checksum = Frame::compute_checksum(&nonce);
+        let mut chunk = Frame::chunk(rid.clone(), stream_id.clone(), 0, nonce.clone(), 0, checksum);
+        chunk.routing_id = Some(xid.clone());
+        let mut se = Frame::stream_end(rid.clone(), stream_id, 1);
+        se.routing_id = Some(xid.clone());
+        let mut end = Frame::end(rid.clone(), None);
+        end.routing_id = Some(xid.clone());
 
-        // Inner async block that runs the probe round-trip. Wrapped
-        // so the function tail can clean up the registered channel
-        // and routing maps regardless of which branch produced the
-        // outcome.
-        let probe_outcome = async {
-            // Build and send the probe frames. All five carry the
-            // same (xid, rid) so the master returns its echo on the
-            // same flow.
-            let mut req = Frame::req(rid.clone(), CAP_IDENTITY, vec![], "application/cbor");
-            req.routing_id = Some(xid.clone());
-            let mut ss =
-                Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), None);
-            ss.routing_id = Some(xid.clone());
-            let checksum = Frame::compute_checksum(&nonce);
-            let mut chunk = Frame::chunk(
-                rid.clone(),
-                stream_id.clone(),
-                0,
-                nonce.clone(),
-                0,
-                checksum,
-            );
-            chunk.routing_id = Some(xid.clone());
-            let mut se = Frame::stream_end(rid.clone(), stream_id.clone(), 1);
-            se.routing_id = Some(xid.clone());
-            let mut end = Frame::end(rid.clone(), None);
-            end.routing_id = Some(xid.clone());
-
-            for mut frame in [req, ss, chunk, se, end] {
-                self.write_to_master_idx(master_idx, &mut frame)
-                    .await
-                    .map_err(|e| format!("identity probe send failed: {}", e))?;
+        let sent_at = Instant::now();
+        for mut frame in [req, ss, chunk, se, end] {
+            if let Err(e) = self.write_to_master_idx(master_idx, &mut frame).await {
+                return Err((key, format!("master {}: identity probe send failed: {}", master_idx, e)));
             }
+        }
 
-            // Drain response frames. Cartridge contract: the
-            // identity handler echoes the nonce back as STREAM_START
-            // + CHUNK(nonce) + STREAM_END + END.
-            let started_at = Instant::now();
-            let mut accumulated = Vec::new();
-            loop {
-                let elapsed = started_at.elapsed();
-                let remaining = RUNTIME_PROBE_TIMEOUT
-                    .checked_sub(elapsed)
-                    .unwrap_or(Duration::ZERO);
-                if remaining.is_zero() {
-                    return Err(format!(
-                        "runtime identity probe timed out after {:?}",
-                        RUNTIME_PROBE_TIMEOUT
-                    ));
-                }
-                let frame = match tokio::time::timeout(remaining, rx.recv()).await {
-                    Ok(Some(f)) => f,
-                    Ok(None) => {
-                        return Err("runtime identity probe channel closed before END".to_string());
-                    }
-                    Err(_) => {
-                        return Err(format!(
-                            "runtime identity probe timed out after {:?}",
-                            RUNTIME_PROBE_TIMEOUT
-                        ));
-                    }
+        Ok(OpenIdentityProbe {
+            master_idx,
+            key,
+            answers,
+            nonce,
+            echoed: Vec::new(),
+            sent_at,
+            window: self.identity_probe_window(),
+            overdue: false,
+        })
+    }
+
+    /// Wait for an open identity probe's answer and settle its master with
+    /// it. Past the probe's window the master is reported overdue and the
+    /// wait goes on: the answer, whenever it comes, settles the master.
+    /// The wait ends without an answer only when the switch releases the
+    /// probe's request (its master's connection died: an ERR) or the
+    /// switch itself goes away.
+    async fn await_identity_answer(switch: std::sync::Weak<Self>, mut probe: OpenIdentityProbe) {
+        let outcome = loop {
+            let received = if probe.overdue {
+                Some(probe.answers.recv().await)
+            } else {
+                let remaining = probe.window.saturating_sub(probe.sent_at.elapsed());
+                tokio::time::timeout(remaining, probe.answers.recv()).await.ok()
+            };
+            let Some(received) = received else {
+                probe.overdue = true;
+                let Some(switch) = switch.upgrade() else {
+                    return;
                 };
-                match frame.frame_type {
-                    FrameType::StreamStart => {}
-                    FrameType::Chunk => {
-                        if let Some(payload) = frame.payload {
-                            accumulated.extend_from_slice(&payload);
-                        }
-                    }
-                    FrameType::StreamEnd => {}
-                    FrameType::End => {
-                        if accumulated != nonce {
-                            return Err(format!(
-                                "identity probe payload mismatch (expected {} bytes, got {})",
-                                nonce.len(),
-                                accumulated.len()
-                            ));
-                        }
-                        return Ok(());
-                    }
-                    FrameType::Err => {
-                        let code = frame
-                            .error_code()
-                            .ok_or_else(|| "ERR frame missing required text code".to_string())?;
-                        let msg = frame
-                            .error_message()
-                            .ok_or_else(|| "ERR frame missing required text message".to_string())?;
-                        return Err(format!("identity probe failed: [{}] {}", code, msg));
-                    }
-                    // Control/side-channel frames are legal ANYWHERE during the
-                    // probe (spec 12.4: LOG interleaves without affecting data
-                    // flow; CREDIT/HEARTBEAT are the control plane the writer
-                    // gate itself exempts, L4). A cartridge crediting its
-                    // probe input as it consumes (L10) must not fail identity
-                    // verification.
-                    FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-                    other => {
-                        return Err(format!("identity probe: unexpected frame type {:?}", other));
-                    }
+                switch.report_identity_probe_overdue(&probe).await;
+                continue;
+            };
+            let Some(frame) = received else {
+                break Err("identity probe ended unanswered: the switch released its request".to_string());
+            };
+            if let Some(outcome) = identity_answer_step(&frame, &probe.nonce, &mut probe.echoed) {
+                break outcome;
+            }
+        };
+        let outcome = outcome.map_err(|detail| format!("master {}: {}", probe.master_idx, detail));
+        let Some(switch) = switch.upgrade() else {
+            return;
+        };
+        switch
+            .settle_identity_probe(probe.master_idx, &probe.key, outcome, probe.sent_at.elapsed(), probe.overdue)
+            .await;
+    }
+
+    /// Report a master whose open identity probe outlasted its window.
+    async fn report_identity_probe_overdue(&self, probe: &OpenIdentityProbe) {
+        let masters = self.masters.read().await;
+        let Some(master) = masters.get(probe.master_idx) else {
+            return;
+        };
+        let current = master
+            .identity_probe
+            .lock()
+            .expect("identity_probe mutex poisoned")
+            .as_ref()
+            == Some(&probe.key);
+        if !current {
+            return;
+        }
+        let message = identity_probe_overdue_message(probe.master_idx, probe.window);
+        error!(
+            target: "relay_switch",
+            master_idx = probe.master_idx,
+            "[RelaySwitch] {} — the probe stays open",
+            message
+        );
+        *master.last_error.write().await = Some(message);
+    }
+
+    /// Settle a master with its identity probe's outcome: verified, its
+    /// caps become routable; failed, it stays unhealthy with why. A probe
+    /// that is no longer the master's open one (the master reattached, or
+    /// was probed again) settles nothing.
+    async fn settle_identity_probe(
+        &self,
+        master_idx: usize,
+        key: &RequestKey,
+        outcome: Result<(), String>,
+        waited: Duration,
+        was_overdue: bool,
+    ) {
+        // The request ends here whichever way the probe did; one its
+        // answer or a master death already ended is gone.
+        let kind = if outcome.is_ok() { TerminalKind::End } else { TerminalKind::Err };
+        self.requests.write().await.terminate(key, kind);
+
+        {
+            let masters = self.masters.read().await;
+            let Some(master) = masters.get(master_idx) else {
+                return;
+            };
+            {
+                let mut open = master.identity_probe.lock().expect("identity_probe mutex poisoned");
+                if open.as_ref() != Some(key) {
+                    info!(
+                        target: "relay_switch",
+                        master_idx = master_idx,
+                        "[RelaySwitch] identity probe settled after its master moved on to another — ignored"
+                    );
+                    return;
+                }
+                *open = None;
+            }
+            match &outcome {
+                Ok(()) => {
+                    master.healthy.store(true, Ordering::SeqCst);
+                    master.last_error.write().await.take();
+                }
+                Err(detail) => {
+                    master.healthy.store(false, Ordering::SeqCst);
+                    *master.last_error.write().await = Some(detail.clone());
                 }
             }
         }
-        .await;
+        self.rebuild_cap_table().await;
+        self.rebuild_capabilities().await;
 
-        // Always terminate the request — whether the probe succeeded, failed,
-        // or timed out. Leaking the entry would waste memory and confuse
-        // introspection over time. Success ends via the probe's END; failure
-        // is an Err-kind termination.
-        let kind = if probe_outcome.is_ok() {
-            TerminalKind::End
-        } else {
-            TerminalKind::Err
-        };
-        self.requests.write().await.terminate(&key, kind);
-
-        probe_outcome
+        let waited_ms = waited.as_millis() as u64;
+        match outcome {
+            Ok(()) if was_overdue => warn!(
+                target: "relay_switch",
+                master_idx = master_idx,
+                waited_ms = waited_ms,
+                "[RelaySwitch] identity probe answered after its window — master is now healthy"
+            ),
+            Ok(()) => info!(
+                target: "relay_switch",
+                master_idx = master_idx,
+                waited_ms = waited_ms,
+                "[RelaySwitch] identity probe answered — master is now healthy"
+            ),
+            Err(detail) => error!(
+                target: "relay_switch",
+                master_idx = master_idx,
+                waited_ms = waited_ms,
+                error = %detail,
+                "[RelaySwitch] identity probe FAILED — master remains unhealthy"
+            ),
+        }
     }
 
     /// STOP a feed-bearing request's live inputs (15.2 §Runs Stop): send a
@@ -3034,6 +3198,18 @@ impl RelaySwitch {
 
         let mut seq_assigner = SeqAssigner::new();
 
+        // The master's reader starts now and is the only reader of its
+        // socket from here on. Until the slot is committed below, the reader
+        // hands what it reads to this call instead of the frame loop: to the
+        // identity probe while it waits, and in any case so the frame loop
+        // never sees a frame of a master it does not hold yet (a capless
+        // master's empty→non-empty RelayNotify would be dropped, and its
+        // runtime probe would never run).
+        let (probe_tap, mut probe_reads) = mpsc::unbounded_channel();
+        let diversion: ReaderDiversion = Arc::new(std::sync::Mutex::new(Some(probe_tap)));
+        let reader_handle =
+            spawn_master_reader(master_idx, socket_reader, self.frame_tx.clone(), diversion.clone());
+
         // End-to-end identity verification. The engine sends a
         // `cap:effect=none` / CAP_IDENTITY REQ through the relay and expects the nonce
         // echoed back via some cartridge on the host. This probe is only
@@ -3043,24 +3219,32 @@ impl RelaySwitch {
         // `installed_cartridges` carries attachment-error entries the UI
         // needs to surface.
         //
-        // The probe is wrapped in a hard timeout. Cold-starting the
-        // first cartridge that handles `cap:effect=none` (identity) — typically
-        // ~2-3s for a Rust binary, longer for Swift cartridges with
-        // sandbox-deferred init — used to silently extend
-        // `add_master` indefinitely, and during that window the
-        // master was invisible to `rebuild_capabilities` (it isn't
-        // pushed to `self.masters` until after identity returns). The
-        // engine's `installed_cartridges` aggregate stayed empty for
-        // the whole probe window, the gRPC bridge connected and saw
-        // 0 cartridges, and the Mac client's UI reported "no
-        // cartridges installed" until something else happened to
-        // trigger a rebuild. With the timeout, identity failure / hang
-        // surfaces as a hard error with a typed message — exposed,
-        // not hidden.
-        const IDENTITY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-        let mut identity_failure: Option<String> = None;
+        // Starting the cartridge that answers identity is part of the round
+        // trip, and its cold start has no fixed bound (a Swift cartridge's
+        // sandbox-deferred init, a freshly installed binary). So the wait
+        // here is bounded by the probe window and the master joins when it
+        // ends, answered or not — it is not pushed to `self.masters` until
+        // then, and while it is not, its `installed_cartridges` are missing
+        // from the engine's aggregate. A probe unanswered at the end of its
+        // window is not a failure: the master joins unverified and reported
+        // overdue, the probe stays open, and its answer, whenever it comes,
+        // verifies the master (the probe driver waits for it).
+        enum AttachIdentity {
+            /// The host advertised no caps: nothing to probe.
+            NotProbed,
+            Verified,
+            Failed(String),
+            Unanswered {
+                key: RequestKey,
+                nonce: Vec<u8>,
+                echoed: Vec<u8>,
+                sent_at: Instant,
+            },
+        }
+        let window = self.identity_probe_window();
+        let probe_started_at = Instant::now();
+        let mut identity = AttachIdentity::NotProbed;
         if !caps.is_empty() {
-            let probe_started_at = std::time::Instant::now();
             let xid = MessageId::Uint(self.xid_counter.fetch_add(1, Ordering::SeqCst) + 1);
 
             use crate::standard::caps::CAP_IDENTITY;
@@ -3069,218 +3253,152 @@ impl RelaySwitch {
             let req_id = MessageId::new_uuid();
             let stream_id = "identity-verify".to_string();
 
-            // Wrap the probe so any failure is captured as a typed
-            // attachment-error message rather than aborting master
-            // registration. We still log the precise failure mode loudly
-            // — silent fallbacks hide the real problem — but the master
-            // still joins so its installed_cartridges are visible to the
-            // inventory aggregate.
-            let probe_result: Result<(), String> = async {
+            let sent: Result<(), String> = async {
                 let mut req = Frame::req(req_id.clone(), CAP_IDENTITY, vec![], "application/cbor");
                 req.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut req);
-                socket_writer
-                    .write(&req)
-                    .await
-                    .map_err(|e| format!("identity send failed (REQ): {}", e))?;
-
-                let mut ss = Frame::stream_start(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    "media:".to_string(),
-                    None,
-                );
+                let mut ss = Frame::stream_start(req_id.clone(), stream_id.clone(), "media:".to_string(), None);
                 ss.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut ss);
-                socket_writer
-                    .write(&ss)
-                    .await
-                    .map_err(|e| format!("identity send failed (StreamStart): {}", e))?;
-
                 let checksum = Frame::compute_checksum(&nonce);
-                let mut chunk = Frame::chunk(
-                    req_id.clone(),
-                    stream_id.clone(),
-                    0,
-                    nonce.clone(),
-                    0,
-                    checksum,
-                );
+                let mut chunk = Frame::chunk(req_id.clone(), stream_id.clone(), 0, nonce.clone(), 0, checksum);
                 chunk.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut chunk);
-                socket_writer
-                    .write(&chunk)
-                    .await
-                    .map_err(|e| format!("identity send failed (Chunk): {}", e))?;
-
                 let mut se = Frame::stream_end(req_id.clone(), stream_id.clone(), 1);
                 se.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut se);
-                socket_writer
-                    .write(&se)
-                    .await
-                    .map_err(|e| format!("identity send failed (StreamEnd): {}", e))?;
-
                 let mut end = Frame::end(req_id.clone(), None);
                 end.routing_id = Some(xid.clone());
-                seq_assigner.assign(&mut end);
-                socket_writer
-                    .write(&end)
-                    .await
-                    .map_err(|e| format!("identity send failed (End): {}", e))?;
-
+                for mut frame in [req, ss, chunk, se, end] {
+                    seq_assigner.assign(&mut frame);
+                    let kind = frame.frame_type;
+                    socket_writer
+                        .write(&frame)
+                        .await
+                        .map_err(|e| format!("identity send failed ({:?}): {}", kind, e))?;
+                }
                 seq_assigner.remove(&FlowKey {
                     rid: req_id.clone(),
                     xid: Some(xid.clone()),
                 });
+                Ok(())
+            }
+            .await;
 
-                // Read response — bounded by the global probe timeout
-                // so a hung cold-start never blocks master
-                // registration.
-                let mut accumulated = Vec::new();
-                loop {
-                    let elapsed = probe_started_at.elapsed();
-                    let remaining = IDENTITY_PROBE_TIMEOUT
-                        .checked_sub(elapsed)
-                        .unwrap_or(std::time::Duration::ZERO);
-                    if remaining.is_zero() {
-                        return Err(format!(
-                            "identity verification timed out after {:?} — host did not echo nonce within the probe window. Cartridge cold-start exceeded the timeout or the identity-handler cap is unresponsive.",
-                            IDENTITY_PROBE_TIMEOUT
-                        ));
-                    }
-                    let frame = match tokio::time::timeout(remaining, socket_reader.read()).await {
-                        Ok(read_result) => read_result
-                            .map_err(|e| format!("identity read failed: {}", e))?
-                            .ok_or_else(|| {
-                                "closed during identity verification".to_string()
-                            })?,
-                        Err(_) => {
-                            return Err(format!(
-                                "identity verification timed out after {:?} waiting for next frame.",
-                                IDENTITY_PROBE_TIMEOUT
-                            ));
-                        }
-                    };
-
-                    match frame.frame_type {
-                        FrameType::RelayNotify => {
+            identity = match sent {
+                Err(detail) => AttachIdentity::Failed(detail),
+                Ok(()) => {
+                    let mut echoed = Vec::new();
+                    loop {
+                        let remaining = window.saturating_sub(probe_started_at.elapsed());
+                        let read = tokio::time::timeout(remaining, probe_reads.recv()).await;
+                        let frame = match read {
+                            Err(_) => {
+                                break AttachIdentity::Unanswered {
+                                    key: (xid.clone(), req_id.clone()),
+                                    nonce,
+                                    echoed,
+                                    sent_at: probe_started_at,
+                                }
+                            }
+                            Ok(Some(Ok(Some(frame)))) => frame,
+                            Ok(Some(Ok(None))) | Ok(None) => {
+                                break AttachIdentity::Failed("closed during identity verification".to_string())
+                            }
+                            Ok(Some(Err(e))) => {
+                                break AttachIdentity::Failed(format!("identity read failed: {}", e))
+                            }
+                        };
+                        if frame.frame_type == FrameType::RelayNotify {
                             if let Some(manifest) = frame.relay_notify_manifest() {
                                 caps_payload = manifest.to_vec();
-                                payload = parse_relay_notify_payload(&caps_payload)
-                                    .map_err(|e| format!("RelayNotify reparse failed: {}", e))?;
+                                payload = match parse_relay_notify_payload(&caps_payload) {
+                                    Ok(payload) => payload,
+                                    Err(e) => {
+                                        break AttachIdentity::Failed(format!("RelayNotify reparse failed: {}", e))
+                                    }
+                                };
                                 caps = payload.cap_urns();
                             }
                             if let Some(l) = frame.relay_notify_limits() {
                                 limits = l;
                             }
+                            continue;
                         }
-                        FrameType::StreamStart => {}
-                        FrameType::Chunk => {
-                            if let Some(payload) = frame.payload {
-                                accumulated.extend_from_slice(&payload);
-                            }
-                        }
-                        FrameType::StreamEnd => {}
-                        FrameType::End => {
-                            if accumulated != nonce {
-                                return Err(format!(
-                                    "identity payload mismatch (expected {} bytes, got {})",
-                                    nonce.len(),
-                                    accumulated.len()
-                                ));
-                            }
-                            break;
-                        }
-                        FrameType::Err => {
-                            let code = frame
-                                .error_code()
-                                .ok_or_else(|| "ERR frame missing required text code".to_string())?;
-                            let msg = frame
-                                .error_message()
-                                .ok_or_else(|| "ERR frame missing required text message".to_string())?;
-                            return Err(format!(
-                                "identity failed: [{}] {}",
-                                code, msg
-                            ));
-                        }
-                        // Control/side-channel frames are legal ANYWHERE during the
-                        // probe (spec 12.4: LOG interleaves without affecting data
-                        // flow; CREDIT/HEARTBEAT are the control plane the writer
-                        // gate itself exempts, L4). A cartridge crediting its
-                        // probe input as it consumes (L10) must not fail identity
-                        // verification.
-                        FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-                        other => {
-                            return Err(format!(
-                                "identity: unexpected frame type {:?}",
-                                other
-                            ));
+                        match identity_answer_step(&frame, &nonce, &mut echoed) {
+                            None => {}
+                            Some(Ok(())) => break AttachIdentity::Verified,
+                            Some(Err(detail)) => break AttachIdentity::Failed(detail),
                         }
                     }
                 }
-                Ok(())
-            }
-            .await;
-
-            match probe_result {
-                Ok(()) => {}
-                Err(detail) => {
-                    let elapsed_ms = probe_started_at.elapsed().as_millis() as u64;
-                    let detailed = format!(
-                        "new master {}: {} (after {} ms)",
-                        master_idx, detail, elapsed_ms
-                    );
-                    tracing::error!(
-                        target: "relay_switch",
-                        master_idx = master_idx,
-                        elapsed_ms = elapsed_ms,
-                        error = %detailed,
-                        "[RelaySwitch] add_master: identity verification FAILED — registering master as unhealthy so its installed_cartridges remain visible to the inventory aggregate"
-                    );
-                    identity_failure = Some(detailed);
-                }
-            }
+            };
         }
+        let elapsed_ms = probe_started_at.elapsed().as_millis() as u64;
 
-        // Spawn reader task
-        let tx = self.frame_tx.clone();
-        let reader_handle = tokio::spawn(async move {
-            let mut reader = socket_reader;
-            loop {
-                match reader.read().await {
-                    Ok(Some(frame)) => {
-                        if tx.send(Inbound::Frame(master_idx, Ok(frame))).is_err() {
-                            tracing::warn!(
-                                "[RelaySwitch] master {} reader: frame_tx closed",
-                                master_idx
-                            );
-                            break;
-                        }
-                    }
-                    Ok(None) => {
-                        tracing::warn!(
-                            "[RelaySwitch] master {} reader: socket closed (EOF)",
-                            master_idx
-                        );
-                        let _ = tx.send(Inbound::Frame(master_idx, Err(CborError::UnexpectedEof)));
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[RelaySwitch] master {} reader: socket error: {}",
-                            master_idx,
-                            e
-                        );
-                        let _ = tx.send(Inbound::Frame(master_idx, Err(e)));
-                        break;
-                    }
-                }
+        // The master's health as it joins, and the probe still open for it.
+        let (healthy_at_register, last_error_at_register, open_probe_key) = match &identity {
+            AttachIdentity::NotProbed | AttachIdentity::Verified => (true, None, None),
+            AttachIdentity::Failed(detail) => {
+                let detailed = format!("new master {}: {} (after {} ms)", master_idx, detail, elapsed_ms);
+                tracing::error!(
+                    target: "relay_switch",
+                    master_idx = master_idx,
+                    elapsed_ms = elapsed_ms,
+                    error = %detailed,
+                    "[RelaySwitch] add_master: identity verification FAILED — registering master as unhealthy so its installed_cartridges remain visible to the inventory aggregate"
+                );
+                (false, Some(detailed), None)
             }
-        });
+            AttachIdentity::Unanswered { key, .. } => {
+                let message = identity_probe_overdue_message(master_idx, window);
+                tracing::error!(
+                    target: "relay_switch",
+                    master_idx = master_idx,
+                    elapsed_ms = elapsed_ms,
+                    "[RelaySwitch] add_master: {} — registering it unverified; the probe stays open",
+                    message
+                );
+                (false, Some(message), Some(key.clone()))
+            }
+        };
+
+        // An unanswered probe's answer will come through the frame loop:
+        // its request is registered before the reader stops handing reads
+        // to this call, so no part of the answer finds the table without it.
+        let open_probe = match identity {
+            AttachIdentity::Unanswered { key, nonce, echoed, sent_at } => {
+                use crate::standard::caps::CAP_IDENTITY;
+                let (tx, answers) = mpsc::unbounded_channel::<Frame>();
+                let state = RequestState::new(
+                    RoutingEntry {
+                        source_master_idx: None,
+                        destination_master_idx: master_idx,
+                    },
+                    None,
+                    Some(tx),
+                    false,
+                    limits.initial_credit,
+                )
+                .with_cap_urn(Some(CAP_IDENTITY.to_string()));
+                if let Err(e) = self.requests.write().await.register(key.clone(), state) {
+                    reader_handle.abort();
+                    return Err(RelaySwitchError::Protocol(format!(
+                        "new master {}: registering its open identity probe failed: {}",
+                        master_idx, e
+                    )));
+                }
+                Some(OpenIdentityProbe {
+                    master_idx,
+                    key,
+                    answers,
+                    nonce,
+                    echoed,
+                    sent_at,
+                    window,
+                    overdue: true,
+                })
+            }
+            _ => None,
+        };
 
         let cap_count = caps.len();
-        let healthy_at_register = identity_failure.is_none();
 
         // Commit the connection state into the slot.
         //
@@ -3310,6 +3428,7 @@ impl RelaySwitch {
                 // of the push.
                 let mut masters = self.masters.write().await;
                 if masters.len() != master_idx {
+                    reader_handle.abort();
                     return Err(RelaySwitchError::Protocol(format!(
                         "add_master: append-index race for id '{}': reserved {} but masters.len() is now {} \
                          (a concurrent caller bypassed add_master_lock — this is a protocol violation)",
@@ -3328,7 +3447,8 @@ impl RelaySwitch {
                     healthy: AtomicBool::new(healthy_at_register),
                     reader_handle: Mutex::new(Some(reader_handle)),
                     connected_at: std::sync::Mutex::new(Instant::now()),
-                    last_error: RwLock::new(identity_failure.clone()),
+                    last_error: RwLock::new(last_error_at_register.clone()),
+                    identity_probe: std::sync::Mutex::new(open_probe_key),
                 });
             }
             Some(slot_idx) => {
@@ -3345,6 +3465,7 @@ impl RelaySwitch {
                 let masters = self.masters.read().await;
                 let slot: &MasterConnection = &masters[slot_idx];
                 if slot.id != id {
+                    reader_handle.abort();
                     return Err(RelaySwitchError::Protocol(format!(
                         "add_master: reattach-id mismatch at index {}: expected '{}' but found '{}' \
                          (masters Vec was reordered concurrently — this is a protocol violation)",
@@ -3359,7 +3480,11 @@ impl RelaySwitch {
                 *slot.installed_cartridges.write().await = payload.installed_cartridges;
                 *slot.host_protocol_stats.write().await = payload.host_protocol_stats;
                 slot.healthy.store(healthy_at_register, Ordering::SeqCst);
-                *slot.last_error.write().await = identity_failure.clone();
+                *slot.last_error.write().await = last_error_at_register.clone();
+                *slot
+                    .identity_probe
+                    .lock()
+                    .expect("identity_probe mutex poisoned") = open_probe_key;
                 {
                     let mut handle_slot = slot.reader_handle.lock().await;
                     if let Some(prev) = handle_slot.take() {
@@ -3371,6 +3496,18 @@ impl RelaySwitch {
                     .connected_at
                     .lock()
                     .expect("connected_at mutex poisoned") = Instant::now();
+            }
+        }
+
+        // The slot is in place: the reader hands its reads to the frame
+        // loop from now on, after what the probe left unread — under the
+        // diversion's lock, so no later read overtakes them.
+        {
+            let mut diverted = diversion.lock().expect("reader diversion mutex poisoned");
+            if diverted.take().is_some() {
+                while let Ok(read) = probe_reads.try_recv() {
+                    let _ = self.frame_tx.send(Inbound::from_read(master_idx, read));
+                }
             }
         }
 
@@ -3390,6 +3527,23 @@ impl RelaySwitch {
         self.rebuild_capabilities().await;
         self.rebuild_limits().await;
 
+        if let Some(probe) = open_probe {
+            // The probe driver waits for the answer. Without a driver
+            // (`start_background_pump` / `spawn_identity_probe_driver`)
+            // the job waits in the queue and the master stays reported
+            // overdue.
+            if self
+                .pending_identity_probes_tx
+                .send(IdentityProbeJob::Await(probe))
+                .is_err()
+            {
+                return Err(RelaySwitchError::Protocol(format!(
+                    "new master {}: the identity probe driver is gone; its open probe has nobody to wait for its answer",
+                    master_idx
+                )));
+            }
+        }
+
         if healthy_at_register {
             info!(
                 master_idx = master_idx,
@@ -3401,8 +3555,8 @@ impl RelaySwitch {
             tracing::error!(
                 master_idx = master_idx,
                 cap_count = cap_count,
-                error = %identity_failure.as_deref().unwrap_or(""),
-                "[RelaySwitch] Master registered as UNHEALTHY (identity probe failed) — installed_cartridges remain in inventory but the master is not in the routing table"
+                error = %last_error_at_register.as_deref().unwrap_or(""),
+                "[RelaySwitch] Master registered as UNHEALTHY — installed_cartridges remain in inventory but the master is not in the routing table"
             );
         }
 
@@ -4473,7 +4627,9 @@ impl RelaySwitch {
                     // an unbounded channel cannot block; if the
                     // receiver has been dropped the relay is being
                     // torn down and we silently skip.
-                    let _ = self.pending_identity_probes_tx.send(source_idx);
+                    let _ = self
+                        .pending_identity_probes_tx
+                        .send(IdentityProbeJob::Probe(source_idx));
                 }
 
                 // Pass through to engine (for visibility)
@@ -4557,7 +4713,12 @@ impl RelaySwitch {
         }
 
         if !was_healthy {
-            return Ok(()); // Already handled
+            // Already unhealthy: its death was handled before, or it never
+            // became routable (its identity probe is open or failed). No
+            // route leads here, but a request to it — its open identity
+            // probe — still ends: nobody is left to answer it.
+            self.fail_requests_to_master(master_idx, reason).await;
+            return Ok(());
         }
 
         // Mark unhealthy and record error
@@ -4576,7 +4737,35 @@ impl RelaySwitch {
             "[RelaySwitch] Master died - marking unhealthy and cleaning up"
         );
 
-        // Find all pending requests routed to this master
+        self.fail_requests_to_master(master_idx, reason).await;
+
+        // Rebuild tables
+        self.rebuild_cap_table().await;
+        self.rebuild_capabilities().await;
+        self.rebuild_limits().await;
+
+        // Log remaining healthy masters
+        let (healthy_count, total_count) = {
+            let masters = self.masters.read().await;
+            let healthy = masters
+                .iter()
+                .filter(|m| m.healthy.load(Ordering::SeqCst))
+                .count();
+            let total = masters.len();
+            (healthy, total)
+        };
+        info!(
+            healthy_masters = healthy_count,
+            total_masters = total_count,
+            "[RelaySwitch] Master health updated after death"
+        );
+
+        Ok(())
+    }
+
+    /// End every request routed to a master whose connection died, each
+    /// with a MASTER_DIED ERR to whoever waits on it.
+    async fn fail_requests_to_master(&self, master_idx: usize, reason: &str) {
         let dead_keys = {
             let requests = self.requests.read().await;
             requests.keys_where(|s| s.routing.destination_master_idx == master_idx)
@@ -4638,29 +4827,6 @@ impl RelaySwitch {
                 }
             }
         }
-
-        // Rebuild tables
-        self.rebuild_cap_table().await;
-        self.rebuild_capabilities().await;
-        self.rebuild_limits().await;
-
-        // Log remaining healthy masters
-        let (healthy_count, total_count) = {
-            let masters = self.masters.read().await;
-            let healthy = masters
-                .iter()
-                .filter(|m| m.healthy.load(Ordering::SeqCst))
-                .count();
-            let total = masters.len();
-            (healthy, total)
-        };
-        info!(
-            healthy_masters = healthy_count,
-            total_masters = total_count,
-            "[RelaySwitch] Master health updated after death"
-        );
-
-        Ok(())
     }
 
     // =========================================================================
@@ -5192,7 +5358,10 @@ mod tests {
         while let Ok(Some(_)) = reader.read().await {}
     }
 
-    async fn slave_notify_with_identity(
+    /// A fake master: its RelayNotify advertising `caps_json`, and the
+    /// switch's policy read. Returns the (reader, writer) the switch's next
+    /// frames arrive on.
+    async fn slave_notify(
         socket: UnixStream,
         caps_json: &serde_json::Value,
         limits: &Limits,
@@ -5203,28 +5372,63 @@ mod tests {
         let (read_half, write_half) = socket.into_split();
         let mut reader = FrameReader::new(BufReader::new(read_half));
         let mut writer = FrameWriter::new(BufWriter::new(write_half));
+        let notify = Frame::relay_notify(&serde_json::to_vec(&test_notify_payload(caps_json)).unwrap(), limits);
+        writer.write(&notify).await.unwrap();
+        expect_policy(&mut reader).await;
+        (reader, writer)
+    }
 
-        // Build a single synthetic installed-cartridge whose lone
-        // cap_group carries the test's caps. Each cap is rendered with
-        // the minimal Cap schema (urn/title/command/args=[]) so the
-        // payload deserializes cleanly under the production parser.
-        let cap_urns_array = caps_json
+    /// Read an identity probe a fake master was sent — its REQ and body —
+    /// and return what answering it takes: (rid, xid, nonce).
+    async fn read_identity_probe<R: tokio::io::AsyncRead + Unpin>(
+        reader: &mut FrameReader<R>,
+    ) -> (MessageId, Option<MessageId>, Vec<u8>) {
+        let req = reader.read().await.unwrap().expect("expected the identity probe's REQ");
+        assert_eq!(req.frame_type, FrameType::Req, "an identity probe begins with its REQ");
+        let mut nonce = Vec::new();
+        loop {
+            let f = reader.read().await.unwrap().expect("expected the identity probe's body");
+            match f.frame_type {
+                FrameType::StreamStart | FrameType::StreamEnd => {}
+                FrameType::Chunk => nonce.extend(f.payload.unwrap_or_default()),
+                FrameType::End => return (req.id, req.routing_id, nonce),
+                other => panic!("unexpected frame type in an identity probe: {:?}", other),
+            }
+        }
+    }
+
+    /// The echo that answers an identity probe: STREAM_START, CHUNK(nonce),
+    /// STREAM_END, END, on the probe's flow.
+    fn identity_echo_frames(rid: &MessageId, xid: &Option<MessageId>, nonce: Vec<u8>) -> Vec<Frame> {
+        let stream_id = "identity-echo".to_string();
+        let checksum = Frame::compute_checksum(&nonce);
+        let mut frames = vec![
+            Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), None),
+            Frame::chunk(rid.clone(), stream_id.clone(), 0, nonce, 0, checksum),
+            Frame::stream_end(rid.clone(), stream_id, 1),
+            Frame::end(rid.clone(), None),
+        ];
+        for (seq, frame) in frames.iter_mut().enumerate() {
+            frame.routing_id = xid.clone();
+            frame.seq = seq as u64;
+        }
+        frames
+    }
+
+    /// A RelayNotify payload with one synthetic installed cartridge whose
+    /// lone cap group carries `caps_json` (a JSON array of cap URNs).
+    fn test_notify_payload(caps_json: &serde_json::Value) -> serde_json::Value {
+        let cap_urns: Vec<&str> = caps_json
             .as_array()
-            .expect("caps_json must be a JSON array of cap URN strings");
-        let group_caps: Vec<serde_json::Value> = cap_urns_array
+            .expect("caps_json must be a JSON array of cap URN strings")
             .iter()
-            .map(|v| {
-                let urn = v.as_str().expect("cap URN must be a string").to_string();
-                serde_json::json!({
-                    "urn": urn,
-                    "title": "test",
-                    "aliases": ["test"],
-                    "args": [],
-                })
-            })
+            .map(|v| v.as_str().expect("cap URN must be a string"))
             .collect();
-
-        let notify_payload = serde_json::json!({
+        let group_caps: Vec<serde_json::Value> = cap_urns
+            .iter()
+            .map(|urn| serde_json::json!({ "urn": urn, "title": "test", "aliases": ["test"], "args": [] }))
+            .collect();
+        serde_json::json!({
             "installed_cartridges": [
                 {
                     "registry_url": null,
@@ -5234,14 +5438,7 @@ mod tests {
                     "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
                     "runtime_stats": {
                         "running": true,
-                        "pools": test_pool_states_json(
-                            &cap_urns_array
-                                .iter()
-                                .map(|v| v.as_str().expect("cap URN must be a string"))
-                                .collect::<Vec<_>>(),
-                            0,
-                            0,
-                        ),
+                        "pools": test_pool_states_json(&cap_urns, 0, 0),
                         "active_request_count": 0,
                         "peer_request_count": 0,
                         "memory_footprint_mb": 0,
@@ -5249,18 +5446,35 @@ mod tests {
                         "restart_count": 0
                     },
                     "cap_groups": [
-                        {
-                            "name": "test",
-                            "caps": group_caps,
-                            "adapter_urns": [],
-                        }
+                        { "name": "test", "caps": group_caps, "adapter_urns": [] }
                     ],
                 }
             ],
-        });
-        let notify = Frame::relay_notify(&serde_json::to_vec(&notify_payload).unwrap(), limits);
-        writer.write(&notify).await.unwrap();
-        expect_policy(&mut reader).await;
+        })
+    }
+
+    /// Poll until `done` holds, or fail naming `what` after `limit`.
+    async fn wait_until<F, Fut>(limit: Duration, what: &str, mut done: F)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let deadline = Instant::now() + limit;
+        while !done().await {
+            assert!(Instant::now() < deadline, "timed out waiting until {}", what);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn slave_notify_with_identity(
+        socket: UnixStream,
+        caps_json: &serde_json::Value,
+        limits: &Limits,
+    ) -> (
+        FrameReader<BufReader<crate::bifaci::local_socket::OwnedReadHalf>>,
+        FrameWriter<BufWriter<crate::bifaci::local_socket::OwnedWriteHalf>>,
+    ) {
+        let (mut reader, mut writer) = slave_notify(socket, caps_json, limits).await;
 
         // Handle identity verification REQ
         let req = reader
@@ -5505,49 +5719,9 @@ mod tests {
         expect_policy(&mut reader).await;
 
         // 2. Populated RelayNotify — the empty→non-empty transition.
-        let cap_urns_array = caps_json
-            .as_array()
-            .expect("caps_json must be a JSON array of cap URN strings");
-        let group_caps: Vec<serde_json::Value> = cap_urns_array
-            .iter()
-            .map(|v| {
-                let urn = v.as_str().expect("cap URN must be a string").to_string();
-                serde_json::json!({ "urn": urn, "title": "test", "aliases": ["test"], "args": [] })
-            })
-            .collect();
-        let notify_payload = serde_json::json!({
-            "installed_cartridges": [
-                {
-                    "registry_url": null,
-                    "channel": "release",
-                    "id": "test-cartridge",
-                    "version": "0.0.0",
-                    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-                    "runtime_stats": {
-                        "running": true,
-                        "pools": test_pool_states_json(
-                            &cap_urns_array
-                                .iter()
-                                .map(|v| v.as_str().expect("cap URN must be a string"))
-                                .collect::<Vec<_>>(),
-                            0,
-                            0,
-                        ),
-                        "active_request_count": 0,
-                        "peer_request_count": 0,
-                        "memory_footprint_mb": 0,
-                        "memory_rss_mb": 0,
-                        "restart_count": 0
-                    },
-                    "cap_groups": [
-                        { "name": "test", "caps": group_caps, "adapter_urns": [] }
-                    ],
-                }
-            ],
-        });
         writer
             .write(&Frame::relay_notify(
-                &serde_json::to_vec(&notify_payload).unwrap(),
+                &serde_json::to_vec(&test_notify_payload(caps_json)).unwrap(),
                 limits,
             ))
             .await
@@ -6734,8 +6908,7 @@ mod tests {
         );
         switch.start_background_pump();
 
-        // Wait for the runtime probe driver to process the failure.
-        // The probe times out at 10s; we poll with a generous bound.
+        // Wait for the runtime probe driver to settle the ERR answer.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut master_unhealthy = false;
         while std::time::Instant::now() < deadline {
@@ -6825,6 +6998,167 @@ mod tests {
             masters[0].healthy.load(Ordering::SeqCst),
             "master must be marked healthy after a successful runtime identity probe"
         );
+    }
+
+    // TEST7190: a host whose identity answer outlasts add_master's probe
+    // window — a cartridge cold start longer than the window — joins
+    // unverified and reported overdue, and its answer, arriving after the
+    // window, verifies it. Half the answer arrives inside the window and the
+    // rest after it: the part add_master read carries over to the wait.
+    // Before, the late answer was dropped and the master stayed unverified
+    // for the life of the connection (a desktop client stuck on its splash).
+    #[tokio::test]
+    async fn test7190_add_master_probe_answered_after_its_window_verifies_the_master() {
+        const LATE_CAP: &str = "cap:in=\"media:void\";late;out=\"media:void\"";
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let _slave = tokio::spawn(async move {
+            let caps = serde_json::json!(["cap:effect=none", LATE_CAP]);
+            let (mut reader, mut writer) = slave_notify(slave_sock, &caps, &Limits::default()).await;
+            let (rid, xid, nonce) = read_identity_probe(&mut reader).await;
+            let echo = identity_echo_frames(&rid, &xid, nonce);
+            for frame in &echo[..2] {
+                writer.write(frame).await.unwrap();
+            }
+            release_rx.await.unwrap();
+            for frame in &echo[2..] {
+                writer.write(frame).await.unwrap();
+            }
+            hold_until_hangup(&mut reader).await;
+        });
+
+        let switch = Arc::new(
+            RelaySwitch::new(vec![], test_fabric_registry(), test_policy())
+                .await
+                .unwrap(),
+        );
+        switch.set_identity_probe_window(Duration::from_millis(300));
+        switch.start_background_pump();
+
+        let idx = switch.add_master("slow-host", engine_sock).await.unwrap();
+        let health = switch.get_master_health().await.remove(idx);
+        assert!(!health.healthy, "a master whose probe is unanswered is not verified");
+        let reported = health.last_error.expect("an unverified master says why");
+        assert!(
+            reported.contains("identity probe unanswered after"),
+            "the master is reported overdue: {}",
+            reported
+        );
+        assert_eq!(switch.find_master_for_cap(LATE_CAP, None).await, None);
+
+        release_tx.send(()).unwrap();
+        wait_until(Duration::from_secs(5), "the late answer verifies the master", || async {
+            switch.find_master_for_cap(LATE_CAP, None).await == Some(idx)
+        })
+        .await;
+        let health = switch.get_master_health().await.remove(idx);
+        assert!(health.healthy);
+        assert_eq!(health.last_error, None);
+    }
+
+    // TEST7191: the runtime identity probe (a master whose advertised caps
+    // went from empty to non-empty) left unanswered past its window reports
+    // the master overdue and stays open; the answer, when it comes, makes
+    // the master's caps routable.
+    #[tokio::test]
+    async fn test7191_runtime_probe_answered_after_its_window_verifies_the_master() {
+        const LATE_CAP: &str = "cap:in=\"media:void\";late;out=\"media:void\"";
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let _slave = tokio::spawn(async move {
+            let (read_half, write_half) = slave_sock.into_split();
+            let mut reader = FrameReader::new(BufReader::new(read_half));
+            let mut writer = FrameWriter::new(BufWriter::new(write_half));
+            let empty = serde_json::json!({ "installed_cartridges": [] });
+            writer
+                .write(&Frame::relay_notify(&serde_json::to_vec(&empty).unwrap(), &Limits::default()))
+                .await
+                .unwrap();
+            expect_policy(&mut reader).await;
+            let caps = serde_json::json!(["cap:effect=none", LATE_CAP]);
+            writer
+                .write(&Frame::relay_notify(
+                    &serde_json::to_vec(&test_notify_payload(&caps)).unwrap(),
+                    &Limits::default(),
+                ))
+                .await
+                .unwrap();
+            let (rid, xid, nonce) = read_identity_probe(&mut reader).await;
+            release_rx.await.unwrap();
+            for frame in identity_echo_frames(&rid, &xid, nonce) {
+                writer.write(&frame).await.unwrap();
+            }
+            hold_until_hangup(&mut reader).await;
+        });
+
+        let switch = Arc::new(
+            RelaySwitch::new(wrap_with_test_ids(vec![engine_sock]), test_fabric_registry(), test_policy())
+                .await
+                .unwrap(),
+        );
+        switch.set_identity_probe_window(Duration::from_millis(300));
+        switch.start_background_pump();
+
+        wait_until(Duration::from_secs(5), "the unanswered probe is reported overdue", || async {
+            let health = switch.get_master_health().await.remove(0);
+            health
+                .last_error
+                .is_some_and(|e| e.contains("identity probe unanswered after"))
+        })
+        .await;
+        assert!(!switch.get_master_health().await[0].healthy);
+        assert_eq!(switch.find_master_for_cap(LATE_CAP, None).await, None);
+
+        release_tx.send(()).unwrap();
+        wait_until(Duration::from_secs(5), "the late answer verifies the master", || async {
+            switch.find_master_for_cap(LATE_CAP, None).await == Some(0)
+        })
+        .await;
+        let health = switch.get_master_health().await.remove(0);
+        assert!(health.healthy);
+        assert_eq!(health.last_error, None);
+    }
+
+    // TEST7192: a master whose identity probe is open is unhealthy; when its
+    // connection dies, the probe's request ends with MASTER_DIED and the
+    // master says so. Death handling used to stop at an unhealthy master,
+    // leaving its requests — the open probe — in the table for ever.
+    #[tokio::test]
+    async fn test7192_open_identity_probe_ends_when_its_master_dies() {
+        let (engine_sock, slave_sock) = UnixStream::pair().unwrap();
+        let (hangup_tx, hangup_rx) = tokio::sync::oneshot::channel::<()>();
+        let slave = tokio::spawn(async move {
+            let caps = serde_json::json!(["cap:effect=none", "cap:in=\"media:void\";mute;out=\"media:void\""]);
+            let (mut reader, writer) = slave_notify(slave_sock, &caps, &Limits::default()).await;
+            let _ = read_identity_probe(&mut reader).await;
+            hangup_rx.await.unwrap();
+            drop(writer);
+            drop(reader);
+        });
+
+        let switch = Arc::new(
+            RelaySwitch::new(vec![], test_fabric_registry(), test_policy())
+                .await
+                .unwrap(),
+        );
+        switch.set_identity_probe_window(Duration::from_millis(200));
+        switch.start_background_pump();
+        let idx = switch.add_master("mute-host", engine_sock).await.unwrap();
+        assert_eq!(switch.requests.read().await.len(), 1, "the open probe is a live request");
+
+        hangup_tx.send(()).unwrap();
+        slave.await.unwrap();
+        wait_until(Duration::from_secs(5), "the dead master's probe ends", || async {
+            switch.requests.read().await.is_empty()
+                && switch
+                    .get_master_health()
+                    .await
+                    .remove(idx)
+                    .last_error
+                    .is_some_and(|e| e.contains("MASTER_DIED"))
+        })
+        .await;
+        assert!(!switch.get_master_health().await[idx].healthy);
     }
 
     // TEST1897: the installed-cartridge INVENTORY is NOT health-filtered. A
