@@ -36,11 +36,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::cap::registry::FabricRegistry;
 use crate::machine::resolve::{resolve_pre_interned, ForEachIdentity, PreInternedWiring};
-use crate::machine::{Machine, MachineStrand, NodeId};
+use crate::machine::{Machine, MachineAbstractionError, MachineStrand, NodeId};
 use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
-use super::live_cap_fab::{LiveCapFab, LiveMachinePlanEdgeType, StepToken, Strand, StrandStepType};
+use super::live_cap_fab::{
+    arrives_as_sequence_after_cap, LiveCapFab, LiveMachinePlanEdgeType, StepToken, Strand, StrandStepType,
+};
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence, PlanApex,
@@ -206,6 +208,18 @@ impl Assembler {
         resolve_pre_interned(self.nodes, &self.wirings, registry, 0)
             .map_err(|e| PlanError::Internal(format!("candidate assembly failed to resolve: {e}")))
     }
+
+    /// Resolve an assembled candidate: its strand, or `None` when the resolver
+    /// cannot bind the candidate's members to its caps' args for these types —
+    /// no valid candidate, dropped. Any other refusal is a defect and fails.
+    fn resolve_candidate(self, registry: &FabricRegistry) -> Result<Option<MachineStrand>, PlanError> {
+        match resolve_pre_interned(self.nodes, &self.wirings, registry, 0) {
+            Ok(strand) => Ok(Some(strand)),
+            Err(MachineAbstractionError::UnmatchedSourceInCapArgs { .. })
+            | Err(MachineAbstractionError::AmbiguousMachineNotation { .. }) => Ok(None),
+            Err(e) => Err(PlanError::Internal(format!("candidate assembly failed to resolve: {e}"))),
+        }
+    }
 }
 
 /// Canonical notation of a set of resolved strands (one Machine).
@@ -216,9 +230,11 @@ fn notation_of(strands: Vec<MachineStrand>) -> Result<String, PlanError> {
 }
 
 /// Verify that a resolved strand actually GATHERED at the fold: the edge with
-/// `fold_token` must carry `n` bindings on one arg slot. A fold cap whose
-/// extra scalar args stole leg outputs via product precedence is NOT a valid
-/// fold for these types — the candidate is dropped, never silently mis-wired.
+/// `fold_token` must carry `n` bindings on one arg slot. A fold is dropped,
+/// never silently mis-wired, either way it is no valid fold for these types:
+/// the resolver cannot bind the legs to its args (`resolve_candidate` gives
+/// `None`), or it binds them but not all `n` on one arg (extra scalar args
+/// stole leg outputs via product precedence).
 fn fold_gathered(strand: &MachineStrand, fold_token: &StepToken, n: usize) -> bool {
     let Some(edge) = strand.edges().iter().find(|e| &e.token_id == fold_token) else {
         return false;
@@ -1114,7 +1130,7 @@ impl LiveCapFab {
                 }
                 let n = leg_exits.len();
                 let (_, fold_token) = asm.append_strand_fanin(tail, leg_exits)?;
-                let resolved = asm.resolve(registry)?;
+                let Some(resolved) = asm.resolve_candidate(registry)? else { continue };
                 if !fold_gathered(&resolved, &fold_token, n) {
                     // Product precedence stole leg outputs into other args —
                     // not a valid fold for these types. Drop, don't mis-wire.
@@ -1296,10 +1312,8 @@ impl LiveCapFab {
                 continue;
             }
 
-            let resolved = asm.resolve(registry);
-            // A merge cap whose args the resolver cannot uniquely assign for
-            // these concrete types is not a valid product apex — skip it.
-            let Ok(resolved) = resolved else { continue };
+            // A merge cap whose args the resolver cannot bind for these types is no valid product apex.
+            let Some(resolved) = asm.resolve_candidate(registry)? else { continue };
             let notation = notation_of(vec![resolved])?;
             let cap_steps = leg_steps_total + 1 + tail_steps;
             out.push(PlanCandidate {
@@ -1760,28 +1774,10 @@ fn strand_final_is_sequence(strand: &Strand, entry_is_sequence: bool) -> bool {
     for step in &strand.steps {
         match &step.step_type {
             StrandStepType::Cap {
-                output_is_sequence, ..
-            } => {
-                // Per-item mapping inside an unclosed ForEach keeps the run's
-                // overall output a sequence; the path finder models that by
-                // the ForEach step below, so here the cap's own flag decides
-                // ONLY when the data is not already per-item mapped.
-                if !seq {
-                    seq = *output_is_sequence;
-                } else {
-                    // Sequence in: a sequence-consuming cap folds (its output
-                    // flag then decides); a scalar cap is mapped per item and
-                    // the overall result stays a sequence.
-                    if let StrandStepType::Cap {
-                        input_is_sequence: true,
-                        output_is_sequence,
-                        ..
-                    } = &step.step_type
-                    {
-                        seq = *output_is_sequence;
-                    }
-                }
-            }
+                input_is_sequence,
+                output_is_sequence,
+                ..
+            } => seq = arrives_as_sequence_after_cap(seq, *input_is_sequence, *output_is_sequence),
             StrandStepType::ForEach { .. } => { /* per-item view; overall stays a sequence */ }
             StrandStepType::Collect { .. } => seq = true,
         }
@@ -2563,6 +2559,128 @@ mod tests {
             scalar_targets.iter().all(|t| !t.convergent),
             "a scalar source has nothing to combine — no convergent targets"
         );
+    }
+
+    // TEST1982: a fold whose args the resolver cannot bind for these legs is
+    // no valid fold and is dropped; the plan goes on with the candidates that
+    // are, where the refusal used to fail the whole plan.
+    #[test]
+    fn test1982_a_fold_the_resolver_cannot_bind_is_dropped() {
+        let pdf2text = build_cap(
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
+            "pdf2text",
+            &["media:document;ext=pdf"],
+            "media:enc=utf8;page",
+        );
+        let md2text = build_cap(
+            "cap:in=\"media:ext=md;plain-text\";extract;out=\"media:enc=utf8;page\"",
+            "md2text",
+            &["media:ext=md;plain-text"],
+            "media:enc=utf8;page",
+        );
+        let mut concat = build_cap(
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
+            "concat",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
+        );
+        concat.args[0].is_sequence = true;
+        // A fold with two sequence args the legs fit equally: the types do
+        // not say which arg each leg is for.
+        let mut join2 = build_cap(
+            "cap:in=\"media:enc=utf8\";join2;out=\"media:enc=utf8;ext=txt;plain-text\"",
+            "join2",
+            &["media:enc=utf8", "media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
+        );
+        join2.args[0].is_sequence = true;
+        join2.args[1].is_sequence = true;
+        let caps = vec![pdf2text, md2text, concat, join2];
+        let registry = registry_with(caps.clone());
+        let bookends: HashSet<MediaUrn> = [
+            media("media:document;ext=pdf"),
+            media("media:ext=md;plain-text"),
+            txt(),
+        ]
+        .into_iter()
+        .collect();
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+
+        let request = PlanRequest::auto(
+            vec![
+                SourceSpec::single(media("media:document;ext=pdf")),
+                SourceSpec::single(media("media:ext=md;plain-text")),
+            ],
+            TargetSpec::Exact(vec![txt()]),
+        );
+        let candidates = fab
+            .plan(&request, &registry)
+            .expect("an unbindable fold is dropped, not a planning failure")
+            .candidates;
+        assert!(!candidates.is_empty(), "the folds that bind still plan");
+        assert!(
+            candidates.iter().all(|c| !c.notation.contains("join2")),
+            "no candidate goes through the fold the resolver cannot bind"
+        );
+    }
+
+    // TEST1981: a route that runs a one-value cap per item after a ForEach
+    // arrives with a sequence, as a machine's iteration gives it: from a
+    // sequence of pdfs, a thumbnail is reached only per item (no fold), so it
+    // is no combined target; txt, folded by concat, is.
+    #[test]
+    fn test1981_a_per_item_route_arrives_as_a_sequence() {
+        let pdf2text = build_cap(
+            "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
+            "pdf2text",
+            &["media:document;ext=pdf"],
+            "media:enc=utf8;page",
+        );
+        let mut concat = build_cap(
+            "cap:in=\"media:enc=utf8\";concat;out=\"media:enc=utf8;ext=txt;plain-text\"",
+            "concat",
+            &["media:enc=utf8"],
+            "media:enc=utf8;ext=txt;plain-text",
+        );
+        concat.args[0].is_sequence = true;
+        let thumb = build_cap(
+            "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
+            "thumb",
+            &["media:document;ext=pdf"],
+            "media:ext=png;image",
+        );
+        let caps = vec![pdf2text, concat, thumb];
+        let png = media("media:ext=png;image");
+        let bookends: HashSet<MediaUrn> =
+            [media("media:document;ext=pdf"), txt(), png.clone()].into_iter().collect();
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+
+        let targets = fab
+            .discover_convergent_targets(
+                &[SourceSpec::sequence(media("media:document;ext=pdf"))],
+                PlanRequest::DEFAULT_MAX_DEPTH,
+            )
+            .expect("sequence single-source discovery must succeed")
+            .targets;
+        let png_target = targets
+            .iter()
+            .find(|t| t.media_def.is_equivalent(&png))
+            .expect("png is reachable from a pdf sequence");
+        assert!(!png_target.convergent, "png is reached only per item: no combined result");
+        let txt_target = targets
+            .iter()
+            .find(|t| t.media_def.is_equivalent(&txt()))
+            .expect("txt is reachable from a pdf sequence");
+        assert!(txt_target.convergent, "txt is reached through the concat fold");
+
+        let reach = fab
+            .get_reachable_targets_with_cardinality(&media("media:document;ext=pdf"), true, PlanRequest::DEFAULT_MAX_DEPTH)
+            .into_iter()
+            .find(|r| r.info.media_def.is_equivalent(&png))
+            .expect("png is reachable");
+        assert!(reach.reached_sequence && !reach.reached_scalar, "png arrives only as a sequence");
     }
 
     // TEST1425 (bounds): max_candidates truncates AFTER ranking and ranks are

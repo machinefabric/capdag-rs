@@ -168,15 +168,33 @@ pub struct ReachableTargetInfo {
 }
 
 /// One reachable target plus the CARDINALITY STATES it was reached in.
-/// `reached_scalar` means some route arrives with a single value (the source
-/// was scalar, or a sequence-consuming fold ran along the way);
-/// `reached_sequence` means some route arrives per-item. A target may be
-/// reachable both ways.
+/// `reached_scalar`: some route arrives with one value (the source was one
+/// value and no step ran per item, or a sequence-taking cap folded the
+/// items). `reached_sequence`: some route arrives with a sequence (a cap gave
+/// one, or a step ran per item after a ForEach and nothing folded it). A
+/// target may be reachable both ways.
 #[derive(Debug, Clone)]
 pub(crate) struct ReachableTargetCardinality {
     pub(crate) info: ReachableTargetInfo,
     pub(crate) reached_scalar: bool,
     pub(crate) reached_sequence: bool,
+}
+
+/// Whether a route arrives with a sequence after a cap step, given whether
+/// it did before: a route over one value arrives as the cap's output does;
+/// a sequence-taking cap folds what came before, so it arrives as the cap's
+/// output does; a cap that takes one value inside a ForEach runs per item,
+/// so the route still arrives with a sequence (docs 09 §Iteration).
+pub(crate) fn arrives_as_sequence_after_cap(
+    before: bool,
+    input_is_sequence: bool,
+    output_is_sequence: bool,
+) -> bool {
+    if !before || input_is_sequence {
+        output_is_sequence
+    } else {
+        true
+    }
 }
 
 impl LiveMachinePlanEdge {
@@ -1109,10 +1127,11 @@ impl LiveCapFab {
     }
 
     /// `get_reachable_targets` keeping the CARDINALITY STATES each target was
-    /// reached in — scalar (a fold consumed the sequence along the way, or
-    /// the source was scalar) vs sequence (per-item). The unified plan engine
-    /// uses the split to tell an honest "combined" single-source target from
-    /// a per-item one.
+    /// reached in — one value (the source was one value and no step ran per
+    /// item, or a sequence-taking cap folded the items) vs a sequence (a cap
+    /// gave one, or a step ran per item after a ForEach and nothing folded
+    /// it). The unified plan engine uses the split to tell an honest
+    /// "combined" single-source target from a per-item one.
     pub(crate) fn get_reachable_targets_with_cardinality(
         &self,
         source: &MediaUrn,
@@ -1122,14 +1141,17 @@ impl LiveCapFab {
         // `results` and `visited` are keyed on `MediaUrn`
         // directly — their derived `Hash`/`Eq` go through
         // `TaggedUrn`'s structural tag-set identity.
+        // Each state also carries whether the route so far arrives with a
+        // sequence (`arrives_seq`), which a per-item step after a ForEach
+        // keeps true until a sequence-taking cap folds it.
         let mut results: HashMap<MediaUrn, ReachableTargetCardinality> = HashMap::new();
-        let mut visited: HashSet<(MediaUrn, bool, bool)> = HashSet::new();
-        let mut queue: VecDeque<(MediaUrn, bool, bool, usize)> = VecDeque::new();
+        let mut visited: HashSet<(MediaUrn, bool, bool, bool)> = HashSet::new();
+        let mut queue: VecDeque<(MediaUrn, bool, bool, bool, usize)> = VecDeque::new();
 
-        queue.push_back((source.clone(), is_sequence, false, 0));
-        visited.insert((source.clone(), is_sequence, false));
+        queue.push_back((source.clone(), is_sequence, false, is_sequence, 0));
+        visited.insert((source.clone(), is_sequence, false, is_sequence));
 
-        while let Some((current, current_is_seq, pending_foreach, depth)) = queue.pop_front() {
+        while let Some((current, current_is_seq, pending_foreach, arrives_seq, depth)) = queue.pop_front() {
             if depth >= max_depth {
                 continue;
             }
@@ -1142,6 +1164,15 @@ impl LiveCapFab {
 
                 let next_pending_foreach =
                     matches!(&edge.edge_type, LiveMachinePlanEdgeType::ForEach);
+                let next_arrives = match &edge.edge_type {
+                    LiveMachinePlanEdgeType::Cap {
+                        input_is_sequence,
+                        output_is_sequence,
+                        ..
+                    } => arrives_as_sequence_after_cap(arrives_seq, *input_is_sequence, *output_is_sequence),
+                    LiveMachinePlanEdgeType::ForEach => arrives_seq,
+                    LiveMachinePlanEdgeType::Collect => true,
+                };
                 if !next_pending_foreach {
                     // A ForEach boundary is not a result. Record only complete
                     // cap transitions; structural equality collapses tag-order
@@ -1159,7 +1190,7 @@ impl LiveCapFab {
                         }
                     });
                     entry.info.path_count += 1;
-                    if next_is_seq {
+                    if next_arrives {
                         entry.reached_sequence = true;
                     } else {
                         entry.reached_scalar = true;
@@ -1167,13 +1198,14 @@ impl LiveCapFab {
                 }
 
                 // Continue BFS if not visited at this cardinality state.
-                let visit_key = (edge.to_spec.clone(), next_is_seq, next_pending_foreach);
+                let visit_key = (edge.to_spec.clone(), next_is_seq, next_pending_foreach, next_arrives);
                 if !visited.contains(&visit_key) {
                     visited.insert(visit_key);
                     queue.push_back((
                         edge.to_spec.clone(),
                         next_is_seq,
                         next_pending_foreach,
+                        next_arrives,
                         new_depth,
                     ));
                 }

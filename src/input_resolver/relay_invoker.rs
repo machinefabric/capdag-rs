@@ -2,7 +2,8 @@
 //! cartridges with: the desktop engine for its attached cartridges, and the
 //! capdag command for the cartridges it starts to inspect a file.
 //!
-//! Drives a cartridge's `cap:in="media:";out="media:adapter-selection;json;record"`
+//! Drives a cartridge's adapter-selection cap (`CAP_ADAPTER_SELECTION`,
+//! `cap:in="media:";out="media:adapter-selection;enc=utf8;fmt=json;record"`)
 //! handler over the bifaci relay, targeting a specific cartridge by id
 //! (via `target_cartridge` REQ meta) so adapter selection never lands
 //! on the wrong cartridge when multiple register the cap. Returns the
