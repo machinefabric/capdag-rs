@@ -1757,6 +1757,7 @@ mod tests {
     use super::*;
     use crate::cap::definition::Cap;
     use crate::urn::cap_urn::CapUrn;
+    use tagged_urn::Constraint;
 
     /// Bookend set that treats every URN appearing in the supplied caps
     /// (in or out direction) as bookend-eligible. Tests use this when
@@ -1782,18 +1783,18 @@ mod tests {
     /// that arg to decide cardinality, so a fixture without it is not a cap the
     /// planner can reason about at all — it would panic rather than mis-plan.
     fn make_test_cap(in_spec: &str, out_spec: &str, op: &str, title: &str) -> Cap {
-        make_tagged_test_cap(in_spec, out_spec, &[(op, "*")], title)
+        make_tagged_test_cap(in_spec, out_spec, &[(op, Constraint::Present)], title)
     }
 
-    /// `make_test_cap` whose cap URN carries `tags` (each `(key, value)`, a
-    /// value of `*` being a marker) in place of one operation marker.
-    fn make_tagged_test_cap(in_spec: &str, out_spec: &str, tags: &[(&str, &str)], title: &str) -> Cap {
+    /// `make_test_cap` whose cap URN carries `tags` (each a key and its
+    /// constraint) in place of one operation marker.
+    fn make_tagged_test_cap(in_spec: &str, out_spec: &str, tags: &[(&str, Constraint)], title: &str) -> Cap {
         use crate::cap::definition::{ArgSource, CapArg};
         use crate::urn::cap_urn::CapUrnBuilder;
 
         let mut builder = CapUrnBuilder::new().in_spec(in_spec).out_spec(out_spec);
-        for (key, value) in tags {
-            builder = builder.tag(key, value);
+        for (key, constraint) in tags {
+            builder = builder.constraint(key, constraint.clone());
         }
         let cap_urn = builder.build().expect("Failed to build test cap URN");
 
@@ -2524,11 +2525,11 @@ mod tests {
     // TEST7271: Among paths with as many cap steps, the one whose steps' specificities sum higher comes first, whatever order the caps were added in
     #[test]
     fn test7271_paths_of_as_many_steps_are_ordered_by_specificity() {
-        let general = make_tagged_test_cap("media:format-a", "media:format-c", &[("convert", "*")], "Convert");
+        let general = make_tagged_test_cap("media:format-a", "media:format-c", &[("convert", Constraint::Present)], "Convert");
         let specific = make_tagged_test_cap(
             "media:format-a",
             "media:format-c",
-            &[("convert", "*"), ("fast", "*")],
+            &[("convert", Constraint::Present), ("fast", Constraint::Present)],
             "Convert fast",
         );
         assert!(specific.urn.specificity() > general.urn.specificity());
@@ -2557,8 +2558,8 @@ mod tests {
         // `cap:a-x=c;…` sorts before `cap:a=b;…` ('-' < '='), and by
         // title "Alpha" sorts before "Zed": either would put the other path
         // first.
-        let zed = make_tagged_test_cap("media:format-a", "media:format-c", &[("a", "b")], "Zed");
-        let alpha = make_tagged_test_cap("media:format-a", "media:format-c", &[("a-x", "c")], "Alpha");
+        let zed = make_tagged_test_cap("media:format-a", "media:format-c", &[("a", Constraint::Exact { value: "b".into() })], "Zed");
+        let alpha = make_tagged_test_cap("media:format-a", "media:format-c", &[("a-x", Constraint::Exact { value: "c".into() })], "Alpha");
         assert_eq!(zed.urn.specificity(), alpha.urn.specificity());
 
         let source = MediaUrn::from_string("media:format-a").unwrap();
