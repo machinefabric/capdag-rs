@@ -4075,7 +4075,6 @@ mod alias_tests {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
@@ -4749,7 +4748,6 @@ mod parity_port_tests {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         };
         registry.add_caps_to_cache(vec![cap]);
         registry.set_offline(true);

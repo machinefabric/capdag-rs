@@ -3,8 +3,8 @@
 
 It declares one content-inspection adapter, `media:enc=utf8;fmt=json`, as the
 data cartridge does, and answers adapter selection by reading the file's
-content: an object is a JSON record, an array of objects is a list of JSON
-records, any other JSON is plain JSON, and what is not JSON it declines. The
+content: an object is a JSON record, an array of objects (an empty one
+included) is a list of JSON records, any other JSON is plain JSON, and what is not JSON it declines. The
 file-inspection e2e installs it under the dev slot and asks the capdag command
 what a .json file is: the answer is the record or the list only if the command
 consulted this cartridge, since nothing else proves a JSON file is either.
@@ -32,7 +32,7 @@ def claims(content: bytes) -> list:
         return []
     if isinstance(value, dict):
         return [RECORD]
-    if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+    if isinstance(value, list) and all(isinstance(item, dict) for item in value):
         return [LIST_OF_RECORDS]
     return [JSON]
 

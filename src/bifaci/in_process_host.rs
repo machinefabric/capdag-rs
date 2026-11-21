@@ -1477,7 +1477,6 @@ mod tests {
             metadata_json: None,
             registered_by: None,
             supported_model_types: Vec::new(),
-            default_model_spec: None,
         }
     }
 
