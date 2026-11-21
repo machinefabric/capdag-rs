@@ -226,10 +226,9 @@ pub fn settle(
     let text = std::str::from_utf8(content).unwrap_or("");
     let mut refined: Vec<MediaUrn> = Vec::new();
     for urn in survivors {
-        let urn_str = value_adapters.refine_media_urn(&urn.to_string(), text);
-        let urn = MediaUrn::from_string(&urn_str).map_err(|e| {
-            format!("a value adapter refined a file's media to '{urn_str}', which is no media URN: {e}")
-        })?;
+        let urn = value_adapters
+            .refine_media_urn(urn, text)
+            .map_err(|e| e.to_string())?;
         if !refined.iter().any(|seen| seen.is_equivalent(&urn).unwrap_or(false)) {
             refined.push(urn);
         }
