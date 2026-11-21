@@ -30,12 +30,7 @@ fn conforms(concrete: &str, pattern: &str) -> bool {
         .unwrap_or_else(|e| panic!("BUG: concrete URN {:?} unparseable: {}", concrete, e));
     let p = MediaUrn::from_string(pattern)
         .unwrap_or_else(|e| panic!("BUG: pattern URN {:?} unparseable: {}", pattern, e));
-    c.conforms_to(&p).unwrap_or_else(|e| {
-        panic!(
-            "conforms_to failed for ({:?},{:?}): {}",
-            concrete, pattern, e
-        )
-    })
+    c.conforms_to(&p)
 }
 
 const PLAIN_TEXT: &str = "media:enc=utf8;ext=txt;plain-text";

@@ -405,7 +405,6 @@ fn resolve_wirings(
                 taken
                     .output_media_urn
                     .is_equivalent(&output_media_urn)
-                    .unwrap_or(false)
             }) {
                 return Err(MachineAbstractionError::OutputTakenTwice {
                     strand_index,
@@ -443,14 +442,7 @@ fn resolve_wirings(
         })?;
         let void_media = MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
             .expect("MEDIA_VOID is a valid MediaUrn");
-        let primary_arg_index = if cap_in_spec.is_equivalent(&void_media).map_err(|e| {
-            MachineAbstractionError::RuntimeMediaInference {
-                strand_index,
-                cap_urn: wiring.cap_urn.to_string(),
-                runtime_input: cap.urn.in_spec().to_string(),
-                reason: format!("cap `in=` cannot be compared with media:void: {e}"),
-            }
-        })? {
+        let primary_arg_index = if cap_in_spec.is_equivalent(&void_media) {
             None
         } else {
             Some(
@@ -503,7 +495,7 @@ fn resolve_wirings(
             match source {
                 BindingSource::Node(id) => {
                     let source_urn = &nodes[*id as usize];
-                    if !source_urn.conforms_to(&arg_accepts[index]).unwrap_or(false) {
+                    if !source_urn.conforms_to(&arg_accepts[index]) {
                         return Err(MachineAbstractionError::SourceDoesNotConformToArg {
                             strand_index,
                             cap_urn: wiring.cap_urn.to_string(),
@@ -594,7 +586,7 @@ fn resolve_wirings(
         for (matched_accepts, source_urn) in &sorted_assignment {
             let matched = free_accepts
                 .iter()
-                .position(|accepts| accepts.is_equivalent(matched_accepts).unwrap_or(false))
+                .position(|accepts| accepts.is_equivalent(matched_accepts))
                 .expect("matching returned an accepted URN that isn't in the cap's free args");
             let slot_urn = free_slots[matched].clone();
             let arg_name = cap.args[free[matched]].name.clone();
@@ -607,7 +599,6 @@ fn resolve_wirings(
                 }
                 if nodes[*sid as usize]
                     .is_equivalent(source_urn)
-                    .unwrap_or(false)
                 {
                     chosen_pos = Some(pos);
                     break;
@@ -636,7 +627,7 @@ fn resolve_wirings(
         if let Some(index) = primary_arg_index {
             let bound = bindings
                 .iter()
-                .any(|b| b.cap_arg_media_urn.is_equivalent(&arg_slots[index]).unwrap_or(false));
+                .any(|b| b.cap_arg_media_urn.is_equivalent(&arg_slots[index]));
             if !bound {
                 return Err(MachineAbstractionError::MainInputUnbound {
                     strand_index,
@@ -657,7 +648,7 @@ fn resolve_wirings(
         let arg_of = |binding: &EdgeAssignmentBinding| {
             arg_slots
                 .iter()
-                .position(|slot| slot.is_equivalent(&binding.cap_arg_media_urn).unwrap_or(false))
+                .position(|slot| slot.is_equivalent(&binding.cap_arg_media_urn))
                 .expect("every binding names a slot of the cap")
         };
         let members: Vec<MemberShape> = bindings
@@ -925,7 +916,7 @@ pub(crate) fn match_sources_to_args(
         // it.
         let source = sources
             .iter()
-            .position(|source| !args.iter().any(|a| source.conforms_to(a).unwrap_or(false)))
+            .position(|source| !args.iter().any(|a| source.conforms_to(a)))
             .unwrap_or(0);
         return Err(MatchFailure::Unmatched { source });
     }
@@ -938,7 +929,7 @@ pub(crate) fn match_sources_to_args(
 
     for (s_idx, source) in sources.iter().enumerate() {
         for (a_idx, arg) in args.iter().enumerate() {
-            if source.conforms_to(arg).unwrap_or(false) {
+            if source.conforms_to(arg) {
                 // The specificity distance: how much more the source says
                 // than the arg asks. It is never negative — refining never
                 // scores lower (04 §Predicates, `tagScore_monotone`).
@@ -1116,7 +1107,7 @@ pub fn assign_sources_to_anchors(
     let mut cost: Vec<Vec<Option<i64>>> = vec![vec![None; anchors.len()]; sources.len()];
     for (s_idx, source) in sources.iter().enumerate() {
         for (a_idx, anchor) in anchors.iter().enumerate() {
-            if source.conforms_to(anchor).unwrap_or(false) {
+            if source.conforms_to(anchor) {
                 cost[s_idx][a_idx] =
                     Some(source.specificity() as i64 - anchor.specificity() as i64);
             }
@@ -1388,8 +1379,8 @@ mod tests {
         let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None)
             .expect("trivial single-source match must succeed");
         assert_eq!(pairs.len(), 1);
-        assert!(pairs[0].0.is_equivalent(&media("media:document;ext=pdf")).unwrap());
-        assert!(pairs[0].1.is_equivalent(&media("media:document;ext=pdf")).unwrap());
+        assert!(pairs[0].0.is_equivalent(&media("media:document;ext=pdf")));
+        assert!(pairs[0].1.is_equivalent(&media("media:document;ext=pdf")));
     }
 
     // TEST1179: Source-to-arg matching assigns a more specific source to a compatible general argument.
@@ -1403,11 +1394,10 @@ mod tests {
         let args = vec![media("media:enc=utf8")];
         let pairs = match_sources_to_args(&sources, &args, &vec![false; args.len()], None)
             .expect("more-specific source must be matched to its arg");
-        assert!(pairs[0].0.is_equivalent(&media("media:enc=utf8")).unwrap());
+        assert!(pairs[0].0.is_equivalent(&media("media:enc=utf8")));
         assert!(pairs[0]
             .1
-            .is_equivalent(&media("media:enc=utf8;page"))
-            .unwrap());
+            .is_equivalent(&media("media:enc=utf8;page")));
     }
 
     // TEST1180: Matching fails when a source does not conform to any cap input argument.
@@ -1463,13 +1453,12 @@ mod tests {
         let mut found_image = false;
         let mut found_text = false;
         for (arg, src) in &pairs {
-            if arg.is_equivalent(&media("media:ext=png;image")).unwrap() {
-                assert!(src.is_equivalent(&media("media:ext=png;image")).unwrap());
+            if arg.is_equivalent(&media("media:ext=png;image")) {
+                assert!(src.is_equivalent(&media("media:ext=png;image")));
                 found_image = true;
-            } else if arg.is_equivalent(&media("media:enc=utf8")).unwrap() {
+            } else if arg.is_equivalent(&media("media:enc=utf8")) {
                 assert!(src
-                    .is_equivalent(&media("media:enc=utf8;model-spec"))
-                    .unwrap());
+                    .is_equivalent(&media("media:enc=utf8;model-spec")));
                 found_text = true;
             }
         }
@@ -1499,7 +1488,7 @@ mod tests {
             let pairs = match_sources_to_args(&page, &either, &[false, false], None).unwrap();
             assert_eq!(pairs.len(), 1);
             assert!(
-                pairs[0].0.is_equivalent(&exact).unwrap(),
+                pairs[0].0.is_equivalent(&exact),
                 "the exact arg, not the general one: {}",
                 pairs[0].0
             );
@@ -1591,19 +1580,17 @@ mod tests {
         let binding = &resolved.edges()[0].assignment[0];
         assert!(binding
             .cap_arg_media_urn
-            .is_equivalent(&media("media:document;ext=pdf"))
-            .unwrap());
+            .is_equivalent(&media("media:document;ext=pdf")));
         let src_urn = resolved.node_urn(binding.node().expect("a node binding"));
-        assert!(src_urn.is_equivalent(&media("media:document;ext=pdf")).unwrap());
+        assert!(src_urn.is_equivalent(&media("media:document;ext=pdf")));
         // Anchors: input is media:document;ext=pdf, output is media:enc=utf8;ext=txt.
         let inputs = resolved.input_anchors();
         let outputs = resolved.output_anchors();
         assert_eq!(inputs.len(), 1);
         assert_eq!(outputs.len(), 1);
-        assert!(inputs[0].is_equivalent(&media("media:document;ext=pdf")).unwrap());
+        assert!(inputs[0].is_equivalent(&media("media:document;ext=pdf")));
         assert!(outputs[0]
-            .is_equivalent(&media("media:enc=utf8;ext=txt;plain-text"))
-            .unwrap());
+            .is_equivalent(&media("media:enc=utf8;ext=txt;plain-text")));
     }
 
     // TEST1185: Resolving a chained strand reuses the intermediate node between adjacent caps.
@@ -1668,10 +1655,9 @@ mod tests {
         let outputs = resolved.output_anchors();
         assert_eq!(inputs.len(), 1);
         assert_eq!(outputs.len(), 1);
-        assert!(inputs[0].is_equivalent(&media("media:document;ext=pdf")).unwrap());
+        assert!(inputs[0].is_equivalent(&media("media:document;ext=pdf")));
         assert!(outputs[0]
-            .is_equivalent(&media("media:vec;record"))
-            .unwrap());
+            .is_equivalent(&media("media:vec;record")));
     }
 
     // TEST1186: Resolving a strand with ForEach marks the following cap edge as a loop.
@@ -1753,8 +1739,7 @@ mod tests {
         assert!(
             resolved
                 .node_urn(disbind_target)
-                .is_equivalent(&media("media:enc=utf8;page"))
-                .unwrap(),
+                .is_equivalent(&media("media:enc=utf8;page")),
             "shared node URN must be the more-specific media:enc=utf8;page, got: {}",
             resolved.node_urn(disbind_target)
         );
@@ -1820,7 +1805,7 @@ mod tests {
         let i2 = r2.input_anchors();
         assert_eq!(i1.len(), i2.len());
         for (a, b) in i1.iter().zip(i2.iter()) {
-            assert!(a.is_equivalent(b).unwrap());
+            assert!(a.is_equivalent(b));
         }
     }
 
@@ -1935,8 +1920,7 @@ mod tests {
         assert!(
             binding
                 .cap_arg_media_urn
-                .is_equivalent(&media("media:enc=utf8;file-path"))
-                .unwrap(),
+                .is_equivalent(&media("media:enc=utf8;file-path")),
             "binding cap_arg_media_urn must be the slot identity, got: {}",
             binding.cap_arg_media_urn
         );
@@ -1946,7 +1930,7 @@ mod tests {
         // sees flowing on the wire.
         let source_urn = resolved.node_urn(binding.node().expect("a node binding"));
         assert!(
-            source_urn.is_equivalent(&media("media:document;ext=pdf")).unwrap(),
+            source_urn.is_equivalent(&media("media:document;ext=pdf")),
             "source node URN must be media:document;ext=pdf (the data-type URN), got: {}",
             source_urn
         );
@@ -2070,8 +2054,8 @@ mod tests {
             .expect("three sources must gather into the sequence arg");
         assert_eq!(pairs.len(), 3, "one binding per gathered source");
         for (arg, src) in &pairs {
-            assert!(arg.is_equivalent(&media("media:enc=utf8")).unwrap());
-            assert!(src.is_equivalent(&media("media:enc=utf8;page")).unwrap());
+            assert!(arg.is_equivalent(&media("media:enc=utf8")));
+            assert!(src.is_equivalent(&media("media:enc=utf8;page")));
         }
     }
 
@@ -2093,20 +2077,18 @@ mod tests {
         // gathered into the sequence arg alongside the summary.
         let page_pair = pairs
             .iter()
-            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8;page")).unwrap())
+            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8;page")))
             .expect("scalar page arg must be claimed");
         assert!(page_pair
             .1
-            .is_equivalent(&media("media:enc=utf8;page"))
-            .unwrap());
+            .is_equivalent(&media("media:enc=utf8;page")));
         let seq_pair = pairs
             .iter()
-            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8")).unwrap())
+            .find(|(a, _)| a.is_equivalent(&media("media:enc=utf8")))
             .expect("sequence arg must take the remaining source");
         assert!(seq_pair
             .1
-            .is_equivalent(&media("media:enc=utf8;summary"))
-            .unwrap());
+            .is_equivalent(&media("media:enc=utf8;summary")));
 
         // Two pages, a sequence arg that takes pages and a scalar arg that
         // takes any text: each page can take either arg, at one cost — a tie.
@@ -2237,8 +2219,7 @@ mod tests {
         // Both bindings target the same slot.
         assert!(concat_edge.assignment[0]
             .cap_arg_media_urn
-            .is_equivalent(&concat_edge.assignment[1].cap_arg_media_urn)
-            .unwrap());
+            .is_equivalent(&concat_edge.assignment[1].cap_arg_media_urn));
         // Deterministic gather order = source declaration order (node 2 then 3).
         assert_eq!(concat_edge.assignment[0].node(), Some(2));
         assert_eq!(concat_edge.assignment[1].node(), Some(3));
@@ -2423,7 +2404,7 @@ mod tests {
             assert_eq!(resolved.input_anchor_ids().len(), 1);
             let anchor = resolved.input_anchor_ids()[0];
             assert!(
-                resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf8;page")).unwrap(),
+                resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf8;page")),
                 "the most specific type a step declares for it, whichever step comes first"
             );
             for edge in resolved.edges() {
