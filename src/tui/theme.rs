@@ -381,11 +381,16 @@ impl MediaKind {
         if marker("numeric") || marker("integer") {
             return MediaKind::Numeric;
         }
-        let fmt = urn.exact_value("fmt");
-        if fmt == Some("csv") || marker("list") {
+        // A format or an encoding counts only where the URN guarantees one:
+        // `?fmt` and `!enc` say neither.
+        let guarantees = |any: &str| {
+            urn.conforms_to(&MediaUrn::from_string(any).expect("a media URN"))
+                .expect("two media URNs compare")
+        };
+        if urn.exact_value("fmt") == Some("csv") || marker("list") {
             return MediaKind::Table;
         }
-        if fmt.is_some() || marker("record") {
+        if guarantees("media:fmt") || marker("record") {
             return MediaKind::Record;
         }
         if urn
@@ -394,7 +399,7 @@ impl MediaKind {
         {
             return MediaKind::Text;
         }
-        if urn.get_tag("enc").is_some() {
+        if guarantees("media:enc") {
             return MediaKind::Text;
         }
         MediaKind::Binary
@@ -539,6 +544,12 @@ mod tests {
         assert_eq!(kind("media:audio;live;microphone"), MediaKind::Live);
         assert_eq!(kind("media:void"), MediaKind::None);
         assert_eq!(kind("media:ext=bin"), MediaKind::Binary);
+        // A format or an encoding counts only where the URN guarantees one.
+        assert_eq!(kind("media:fmt"), MediaKind::Record);
+        assert_eq!(kind("media:?fmt;enc=utf8"), MediaKind::Text);
+        assert_eq!(kind("media:enc"), MediaKind::Text);
+        assert_eq!(kind("media:?enc"), MediaKind::Binary);
+        assert_eq!(kind("media:!enc"), MediaKind::Binary);
     }
 
     // TEST13021: every combination of line directions has a glyph that

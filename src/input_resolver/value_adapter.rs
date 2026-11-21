@@ -12,6 +12,75 @@
 //! specifies `media:enc=utf8;llm;model-spec`). The value filling the slot is inspected
 //! to produce a more specific URN (e.g., `media:enc=utf8;llm;mistral;model-spec`).
 
+use std::fmt;
+
+/// Why the value-adapter registry refused a key, or could not refine a base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValueAdapterError {
+    /// The key an adapter was registered under is no media URN.
+    BadKey { key: String, error: String },
+    /// An adapter is already registered under a key equivalent to this one.
+    DuplicateKey { key: String, existing: String },
+    /// The base falls under two most specific keys, neither of which refines
+    /// the other: no one adapter is the one to ask.
+    Ambiguous {
+        base: String,
+        first: String,
+        second: String,
+    },
+    /// The adapter's refinement is no media URN.
+    BadRefinement {
+        adapter: String,
+        base: String,
+        refined: String,
+        error: String,
+    },
+    /// The adapter's refinement does not lie inside the base it refines.
+    NotInside {
+        adapter: String,
+        base: String,
+        refined: String,
+    },
+}
+
+impl fmt::Display for ValueAdapterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValueAdapterError::BadKey { key, error } => {
+                write!(f, "value adapter key '{key}' is no media URN: {error}")
+            }
+            ValueAdapterError::DuplicateKey { key, existing } => write!(
+                f,
+                "value adapter key '{key}' is equivalent to the registered key '{existing}'"
+            ),
+            ValueAdapterError::Ambiguous { base, first, second } => write!(
+                f,
+                "'{base}' falls under the value adapter keys '{first}' and '{second}', \
+                 neither of which refines the other"
+            ),
+            ValueAdapterError::BadRefinement {
+                adapter,
+                base,
+                refined,
+                error,
+            } => write!(
+                f,
+                "value adapter {adapter} refined '{base}' to '{refined}', which is no media URN: {error}"
+            ),
+            ValueAdapterError::NotInside {
+                adapter,
+                base,
+                refined,
+            } => write!(
+                f,
+                "value adapter {adapter} refined '{base}' to '{refined}', which does not conform to it"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ValueAdapterError {}
+
 /// Result of value-based content inspection
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValueAdapterResult {
