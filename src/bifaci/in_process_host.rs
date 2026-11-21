@@ -1848,8 +1848,13 @@ mod tests {
         assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::StreamEnd);
         assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::End);
 
+        // Frame::req refuses to build a REQ for no cap URN; a peer that sends
+        // one anyway is written by hand.
         let bad = MessageId::new_uuid();
-        let mut req = Frame::req(bad.clone(), "cap:in=", vec![], "application/cbor");
+        let mut req = Frame::new(FrameType::Req, bad.clone());
+        req.cap = Some("cap:in=".to_string());
+        req.payload = Some(vec![]);
+        req.content_type = Some("application/cbor".to_string());
         req.routing_id = Some(MessageId::Uint(1));
         writer.write(&req).await.unwrap();
         let err = reader.read().await.unwrap().unwrap();
