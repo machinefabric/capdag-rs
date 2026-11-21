@@ -45,5 +45,5 @@ pub use path_resolver::resolve_directory;
 
 pub use adapters::MediaAdapterRegistry;
 pub use relay_invoker::RelaySwitchAdapterInvoker;
-pub use value_adapter::{ValueAdapter, ValueAdapterResult};
+pub use value_adapter::{ValueAdapter, ValueAdapterError, ValueAdapterResult};
 pub use value_adapter_registry::ValueAdapterRegistry;
