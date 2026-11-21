@@ -229,12 +229,9 @@ pub fn settle(
     for urn in survivors {
         let urn = match text {
             None => urn.clone(),
-            Some(text) => {
-                let urn_str = value_adapters.refine_media_urn(&urn.to_string(), text);
-                MediaUrn::from_string(&urn_str).map_err(|e| {
-                    format!("a value adapter refined a file's media to '{urn_str}', which is no media URN: {e}")
-                })?
-            }
+            Some(text) => value_adapters
+                .refine_media_urn(urn, text)
+                .map_err(|e| e.to_string())?,
         };
         if !refined.iter().any(|seen| seen.is_equivalent(&urn)) {
             refined.push(urn);
