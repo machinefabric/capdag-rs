@@ -1577,8 +1577,15 @@ impl CartridgeHostRuntime {
     {
         let (outbound_tx, outbound_rx) = mpsc::unbounded_channel::<Frame>();
 
-        // Spawn outbound writer task (runtime → relay)
-        let outbound_writer = tokio::spawn(Self::outbound_writer_loop(relay_write, outbound_rx));
+        // Spawn outbound writer task (runtime → relay). A frame it cannot
+        // write is reported on `relay_write_failed`, and the session ends on
+        // it below.
+        let (relay_write_failed_tx, mut relay_write_failed) = mpsc::unbounded_channel::<String>();
+        let outbound_writer = tokio::spawn(Self::outbound_writer_loop(
+            relay_write,
+            outbound_rx,
+            relay_write_failed_tx,
+        ));
 
         // Spawn relay reader task — reads frames from the relay and sends them
         // through a channel. This MUST be a dedicated task because read_exact is
@@ -1659,6 +1666,14 @@ impl CartridgeHostRuntime {
                             }
                         }
                     }
+                }
+
+                // A frame the relay could not take ends the session: it is
+                // lost, and every frame after it would be too, so the
+                // engine would wait on answers this host can no longer
+                // give.
+                Some(detail) = relay_write_failed.recv() => {
+                    break Err(AsyncHostError::Io(format!("relay write failed: {}", detail)));
                 }
 
                 // Frames from relay reader task (cancel-safe: channel recv is cancel-safe)
@@ -3904,10 +3919,14 @@ impl CartridgeHostRuntime {
     async fn outbound_writer_loop<W: AsyncWrite + Unpin>(
         relay_write: W,
         mut rx: mpsc::UnboundedReceiver<Frame>,
+        failed: mpsc::UnboundedSender<String>,
     ) {
         let mut writer = FrameWriter::new(relay_write);
         while let Some(frame) = rx.recv().await {
-            if writer.write(&frame).await.is_err() {
+            if let Err(e) = writer.write(&frame).await {
+                // Said, never swallowed: the run loop ends the session on it.
+                // Nobody left to tell means the run loop has already ended.
+                let _ = failed.send(format!("{:?} for {} could not be written: {}", frame.frame_type, frame.id, e));
                 break;
             }
         }
@@ -5243,6 +5262,32 @@ mod tests {
         let answer = engine_task.await.unwrap();
         assert_eq!(answer.error_code(), Some("PROTOCOL_VIOLATION"));
         assert_eq!(answer.routing_id, Some(MessageId::Uint(1)));
+    }
+
+    // TEST7193: a frame the host cannot write to its relay ends its session
+    // with the failure named. The writer used to stop on the error without a
+    // word while the host went on reading the relay, so the engine waited
+    // for answers the host could no longer give. Here the relay's read side
+    // stays open and sends nothing; the host's first frame — its initial
+    // RelayNotify — cannot be written.
+    #[tokio::test]
+    async fn test7193_failed_relay_write_ends_the_host_session() {
+        let (relay_read, _engine_side_kept_open) = tokio::io::duplex(1024);
+        let (relay_write, engine_read) = tokio::io::duplex(1024);
+        drop(engine_read);
+
+        let mut runtime = CartridgeHostRuntime::new();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            runtime.run(relay_read, relay_write, || vec![]),
+        )
+        .await
+        .expect("a host whose relay cannot take its frames ends its session");
+        let err = outcome.expect_err("the session ends with the failed write");
+        assert!(
+            err.to_string().contains("relay write failed"),
+            "the session's end names the failed write: {err}"
+        );
     }
 
     #[tokio::test]
