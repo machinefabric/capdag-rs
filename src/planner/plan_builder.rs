@@ -1061,13 +1061,13 @@ mod tests {
     fn test880_no_duplicates_with_unique_caps() -> Result<(), crate::urn::cap_urn::CapUrnError> {
         let caps = vec![
             make_test_cap(
-                "extract_metadata",
+                "extract-metadata",
                 "media:document;ext=pdf",
                 "media:enc=utf8;file-metadata;record",
                 "Extract Metadata",
             )?,
             make_test_cap(
-                "extract_outline",
+                "extract-outline",
                 "media:document;ext=pdf",
                 "media:document-outline;enc=utf8;record",
                 "Extract Outline",
@@ -1162,13 +1162,13 @@ mod tests {
     ) -> Result<(), crate::urn::cap_urn::CapUrnError> {
         let caps = vec![
             make_test_cap(
-                "extract_metadata",
+                "extract-metadata",
                 "media:document;ext=pdf",
                 "media:enc=utf8;file-metadata;record",
                 "Extract PDF Metadata",
             )?,
             make_test_cap(
-                "extract_metadata",
+                "extract-metadata",
                 "media:enc=utf8;ext=txt;plain-text",
                 "media:enc=utf8;file-metadata;record",
                 "Extract TXT Metadata",
