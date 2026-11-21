@@ -964,7 +964,7 @@ impl LiveCapFab {
                         // effect; any other output gives its own type.
                         let runtime_out = match output_urn {
                             Some(output_urn) => output_urn.clone(),
-                            None => cap_urn.infer_runtime_output_media(source).ok()?,
+                            None => cap_urn.apply_to_runtime_input_media(source).ok()?,
                         };
                         Some((
                             LiveMachinePlanEdge {
