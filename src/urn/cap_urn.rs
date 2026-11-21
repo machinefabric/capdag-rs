@@ -3737,13 +3737,6 @@ mod tier_tests {
         assert_eq!(literal.get_tag("x"), Some(&exact("?foo")));
     }
 
-        // `x=?foo` is a plain exact tag whose value is the string
-        // `?foo` — NOT a canonicalization alias.
-        let exact = CapUrn::from_string("cap:x=?foo").unwrap();
-        assert_eq!(exact.to_string(), "cap:x=?foo");
-        assert_eq!(exact.get_tag("x"), Some(&exact("?foo")));
-    }
-
     // TEST1832: x ≡ x=* both canonicalize to bare x.
     #[test]
     fn test1832_canonicalize_must_have_any() {
@@ -3780,13 +3773,6 @@ mod tier_tests {
         let literal = CapUrn::from_string(r#"cap:x="!foo""#).unwrap();
         assert_eq!(literal.to_string(), r#"cap:x="!foo""#);
         assert_eq!(literal.get_tag("x"), Some(&exact("!foo")));
-    }
-
-        // `x=!foo` is a plain exact tag whose value is the string
-        // `!foo` — NOT a canonicalization alias.
-        let exact = CapUrn::from_string("cap:x=!foo").unwrap();
-        assert_eq!(exact.to_string(), "cap:x=!foo");
-        assert_eq!(exact.get_tag("x"), Some(&exact("!foo")));
     }
 
     // TEST1834: x=v stays as x=v (the lone exact-value form).
@@ -3957,4 +3943,192 @@ mod tier_tests {
         // 10000*8 + 100*4 + 2 = 80402
         assert_eq!(cap.specificity(), 10_000 * 8 + 100 * 4 + 2);
     }
+
+    // TEST6759: CapUrn::new and from_tags read direction tags as parsing does: * is media:, an empty spec is refused, and a cap-tag map naming a structural key is refused
+    #[test]
+    fn test6759_constructors_normalize_directions_like_parsing() {
+        let op = |c: Constraint| -> BTreeMap<String, Constraint> {
+            std::iter::once(("op".to_string(), c)).collect()
+        };
+        let made = CapUrn::new(
+            "*".to_string(),
+            "media:record".to_string(),
+            "declared".to_string(),
+            op(Constraint::Present),
+        )
+        .unwrap();
+        assert_eq!(made, CapUrn::from_string("cap:op;out=media:record").unwrap());
+
+        let mut tags = op(Constraint::Present);
+        tags.insert("in".to_string(), Constraint::Present);
+        tags.insert("out".to_string(), Constraint::Present);
+        assert_eq!(
+            CapUrn::from_tags(tags).unwrap(),
+            CapUrn::from_string("cap:in=*;op;out=*").unwrap()
+        );
+
+        assert!(matches!(
+            CapUrn::new(
+                String::new(),
+                "media:record".to_string(),
+                "declared".to_string(),
+                op(Constraint::Present)
+            ),
+            Err(CapUrnError::InvalidInSpec(_))
+        ));
+
+        let mut structural = op(Constraint::Present);
+        structural.insert("in".to_string(), exact("media:pdf"));
+        assert!(matches!(
+            CapUrn::new(
+                "media:pdf".to_string(),
+                "media:record".to_string(),
+                "declared".to_string(),
+                structural
+            ),
+            Err(CapUrnError::InvalidTagFormat(_))
+        ));
+    }
+
+    // TEST6760: A quoted * in a direction tag and a quoted ? as the effect are literal values, which a cap refuses
+    #[test]
+    fn test6760_quoted_structural_sigils_are_literal() {
+        assert!(matches!(
+            CapUrn::from_string(r#"cap:in="*";op"#),
+            Err(CapUrnError::InvalidInSpec(_))
+        ));
+        assert!(matches!(
+            CapUrn::from_string(r#"cap:effect="?";op"#),
+            Err(CapUrnError::InvalidEffect(_))
+        ));
+        // Unquoted, they are the marker and the unconstrained effect.
+        assert_eq!(CapUrn::from_string("cap:in=*;op").unwrap().in_spec(), "media:");
+        assert_eq!(
+            CapUrn::from_string("cap:effect=?;op").unwrap().effect(),
+            CapEffect::Any
+        );
+    }
+
+    // TEST6761: A missing direction and a direction that is no media URN say what the validation rules say
+    #[test]
+    fn test6761_cu1_cu2_messages() {
+        let missing_in = CapUrnBuilder::new().out_spec("media:").build().unwrap_err();
+        assert_eq!(missing_in.to_string(), "Cap URN requires 'in' tag");
+        let missing_out = CapUrnBuilder::new().in_spec("media:").build().unwrap_err();
+        assert_eq!(missing_out.to_string(), "Cap URN requires 'out' tag");
+
+        let not_media = CapUrn::from_string("cap:in=invalid;op").unwrap_err();
+        assert_eq!(
+            not_media.to_string(),
+            "Invalid 'in' media URN: invalid. Must start with 'media:' or be '*'"
+        );
+        let not_parsing = CapUrn::from_string(r#"cap:in="media:void;x";op"#).unwrap_err();
+        assert!(
+            not_parsing
+                .to_string()
+                .starts_with("Invalid 'in' media URN: media:void;x: "),
+            "{not_parsing}"
+        );
+        let out_not_media = CapUrn::from_string("cap:op;out=invalid").unwrap_err();
+        assert_eq!(
+            out_not_media.to_string(),
+            "Invalid 'out' media URN: invalid. Must start with 'media:' or be '*'"
+        );
+    }
+
+    // TEST6762: Every surface form the cap URN docs give canonicalizes to the canonical form they give, which reads back as itself
+    #[test]
+    fn test6762_documented_canonical_forms() {
+        let pairs = [
+            ("cap:test", "cap:test"),
+            ("cap:in=media:;test;out=media:", "cap:test"),
+            ("cap:in=*;test;out=*", "cap:test"),
+            (
+                "cap:in=media:pdf;extract;out=media:record",
+                "cap:extract;in=media:pdf;out=media:record",
+            ),
+            ("cap:in=media:;out=media:;effect=none", "cap:effect=none"),
+            ("cap:effect=none", "cap:effect=none"),
+            (
+                r#"cap:extract;in="media:document;ext=pdf";out=media:record"#,
+                r#"cap:extract;in="media:document;ext=pdf";out=media:record"#,
+            ),
+            (
+                r#"cap:in="media:enc=utf8";out="media:enc=utf8;fmt=json;record";prompt"#,
+                r#"cap:in="media:enc=utf8";out="media:enc=utf8;fmt=json;record";prompt"#,
+            ),
+            ("cap:in=media:;out=media:;transform", "cap:transform"),
+            (
+                r#"cap:in="media:document;ext=pdf";extract;out="media:record""#,
+                r#"cap:extract;in="media:document;ext=pdf";out=media:record"#,
+            ),
+            (
+                r#"cap:in=media:;generate;out="media:enc=utf8""#,
+                r#"cap:generate;out="media:enc=utf8""#,
+            ),
+        ];
+        for (surface, canonical) in pairs {
+            let cap = CapUrn::from_string(surface).unwrap_or_else(|e| panic!("{surface}: {e}"));
+            assert_eq!(cap.to_string(), canonical, "{surface}");
+            assert_eq!(CapUrn::from_string(canonical).unwrap(), cap, "{canonical} reads back");
+        }
+
+        assert!(matches!(
+            CapUrn::from_string(r#"cap:effect=none;in="media:document;ext=pdf";out="media:enc=utf8""#),
+            Err(CapUrnError::IllegalDeclaration(_))
+        ));
+
+        // The accessor example: the direction specs and the kind.
+        let cap =
+            CapUrn::from_string(r#"cap:extract;in="media:document;ext=pdf";out=media:record"#).unwrap();
+        assert_eq!(cap.in_spec(), "media:document;ext=pdf");
+        assert_eq!(cap.out_spec(), "media:record");
+        assert!(cap.has_marker_tag("extract"));
+        assert_eq!(cap.kind().unwrap(), CapKind::Transform);
+    }
+
+    // TEST6763: The ranking docs' worked examples hold: each candidate's specificity, that it serves the request, the order find_all_matches gives and the choice select makes
+    #[test]
+    fn test6763_documented_ranking_examples() {
+        let p = |s: &str| CapUrn::from_string(s).unwrap_or_else(|e| panic!("{s}: {e}"));
+
+        // Exact match preferred.
+        let request = p("cap:extract;in=media:pdf;out=media:record");
+        let a = p("cap:extract;in=media:pdf;out=media:record");
+        let b = p("cap:extract;in=media:pdf;out=media:record;v=2");
+        let c = p("cap:extract;out=media:record");
+        assert_eq!(request.specificity(), 20202);
+        assert_eq!((a.specificity(), b.specificity(), c.specificity()), (20202, 20206, 20002));
+        let caps = vec![c.clone(), b.clone(), a.clone()];
+        assert!(caps.iter().all(|cap| cap.is_dispatchable(&request)));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&a, &b, &c]);
+        assert_eq!(CapUrn::select(&caps, &request), Some(2));
+
+        // Refinement when no exact match.
+        let request = p("cap:convert");
+        let a = p("cap:convert;in=media:pdf;out=media:html");
+        let b = p("cap:convert;in=media:image;out=media:png");
+        let c = p("cap:convert");
+        assert_eq!(request.specificity(), 2);
+        assert_eq!((a.specificity(), b.specificity(), c.specificity()), (20202, 20202, 2));
+        let caps = vec![a.clone(), b.clone(), c.clone()];
+        assert!(caps.iter().all(|cap| cap.is_dispatchable(&request)));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&c, &a, &b]);
+        assert_eq!(CapUrn::select(&caps, &request), Some(2));
+        // Without C, A and B tie, and the first in the list is chosen.
+        assert_eq!(CapUrn::select(&[a.clone(), b.clone()], &request), Some(0));
+        assert_eq!(CapUrn::select(&[b.clone(), a.clone()], &request), Some(0));
+
+        // Fallback only.
+        let request = p(r#"cap:extract;format=json;in="media:pdf;v=2.0";out=media:record"#);
+        let a = p("cap:extract;format=json;in=media:pdf;out=media:record");
+        let b = p("cap:extract;format=json;out=media:record");
+        assert_eq!(request.specificity(), 20606);
+        assert_eq!((a.specificity(), b.specificity()), (20206, 20006));
+        let caps = vec![b.clone(), a.clone()];
+        assert!(caps.iter().all(|cap| cap.is_dispatchable(&request)));
+        assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&a, &b]);
+        assert_eq!(CapUrn::select(&caps, &request), Some(1));
+    }
+
 }

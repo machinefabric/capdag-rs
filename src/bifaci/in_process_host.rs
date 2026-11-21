@@ -529,9 +529,6 @@ struct HandlerEntry {
     handler: Arc<dyn FrameHandler>,
 }
 
-/// Cap table entry: (cap_urn_string, handler_index).
-type CapTable = Vec<(String, usize)>;
-
 /// Identity values an `InProcessCartridgeHost` advertises in its
 /// RelayNotify payload. The host has no on-disk cartridge directory,
 /// so the embedding application must supply the same four-tuple identity
@@ -644,7 +641,7 @@ impl InProcessCartridgeHost {
         let mut caps: Vec<Cap> = vec![crate::standard::caps::identity_cap()];
         for entry in &self.handlers {
             for cap in &entry.caps {
-                if cap.urn.to_string() != CAP_IDENTITY {
+                if !cap.urn.is_equivalent(&crate::standard::caps::identity_urn()) {
                     caps.push(cap.clone());
                 }
             }
@@ -692,71 +689,31 @@ impl InProcessCartridgeHost {
             .expect("BUG: InProcessCartridgeHost RelayNotify payload must serialize")
     }
 
-    /// Build the cap table for routing: flat list of (cap_urn, handler_idx).
-    fn build_cap_table(handlers: &[HandlerEntry]) -> CapTable {
-        let mut table = Vec::new();
+    /// Every handler's caps as parsed values, in handler order and then each
+    /// handler's cap order, with the owning handler's index at the same
+    /// position.
+    fn registered_caps(handlers: &[HandlerEntry]) -> (Vec<CapUrn>, Vec<usize>) {
+        let mut caps = Vec::new();
+        let mut owners = Vec::new();
         for (idx, entry) in handlers.iter().enumerate() {
             for cap in &entry.caps {
-                table.push((cap.urn.to_string(), idx));
+                caps.push(cap.urn.clone());
+                owners.push(idx);
             }
         }
-        table
+        (caps, owners)
     }
 
-    /// Find the best handler for a cap URN.
+    /// The handler that serves `request`, and the cap it serves it with.
     ///
-    /// Uses `is_dispatchable(candidate, request)` to find handlers that can
-    /// legally handle the request, then ranks by specificity.
-    ///
-    /// Ranking prefers:
-    /// 1. Equivalent matches (distance 0)
-    /// 2. More specific candidates (positive distance) - refinements
-    /// 3. More generic candidates (negative distance) - fallbacks
-    fn find_handler_for_cap(cap_table: &CapTable, cap_urn: &str) -> Option<(usize, String)> {
-        let request_urn = match CapUrn::from_string(cap_urn) {
-            Ok(u) => u,
-            Err(_) => return None,
-        };
-
-        let request_specificity = request_urn.specificity();
-        // (handler_idx, registered cap, signed_distance)
-        let mut matches: Vec<(usize, String, isize)> = Vec::new();
-
-        for (registered_cap, handler_idx) in cap_table {
-            if let Ok(registered_urn) = CapUrn::from_string(registered_cap) {
-                // Use is_dispatchable: can this candidate handle this request?
-                if registered_urn.is_dispatchable(&request_urn) {
-                    let specificity = registered_urn.specificity();
-                    let signed_distance = specificity as isize - request_specificity as isize;
-                    matches.push((*handler_idx, registered_urn.to_string(), signed_distance));
-                }
-            }
-        }
-
-        if matches.is_empty() {
-            return None;
-        }
-
-        // Ranking: prefer equivalent (0), then more specific (+), then more generic (-)
-        matches.sort_by(|a, b| {
-            let (_, _, dist_a) = a;
-            let (_, _, dist_b) = b;
-
-            // First: non-negative distances before negative
-            match (dist_a >= &0, dist_b >= &0) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => {
-                    // Same sign: prefer smaller absolute distance
-                    dist_a.unsigned_abs().cmp(&dist_b.unsigned_abs())
-                }
-            }
-        });
-
-        matches
-            .into_iter()
-            .next()
-            .map(|(idx, registered, _)| (idx, registered))
+    /// The proved selection (`CapUrn::select`): least ranking key; of equal
+    /// keys, the first registered.
+    fn find_handler_for_cap(
+        caps: &[CapUrn],
+        owners: &[usize],
+        request: &CapUrn,
+    ) -> Option<(usize, CapUrn)> {
+        CapUrn::select(caps, request).map(|i| (owners[i], caps[i].clone()))
     }
 
     /// The host's full pool-state map: one at-rest singleton per advertised
@@ -863,7 +820,7 @@ impl InProcessCartridgeHost {
 
         // Move handlers to Arc for sharing with handler tasks
         let handlers = Arc::new(self.handlers);
-        let cap_table = Self::build_cap_table(&handlers);
+        let (registered_caps, owners) = Self::registered_caps(&handlers);
 
         // Advertised caps (canonical URNs) — the singleton pool roster.
         let mut advertised_caps: Vec<String> = vec![CAP_IDENTITY.to_string()];
@@ -964,9 +921,12 @@ impl InProcessCartridgeHost {
                     {
                         (Arc::clone(&identity_handler), CAP_IDENTITY.to_string())
                     } else {
-                        match Self::find_handler_for_cap(&cap_table, &cap_urn) {
+                        let chosen = CapUrn::from_string(&cap_urn).ok().and_then(|request| {
+                            Self::find_handler_for_cap(&registered_caps, &owners, &request)
+                        });
+                        match chosen {
                             Some((idx, registered)) => {
-                                (Arc::clone(&handlers[idx].handler), registered)
+                                (Arc::clone(&handlers[idx].handler), registered.to_string())
                             }
                             None => {
                                 // No registered handler for a dispatched cap
@@ -2023,18 +1983,45 @@ mod tests {
             InProcessHostIdentity::for_test("in-process-test"),
             handlers,
         );
-        let cap_table = InProcessCartridgeHost::build_cap_table(&host.handlers);
+        let (caps, owners) = InProcessCartridgeHost::registered_caps(&host.handlers);
 
         // Request for pdf thumbnail should match specific (pdf, specificity 3) over generic (image, specificity 2)
-        let result = InProcessCartridgeHost::find_handler_for_cap(
-            &cap_table,
+        let request = CapUrn::from_string(
             "cap:in=\"media:document;ext=pdf\";thumbnail;out=\"media:ext=png;image\"",
-        );
+        )
+        .unwrap();
+        let result = InProcessCartridgeHost::find_handler_for_cap(&caps, &owners, &request);
         let (idx, registered) = result.expect("specific handler must match");
         assert_eq!(idx, 1); // specific handler
-        assert!(
-            registered.contains("ext=pdf"),
-            "the winning registered pattern is the specific one: {registered}"
-        );
+        assert_eq!(registered, CapUrn::from_string(specific_urn).unwrap());
+    }
+
+    // TEST7240: The in-process host chooses among tied handlers by the proved selection: the first registered, every time
+    #[test]
+    fn test7240_in_process_host_ties_go_to_the_first_registered() {
+        let first = "cap:in=media:;op;out=media:;x=a";
+        let second = "cap:in=media:;op;out=media:;y=b";
+        let request = CapUrn::from_string("cap:in=media:;op;out=media:").unwrap();
+        let chosen = |order: [(&str, &str); 2]| -> String {
+            let handlers = order
+                .iter()
+                .map(|(name, urn)| {
+                    (
+                        name.to_string(),
+                        vec![make_test_cap(urn)],
+                        Arc::new(IdentityHandler) as Arc<dyn FrameHandler>,
+                    )
+                })
+                .collect();
+            let host = InProcessCartridgeHost::new(InProcessHostIdentity::for_test("ties"), handlers);
+            let (caps, owners) = InProcessCartridgeHost::registered_caps(&host.handlers);
+            let (idx, _) = InProcessCartridgeHost::find_handler_for_cap(&caps, &owners, &request)
+                .expect("both handlers serve the request");
+            host.handlers[idx].name.clone()
+        };
+        for _ in 0..32 {
+            assert_eq!(chosen([("first", first), ("second", second)]), "first");
+            assert_eq!(chosen([("second", second), ("first", first)]), "second");
+        }
     }
 }
