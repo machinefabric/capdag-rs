@@ -1034,7 +1034,7 @@ mod tests {
             .get_tag("enc")
             .is_some()); // "media:enc=utf8"
         assert_eq!(
-            MediaUrn::from_string(MEDIA_JSON).unwrap().get_tag("enc").as_deref(),
+            MediaUrn::from_string(MEDIA_JSON).unwrap().exact_value("enc"),
             Some("utf8"),
             "a JSON record is UTF-8"
         ); // "media:enc=utf8;fmt=json;record"
@@ -1292,8 +1292,8 @@ mod debug_tests {
     #[test]
     fn test304_media_availability_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_AVAILABILITY_OUTPUT).expect("must parse");
-        assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-availability is a JSON record");
-        assert_eq!(urn.get_tag("enc").as_deref(), Some("utf8"), "a JSON record is UTF-8");
+        assert_eq!(urn.exact_value("fmt"), Some("json"), "model-availability is a JSON record");
+        assert_eq!(urn.exact_value("enc"), Some("utf8"), "a JSON record is UTF-8");
         assert!(!urn.has_marker_tag("plain-text"), "a JSON record is not plain text");
         assert!(
             urn.is_record(),
@@ -1311,8 +1311,8 @@ mod debug_tests {
     #[test]
     fn test305_media_path_output_constant() {
         let urn = MediaUrn::from_string(MEDIA_PATH_OUTPUT).expect("must parse");
-        assert_eq!(urn.get_tag("fmt").as_deref(), Some("json"), "model-path is a JSON record");
-        assert_eq!(urn.get_tag("enc").as_deref(), Some("utf8"), "a JSON record is UTF-8");
+        assert_eq!(urn.exact_value("fmt"), Some("json"), "model-path is a JSON record");
+        assert_eq!(urn.exact_value("enc"), Some("utf8"), "a JSON record is UTF-8");
         assert!(!urn.has_marker_tag("plain-text"), "a JSON record is not plain text");
         assert!(urn.is_record(), "model-path must have record marker");
         let reparsed = MediaUrn::from_string(&urn.to_string()).expect("roundtrip must parse");
@@ -1468,7 +1468,7 @@ mod debug_tests {
     #[test]
     fn test555_with_tag_and_without_tag() {
         let urn = MediaUrn::from_string("media:string").unwrap();
-        let with_ext = urn.with_tag("ext", "pdf").unwrap();
+        let with_ext = urn.with_tag("ext", tagged_urn::Constraint::Exact { value: "pdf".to_string() }).unwrap();
         assert_eq!(with_ext.extension(), Some("pdf"));
         // Original unchanged
         assert_eq!(urn.extension(), None);
@@ -1532,7 +1532,7 @@ mod debug_tests {
         // carries enc=utf8; `fmt=json` says how those characters are structured.
         let json_urn = MediaUrn::from_string(MEDIA_JSON).unwrap();
         assert!(json_urn.is_json());
-        assert_eq!(json_urn.get_tag("enc"), Some("utf8"));
+        assert_eq!(json_urn.exact_value("enc"), Some("utf8"));
         assert!(json_urn.is_record());
         assert!(
             json_urn.is_scalar(),
@@ -1761,7 +1761,7 @@ mod debug_tests {
             let urn = MediaUrn::from_string(input)
                 .unwrap_or_else(|e| panic!("{input} must parse: it does not say void, got {e:?}"));
             assert!(!urn.is_void(), "{input} is not void");
-            assert_eq!(urn.get_tag("enc"), Some("utf8"), "{input} keeps its other tags");
+            assert_eq!(urn.exact_value("enc"), Some("utf8"), "{input} keeps its other tags");
         }
     }
 
