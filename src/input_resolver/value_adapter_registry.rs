@@ -87,7 +87,7 @@ impl ValueAdapterRegistry {
         let position = |n: lungo::Nat| -> usize {
             n.to_u64().expect("a key's position fits in u64") as usize
         };
-        match crate::formal::exec::adapter_for(keys, base.inner().formal().clone()) {
+        match crate::formal::detect::adapter_for(keys, base.inner().formal().clone()) {
             AdapterChoice::Uncovered => Ok(base.clone()),
             AdapterChoice::Ambiguous { i, j } => Err(ValueAdapterError::Ambiguous {
                 base: base.to_string(),

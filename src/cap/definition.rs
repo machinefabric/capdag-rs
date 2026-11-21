@@ -1172,7 +1172,7 @@ mod tests {
     // TEST108: Test creating new cap with URN, title, and command verifies correct initialization
     #[test]
     fn test108_cap_creation() {
-        let urn = CapUrn::from_string(&test_urn("transform;format=json;data_processing")).unwrap();
+        let urn = CapUrn::from_string(&test_urn("transform;format=json;data-processing")).unwrap();
         let cap = Cap::new(
             urn,
             "Transform JSON Data".to_string(),
@@ -1220,18 +1220,18 @@ mod tests {
     // TEST110: Test cap matching with subset semantics for request fulfillment
     #[test]
     fn test110_cap_matching() {
-        // Use type=data_processing key-value instead of flag for proper matching
+        // Use type=data-processing key-value instead of flag for proper matching
         let urn =
-            CapUrn::from_string(&test_urn("transform;format=json;type=data_processing")).unwrap();
+            CapUrn::from_string(&test_urn("transform;format=json;type=data-processing")).unwrap();
         let cap = Cap::new(
             urn,
             "Transform JSON Data".to_string(),
             vec!["test-command".to_string()],
         );
 
-        assert!(cap.accepts_request(&test_urn("transform;format=json;type=data_processing")));
-        assert!(cap.accepts_request(&test_urn("transform;format=*;type=data_processing")));
-        assert!(cap.accepts_request(&test_urn("type=data_processing")));
+        assert!(cap.accepts_request(&test_urn("transform;format=json;type=data-processing")));
+        assert!(cap.accepts_request(&test_urn("transform;format=*;type=data-processing")));
+        assert!(cap.accepts_request(&test_urn("type=data-processing")));
         assert!(!cap.accepts_request(&test_urn("type=compute")));
     }
 
