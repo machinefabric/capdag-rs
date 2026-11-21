@@ -17,7 +17,7 @@
 
 use std::fmt;
 use std::str::FromStr;
-use tagged_urn::{TaggedUrn, TaggedUrnCoordinateDelta, TaggedUrnError};
+use tagged_urn::{Constraint, TaggedUrn, TaggedUrnCoordinateDelta, TaggedUrnError};
 
 // =============================================================================
 // STANDARD MEDIA URN CONSTANTS
@@ -455,7 +455,7 @@ impl MediaUrn {
                 actual: urn.prefix().to_string(),
             });
         }
-        if urn.tags().get("void").map_or(false, |v| v == "*") && urn.tags().len() > 1 {
+        if urn.has_marker_tag("void") && urn.tags().len() > 1 {
             let extra_tags: Vec<String> = urn
                 .tags()
                 .keys()
@@ -481,29 +481,41 @@ impl MediaUrn {
         &self.0
     }
 
-    /// Get the extension tag value (e.g., "pdf", "epub", "md")
+    /// The extension this media names exactly (`ext=pdf` gives "pdf"); `None`
+    /// when it names none or constrains `ext` otherwise.
     pub fn extension(&self) -> Option<&str> {
-        self.get_tag("ext")
+        self.exact_value("ext")
     }
 
-    /// Get any tag value by key
-    pub fn get_tag(&self, key: &str) -> Option<&str> {
-        self.0.get_tag(key).map(|s| s.as_str())
+    /// The constraint this media writes for `key`, or `None` when it does not
+    /// mention it.
+    pub fn get_tag(&self, key: &str) -> Option<&Constraint> {
+        self.0.get_tag(key)
     }
 
-    /// Check if this media URN has a specific tag
+    /// The exact value this media writes for `key` (`key=value`); `None` when
+    /// it does not mention the key or constrains it in another form.
+    pub fn exact_value(&self, key: &str) -> Option<&str> {
+        match self.0.get_tag(key) {
+            Some(Constraint::Exact { value }) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Whether this media writes the exact value `value` for `key`.
     pub fn has_tag(&self, key: &str, value: &str) -> bool {
         self.0.has_tag(key, value)
     }
 
-    /// Create a new MediaUrn with an additional or updated tag
-    /// Returns error if value is empty (use "*" for wildcard)
-    pub fn with_tag(&self, key: &str, value: &str) -> Result<Self, tagged_urn::TaggedUrnError> {
-        Ok(Self(
+    /// A new MediaUrn with a tag added or replaced; the key must be an
+    /// identifier and the constraint one a URN can write.
+    pub fn with_tag(&self, key: &str, constraint: Constraint) -> Result<Self, MediaUrnError> {
+        Self::new(
             self.0
                 .clone()
-                .with_tag(key.to_string(), value.to_string())?,
-        ))
+                .with_tag(key, constraint)
+                .map_err(MediaUrnError::Parse)?,
+        )
     }
 
     /// Create a new MediaUrn without a specific tag
@@ -677,10 +689,9 @@ impl MediaUrn {
     // HELPER: Check for marker tag presence
     // =========================================================================
 
-    /// Check if a marker tag (tag with wildcard/no value) is present.
-    /// A marker tag is stored as key="*" in the tagged URN.
+    /// Whether `tag_name` is present as a marker (written as just the key).
     pub fn has_marker_tag(&self, tag_name: &str) -> bool {
-        self.0.tags().get(tag_name).map_or(false, |v| v == "*")
+        self.0.has_marker_tag(tag_name)
     }
 
     /// Check if this value's content format is JSON.
@@ -688,12 +699,12 @@ impl MediaUrn {
     /// serialization format is the single `fmt=` axis — `fmt=json` marks JSON
     /// content regardless of whether it also came from a `.json` file (`ext=json`).
     pub fn is_json(&self) -> bool {
-        self.get_tag("fmt") == Some("json")
+        self.exact_value("fmt") == Some("json")
     }
 
     /// Check if this value's content format is YAML (`fmt=yaml`).
     pub fn is_yaml(&self) -> bool {
-        self.get_tag("fmt") == Some("yaml")
+        self.exact_value("fmt") == Some("yaml")
     }
 
     /// Check if this value's content format is CSV (`fmt=csv`).
@@ -704,7 +715,7 @@ impl MediaUrn {
     /// A `.csv` file on disk carries `ext=csv` *and* `fmt=csv`; the file-type tag
     /// alone (`ext=csv`) does not make a value CSV content.
     pub fn is_csv(&self) -> bool {
-        self.get_tag("fmt") == Some("csv")
+        self.exact_value("fmt") == Some("csv")
     }
 
     /// Check if this represents image data.
@@ -742,7 +753,7 @@ impl MediaUrn {
     /// nullary value; a cap with `media:void` on a side has no
     /// meaningful data on that side. It is NOT "invalid" or "absent".
     ///
-    /// True only for the `void` marker (`void`, stored as `*`): `media:!void`
+    /// True only for the `void` marker (`void`, the constraint present): `media:!void`
     /// says the media must not be void, and `media:?void` leaves it open.
     pub fn is_void(&self) -> bool {
         self.has_marker_tag("void")

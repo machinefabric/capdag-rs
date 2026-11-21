@@ -13,9 +13,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
-use tagged_urn::{TaggedUrn, TaggedUrnBuilder, TaggedUrnError};
+use tagged_urn::{Constraint, TaggedUrn, TaggedUrnBuilder, TaggedUrnError};
 
-use crate::urn::media_urn::{MediaUrn, MediaUrnError, MEDIA_IDENTITY, MEDIA_VOID};
+use crate::urn::media_urn::{MediaUrn, MediaUrnError, MEDIA_IDENTITY};
 
 /// Functional category of a cap, derived from all four structural axes (`in`,
 /// `out`, `effect`, and the remaining tags). The classification is **logical**
@@ -136,9 +136,9 @@ pub struct CapUrn {
     /// Effect on runtime media/type identity. Stored as canonical raw value:
     /// `declared`, `none`, `patch`, or `?` for explicit unconstrained effect.
     effect: String,
-    /// Additional tags that define this cap, stored in sorted order for canonical representation
-    /// Note: 'in', 'out', and 'effect' are NOT stored here.
-    tags: BTreeMap<String, String>,
+    /// Additional tags that define this cap (the y axis), in key order, each
+    /// as the constraint it writes. 'in', 'out', and 'effect' are never here.
+    tags: BTreeMap<String, Constraint>,
     /// The same cap on the proved model's side: its three URN handles and its
     /// effect. Dispatch, acceptance, equivalence and specificity are asked of
     /// this, through code generated from `../formal`. Built once, when the cap
@@ -179,6 +179,64 @@ impl std::hash::Hash for CapUrn {
 }
 
 
+/// The error a direction side reports, as the side it is.
+fn direction_spec_error(side: &str, message: String) -> CapUrnError {
+    match side {
+        "in" => CapUrnError::InvalidInSpec(message),
+        "out" => CapUrnError::InvalidOutSpec(message),
+        other => unreachable!("a cap's direction is 'in' or 'out', not '{}'", other),
+    }
+}
+
+/// What a direction side says when its value is no media URN: a value that
+/// does not even name the `media` prefix, in the validation rules' words, and
+/// one that names it but does not parse, with the parser's reason.
+fn direction_error(side: &str, value: &str, e: MediaUrnError) -> CapUrnError {
+    let message = match e {
+        MediaUrnError::InvalidPrefix { .. }
+        | MediaUrnError::Parse(TaggedUrnError::MissingPrefix)
+        | MediaUrnError::Parse(TaggedUrnError::EmptyPrefix) => format!(
+            "Invalid '{}' media URN: {}. Must start with 'media:' or be '*'",
+            side, value
+        ),
+        other => format!("Invalid '{}' media URN: {}: {}", side, value, other),
+    };
+    direction_spec_error(side, message)
+}
+
+/// A direction side's media URN, in canonical form. An empty value is
+/// refused.
+fn direction_media(side: &str, value: &str) -> Result<String, CapUrnError> {
+    if value.is_empty() {
+        return Err(direction_spec_error(
+            side,
+            format!("Empty value for '{}' tag is not allowed", side),
+        ));
+    }
+    MediaUrn::from_string(value)
+        .map(|m| m.to_string())
+        .map_err(|e| direction_error(side, value, e))
+}
+
+/// A direction spec given as text (to [`CapUrn::new`] or the builder): `*`
+/// is the top media `media:`, as the marker is in parsing; anything else is a
+/// media URN, in canonical form.
+fn direction_spec(side: &str, raw: &str) -> Result<String, CapUrnError> {
+    if raw == "*" {
+        return Ok(MEDIA_IDENTITY.to_string());
+    }
+    direction_media(side, raw)
+}
+
+/// A tag a parsed tag map holds, as written, for an error that names it.
+fn written_tag(key: &str, constraint: &Constraint) -> String {
+    let mut tags = BTreeMap::new();
+    tags.insert(key.to_string(), constraint.clone());
+    TaggedUrn::new("cap", tags)
+        .expect("a tag a tagged URN held is one a tagged URN writes")
+        .tags_to_string()
+}
+
 impl CapUrn {
     /// The required prefix for all cap URNs
     pub const PREFIX: &'static str = "cap";
@@ -186,29 +244,36 @@ impl CapUrn {
     /// The one way a `CapUrn` is made: the fields, the model's handles built
     /// from exactly them, and the admissibility check — so no constructor or
     /// edit can produce a cap whose handles describe something else.
+    ///
+    /// `in_urn` and `out_urn` are canonical media URNs (as [`direction_media`]
+    /// makes them); `tags` are the cap-tags, which may not name a structural
+    /// key.
     fn assemble(
         in_urn: String,
         out_urn: String,
         effect: String,
-        tags: BTreeMap<String, String>,
+        tags: BTreeMap<String, Constraint>,
     ) -> Result<Self, CapUrnError> {
-        let media = |spec: &str, what: fn(String) -> CapUrnError| {
+        Self::refuse_structural_keys(&tags)?;
+        let media = |side: &str, spec: &str| {
             MediaUrn::from_string(spec)
                 .map(|m| m.inner().formal().clone())
-                .map_err(|e| what(format!("Invalid media URN '{}': {}", spec, e)))
+                .map_err(|e| direction_error(side, spec, e))
         };
+        let other = TaggedUrn::new(Self::PREFIX, tags.clone())
+            .map_err(CapUrnError::from_tagged_urn_error)?;
         let formal = crate::formal::exec::WfCap {
-            input: media(&in_urn, CapUrnError::InvalidInSpec)?,
-            output: media(&out_urn, CapUrnError::InvalidOutSpec)?,
-            other: TaggedUrn::new(Self::PREFIX.to_string(), tags.clone()).formal().clone(),
+            input: media("in", &in_urn)?,
+            output: media("out", &out_urn)?,
+            other: other.formal().clone(),
             effect: match effect.as_str() {
                 "declared" => crate::formal::Effect::Declared,
                 "none" => crate::formal::Effect::None,
                 "patch" => crate::formal::Effect::Patch,
                 "?" => crate::formal::Effect::Unspecified,
                 other => {
-                    return Err(CapUrnError::InvalidTagFormat(format!(
-                        "effect '{}' is not declared, none, patch or ?",
+                    return Err(CapUrnError::InvalidEffect(format!(
+                        "Unsupported effect '{}'. Supported values are declared, none, patch, or ?",
                         other
                     )))
                 }
@@ -219,8 +284,25 @@ impl CapUrn {
         Ok(candidate)
     }
 
+    /// The structural keys a cap carries apart from its cap-tags.
+    const STRUCTURAL_KEYS: [&'static str; 3] = ["in", "out", "effect"];
+
+    /// A cap-tag map may not name `in`, `out` or `effect`: they are the cap's
+    /// direction and effect, given apart from its tags.
+    fn refuse_structural_keys(tags: &BTreeMap<String, Constraint>) -> Result<(), CapUrnError> {
+        for k in tags.keys() {
+            if Self::STRUCTURAL_KEYS.contains(&k.to_ascii_lowercase().as_str()) {
+                return Err(CapUrnError::InvalidTagFormat(format!(
+                    "reserved structural key '{}' must be passed as in_urn, out_urn or effect, not as a tag",
+                    k
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// The non-structural tags (the y axis), in key order.
-    pub fn tags(&self) -> &BTreeMap<String, String> {
+    pub fn tags(&self) -> &BTreeMap<String, Constraint> {
         &self.tags
     }
 
@@ -229,89 +311,37 @@ impl CapUrn {
         &self.formal
     }
 
-    fn validate_non_structural_tags(tags: &BTreeMap<String, String>) -> Result<(), CapUrnError> {
-        let mut builder = TaggedUrnBuilder::new(Self::PREFIX);
-        for (k, v) in tags {
-            builder = builder
-                .tag(k, v)
-                .map_err(CapUrnError::from_tagged_urn_error)?;
-        }
-        let _ = builder.build_allow_empty();
-        Ok(())
-    }
-
-    /// Create a new cap URN from direction specs and additional tags
-    /// Keys are normalized to lowercase; values are preserved as-is
-    /// in_urn and out_urn are required direction specifiers (media URN strings)
-    /// Media URNs are parsed and normalized to canonical form for consistent matching.
+    /// Create a new cap URN from direction specs, an effect and cap-tags.
+    ///
+    /// `in_urn` and `out_urn` are media URNs, normalized to canonical form;
+    /// `*` and `media:` are both the top media `media:`, as in parsing, and an
+    /// empty spec is refused. `effect` is `declared`, `none`, `patch` or `?`.
+    /// The cap-tags may not name `in`, `out` or `effect`.
     pub fn new(
         in_urn: String,
         out_urn: String,
         effect: String,
-        tags: BTreeMap<String, String>,
+        tags: BTreeMap<String, Constraint>,
     ) -> Result<Self, CapUrnError> {
-        use crate::urn::media_urn::MediaUrn;
-
-        // Normalize in_urn to canonical form
-        let in_urn_normalized = if in_urn == "media:" {
-            in_urn
-        } else {
-            MediaUrn::from_string(&in_urn)
-                .map_err(|e| {
-                    CapUrnError::InvalidInSpec(format!(
-                        "Invalid media URN for in spec '{}': {}",
-                        in_urn, e
-                    ))
-                })?
-                .to_string()
-        };
-
-        // Normalize out_urn to canonical form
-        let out_urn_normalized = if out_urn == "media:" {
-            out_urn
-        } else {
-            MediaUrn::from_string(&out_urn)
-                .map_err(|e| {
-                    CapUrnError::InvalidOutSpec(format!(
-                        "Invalid media URN for out spec '{}': {}",
-                        out_urn, e
-                    ))
-                })?
-                .to_string()
-        };
-
-        let effect_normalized = Self::normalize_effect_value(Some(effect.as_str()))?;
-
-        let normalized_tags: BTreeMap<String, String> = tags
-            .into_iter()
-            .filter(|(k, _)| {
-                let k_lower = k.to_lowercase();
-                k_lower != "in" && k_lower != "out" && k_lower != "effect"
-            })
-            .map(|(k, v)| (k.to_lowercase(), v))
-            .collect();
-        Self::validate_non_structural_tags(&normalized_tags)?;
-        Self::assemble(in_urn_normalized, out_urn_normalized, effect_normalized, normalized_tags)
+        let in_urn = direction_spec("in", &in_urn)?;
+        let out_urn = direction_spec("out", &out_urn)?;
+        Self::assemble(in_urn, out_urn, effect, tags)
     }
 
-    /// Create a cap URN from a tag map.
+    /// Create a cap URN from a tag map, as string parsing reads one: `in`,
+    /// `out` and `effect` are taken out of it and read exactly as
+    /// [`from_string`](Self::from_string) reads them, and the rest are the
+    /// cap-tags.
     ///
-    /// Missing structural coordinates default exactly as they do in string
-    /// parsing:
+    /// Missing structural coordinates default as in parsing:
     /// - missing `in`   -> `media:`
     /// - missing `out`  -> `media:`
     /// - missing effect -> `declared`
-    pub fn from_tags(mut tags: BTreeMap<String, String>) -> Result<Self, CapUrnError> {
-        let in_urn = tags
-            .remove("in")
-            .unwrap_or_else(|| MEDIA_IDENTITY.to_string());
-        let out_urn = tags
-            .remove("out")
-            .unwrap_or_else(|| MEDIA_IDENTITY.to_string());
-        let effect = tags
-            .remove("effect")
-            .unwrap_or_else(|| "declared".to_string());
-        Self::new(in_urn, out_urn, effect, tags)
+    pub fn from_tags(mut tags: BTreeMap<String, Constraint>) -> Result<Self, CapUrnError> {
+        let in_urn = Self::process_direction_tag(tags.remove("in"), "in")?;
+        let out_urn = Self::process_direction_tag(tags.remove("out"), "out")?;
+        let effect = Self::normalize_effect_value(tags.remove("effect").as_ref())?;
+        Self::assemble(in_urn, out_urn, effect, tags)
     }
 
     /// Create a cap URN from a string representation
@@ -319,13 +349,13 @@ impl CapUrn {
     /// Format: `cap:in="media:...";out="media:...";key1=value1;...`
     /// The "cap:" prefix is mandatory
     ///
-    /// **Wildcard expansion for in/out tags:**
-    /// - Missing `in` or `out` tag → defaults to `media:`
-    /// - `in` or `out` without `=` → becomes `media:` (TaggedUrn treats `tag` as `tag=*`, we replace `*` with `media:`)
-    /// - `in=*` or `out=*` → replaced with `media:`
+    /// **Direction tags:**
+    /// - Missing `in` or `out` tag → `media:`
+    /// - `in` or `out` without a value, or `=*`, → `media:` (the marker)
+    /// - `in=<media URN>` → that media URN, in canonical form
+    /// - a quoted `in="*"` is the literal value `*`, which is no media URN,
+    ///   and any other form (`?in`, `!in`, `in!=v`) is refused
     /// - `cap:` normalizes to `cap:in=media:;out=media:` and is then rejected as the illegal bare top form
-    /// - `cap:in` normalizes to `cap:in=media:;out=media:` and is then rejected as the illegal bare top form
-    /// - `cap:in=media:;out` normalizes to `cap:in=media:;out=media:` and is then rejected as the illegal bare top form
     ///
     /// Trailing semicolons are optional and ignored
     /// Tags are automatically sorted alphabetically for canonical form
@@ -335,108 +365,46 @@ impl CapUrn {
     /// - Unquoted values: Normalized to lowercase
     /// - Quoted values: Case preserved exactly as specified
     pub fn from_string(s: &str) -> Result<Self, CapUrnError> {
-        // Parse using TaggedUrn
         let tagged = TaggedUrn::from_string(s).map_err(CapUrnError::from_tagged_urn_error)?;
-
-        // Verify cap prefix
         if tagged.prefix() != Self::PREFIX {
             return Err(CapUrnError::MissingCapPrefix);
         }
-
-        // Process in and out tags with wildcard expansion
-        // Missing tag or tag=* → "media:" (the wildcard)
-        let in_urn_raw = Self::process_direction_tag(&tagged, "in")?;
-        let out_urn_raw = Self::process_direction_tag(&tagged, "out")?;
-        let effect = Self::normalize_effect_value(tagged.tags().get("effect").map(|s| s.as_str()))?;
-
-        // Parse and normalize media URNs to canonical form.
-        // This ensures consistent tag ordering (e.g., "record;enc=utf8" vs "enc=utf8;record").
-        use crate::urn::media_urn::MediaUrn;
-        let in_urn = if in_urn_raw == "media:" {
-            in_urn_raw
-        } else {
-            MediaUrn::from_string(&in_urn_raw)
-                .map_err(|e| {
-                    CapUrnError::InvalidInSpec(format!(
-                        "Invalid media URN for in spec '{}': {}",
-                        in_urn_raw, e
-                    ))
-                })?
-                .to_string()
-        };
-        let out_urn = if out_urn_raw == "media:" {
-            out_urn_raw
-        } else {
-            MediaUrn::from_string(&out_urn_raw)
-                .map_err(|e| {
-                    CapUrnError::InvalidOutSpec(format!(
-                        "Invalid media URN for out spec '{}': {}",
-                        out_urn_raw, e
-                    ))
-                })?
-                .to_string()
-        };
-
-        // Collect remaining tags (excluding in/out)
-        let tags: BTreeMap<String, String> = tagged
-            .tags()
-            .clone()
-            .into_iter()
-            .filter(|(k, _)| k != "in" && k != "out" && k != "effect")
-            .collect();
-        Self::validate_non_structural_tags(&tags)?;
-
-        Self::assemble(in_urn, out_urn, effect, tags)
+        Self::from_tags(tagged.tags().clone())
     }
 
-    /// Process a direction tag (in or out) with wildcard expansion
-    ///
-    /// - Missing tag → "media:" (wildcard)
-    /// - tag=* → "media:" (wildcard)
-    /// - tag= (empty) → error
-    /// - tag=value → value (validated later)
-    fn process_direction_tag(tagged: &TaggedUrn, tag_name: &str) -> Result<String, CapUrnError> {
-        match tagged.tags().get(tag_name) {
-            Some(value) => {
-                if value == "*" {
-                    // Replace * with media: wildcard
-                    Ok("media:".to_string())
-                } else if value.is_empty() {
-                    // Empty value is not allowed (in= or out= with nothing after =)
-                    if tag_name == "in" {
-                        Err(CapUrnError::InvalidInSpec(
-                            "Empty value for 'in' tag is not allowed".to_string(),
-                        ))
-                    } else {
-                        Err(CapUrnError::InvalidOutSpec(
-                            "Empty value for 'out' tag is not allowed".to_string(),
-                        ))
-                    }
-                } else {
-                    // Regular value - will be validated as MediaUrn later
-                    Ok(value.clone())
-                }
-            }
-            None => {
-                // Tag is missing - default to media: wildcard
-                Ok("media:".to_string())
-            }
+    /// A direction tag as a cap's tag map holds it: missing, or the marker
+    /// (`in`, `in=*`), is `media:`; an exact value is that media URN in
+    /// canonical form; any other form is refused.
+    fn process_direction_tag(tag: Option<Constraint>, side: &str) -> Result<String, CapUrnError> {
+        match tag {
+            None | Some(Constraint::Present) => Ok(MEDIA_IDENTITY.to_string()),
+            Some(Constraint::Exact { value }) => direction_media(side, &value),
+            Some(other) => Err(direction_spec_error(
+                side,
+                format!(
+                    "Invalid '{}' media URN: {}. Must start with 'media:' or be '*'",
+                    side,
+                    written_tag(side, &other)
+                ),
+            )),
         }
     }
 
-    fn normalize_effect_value(raw: Option<&str>) -> Result<String, CapUrnError> {
+    /// The effect a cap's tag map writes: none is `declared`; the marker or
+    /// `?effect` is the unconstrained `?`; an exact `declared`, `none` or
+    /// `patch` is that effect; anything else is refused, named as written.
+    fn normalize_effect_value(raw: Option<&Constraint>) -> Result<String, CapUrnError> {
         match raw {
             None => Ok("declared".to_string()),
-            Some("?") | Some("*") => Ok("?".to_string()),
-            Some("declared") => Ok("declared".to_string()),
-            Some("none") => Ok("none".to_string()),
-            Some("patch") => Ok("patch".to_string()),
-            Some(value) if value.is_empty() => Err(CapUrnError::InvalidEffect(
-                "Empty value for 'effect' tag is not allowed".to_string(),
-            )),
-            Some(value) => Err(CapUrnError::InvalidEffect(format!(
+            Some(Constraint::Present) | Some(Constraint::Unconstrained) => Ok("?".to_string()),
+            Some(Constraint::Exact { value })
+                if matches!(value.as_str(), "declared" | "none" | "patch") =>
+            {
+                Ok(value.clone())
+            }
+            Some(other) => Err(CapUrnError::InvalidEffect(format!(
                 "Unsupported effect '{}'. Supported values are declared, none, patch, or explicit unconstrained ?effect/effect=*",
-                value
+                written_tag("effect", other)
             ))),
         }
     }
@@ -458,47 +426,49 @@ impl CapUrn {
         }
     }
 
-    /// Get the canonical string representation of this cap URN
-    ///
-    /// Always includes "cap:" prefix
-    /// All tags (including in/out) are sorted alphabetically
-    /// No trailing semicolon in canonical form
-    /// Values are quoted only when necessary (smart quoting via TaggedUrn)
     /// Build a TaggedUrn representation of this CapUrn (internal helper)
     ///
-    /// `in` and `out` segments are emitted only when they refine beyond
-    /// the trivial wildcard `media:`. `effect=declared` is omitted because
-    /// it is the default on admissible caps.
+    /// `in` and `out` are written as exact values only when they refine
+    /// beyond the top media `media:`. `effect=declared` is omitted because it
+    /// is the default on admissible caps; the unconstrained effect is written
+    /// `?effect`.
     ///
     /// `effect=none` is not omitted. The true identity cap canonicalizes to
     /// `cap:effect=none`, never to `cap:`.
     fn build_tagged_urn(&self) -> TaggedUrn {
-        let mut builder = TaggedUrnBuilder::new(Self::PREFIX);
+        let mut builder = TaggedUrnBuilder::new(Self::PREFIX).expect("cap is an identifier");
 
-        if self.in_urn != crate::urn::media_urn::MEDIA_IDENTITY {
+        if self.in_urn != MEDIA_IDENTITY {
             builder = builder
                 .tag("in", &self.in_urn)
                 .expect("in_urn guaranteed non-empty");
         }
-        if self.out_urn != crate::urn::media_urn::MEDIA_IDENTITY {
+        if self.out_urn != MEDIA_IDENTITY {
             builder = builder
                 .tag("out", &self.out_urn)
                 .expect("out_urn guaranteed non-empty");
         }
-        if self.effect != "declared" {
-            builder = builder
-                .tag("effect", &self.effect)
-                .expect("effect guaranteed valid");
+        match self.effect.as_str() {
+            "declared" => {}
+            "?" => {
+                builder = builder
+                    .constraint("effect", Constraint::Unconstrained)
+                    .expect("effect is an identifier");
+            }
+            effect => {
+                builder = builder
+                    .tag("effect", effect)
+                    .expect("effect guaranteed valid");
+            }
         }
 
-        for (k, v) in &self.tags {
+        for (k, c) in &self.tags {
             // Tags are validated at construction time
             builder = builder
-                .tag(k, v)
+                .constraint(k, c.clone())
                 .expect("tag values validated at construction");
         }
 
-        // Use build_allow_empty which returns TaggedUrn directly
         builder.build_allow_empty()
     }
 
@@ -509,20 +479,30 @@ impl CapUrn {
         self.build_tagged_urn().tags_to_string()
     }
 
+    /// The canonical text: `cap:` and every tag sorted by key, `in`, `out`
+    /// and `effect` among them; `in` and `out` written only when they are not
+    /// `media:`, `effect` only when it is not `declared`; values quoted only
+    /// when they must be.
     pub fn to_string(&self) -> String {
         self.build_tagged_urn().to_string()
     }
 
-    /// Get a specific tag value
-    /// Key is normalized to lowercase for lookup
-    /// For 'in' and 'out', returns the direction spec fields
-    pub fn get_tag(&self, key: &str) -> Option<&String> {
-        let key_lower = key.to_lowercase();
-        match key_lower.as_str() {
-            "in" => Some(&self.in_urn),
-            "out" => Some(&self.out_urn),
-            "effect" => Some(&self.effect),
-            _ => self.tags.get(&key_lower),
+    /// The constraint this cap writes for the cap-tag `key`, or `None` when
+    /// it does not mention it. Key is normalized to lowercase for lookup. The
+    /// direction and the effect are not cap-tags: they are read with
+    /// [`in_spec`](Self::in_spec), [`out_spec`](Self::out_spec) and
+    /// [`effect`](Self::effect).
+    pub fn get_tag(&self, key: &str) -> Option<&Constraint> {
+        self.tags.get(&key.to_ascii_lowercase())
+    }
+
+    /// The exact value this cap writes for the cap-tag `key` (`key=value`);
+    /// `None` when it does not mention the key or constrains it in another
+    /// form.
+    pub fn exact_value(&self, key: &str) -> Option<&str> {
+        match self.get_tag(key) {
+            Some(Constraint::Exact { value }) => Some(value.as_str()),
+            _ => None,
         }
     }
 
@@ -606,48 +586,28 @@ impl CapUrn {
         Ok(CapKind::Transform)
     }
 
-    /// Check if this cap has a specific tag with a specific value
-    /// Key is normalized to lowercase; value comparison is case-sensitive
-    /// For 'in' and 'out', checks the direction spec fields
+    /// Whether this cap writes the exact value `value` for the cap-tag `key`
+    /// (`key=value`). Key is normalized to lowercase; value comparison is
+    /// case-sensitive.
     pub fn has_tag(&self, key: &str, value: &str) -> bool {
-        let key_lower = key.to_lowercase();
-        match key_lower.as_str() {
-            "in" => self.in_urn == value,
-            "out" => self.out_urn == value,
-            "effect" => self.effect == value,
-            _ => self.tags.get(&key_lower).map_or(false, |v| v == value),
-        }
+        self.exact_value(key) == Some(value)
     }
 
-    /// Check if a marker tag (solo tag with no value) is present.
-    /// A marker tag is stored as key="*" in the cap URN.
-    /// Example: `cap:constrained;...` has marker tag "constrained"
+    /// Whether the cap-tag `tag_name` is present as a marker (written as just
+    /// the key). Example: `cap:constrained;...` has marker tag "constrained".
     pub fn has_marker_tag(&self, tag_name: &str) -> bool {
-        self.tags
-            .get(&tag_name.to_lowercase())
-            .map_or(false, |v| v == "*")
+        self.get_tag(tag_name) == Some(&Constraint::Present)
     }
 
-    /// Add or update a non-structural tag.
-    /// Key is normalized to lowercase; value is preserved as-is.
+    /// Add or replace a cap-tag. The key must be an identifier and is
+    /// lowered; the constraint must be one a URN can write.
     ///
     /// Reserved structural coordinates (`in`, `out`, `effect`) are not part of
     /// the y-axis and must be changed through dedicated accessors.
-    /// Returns error if value is empty (use "*" for wildcard).
-    pub fn with_tag(self, key: String, value: String) -> Result<Self, CapUrnError> {
-        if value.is_empty() {
-            return Err(CapUrnError::EmptyValue(key));
-        }
-        let key_lower = key.to_lowercase();
-        if key_lower == "in" || key_lower == "out" || key_lower == "effect" {
-            return Err(CapUrnError::InvalidTagFormat(format!(
-                "reserved structural key '{}' must be changed via dedicated CapUrn accessors",
-                key_lower
-            )));
-        }
+    pub fn with_tag(self, key: &str, constraint: Constraint) -> Result<Self, CapUrnError> {
+        let key_lower = key.to_ascii_lowercase();
         let mut tags = self.tags;
-        tags.insert(key_lower, value);
-        Self::validate_non_structural_tags(&tags)?;
+        tags.insert(key_lower, constraint);
         Self::assemble(self.in_urn, self.out_urn, self.effect, tags)
     }
 
@@ -672,7 +632,7 @@ impl CapUrn {
     /// Remove a non-structural tag.
     /// Key is normalized to lowercase for case-insensitive removal.
     pub fn without_tag(self, key: &str) -> Self {
-        let key_lower = key.to_lowercase();
+        let key_lower = key.to_ascii_lowercase();
         if key_lower == "in" || key_lower == "out" || key_lower == "effect" {
             panic!(
                 "CapUrn::without_tag cannot remove reserved structural key '{}'",
@@ -941,14 +901,14 @@ impl CapUrn {
     /// across the three axes (`out`, `in`, `y`), each axis scored as
     /// a Tagged URN per [`tagged_urn::TaggedUrn::specificity`]:
     ///
-    /// | Stored tag value | Form           | Score |
+    /// | Constraint       | Form           | Score |
     /// |------------------|----------------|------:|
-    /// | `"?"`            | `?x`           |     0 |
-    /// | starts with `?=` | `x?=v`         |     1 |
-    /// | `"*"`            | `x` (`x=*`)    |     2 |
-    /// | starts with `!=` | `x!=v`         |     3 |
-    /// | exact value      | `x=v`          |     4 |
-    /// | `"!"`            | `!x`           |     5 |
+    /// | unconstrained    | `?x`           |     0 |
+    /// | optionalNot v    | `x?=v`         |     1 |
+    /// | present          | `x` (`x=*`)    |     2 |
+    /// | presentNot v     | `x!=v`         |     3 |
+    /// | exact v          | `x=v`          |     4 |
+    /// | absent           | `!x`           |     5 |
     ///
     /// Axis weighting:
     ///
@@ -988,10 +948,10 @@ impl CapUrn {
         self.specificity() > other.specificity()
     }
 
-    /// Create a wildcard version by replacing specific values with wildcards
-    /// For 'in' or 'out', sets the corresponding direction spec to wildcard
+    /// The same cap with `key` opened: `in` or `out` set to `media:`,
+    /// `effect` to the unconstrained `?`, and a cap-tag it has made a marker.
     pub fn with_wildcard_tag(self, key: &str) -> Self {
-        let key_lower = key.to_lowercase();
+        let key_lower = key.to_ascii_lowercase();
         let (mut in_urn, mut out_urn, mut effect, mut tags) =
             (self.in_urn, self.out_urn, self.effect, self.tags);
         match key_lower.as_str() {
@@ -1000,7 +960,7 @@ impl CapUrn {
             "effect" => effect = "?".to_string(),
             _ => {
                 if tags.contains_key(&key_lower) {
-                    tags.insert(key_lower, "*".to_string());
+                    tags.insert(key_lower, Constraint::Present);
                 }
             }
         }
@@ -1013,7 +973,7 @@ impl CapUrn {
     pub fn subset(&self, keys: &[&str]) -> Self {
         let mut tags = BTreeMap::new();
         for &key in keys {
-            let key_lower = key.to_lowercase();
+            let key_lower = key.to_ascii_lowercase();
             // Skip in/out as they're handled separately
             if key_lower == "in" || key_lower == "out" {
                 continue;
@@ -1067,8 +1027,6 @@ pub enum CapUrnError {
     InvalidCharacter(String),
     /// Error code 6: Same key appears twice
     DuplicateKey(String),
-    /// Error code 7: Key is purely numeric
-    NumericKey(String),
     /// Error code 8: Quoted value never closed
     UnterminatedQuote(usize),
     /// Error code 9: Invalid escape in quoted value (only \" and \\ allowed)
@@ -1077,8 +1035,6 @@ pub enum CapUrnError {
     MissingInSpec,
     /// Error code 11: Missing required 'out' tag - caps must declare their output type
     MissingOutSpec,
-    /// Error code 12: Empty value provided (use "*" for wildcard)
-    EmptyValue(String),
     /// Error code 13: Invalid media URN in 'in' spec
     InvalidInSpec(String),
     /// Error code 14: Invalid media URN in 'out' spec
@@ -1102,7 +1058,6 @@ impl CapUrnError {
             TaggedUrnError::EmptyTagComponent(s) => CapUrnError::EmptyTagComponent(s),
             TaggedUrnError::InvalidCharacter(s) => CapUrnError::InvalidCharacter(s),
             TaggedUrnError::DuplicateKey(s) => CapUrnError::DuplicateKey(s),
-            TaggedUrnError::NumericKey(s) => CapUrnError::NumericKey(s),
             TaggedUrnError::UnterminatedQuote(pos) => CapUrnError::UnterminatedQuote(pos),
             TaggedUrnError::InvalidEscapeSequence(pos) => CapUrnError::InvalidEscapeSequence(pos),
             TaggedUrnError::PrefixMismatch { .. } => CapUrnError::MissingCapPrefix,
@@ -1132,9 +1087,6 @@ impl fmt::Display for CapUrnError {
             CapUrnError::DuplicateKey(key) => {
                 write!(f, "Duplicate tag key: {}", key)
             }
-            CapUrnError::NumericKey(key) => {
-                write!(f, "Tag key cannot be purely numeric: {}", key)
-            }
             CapUrnError::UnterminatedQuote(pos) => {
                 write!(f, "Unterminated quote at position {}", pos)
             }
@@ -1146,22 +1098,13 @@ impl fmt::Display for CapUrnError {
                 )
             }
             CapUrnError::MissingInSpec => {
-                write!(f, "Cap URN is missing required 'in' tag - caps must declare their input type (use {} for no input)", MEDIA_VOID)
+                write!(f, "Cap URN requires 'in' tag")
             }
             CapUrnError::MissingOutSpec => {
-                write!(
-                    f,
-                    "Cap URN is missing required 'out' tag - caps must declare their output type"
-                )
+                write!(f, "Cap URN requires 'out' tag")
             }
-            CapUrnError::EmptyValue(key) => {
-                write!(f, "Empty value for key '{}' (use '*' for wildcard)", key)
-            }
-            CapUrnError::InvalidInSpec(msg) => {
-                write!(f, "Invalid 'in' spec: {}", msg)
-            }
-            CapUrnError::InvalidOutSpec(msg) => {
-                write!(f, "Invalid 'out' spec: {}", msg)
+            CapUrnError::InvalidInSpec(msg) | CapUrnError::InvalidOutSpec(msg) => {
+                write!(f, "{}", msg)
             }
             CapUrnError::InvalidEffect(msg) => {
                 write!(f, "Invalid 'effect' spec: {}", msg)
@@ -1195,11 +1138,8 @@ impl fmt::Display for CapUrn {
 /// Structural total order over `CapUrn`.
 ///
 /// The comparison routes through the parsed `MediaUrn` values
-/// of `in` / `out` (which use `TaggedUrn`'s structural
-/// `(prefix, tags-BTreeMap)` `Ord`) and then the non-direction
-/// `tags` `BTreeMap<String, String>` (whose `Ord` is the
-/// natural lexicographic order over canonicalized tag keys and
-/// values).
+/// of `in` / `out` (which use `TaggedUrn`'s `Ord`), the effect, and then the
+/// cap-tags as a tagged URN of their own.
 ///
 /// This explicitly avoids flat-string comparison of the
 /// whole canonical form — per the URN rules in
@@ -1240,7 +1180,11 @@ impl Ord for CapUrn {
             ord => return ord,
         }
 
-        self.tags.cmp(&other.tags)
+        let cap_tags = |c: &CapUrn| {
+            TaggedUrn::new(Self::PREFIX, c.tags.clone())
+                .expect("CapUrn invariant: cap-tags make a tagged URN")
+        };
+        cap_tags(self).cmp(&cap_tags(other))
     }
 }
 
@@ -1317,7 +1261,7 @@ pub struct CapUrnBuilder {
     in_urn: Option<String>,
     out_urn: Option<String>,
     effect: Option<String>,
-    tags: BTreeMap<String, String>,
+    tags: BTreeMap<String, Constraint>,
 }
 
 impl CapUrnBuilder {
@@ -1348,30 +1292,34 @@ impl CapUrnBuilder {
         self
     }
 
-    /// Add a non-structural tag with key (normalized to lowercase) and value
-    /// (preserved as-is).
-    pub fn tag(mut self, key: &str, value: &str) -> Self {
-        let key_lower = key.to_lowercase();
-        if key_lower == "in" || key_lower == "out" || key_lower == "effect" {
+    /// Add a cap-tag of any form, its key normalized to lowercase. The key is
+    /// checked, with the constraint, when the cap is built; a structural key
+    /// (`in`, `out`, `effect`) is set with in_spec/out_spec/effect instead.
+    pub fn constraint(mut self, key: &str, constraint: Constraint) -> Self {
+        let key_lower = key.to_ascii_lowercase();
+        if CapUrn::STRUCTURAL_KEYS.contains(&key_lower.as_str()) {
             panic!(
-                "CapUrnBuilder::tag cannot set reserved structural key '{}'; use in_spec/out_spec/effect",
+                "CapUrnBuilder cannot set reserved structural key '{}'; use in_spec/out_spec/effect",
                 key_lower
             );
         }
-        self.tags.insert(key_lower, value.to_string());
+        self.tags.insert(key_lower, constraint);
         self
     }
 
-    pub fn marker(mut self, key: &str) -> Self {
-        let key_lower = key.to_lowercase();
-        if key_lower == "in" || key_lower == "out" || key_lower == "effect" {
-            panic!(
-                "CapUrnBuilder::marker cannot set reserved structural key '{}'; use in_spec/out_spec/effect",
-                key_lower
-            );
-        }
-        self.tags.insert(key_lower, "*".to_string());
-        self
+    /// Add a cap-tag with the exact value `value`, taken literally.
+    pub fn tag(self, key: &str, value: &str) -> Self {
+        self.constraint(
+            key,
+            Constraint::Exact {
+                value: value.to_string(),
+            },
+        )
+    }
+
+    /// Add a cap-tag as a marker (written as just the key).
+    pub fn marker(self, key: &str) -> Self {
+        self.constraint(key, Constraint::Present)
     }
 
     pub fn build(self) -> Result<CapUrn, CapUrnError> {
@@ -1391,7 +1339,13 @@ impl Default for CapUrnBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::urn::media_urn::MEDIA_OBJECT;
+    use crate::urn::media_urn::{MEDIA_OBJECT, MEDIA_VOID};
+
+    fn exact(value: &str) -> Constraint {
+        Constraint::Exact {
+            value: value.to_string(),
+        }
+    }
 
     // All cap URNs now require in and out specs. Use these helpers:
     fn test_urn(tags: &str) -> String {
@@ -1418,8 +1372,8 @@ mod tests {
     fn test001_cap_urn_creation() {
         let cap = CapUrn::from_string(&test_urn("generate;ext=pdf;target=thumbnail")).unwrap();
         assert!(cap.has_marker_tag("generate"));
-        assert_eq!(cap.get_tag("target"), Some(&"thumbnail".to_string()));
-        assert_eq!(cap.get_tag("ext"), Some(&"pdf".to_string()));
+        assert_eq!(cap.get_tag("target"), Some(&exact("thumbnail")));
+        assert_eq!(cap.get_tag("ext"), Some(&exact("pdf")));
         // Direction specs are required and accessible
         assert_eq!(cap.in_spec(), MEDIA_VOID);
         assert_eq!(cap.out_spec(), MEDIA_OBJECT);
@@ -1491,13 +1445,13 @@ mod tests {
         let cap = CapUrn::from_string(&test_urn("Generate;EXT=PDF;Target=Thumbnail")).unwrap();
 
         assert!(cap.has_marker_tag("generate"));
-        assert_eq!(cap.get_tag("ext"), Some(&"pdf".to_string()));
-        assert_eq!(cap.get_tag("target"), Some(&"thumbnail".to_string()));
+        assert_eq!(cap.get_tag("ext"), Some(&exact("pdf")));
+        assert_eq!(cap.get_tag("target"), Some(&exact("thumbnail")));
 
         // Key lookup is case-insensitive: uppercase variants of an
         // existing key resolve to the same keyed tag.
-        assert_eq!(cap.get_tag("EXT"), Some(&"pdf".to_string()));
-        assert_eq!(cap.get_tag("Ext"), Some(&"pdf".to_string()));
+        assert_eq!(cap.get_tag("EXT"), Some(&exact("pdf")));
+        assert_eq!(cap.get_tag("Ext"), Some(&exact("pdf")));
 
         // Tag order in the source string does not affect canonical
         // form — parsed URNs sort tags alphabetically before
@@ -1512,17 +1466,17 @@ mod tests {
     fn test005_quoted_values_preserve_case() {
         // Quoted values preserve their case
         let cap = CapUrn::from_string(&test_urn(r#"key="Value With Spaces""#)).unwrap();
-        assert_eq!(cap.get_tag("key"), Some(&"Value With Spaces".to_string()));
+        assert_eq!(cap.get_tag("key"), Some(&exact("Value With Spaces")));
 
         // Key is still lowercase
         let cap2 = CapUrn::from_string(&test_urn(r#"KEY="Value With Spaces""#)).unwrap();
-        assert_eq!(cap2.get_tag("key"), Some(&"Value With Spaces".to_string()));
+        assert_eq!(cap2.get_tag("key"), Some(&exact("Value With Spaces")));
 
         // Unquoted vs quoted case difference
         let unquoted = CapUrn::from_string(&test_urn("key=UPPERCASE")).unwrap();
         let quoted = CapUrn::from_string(&test_urn(r#"key="UPPERCASE""#)).unwrap();
-        assert_eq!(unquoted.get_tag("key"), Some(&"uppercase".to_string())); // lowercase
-        assert_eq!(quoted.get_tag("key"), Some(&"UPPERCASE".to_string())); // preserved
+        assert_eq!(unquoted.get_tag("key"), Some(&exact("uppercase"))); // lowercase
+        assert_eq!(quoted.get_tag("key"), Some(&exact("UPPERCASE"))); // preserved
         assert_ne!(unquoted, quoted); // NOT equal
     }
 
@@ -1533,16 +1487,16 @@ mod tests {
         let cap = CapUrn::from_string(&test_urn(r#"key="value;with;semicolons""#)).unwrap();
         assert_eq!(
             cap.get_tag("key"),
-            Some(&"value;with;semicolons".to_string())
+            Some(&exact("value;with;semicolons"))
         );
 
         // Equals in quoted values
         let cap2 = CapUrn::from_string(&test_urn(r#"key="value=with=equals""#)).unwrap();
-        assert_eq!(cap2.get_tag("key"), Some(&"value=with=equals".to_string()));
+        assert_eq!(cap2.get_tag("key"), Some(&exact("value=with=equals")));
 
         // Spaces in quoted values
         let cap3 = CapUrn::from_string(&test_urn(r#"key="hello world""#)).unwrap();
-        assert_eq!(cap3.get_tag("key"), Some(&"hello world".to_string()));
+        assert_eq!(cap3.get_tag("key"), Some(&exact("hello world")));
     }
 
     // TEST007: Test that escape sequences in quoted values (\" and \\) are parsed correctly
@@ -1550,17 +1504,17 @@ mod tests {
     fn test007_quoted_value_escape_sequences() {
         // Escaped quotes
         let cap = CapUrn::from_string(&test_urn(r#"key="value\"quoted\"""#)).unwrap();
-        assert_eq!(cap.get_tag("key"), Some(&r#"value"quoted""#.to_string()));
+        assert_eq!(cap.get_tag("key"), Some(&exact(r#"value"quoted""#)));
 
         // Escaped backslashes
         let cap2 = CapUrn::from_string(&test_urn(r#"key="path\\file""#)).unwrap();
-        assert_eq!(cap2.get_tag("key"), Some(&r#"path\file"#.to_string()));
+        assert_eq!(cap2.get_tag("key"), Some(&exact(r#"path\file"#)));
 
         // Mixed escapes
         let cap3 = CapUrn::from_string(&test_urn(r#"key="say \"hello\\world\"""#)).unwrap();
         assert_eq!(
             cap3.get_tag("key"),
-            Some(&r#"say "hello\world""#.to_string())
+            Some(&exact(r#"say "hello\world""#))
         );
     }
 
@@ -1568,8 +1522,8 @@ mod tests {
     #[test]
     fn test008_mixed_quoted_unquoted() {
         let cap = CapUrn::from_string(&test_urn(r#"a="Quoted";b=simple"#)).unwrap();
-        assert_eq!(cap.get_tag("a"), Some(&"Quoted".to_string()));
-        assert_eq!(cap.get_tag("b"), Some(&"simple".to_string()));
+        assert_eq!(cap.get_tag("a"), Some(&exact("Quoted")));
+        assert_eq!(cap.get_tag("b"), Some(&exact("simple")));
     }
 
     // TEST009: Test that unterminated quote produces UnterminatedQuote error
@@ -1654,7 +1608,7 @@ mod tests {
         assert_eq!(cap, reparsed);
         assert_eq!(
             reparsed.get_tag("key"),
-            Some(&"Value With Spaces".to_string())
+            Some(&exact("Value With Spaces"))
         );
     }
 
@@ -1665,7 +1619,7 @@ mod tests {
         let cap = CapUrn::from_string(&original).unwrap();
         assert_eq!(
             cap.get_tag("key"),
-            Some(&r#"value"with\escapes"#.to_string())
+            Some(&exact(r#"value"with\escapes"#))
         );
         let serialized = cap.to_string();
         let reparsed = CapUrn::from_string(&serialized).unwrap();
@@ -1831,8 +1785,8 @@ mod tests {
 
     // TEST020: Specificity is the sum of per-tag truth-table scores
     // across in/out/y. Marker tags (bare segments like `generate`) are
-    // must-have-any (score 2), exact `key=value` tags score 3,
-    // missing/`?` score 0, `!` scores 1.
+    // must-have-any (score 2), exact `key=value` tags score 4,
+    // missing/`?` score 0, `x?=v` 1, `x!=v` 3, `!` 5.
     //
     // test_urn() builds "cap:in=media:void;out=media:record;<tags>"
     // so the directional baseline is:
@@ -1907,7 +1861,7 @@ mod tests {
             .out_spec(MEDIA_OBJECT)
             .tag("123", "value")
             .build();
-        assert!(matches!(invalid_tag, Err(CapUrnError::NumericKey(_))));
+        assert!(matches!(invalid_tag, Err(CapUrnError::InvalidCharacter(_))));
 
         let reserved_tag = std::panic::catch_unwind(|| {
             let _ = CapUrnBuilder::new().tag("in", "media:void");
@@ -1931,7 +1885,7 @@ mod tests {
             .unwrap();
 
         // Key is lowercase
-        assert_eq!(cap.get_tag("key"), Some(&"ValueWithCase".to_string()));
+        assert_eq!(cap.get_tag("key"), Some(&exact("ValueWithCase")));
     }
 
     // TEST024: Directional accepts — pattern's tags are constraints, instance must satisfy
@@ -1989,7 +1943,7 @@ mod tests {
         // A refinement is chosen when nothing matches exactly.
         let without_exact = vec![caps[0].clone(), caps[1].clone()];
         let best = CapMatcher::find_best_match(&without_exact, &request).unwrap();
-        assert_eq!(best.get_tag("ext"), Some(&"pdf".to_string()));
+        assert_eq!(best.get_tag("ext"), Some(&exact("pdf")));
     }
 
     // TEST026: Test merge combines tags from both caps, subset keeps only specified tags
@@ -2007,12 +1961,12 @@ mod tests {
         assert_eq!(merged.out_spec(), "media:integer");
         // Has tags from both
         assert!(merged.has_marker_tag("generate"));
-        assert_eq!(merged.get_tag("ext"), Some(&"pdf".to_string()));
+        assert_eq!(merged.get_tag("ext"), Some(&exact("pdf")));
 
         let subset = merged.subset(&["type", "ext"]);
         // subset keeps in/out from merged
         assert_eq!(subset.in_spec(), "media:");
-        assert_eq!(subset.get_tag("ext"), Some(&"pdf".to_string()));
+        assert_eq!(subset.get_tag("ext"), Some(&exact("pdf")));
         assert_eq!(subset.get_tag("type"), None);
     }
 
@@ -2022,7 +1976,7 @@ mod tests {
         let cap = CapUrn::from_string(&test_urn("ext=pdf")).unwrap();
         let wildcarded = cap.clone().with_wildcard_tag("ext");
 
-        assert_eq!(wildcarded.get_tag("ext"), Some(&"*".to_string()));
+        assert_eq!(wildcarded.get_tag("ext"), Some(&Constraint::Present));
 
         // Test wildcarding in/out
         let wildcard_in = cap.clone().with_wildcard_tag("in");
@@ -2067,9 +2021,16 @@ mod tests {
             CapUrn::from_string(&test_urn("url=https://example_org/api;path=/some/file")).unwrap();
         assert_eq!(
             cap.get_tag("url"),
-            Some(&"https://example_org/api".to_string())
+            Some(&exact("https://example_org/api"))
         );
-        assert_eq!(cap.get_tag("path"), Some(&"/some/file".to_string()));
+        assert_eq!(cap.get_tag("path"), Some(&exact("/some/file")));
+
+        // `=` still needs quotes; `,` stands bare
+        let cap = CapUrn::from_string(&test_urn(r#"list=a,b;url="https://example.org/a?b=c""#))
+            .unwrap();
+        assert_eq!(cap.get_tag("url"), Some(&exact("https://example.org/a?b=c")));
+        assert_eq!(cap.get_tag("list"), Some(&exact("a,b")));
+        assert!(CapUrn::from_string(&test_urn("url=https://example.org/a?b=c")).is_err());
     }
 
     // TEST031: Test wildcard rejected in keys but accepted in values
@@ -2080,7 +2041,7 @@ mod tests {
 
         // Wildcard should be accepted in values
         let cap = CapUrn::from_string(&test_urn("key=*")).unwrap();
-        assert_eq!(cap.get_tag("key"), Some(&"*".to_string()));
+        assert_eq!(cap.get_tag("key"), Some(&Constraint::Present));
     }
 
     // TEST032: Test duplicate keys are rejected with DuplicateKey error
@@ -2093,15 +2054,21 @@ mod tests {
         }
     }
 
-    // TEST033: Test pure numeric keys rejected, mixed alphanumeric allowed, numeric values allowed
+    // TEST033: Test keys that begin with a digit are rejected, digits after the first letter allowed, numeric values allowed
     #[test]
     fn test033_numeric_key_restriction() {
-        // Pure numeric keys should be rejected
-        assert!(CapUrn::from_string(&test_urn("123=value")).is_err());
+        // A key begins with a letter
+        assert!(matches!(
+            CapUrn::from_string(&test_urn("123=value")),
+            Err(CapUrnError::InvalidCharacter(_))
+        ));
+        assert!(matches!(
+            CapUrn::from_string(&test_urn("123key=value")),
+            Err(CapUrnError::InvalidCharacter(_))
+        ));
 
-        // Mixed alphanumeric keys should be allowed
+        // Digits after the first letter are allowed
         assert!(CapUrn::from_string(&test_urn("key123=value")).is_ok());
-        assert!(CapUrn::from_string(&test_urn("123key=value")).is_ok());
 
         // Pure numeric values should be allowed
         assert!(CapUrn::from_string(&test_urn("key=123")).is_ok());
@@ -2114,7 +2081,7 @@ mod tests {
         assert!(CapUrn::from_string(&test_urn("key=;other=value")).is_err());
     }
 
-    // TEST035: Test has_tag is case-sensitive for values, case-insensitive for keys, works for in/out
+    // TEST035: Test has_tag is case-sensitive for values, case-insensitive for keys, and reads cap-tags only
     #[test]
     fn test035_has_tag_case_sensitive() {
         let cap = CapUrn::from_string(&test_urn(r#"key="Value""#)).unwrap();
@@ -2130,9 +2097,11 @@ mod tests {
         assert!(cap.has_tag("KEY", "Value"));
         assert!(cap.has_tag("Key", "Value"));
 
-        // has_tag works for in/out
-        assert!(cap.has_tag("in", MEDIA_VOID));
-        assert!(cap.has_tag("out", MEDIA_OBJECT));
+        // The direction is not a cap-tag: it is read with in_spec/out_spec
+        assert!(!cap.has_tag("in", MEDIA_VOID));
+        assert!(!cap.has_tag("out", MEDIA_OBJECT));
+        assert_eq!(cap.in_spec(), MEDIA_VOID);
+        assert_eq!(cap.out_spec(), MEDIA_OBJECT);
     }
 
     // TEST036: Test with_tag preserves value case
@@ -2144,8 +2113,8 @@ mod tests {
             "declared".to_string(),
             BTreeMap::new(),
         )?
-        .with_tag("key".to_string(), "ValueWithCase".to_string())?;
-        assert_eq!(cap.get_tag("key"), Some(&"ValueWithCase".to_string()));
+        .with_tag("key", exact("ValueWithCase"))?;
+        assert_eq!(cap.get_tag("key"), Some(&exact("ValueWithCase")));
         Ok(())
     }
 
@@ -2158,7 +2127,7 @@ mod tests {
             "declared".to_string(),
             BTreeMap::new(),
         )?;
-        let result = cap.with_tag("key".to_string(), "".to_string());
+        let result = cap.with_tag("key", exact(""));
         assert!(result.is_err());
         Ok(())
     }
@@ -2176,22 +2145,23 @@ mod tests {
         assert!(quoted.to_string().contains("key=simple"));
     }
 
-    // TEST039: Test get_tag returns direction specs (in/out) with case-insensitive lookup
+    // TEST039: Test the direction is read with in_spec/out_spec, and get_tag reads cap-tags only
     #[test]
-    fn test039_get_tag_returns_direction_specs() {
+    fn test039_direction_specs_are_not_cap_tags() {
         let in_str = "media:string";
         let out_int = "media:integer";
         let cap = CapUrn::from_string(&format!("cap:in=\"{}\";test;out=\"{}\"", in_str, out_int))
             .unwrap();
 
-        // get_tag works for in/out
-        assert_eq!(cap.get_tag("in"), Some(&in_str.to_string()));
-        assert_eq!(cap.get_tag("out"), Some(&out_int.to_string()));
+        assert_eq!(cap.in_spec(), in_str);
+        assert_eq!(cap.out_spec(), out_int);
         assert!(cap.has_marker_tag("test"));
 
-        // Case-insensitive lookup for in/out
-        assert_eq!(cap.get_tag("IN"), Some(&in_str.to_string()));
-        assert_eq!(cap.get_tag("OUT"), Some(&out_int.to_string()));
+        // in, out and effect are not cap-tags, whatever their case
+        for key in ["in", "out", "effect", "IN", "OUT"] {
+            assert_eq!(cap.get_tag(key), None, "{}", key);
+        }
+        assert_eq!(cap.tags().len(), 1);
     }
 
     // ============================================================================
@@ -2461,7 +2431,7 @@ mod tests {
     // TEST891: Semantic direction specificity — more constraints in
     // either axis means a higher score under the truth-table-driven
     // sum. media: (top, no tags) scores 0; each marker tag scores 2;
-    // each exact tag scores 3.
+    // each exact tag scores 4.
     #[test]
     fn test891_direction_semantic_specificity() {
         let generic_cap = CapUrn::from_string(
@@ -3073,18 +3043,18 @@ mod tier_tests {
         let cap = CapUrn::from_string(r#"cap:in=media:void;out=media:void;test"#).unwrap();
         let same = cap
             .clone()
-            .with_tag("in".to_string(), "media:".to_string())
+            .with_tag("in", exact("media:"))
             .unwrap_err();
         assert!(matches!(same, CapUrnError::InvalidTagFormat(_)));
 
         let same2 = cap
             .clone()
-            .with_tag("out".to_string(), "media:".to_string())
+            .with_tag("out", exact("media:"))
             .unwrap_err();
         assert!(matches!(same2, CapUrnError::InvalidTagFormat(_)));
 
         let same3 = cap
-            .with_tag("effect".to_string(), "none".to_string())
+            .with_tag("effect", exact("none"))
             .unwrap_err();
         assert!(matches!(same3, CapUrnError::InvalidTagFormat(_)));
     }
@@ -3540,9 +3510,11 @@ mod tier_tests {
     // sum across all three axes, with no axis-specific carve-out:
     //
     //   ? or missing      -> 0   (no constraint)
-    //   !                 -> 1   (must-not-have)
+    //   x?=v              -> 1   (absent or not v)
     //   * (incl. marker)  -> 2   (must-have-any)
-    //   exact key=value   -> 3   (must-have-this-value)
+    //   x!=v              -> 3   (present and not v)
+    //   exact x=v         -> 4   (must-have-this-value)
+    //   !                 -> 5   (must-not-have)
     //
     // Each test exercises one row of the truth table on the y axis,
     // alone, so a regression in any single form fails its dedicated
@@ -3666,14 +3638,12 @@ mod tier_tests {
         }
     }
 
-    // TEST1831: ?x=v and x?=v both canonicalize to x?=v. The third
-    // hypothetical form `x=?v` is NOT recognized as a qualifier — a
-    // value starting with `?` is just an exact value beginning with
-    // a `?` character.
+    // TEST1831: ?x=v, x?=v and x=?v all canonicalize to x?=v; a quoted
+    // x="?v" is the exact value ?v.
     #[test]
     fn test1831_canonicalize_absent_or_not_value() {
         let canonical = "cap:x?=foo";
-        for input in ["cap:?x=foo", "cap:x?=foo"] {
+        for input in ["cap:?x=foo", "cap:x?=foo", "cap:x=?foo"] {
             let cap = CapUrn::from_string(input).unwrap();
             assert_eq!(
                 cap.to_string(),
@@ -3684,11 +3654,17 @@ mod tier_tests {
             );
         }
 
+        // A quoted value is literal: the exact value `?foo`.
+        let literal = CapUrn::from_string(r#"cap:x="?foo""#).unwrap();
+        assert_eq!(literal.to_string(), r#"cap:x="?foo""#);
+        assert_eq!(literal.get_tag("x"), Some(&exact("?foo")));
+    }
+
         // `x=?foo` is a plain exact tag whose value is the string
         // `?foo` — NOT a canonicalization alias.
         let exact = CapUrn::from_string("cap:x=?foo").unwrap();
         assert_eq!(exact.to_string(), "cap:x=?foo");
-        assert_eq!(exact.get_tag("x"), Some(&"?foo".to_string()));
+        assert_eq!(exact.get_tag("x"), Some(&exact("?foo")));
     }
 
     // TEST1832: x ≡ x=* both canonicalize to bare x.
@@ -3707,14 +3683,12 @@ mod tier_tests {
         }
     }
 
-    // TEST1833: !x=v and x!=v both canonicalize to x!=v. The third
-    // hypothetical form `x=!v` is NOT recognized as a qualifier — a
-    // value starting with `!` is just an exact value beginning with
-    // a `!` character.
+    // TEST1833: !x=v, x!=v and x=!v all canonicalize to x!=v; a quoted
+    // x="!v" is the exact value !v.
     #[test]
     fn test1833_canonicalize_present_not_value() {
         let canonical = "cap:x!=foo";
-        for input in ["cap:!x=foo", "cap:x!=foo"] {
+        for input in ["cap:!x=foo", "cap:x!=foo", "cap:x=!foo"] {
             let cap = CapUrn::from_string(input).unwrap();
             assert_eq!(
                 cap.to_string(),
@@ -3725,11 +3699,17 @@ mod tier_tests {
             );
         }
 
+        // A quoted value is literal: the exact value `!foo`.
+        let literal = CapUrn::from_string(r#"cap:x="!foo""#).unwrap();
+        assert_eq!(literal.to_string(), r#"cap:x="!foo""#);
+        assert_eq!(literal.get_tag("x"), Some(&exact("!foo")));
+    }
+
         // `x=!foo` is a plain exact tag whose value is the string
         // `!foo` — NOT a canonicalization alias.
         let exact = CapUrn::from_string("cap:x=!foo").unwrap();
         assert_eq!(exact.to_string(), "cap:x=!foo");
-        assert_eq!(exact.get_tag("x"), Some(&"!foo".to_string()));
+        assert_eq!(exact.get_tag("x"), Some(&exact("!foo")));
     }
 
     // TEST1834: x=v stays as x=v (the lone exact-value form).
