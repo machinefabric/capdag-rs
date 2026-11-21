@@ -596,12 +596,19 @@ pub async fn read_frame<R: AsyncRead + Unpin>(
     reader: &mut R,
     limits: &Limits,
 ) -> Result<Option<Frame>, CborError> {
-    // Read 4-byte length prefix
+    // Read the 4-byte length prefix. The stream may end cleanly only before
+    // its first byte: a stream that ends inside it ended part way through a
+    // frame.
     let mut len_buf = [0u8; 4];
-    match reader.read_exact(&mut len_buf).await {
-        Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(CborError::Io(e)),
+    let mut filled = 0;
+    while filled < len_buf.len() {
+        match reader.read(&mut len_buf[filled..]).await {
+            Ok(0) if filled == 0 => return Ok(None),
+            Ok(0) => return Err(CborError::UnexpectedEof),
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(CborError::Io(e)),
+        }
     }
 
     let length = u32::from_be_bytes(len_buf) as usize;
@@ -1683,7 +1690,9 @@ mod tests {
         assert!(result.is_none());
     }
 
-    // TEST222: Test read_frame handles truncated length prefix (fewer than 4 bytes available)
+    // TEST222: a stream that ends inside a length prefix ended part way through
+    // a frame: read_frame says so, and never reads it as the clean end of the
+    // stream.
     #[tokio::test]
     async fn test222_truncated_length_prefix() {
         let limits = Limits::default();
@@ -1693,13 +1702,26 @@ mod tests {
         client.write_all(&[0x00, 0x01]).await.unwrap();
         drop(client);
         let result = read_frame(&mut server, &limits).await;
-        // read_exact with insufficient data returns UnexpectedEof,
-        // which maps to Ok(None) for the clean-EOF path in read_frame.
-        match result {
-            Ok(None) => {} // clean EOF interpretation
-            Err(_) => {}   // partial read error interpretation
-            Ok(Some(_)) => panic!("must not produce a frame from truncated data"),
-        }
+        assert!(
+            matches!(result, Err(CborError::UnexpectedEof)),
+            "a cut length prefix is an unexpected end, got {result:?}"
+        );
+    }
+
+    // TEST13213: a stream that ends right after a whole length prefix, before
+    // any of the frame it announces, ended part way through that frame.
+    #[tokio::test]
+    async fn test13213_a_stream_ending_after_a_length_prefix_is_an_unexpected_end() {
+        let limits = Limits::default();
+        let (mut client, mut server) = tokio::io::duplex(1024);
+        use tokio::io::AsyncWriteExt;
+        client.write_all(&[0x00, 0x00, 0x00, 0x10]).await.unwrap();
+        drop(client);
+        let result = read_frame(&mut server, &limits).await;
+        assert!(
+            matches!(result, Err(CborError::UnexpectedEof)),
+            "a frame announced and never sent is an unexpected end, got {result:?}"
+        );
     }
 
     // TEST223: Test read_frame returns error on truncated frame body (length prefix says more bytes than available)
