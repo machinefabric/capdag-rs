@@ -441,75 +441,20 @@ impl CapUrn {
         }
     }
 
+    /// Refuse a cap that cannot be declared, as the model decides
+    /// (`Cap.illegal`): the bare top form, and an `effect=none` cap whose
+    /// input is not inside its output.
     fn validate_admissible(&self) -> Result<(), CapUrnError> {
-        let in_media = self.in_media_urn().map_err(|e| {
-            CapUrnError::InvalidInSpec(format!(
-                "Stored in_urn failed CapUrn admissibility validation: {}",
-                e
-            ))
-        })?;
-        let out_media = self.out_media_urn().map_err(|e| {
-            CapUrnError::InvalidOutSpec(format!(
-                "Stored out_urn failed CapUrn admissibility validation: {}",
-                e
-            ))
-        })?;
-
-        if in_media.is_top()
-            && out_media.is_top()
-            && self.tags.is_empty()
-            && self.effect() == CapEffect::Declared
-        {
-            return Err(CapUrnError::IllegalDeclaration(
+        match crate::formal::exec::cap_illegal(self.formal.clone()) {
+            None => Ok(()),
+            Some(crate::formal::Illegal::BareTop) => Err(CapUrnError::IllegalDeclaration(
                 "illegal bare top cap; use cap:effect=none for identity, or declare a non-vacuous input/output/effect/tag"
                     .to_string(),
-            ));
-        }
-
-        match self.effect() {
-            CapEffect::Declared | CapEffect::Any => Ok(()),
-            CapEffect::None => {
-                let sound = in_media.conforms_to(&out_media).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "failed to verify effect=none admissibility for in='{}' out='{}': {}",
-                        in_media, out_media, e
-                    ))
-                })?;
-                if !sound {
-                    return Err(CapUrnError::IllegalDeclaration(format!(
-                        "effect=none requires declared input '{}' to conform to declared output '{}'",
-                        in_media, out_media
-                    )));
-                }
-                Ok(())
-            }
-            CapEffect::Patch => {
-                let delta = out_media.delta_from(&in_media).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "effect=patch requires a computable declared media delta from '{}' to '{}': {}",
-                        in_media, out_media, e
-                    ))
-                })?;
-                let witness = in_media.apply_delta(&delta).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "effect=patch failed to apply declared media delta to input '{}': {}",
-                        in_media, e
-                    ))
-                })?;
-                let sound = witness.conforms_to(&out_media).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "failed to verify effect=patch admissibility for witness '{}' against declared output '{}': {}",
-                        witness, out_media, e
-                    ))
-                })?;
-                if !sound {
-                    return Err(CapUrnError::IllegalDeclaration(format!(
-                        "effect=patch witness '{}' does not conform to declared output '{}'",
-                        witness, out_media
-                    )));
-                }
-                Ok(())
-            }
+            )),
+            Some(crate::formal::Illegal::NoneNotInside) => Err(CapUrnError::IllegalDeclaration(format!(
+                "effect=none requires declared input '{}' to conform to declared output '{}'",
+                self.in_urn, self.out_urn
+            ))),
         }
     }
 

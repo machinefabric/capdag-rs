@@ -506,3 +506,145 @@ fn test12383_pool_limits_are_the_models() {
     }
     conclude("pool limit", table.len(), wrong);
 }
+
+/// A frame of a held request's script: its type by wire number, and a payload
+/// of `size` bytes. The REQ names its cap and has been given its routing id,
+/// as a switch hands it to its holds.
+fn held_frame(code: u64, size: u64) -> Frame {
+    let frame_type = FrameType::from_u8(code as u8)
+        .unwrap_or_else(|| panic!("wire number {code} names no frame type"));
+    let mut frame = Frame::new(frame_type, MessageId::Uint(1));
+    frame.payload = (size > 0).then(|| vec![0u8; size as usize]);
+    if frame_type == FrameType::Req {
+        frame.cap = Some("cap:op=a".to_string());
+        frame.routing_id = Some(MessageId::Uint(9));
+    }
+    frame
+}
+
+fn kept_size(frames: &[Frame]) -> (u64, u64) {
+    let bytes = frames.iter().map(|f| f.payload.as_ref().map_or(0, |p| p.len() as u64)).sum();
+    (frames.len() as u64, bytes)
+}
+
+// TEST7125: a relay switch's holds do what the model says to a peer request no
+// master serves: hold it exactly when the switch can bring a provider and the
+// request is not itself a replay; keep each frame the caller sends while the
+// bound allows, ending the request at the first frame that would exceed it or
+// at a cancel; and, when bringing the provider ends, replay exactly the frames
+// kept, REQ first, or fail the request with an ERR.
+#[test]
+fn test7125_peer_holds_follow_the_model() {
+    use crate::bifaci::peer_hold::{
+        holds, Arrived, Holds, PeerHoldBound, PeerRefusal, Released, Settlement, PEER_HOLD_OVERFLOW,
+    };
+    let table = rows("hold");
+    let rid = MessageId::Uint(1);
+    let refusal = || PeerRefusal {
+        code: "NO_PROVIDER".to_string(),
+        class: crate::failure::AttributionClass::Resource,
+        message: "no cartridge provides cap:op=a".to_string(),
+    };
+    let mut wrong = Vec::new();
+    'rows: for row in table {
+        match row["kind"].as_str().unwrap() {
+            "unrouted" => {
+                let held = holds(row["can_provide"].as_bool().unwrap(), row["replayed"].as_bool().unwrap());
+                if held != (text(&row["unrouted"]) == "hold") {
+                    wrong.push(format!("{row}: held {held}"));
+                }
+            }
+            "fate" => {
+                let bound = PeerHoldBound { frames: 4, bytes: 64, deadline: std::time::Duration::from_secs(1) };
+                let mut h = Holds::new(bound);
+                h.hold(0, held_frame(FrameType::Req as u64, 0)).expect("a bare REQ fits");
+                let settlement = match text(&row["bringing"]).as_str() {
+                    "provided" => Settlement::Provided,
+                    "refused" => Settlement::Refused(refusal()),
+                    "expired" => Settlement::Expired(refusal()),
+                    other => panic!("the model's table names no bringing '{other}'"),
+                };
+                let fate = match h.settle(&rid, settlement) {
+                    Some(Released::Replay(request)) if request.frames.len() == 1 => "replay",
+                    Some(Released::Fail(_, err)) if err.frame_type == FrameType::Err => "fail",
+                    _ => "neither",
+                };
+                if fate != text(&row["fate"]) || h.is_held(0, &rid) {
+                    wrong.push(format!("{row}: {fate}"));
+                }
+            }
+            "script" => {
+                let bound = PeerHoldBound {
+                    frames: uint(&row["bound"]["frames"]),
+                    bytes: uint(&row["bound"]["bytes"]),
+                    deadline: std::time::Duration::from_secs(1),
+                };
+                let mut h = Holds::new(bound);
+                let arrivals = row["arrivals"].as_array().unwrap();
+                let steps = row["steps"].as_array().unwrap();
+                let mut kept: (u64, u64) = (0, 0);
+                let mut ended: Option<String> = None;
+                for (i, (arrival, step)) in arrivals.iter().zip(steps).enumerate() {
+                    let frame = held_frame(uint(&arrival["frame"]), uint(&arrival["size"]));
+                    let got = if i == 0 {
+                        match h.hold(0, frame) {
+                            Ok(()) => "kept".to_string(),
+                            Err(err) if err.frame_type == FrameType::Err => "overflow".to_string(),
+                            Err(_) => "an ERR that is not an ERR".to_string(),
+                        }
+                    } else {
+                        match h.arrive(frame) {
+                            Arrived::Kept => "kept".to_string(),
+                            Arrived::Overflowed(request, refusal) => {
+                                if kept_size(&request.frames) != kept || refusal.code != PEER_HOLD_OVERFLOW {
+                                    format!("overflow keeping {:?}", kept_size(&request.frames))
+                                } else {
+                                    "overflow".to_string()
+                                }
+                            }
+                            Arrived::Cancelled(request, err) => {
+                                if kept_size(&request.frames) != kept || err.frame_type != FrameType::Err {
+                                    format!("cancel keeping {:?}", kept_size(&request.frames))
+                                } else {
+                                    "cancel".to_string()
+                                }
+                            }
+                        }
+                    };
+                    let expected = match step.as_str() {
+                        Some(end) => {
+                            ended = Some(end.to_string());
+                            end.to_string()
+                        }
+                        None => {
+                            kept = (uint(&step["kept"]["frames"]), uint(&step["kept"]["bytes"]));
+                            "kept".to_string()
+                        }
+                    };
+                    if got != expected {
+                        wrong.push(format!("{row}: step {i} {got}"));
+                        continue 'rows;
+                    }
+                }
+                match ended {
+                    Some(_) => {
+                        if h.is_held(0, &rid) {
+                            wrong.push(format!("{row}: still held after it ended"));
+                        }
+                    }
+                    None => match h.settle(&rid, Settlement::Provided) {
+                        Some(Released::Replay(request))
+                            if kept_size(&request.frames) == kept
+                                && request.frames[0].frame_type == FrameType::Req => {}
+                        Some(Released::Replay(request)) => {
+                            wrong.push(format!("{row}: replays {:?}", kept_size(&request.frames)))
+                        }
+                        _ => wrong.push(format!("{row}: not replayed")),
+                    },
+                }
+            }
+            other => panic!("the model's table names no hold row '{other}'"),
+        }
+    }
+    conclude("hold", table.len(), wrong);
+}
