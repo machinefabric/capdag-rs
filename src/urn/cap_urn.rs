@@ -1712,6 +1712,11 @@ mod tests {
             MEDIA_VOID, MEDIA_OBJECT
         ))
         .is_err());
+        // A URN of another prefix is no cap
+        assert_eq!(
+            CapUrn::from_string("media:generate"),
+            Err(CapUrnError::MissingCapPrefix)
+        );
 
         // Valid cap: prefix should work
         let cap = CapUrn::from_string(&test_urn("generate;ext=pdf")).unwrap();
