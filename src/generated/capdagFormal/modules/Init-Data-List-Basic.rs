@@ -139,6 +139,22 @@ pub(crate) unsafe extern "C" fn l_List_dinstDecidablePairwise_d__redArg(x_1: Obj
     }
 }
 
+// Lean: List.isEmpty._redArg
+// Compiled from: List.isEmpty
+// Source: <lean>/Init/Data/List/Basic.lean:763:1
+pub(crate) unsafe extern "C" fn l_List_disEmpty_d__redArg(x_1: Obj) -> u8 {
+    match rt::lean_obj_tag(x_1) {
+        0 => {
+            let x_2: u8 = 1u8;
+            return x_2;
+        }
+        _ => {
+            let x_3: u8 = 0u8;
+            return x_3;
+        }
+    }
+}
+
 // Lean: List.range
 // Source: <lean>/Init/Data/List/Basic.lean:2092:1
 pub(crate) unsafe extern "C" fn l_List_drange(x_1: Obj) -> Obj {

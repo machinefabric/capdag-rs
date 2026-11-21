@@ -192,6 +192,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Illegal",
+    "kind": "type",
+    "rust_path": "Illegal",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Run.Control.RunAct",
     "kind": "type",
     "rust_path": "run::control::RunAct",
@@ -514,6 +520,12 @@
     "kind": "function",
     "rust_path": "exec::accepts",
     "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.capIllegal",
+    "kind": "function",
+    "rust_path": "exec::cap_illegal",
+    "renamed": true
   },
   {
     "lean_name": "CapDAG.Exec.comparable",
@@ -1587,6 +1599,18 @@
     "lean_name": "CapDAG.Grade.none",
     "kind": "constructor",
     "rust_path": "Grade::None",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Illegal.bareTop",
+    "kind": "constructor",
+    "rust_path": "Illegal::BareTop",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Illegal.noneNotInside",
+    "kind": "constructor",
+    "rust_path": "Illegal::NoneNotInside",
     "renamed": true
   },
   {
