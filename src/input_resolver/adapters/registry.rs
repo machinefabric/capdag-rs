@@ -134,7 +134,7 @@ impl MediaAdapterRegistry {
                 let dup = self.registered_adapters.iter().any(|existing| {
                     existing.cartridge_id == cartridge_id
                         && existing.group_name == group_name
-                        && existing.media_urn.is_equivalent(urn).unwrap_or(false)
+                        && existing.media_urn.is_equivalent(urn)
                 });
                 if dup {
                     tracing::warn!(
@@ -158,9 +158,9 @@ impl MediaAdapterRegistry {
             }
             for existing in &self.registered_adapters {
                 let new_conforms_to_existing =
-                    new_urn.conforms_to(&existing.media_urn).unwrap_or(false);
+                    new_urn.conforms_to(&existing.media_urn);
                 let existing_conforms_to_new =
-                    existing.media_urn.conforms_to(new_urn).unwrap_or(false);
+                    existing.media_urn.conforms_to(new_urn);
 
                 if new_conforms_to_existing || existing_conforms_to_new {
                     return Err(AdapterRegistrationError {
@@ -180,8 +180,8 @@ impl MediaAdapterRegistry {
                 let (a_urn, a_str) = &new_adapters[i];
                 let (b_urn, b_str) = &new_adapters[j];
 
-                let a_conforms_to_b = a_urn.conforms_to(b_urn).unwrap_or(false);
-                let b_conforms_to_a = b_urn.conforms_to(a_urn).unwrap_or(false);
+                let a_conforms_to_b = a_urn.conforms_to(b_urn);
+                let b_conforms_to_a = b_urn.conforms_to(a_urn);
 
                 if a_conforms_to_b || b_conforms_to_a {
                     return Err(AdapterRegistrationError {
@@ -252,7 +252,7 @@ impl MediaAdapterRegistry {
             // Check if any candidate conforms to this registered adapter's URN
             let matches = candidates
                 .iter()
-                .any(|c| c.conforms_to(&registered.media_urn).unwrap_or(false));
+                .any(|c| c.conforms_to(&registered.media_urn));
 
             if matches {
                 results.push((
@@ -272,7 +272,7 @@ impl MediaAdapterRegistry {
         Ok(self.registered_adapters.iter().any(|registered| {
             candidates
                 .iter()
-                .any(|c| c.conforms_to(&registered.media_urn).unwrap_or(false))
+                .any(|c| c.conforms_to(&registered.media_urn))
         }))
     }
 }

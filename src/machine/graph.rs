@@ -153,7 +153,6 @@ impl EdgeAssignmentBinding {
         if !self
             .cap_arg_media_urn
             .is_equivalent(&other.cap_arg_media_urn)
-            .unwrap_or(false)
         {
             return false;
         }
@@ -229,7 +228,7 @@ impl MachineEdge {
         let out = self.cap_urn.out_media_urn().ok()?;
         self.outputs
             .iter()
-            .find(|o| o.output_media_urn.is_equivalent(&out).unwrap_or(false))
+            .find(|o| o.output_media_urn.is_equivalent(&out))
             .map(|o| o.node)
     }
 
@@ -278,7 +277,6 @@ impl MachineEdge {
             if !self_o
                 .output_media_urn
                 .is_equivalent(&other_o.output_media_urn)
-                .unwrap_or(false)
             {
                 return false;
             }
@@ -507,7 +505,6 @@ impl NodeBijection {
         // to each other would carry different types.
         if !self_strand.nodes[self_idx]
             .is_equivalent(&other_strand.nodes[other_idx])
-            .unwrap_or(false)
         {
             return false;
         }

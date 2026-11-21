@@ -35,18 +35,13 @@ fn conforms(concrete: &str, pattern: &str) -> bool {
         .unwrap_or_else(|e| panic!("BUG: concrete URN {:?} unparseable: {}", concrete, e));
     let p = MediaUrn::from_string(pattern)
         .unwrap_or_else(|e| panic!("BUG: pattern URN {:?} unparseable: {}", pattern, e));
-    c.conforms_to(&p).unwrap_or_else(|e| {
-        panic!(
-            "conforms_to failed for ({:?},{:?}): {}",
-            concrete, pattern, e
-        )
-    })
+    c.conforms_to(&p)
 }
 
 fn equivalent(a: &str, b: &str) -> bool {
     let ua = MediaUrn::from_string(a).unwrap();
     let ub = MediaUrn::from_string(b).unwrap();
-    ua.is_equivalent(&ub).unwrap()
+    ua.is_equivalent(&ub)
 }
 
 // --- Rich cap-arg URNs from the LLM text-generation cap TOMLs -----------------

@@ -2089,9 +2089,9 @@ mod tests {
         };
         let (_, graph) = build_editor_model(&ast, &HashMap::new(), &HashMap::new(), &definitions);
         let urn = |name: &str| node(&graph, name).linked_media_urn.map(|u| MediaUrn::from_string(&u).unwrap());
-        assert!(urn("n0").unwrap().is_equivalent(&MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap()).unwrap());
-        assert!(urn("n1").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=png;image").unwrap()).unwrap());
-        assert!(urn("n2").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap()).unwrap());
+        assert!(urn("n0").unwrap().is_equivalent(&MediaUrn::from_string("media:enc=utf8;ext=txt;plain-text").unwrap()));
+        assert!(urn("n1").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=png;image").unwrap()));
+        assert!(urn("n2").unwrap().is_equivalent(&MediaUrn::from_string("media:ext=jpeg;image").unwrap()));
         assert_eq!(node(&graph, "n1").is_sequence, Some(true), "a named target takes its output's cardinality");
         let jpeg = graph
             .iter()

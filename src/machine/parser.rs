@@ -664,7 +664,7 @@ fn include_machines(
             }
             if let RawValue::Node(node) = &member.value {
                 let source = &node_media[node];
-                if !source.conforms_to(accepts).unwrap_or(false) {
+                if !source.conforms_to(accepts) {
                     return Err(MachineAbstractionError::SourceDoesNotConformToMachineInput {
                         position,
                         alias: alias.clone(),
@@ -821,7 +821,7 @@ fn give(
             node_media.insert(node.to_string(), urn);
         }
         Some(existing) => {
-            if !existing.is_comparable(&urn).unwrap_or(false) {
+            if !existing.is_comparable(&urn) {
                 return Err(MachineAbstractionError::NodeMediaConflict {
                     node: node.to_string(),
                     first: existing.to_string(),
@@ -879,7 +879,7 @@ fn type_nodes(
             details: format!("in= spec: {}", e),
         })?;
         let void = media(crate::urn::media_urn::MEDIA_VOID);
-        Ok((!in_media.is_equivalent(&void).unwrap_or(false)).then_some(in_media))
+        Ok((!in_media.is_equivalent(&void)).then_some(in_media))
     };
 
     let mut node_media: HashMap<String, MediaUrn> = HashMap::new();
@@ -1014,7 +1014,7 @@ fn type_nodes(
             ([], Some(in_media)) if !main_named => {
                 let on_chain: Vec<&String> = unnamed
                     .iter()
-                    .filter(|node| node_media[**node].is_comparable(in_media).unwrap_or(false))
+                    .filter(|node| node_media[**node].is_comparable(in_media))
                     .copied()
                     .collect();
                 if let [node] = on_chain.as_slice() {
