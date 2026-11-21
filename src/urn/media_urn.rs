@@ -556,15 +556,19 @@ impl MediaUrn {
 
     /// Check if this media URN (instance) satisfies the pattern's constraints.
     /// Equivalent to `pattern.accepts(self)`.
-    pub fn conforms_to(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.conforms_to(&pattern.0).map_err(MediaUrnError::Match)
+    pub fn conforms_to(&self, pattern: &MediaUrn) -> bool {
+        self.0
+            .conforms_to(&pattern.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Whether this media type and `other` COULD describe the same value:
     /// not a guarantee (`conforms_to`), and not excluded. `media:ext` meets
     /// `media:document;ext=pdf`; `media:document;ext=pdf` does not meet `media:ext=png`.
-    pub fn meets(&self, other: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.meets(&other.0).map_err(MediaUrnError::Match)
+    pub fn meets(&self, other: &MediaUrn) -> bool {
+        self.0
+            .meets(&other.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Whether a VALUE whose media this is satisfies the type `pattern`.
@@ -575,39 +579,50 @@ impl MediaUrn {
     /// satisfies `media:document;ext=pdf;!compressed`, which the TYPE `media:document;ext=pdf`
     /// does not conform to. Use this where the left side is the media of
     /// actual data — a stream that arrived, an output that was produced.
-    pub fn satisfies(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.satisfies(&pattern.0).map_err(MediaUrnError::Match)
+    pub fn satisfies(&self, pattern: &MediaUrn) -> bool {
+        self.0
+            .satisfies(&pattern.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Whether a value whose media this is COULD satisfy `pattern`.
-    pub fn may_satisfy(&self, pattern: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.may_satisfy(&pattern.0).map_err(MediaUrnError::Match)
+    pub fn may_satisfy(&self, pattern: &MediaUrn) -> bool {
+        self.0
+            .may_satisfy(&pattern.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Check if this media URN (pattern) accepts the given instance.
     /// Equivalent to `instance.conforms_to(self)`.
-    pub fn accepts(&self, instance: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.accepts(&instance.0).map_err(MediaUrnError::Match)
+    pub fn accepts(&self, instance: &MediaUrn) -> bool {
+        self.0
+            .accepts(&instance.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Check if two media URNs have the exact same tag set (order-independent).
     /// Equivalent to `self.accepts(other) && other.accepts(self)`.
-    pub fn is_equivalent(&self, other: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.is_equivalent(&other.0).map_err(MediaUrnError::Match)
+    pub fn is_equivalent(&self, other: &MediaUrn) -> bool {
+        self.0
+            .is_equivalent(&other.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
-    /// String variant of `is_equivalent`.
+    /// String variant of `is_equivalent`. Fails only when `other_str` does
+    /// not parse as a media URN.
     pub fn is_equivalent_str(&self, other_str: &str) -> Result<bool, MediaUrnError> {
         let other = MediaUrn::from_string(other_str)?;
-        self.is_equivalent(&other)
+        Ok(self.is_equivalent(&other))
     }
 
     /// Check if two media URNs are on the same specialization chain.
     /// Equivalent to `self.accepts(other) || other.accepts(self)`.
     ///
     /// Use this for discovery/grouping, NOT for dispatch.
-    pub fn is_comparable(&self, other: &MediaUrn) -> Result<bool, MediaUrnError> {
-        self.0.is_comparable(&other.0).map_err(MediaUrnError::Match)
+    pub fn is_comparable(&self, other: &MediaUrn) -> bool {
+        self.0
+            .is_comparable(&other.0)
+            .expect("every MediaUrn has the media prefix")
     }
 
     /// Get the specificity of this media URN
@@ -790,8 +805,6 @@ pub enum MediaUrnError {
     InvalidPrefix { expected: String, actual: String },
     /// Error parsing the underlying tagged URN (includes whitespace/empty validation)
     Parse(TaggedUrnError),
-    /// Error during matching operation
-    Match(TaggedUrnError),
     /// `media:void` was combined with one or more other tags. The unit
     /// type is atomic — there is no lattice underneath it. Reasons for
     /// "why void was used" belong on the cap URN's non-directional
@@ -810,7 +823,6 @@ impl fmt::Display for MediaUrnError {
                 )
             }
             MediaUrnError::Parse(e) => write!(f, "failed to parse media URN: {}", e),
-            MediaUrnError::Match(e) => write!(f, "media URN match error: {}", e),
             MediaUrnError::VoidNotAtomic { extra_tags } => write!(
                 f,
                 "media:void is atomic and cannot be refined; got extra tag(s): {}. \

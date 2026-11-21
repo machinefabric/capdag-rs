@@ -232,7 +232,8 @@ impl MediaAdapterRegistry {
     /// 1. Queries FabricRegistry for the extension's file media types
     /// 2. For each candidate, finds registered adapters where the candidate
     ///    `conforms_to` the registered adapter URN
-    /// 3. Returns `(cartridge_id, adapter_media_urn)` pairs
+    /// 3. Returns `(cartridge_id, adapter_media_urn)` pairs, one per matching
+    ///    adapter: a cartridge appears once per adapter it registered
     pub async fn find_adapters_for_extension(
         &self,
         ext: &str,
@@ -241,13 +242,11 @@ impl MediaAdapterRegistry {
         Ok(self.adapters_for_candidates(&candidates))
     }
 
-    /// The registered adapters some of these candidates conform to, one per
-    /// cartridge, as `(cartridge_id, adapter_media_urn)` pairs.
+    /// Every registered adapter some of these candidates conform to, as
+    /// `(cartridge_id, adapter_media_urn)` pairs, in registration order. A
+    /// cartridge appears once per adapter; detection asks it once.
     pub fn adapters_for_candidates(&self, candidates: &[MediaUrn]) -> Vec<(String, MediaUrn)> {
-
         let mut results: Vec<(String, MediaUrn)> = Vec::new();
-        let mut seen_cartridges: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
 
         for registered in &self.registered_adapters {
             // Check if any candidate conforms to this registered adapter's URN
@@ -255,7 +254,7 @@ impl MediaAdapterRegistry {
                 .iter()
                 .any(|c| c.conforms_to(&registered.media_urn).unwrap_or(false));
 
-            if matches && seen_cartridges.insert(registered.cartridge_id.clone()) {
+            if matches {
                 results.push((
                     registered.cartridge_id.clone(),
                     registered.media_urn.clone(),
@@ -484,6 +483,39 @@ mod tests {
         assert!(
             !registry.has_adapter_for_extension("xyz_unknown").await.unwrap(),
             "Unknown extension must return false"
+        );
+    }
+
+    // TEST1318: A cartridge with two incomparable adapters covering candidates
+    // of one extension is returned once per adapter, so detection hands the
+    // model every adapter that owns a candidate.
+    #[test]
+    fn test1318_adapters_for_candidates_returns_every_owning_adapter() {
+        let (fabric_registry, _temp) = create_test_registry();
+        let mut registry = MediaAdapterRegistry::new(fabric_registry);
+
+        let record = "media:enc=utf8;ext=json;fmt=json;record";
+        let list = "media:enc=utf8;ext=json;fmt=json;list";
+        registry
+            .register_cap_group("g", &[record.to_string(), list.to_string()], "datacartridge")
+            .expect("two incomparable adapters register");
+
+        let candidates = [
+            MediaUrn::from_string(record).unwrap(),
+            MediaUrn::from_string(list).unwrap(),
+        ];
+        let pairs: Vec<(String, String)> = registry
+            .adapters_for_candidates(&candidates)
+            .into_iter()
+            .map(|(cartridge, urn)| (cartridge, urn.to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("datacartridge".to_string(), MediaUrn::from_string(record).unwrap().to_string()),
+                ("datacartridge".to_string(), MediaUrn::from_string(list).unwrap().to_string()),
+            ],
+            "both adapters of the cartridge must be returned, in registration order"
         );
     }
 }

@@ -215,7 +215,7 @@ mod tests {
     }
 
     fn same(a: &str, b: &str) -> bool {
-        MediaUrn::from_string(a).unwrap().is_equivalent(&MediaUrn::from_string(b).unwrap()).unwrap()
+        MediaUrn::from_string(a).unwrap().is_equivalent(&MediaUrn::from_string(b).unwrap())
     }
 
     // TEST12755: the media a node holds in a run, by what the node is. A
@@ -231,7 +231,7 @@ mod tests {
         // route's main output: the declared out= refined by the page it was given.
         let routed = media(&plan, "route");
         assert!(
-            MediaUrn::from_string(&routed).unwrap().conforms_to(&MediaUrn::from_string("media:textable").unwrap()).unwrap(),
+            MediaUrn::from_string(&routed).unwrap().conforms_to(&MediaUrn::from_string("media:textable").unwrap()),
             "{routed}"
         );
         // The output that carries the input holds the page, not `media:rejected`.

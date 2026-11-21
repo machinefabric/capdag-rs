@@ -469,13 +469,7 @@ impl CapUrn {
         match self.effect() {
             CapEffect::Declared | CapEffect::Any => Ok(()),
             CapEffect::None => {
-                let sound = in_media.conforms_to(&out_media).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "failed to verify effect=none admissibility for in='{}' out='{}': {}",
-                        in_media, out_media, e
-                    ))
-                })?;
-                if !sound {
+                if !in_media.conforms_to(&out_media) {
                     return Err(CapUrnError::IllegalDeclaration(format!(
                         "effect=none requires declared input '{}' to conform to declared output '{}'",
                         in_media, out_media
@@ -496,13 +490,7 @@ impl CapUrn {
                         in_media, e
                     ))
                 })?;
-                let sound = witness.conforms_to(&out_media).map_err(|e| {
-                    CapUrnError::IllegalDeclaration(format!(
-                        "failed to verify effect=patch admissibility for witness '{}' against declared output '{}': {}",
-                        witness, out_media, e
-                    ))
-                })?;
-                if !sound {
+                if !witness.conforms_to(&out_media) {
                     return Err(CapUrnError::IllegalDeclaration(format!(
                         "effect=patch witness '{}' does not conform to declared output '{}'",
                         witness, out_media
@@ -895,12 +883,7 @@ impl CapUrn {
             ))
         })?;
 
-        if !runtime_input.satisfies(&declared_in).map_err(|e| {
-            CapUrnError::InvalidEffectApplication(format!(
-                "Failed to compare runtime input '{}' against declared input '{}': {}",
-                runtime_input, declared_in, e
-            ))
-        })? {
+        if !runtime_input.satisfies(&declared_in) {
             return Err(CapUrnError::InvalidEffectApplication(format!(
                 "Runtime input '{}' does not conform to declared input '{}'",
                 runtime_input, declared_in
@@ -931,12 +914,7 @@ impl CapUrn {
             }
         };
 
-        if !runtime_out.satisfies(&declared_out).map_err(|e| {
-            CapUrnError::InvalidEffectApplication(format!(
-                "Failed to validate runtime output '{}' against declared output '{}': {}",
-                runtime_out, declared_out, e
-            ))
-        })? {
+        if !runtime_out.satisfies(&declared_out) {
             return Err(CapUrnError::InvalidEffectApplication(format!(
                 "Inferred runtime output '{}' does not conform to declared output '{}'",
                 runtime_out, declared_out
@@ -991,20 +969,8 @@ impl CapUrn {
     ) -> Result<bool, CapUrnError> {
         let inferred = self.apply_to_runtime_input_media(runtime_input)?;
         match self.effect() {
-            CapEffect::None | CapEffect::Patch => {
-                runtime_output.is_equivalent(&inferred).map_err(|e| {
-                    CapUrnError::InvalidEffectApplication(format!(
-                        "Failed to compare emitted output '{}' against inferred output '{}': {}",
-                        runtime_output, inferred, e
-                    ))
-                })
-            }
-            CapEffect::Declared => runtime_output.satisfies(&inferred).map_err(|e| {
-                CapUrnError::InvalidEffectApplication(format!(
-                    "Failed to compare emitted output '{}' against declared output '{}': {}",
-                    runtime_output, inferred, e
-                ))
-            }),
+            CapEffect::None | CapEffect::Patch => Ok(runtime_output.is_equivalent(&inferred)),
+            CapEffect::Declared => Ok(runtime_output.satisfies(&inferred)),
             CapEffect::Any => Err(CapUrnError::InvalidEffectApplication(
                 "Cannot audit an emission against an unconstrained effect request".to_string(),
             )),

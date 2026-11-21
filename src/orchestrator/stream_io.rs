@@ -197,7 +197,7 @@ impl ResponseContract {
         })?;
         let void = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
             .expect("MEDIA_VOID is a valid MediaUrn");
-        if out.is_equivalent(&void).unwrap_or(false) {
+        if out.is_equivalent(&void) {
             return Ok(Self { outputs: Vec::new() });
         }
         Ok(Self {
@@ -346,7 +346,7 @@ impl ResponseAudit {
                     .contract
                     .outputs
                     .iter()
-                    .position(|o| o.urn.is_equivalent(&named_urn).unwrap_or(false))
+                    .position(|o| o.urn.is_equivalent(&named_urn))
                     .ok_or_else(|| {
                         self.breach(format!(
                             "a response stream names output '{}', which the cap does not declare",
@@ -377,12 +377,6 @@ impl ResponseAudit {
             } else {
                 (&output.urn, emitted.satisfies(&output.urn))
             };
-            let holds = holds.map_err(|e| {
-                StreamIoError::Protocol(format!(
-                    "output audit for cap '{}' could not run: {}",
-                    self.cap_urn_str, e
-                ))
-            })?;
             if !holds {
                 return Err(self.breach(format!(
                     "output '{}' carries '{}', expected '{}'{}",
@@ -2691,13 +2685,13 @@ mod tests {
         assert!(!by_name("fit").optional && !by_name("residuals").optional);
         assert!(by_name("note").optional && by_name("rejected").optional);
         assert!(by_name("rejected").carries_input && !by_name("note").carries_input);
-        assert!(by_name("residuals").urn.is_equivalent(&crate::MediaUrn::from_string(RESIDUALS).unwrap()).unwrap());
+        assert!(by_name("residuals").urn.is_equivalent(&crate::MediaUrn::from_string(RESIDUALS).unwrap()));
 
         let one = ResponseContract::main_only(&regress_urn(), STREAMING_SEQUENCE_CONTRACT).unwrap();
         assert_eq!(one.outputs().len(), 1);
         assert!(one.outputs()[0].main && !one.outputs()[0].optional);
         assert_eq!(one.main_shape(), STREAMING_SEQUENCE_CONTRACT);
-        assert!(one.outputs()[0].urn.is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
+        assert!(one.outputs()[0].urn.is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()));
 
         let none = ResponseContract::main_only(r#"cap:in="media:enc=utf8";sink;out=media:void"#, SCALAR_CONTRACT).unwrap();
         assert!(none.outputs().is_empty() && none.main().is_none());
@@ -2784,7 +2778,7 @@ mod tests {
         match audit().audit_frame(&response_start(&rid, "a", FIT, "media:enc=utf8;fmt=json;record", false)) {
             Err(StreamIoError::EffectContract { expected, actual, .. }) => {
                 assert_eq!(actual, "media:enc=utf8;fmt=json;record");
-                assert!(crate::MediaUrn::from_string(&expected).unwrap().is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()).unwrap());
+                assert!(crate::MediaUrn::from_string(&expected).unwrap().is_equivalent(&crate::MediaUrn::from_string(FIT).unwrap()));
             }
             other => panic!("expected EffectContract, got {:?}", other.map(|o| o.name.clone())),
         }
@@ -3008,7 +3002,7 @@ mod tests {
             .unwrap()
             .outputs()
             .iter()
-            .position(|output| output.urn.is_equivalent(&urn).unwrap())
+            .position(|output| output.urn.is_equivalent(&urn))
             .unwrap()
     }
 

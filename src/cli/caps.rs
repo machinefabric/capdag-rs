@@ -51,12 +51,12 @@ pub async fn caps(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         let input = cap.urn.in_media_urn().ok();
         let output = cap.urn.out_media_urn().ok();
         if let (Some(wanted), Some(input)) = (&takes, &input) {
-            if !wanted.conforms_to(input).unwrap_or(false) {
+            if !wanted.conforms_to(input) {
                 continue;
             }
         }
         if let (Some(wanted), Some(output)) = (&gives, &output) {
-            if !output.conforms_to(wanted).unwrap_or(false) {
+            if !output.conforms_to(wanted) {
                 continue;
             }
         }

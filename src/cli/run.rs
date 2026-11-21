@@ -733,7 +733,7 @@ async fn plan_machine_runs(
     let closest = |media: &MediaUrn, what: &str, file: Option<&Path>| -> CliResult<String> {
         let mut best: Vec<(&crate::orchestrator::machine_plan::MachineAnchor, i64)> = Vec::new();
         for input in machine_inputs.iter().filter(|i| !named.contains(&i.name)) {
-            if !media.conforms_to(&input.media_urn).unwrap_or(false) {
+            if !media.conforms_to(&input.media_urn) {
                 continue;
             }
             let distance = media.specificity() as i64 - input.media_urn.specificity() as i64;
