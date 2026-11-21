@@ -251,7 +251,7 @@ fn aliased_strand_node_names(
         let media = strand.node_urn(id as crate::machine::NodeId);
         let base = registry
             .display_alias_for_urn(&media.to_string())
-            .or_else(|| media.get_tag("ext").map(str::to_string))
+            .or_else(|| media.exact_value("ext").map(str::to_string))
             .map(|name| node_identifier(&name))
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "value".to_string());
