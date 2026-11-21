@@ -788,12 +788,13 @@ async fn test12801_a_retryable_failure_is_attempted_again() {
     assert!(error.failure_reason().contains("attempt 1"), "it was asked once: {error}");
 }
 
-/// Run the cartridge's `test-die` the way `how` says, and the reason the run
-/// failed with. The cartridge says on stderr that it is dying, writes the start
-/// of a frame, and dies before the rest of it. The reason names the cartridge,
-/// the read error and what it wrote on stderr, and never calls it still running.
+/// Run the dying cartridge's `test-die` the way `how` says, and the reason the
+/// run failed with. The cartridge says on stderr that it is dying, writes the
+/// start of a frame, and dies before the rest of it. The reason names the
+/// cartridge, the read error and what it wrote on stderr, and never calls it
+/// still running.
 async fn die(how: &str) -> capdag::ExecutionError {
-    let machines = Machines::new(TAG);
+    let machines = Machines::with_cartridges(TAG, vec![support::dyingcartridge_bin(TAG)]);
     let notation = format!("[die {DIE}][(a, how=\"{how}\") -> die -> out]");
     let error = machines
         .run(&notation, &[("a", Given::One(b"a"))])
@@ -802,7 +803,7 @@ async fn die(how: &str) -> capdag::ExecutionError {
         .expect("a cartridge that dies mid-frame fails its step");
     assert_eq!(error.failure_code(), Some("CARTRIDGE_DIED"), "{error}");
     let reason = error.failure_reason();
-    assert!(reason.contains("testcartridge"), "the death names the cartridge: {reason}");
+    assert!(reason.contains("dyingcartridge"), "the death names the cartridge: {reason}");
     assert!(
         reason.contains("reading its output failed: Unexpected end of stream"),
         "the death names the read error the host saw: {reason}"
@@ -813,7 +814,7 @@ async fn die(how: &str) -> capdag::ExecutionError {
         .map(|(_, stderr)| stderr)
         .unwrap_or_else(|| panic!("the death carries the cartridge's stderr: {reason}"));
     assert!(
-        stderr.lines().any(|line| line == format!("test-die is dying: {how}")),
+        stderr.lines().any(|line| line == format!("dyingcartridge is dying: {how}")),
         "the cartridge's last words are in it: {reason}"
     );
     error

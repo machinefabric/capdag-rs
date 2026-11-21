@@ -172,25 +172,46 @@ pub fn testcartridge_bin(tag: &str) -> PathBuf {
 // Running machines on the test cartridge
 // =============================================================================
 
-/// The cap definitions the test cartridge serves: its own manifest, as its
-/// binary prints it. The tests resolve machines against exactly what the
-/// cartridge they run says of itself — a registry built by hand beside it
-/// drifts from it.
+/// The dying cartridge binary: the test cartridge crate's second binary, which
+/// speaks the protocol itself so that it can die part way through a frame.
+/// Built by the same cargo build as the test cartridge.
 #[allow(dead_code)]
-pub fn testcartridge_caps(tag: &str) -> Vec<capdag::Cap> {
-    let bin = testcartridge_bin(tag);
-    let output = std::process::Command::new(&bin)
+pub fn dyingcartridge_bin(tag: &str) -> PathBuf {
+    let bin_path = testcartridge_bin(tag)
+        .with_file_name(format!("dyingcartridge{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        bin_path.exists(),
+        "dyingcartridge binary not found at {:?} after a successful build of its crate",
+        bin_path
+    );
+    bin_path
+}
+
+/// The cap definitions a cartridge binary serves: its own manifest, as it
+/// prints it. The tests resolve machines against exactly what the cartridges
+/// they run say of themselves — a registry built by hand beside them drifts
+/// from them.
+#[allow(dead_code)]
+pub fn cartridge_caps(bin: &Path) -> Vec<capdag::Cap> {
+    let output = std::process::Command::new(bin)
         .arg("manifest")
         .output()
-        .expect("Failed to run the test cartridge for its manifest");
+        .unwrap_or_else(|e| panic!("Failed to run {} for its manifest: {e}", bin.display()));
     assert!(
         output.status.success(),
-        "`testcartridge manifest` failed: {}",
+        "`{} manifest` failed: {}",
+        bin.display(),
         String::from_utf8_lossy(&output.stderr)
     );
     let manifest = capdag::CapManifest::from_advertised(&output.stdout)
-        .expect("the test cartridge prints a manifest of valid cap definitions");
+        .unwrap_or_else(|e| panic!("{} prints a manifest of invalid cap definitions: {e}", bin.display()));
     manifest.all_caps().into_iter().cloned().collect()
+}
+
+/// The cap definitions the test cartridge serves.
+#[allow(dead_code)]
+pub fn testcartridge_caps(tag: &str) -> Vec<capdag::Cap> {
+    cartridge_caps(&testcartridge_bin(tag))
 }
 
 /// A fabric registry holding the test cartridge's caps, plus `extra` — and a
@@ -291,6 +312,8 @@ pub struct Machines {
     pub logs: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String)>>>,
     /// Every overall progress value of every run.
     pub progress: std::sync::Arc<std::sync::Mutex<Vec<f32>>>,
+    /// The cartridges hosted beside the test cartridge.
+    cartridges: Vec<PathBuf>,
 }
 
 #[allow(dead_code)]
@@ -307,7 +330,20 @@ impl Machines {
             dir: tempfile::TempDir::new().expect("Failed to create temp dir"),
             logs: Default::default(),
             progress: Default::default(),
+            cartridges: Vec::new(),
         }
+    }
+
+    /// With the cartridges `bins` hosted beside the test cartridge, and the
+    /// caps they serve that it does not in the registry.
+    pub fn with_cartridges(tag: &str, bins: Vec<PathBuf>) -> Self {
+        let served = testcartridge_caps(tag);
+        let extra: Vec<capdag::Cap> = bins
+            .iter()
+            .flat_map(|bin| cartridge_caps(bin))
+            .filter(|cap| !served.iter().any(|known| known.urn.is_equivalent(&cap.urn)))
+            .collect();
+        Self { cartridges: bins, ..Self::with_caps(tag, extra) }
     }
 
     /// Run the one-strand machine `notation`, giving its inputs — by the
@@ -433,7 +469,9 @@ impl Machines {
             None, // no registry URL — dev binaries only, no network
             capdag::CartridgeChannel::Release,
             capdag::FABRIC_MANIFEST_VERSION,
-            vec![testcartridge_bin(&self.tag)],
+            std::iter::once(testcartridge_bin(&self.tag))
+                .chain(self.cartridges.iter().cloned())
+                .collect(),
             None,
             self.registry.clone(),
             None,
