@@ -1810,7 +1810,7 @@ mod tests {
         let cap = make_test_cap(
             "media:document;ext=pdf",
             "media:digitized",
-            "extract_text",
+            "extract-text",
             "Extract Text",
         );
         graph.add_cap(&cap);
@@ -1866,7 +1866,7 @@ mod tests {
         let cap2 = make_test_cap(
             "media:document;ext=pdf",
             "media:analysis-result;list",
-            "analyze_multi",
+            "analyze-multi",
             "Analyze PDF Multi",
         );
         graph.add_cap(&cap2);
@@ -1955,13 +1955,13 @@ mod tests {
         let cap1 = make_test_cap(
             "media:document;ext=pdf",
             "media:digitized",
-            "extract_a",
+            "extract-a",
             "Extract A",
         );
         let cap2 = make_test_cap(
             "media:document;ext=pdf",
             "media:digitized",
-            "extract_b",
+            "extract-b",
             "Extract B",
         );
 
@@ -2641,7 +2641,7 @@ mod tests {
         let make_decision = make_test_cap(
             "media:enc=utf8",
             "media:decision;enc=utf8;fmt=json;record",
-            "make_decision",
+            "make-decision",
             "Make Decision",
         );
         let __caps = &[make_decision];
@@ -3231,7 +3231,7 @@ mod tests {
         let cap1 = make_test_cap(
             "media:enc=utf8",
             "media:integer;numeric",
-            "coerce_to_int",
+            "coerce-to-int",
             "Coerce to Integer",
         );
         graph.add_cap(&cap1);
@@ -3239,7 +3239,7 @@ mod tests {
         let cap2 = make_test_cap(
             "media:integer;numeric",
             "media:enc=utf8",
-            "coerce_to_text",
+            "coerce-to-text",
             "Coerce to Text",
         );
         graph.add_cap(&cap2);
@@ -3273,14 +3273,14 @@ mod tests {
         graph.add_cap(&make_test_cap(
             "media:enc=utf8",
             "media:integer;numeric",
-            "coerce_to_int",
+            "coerce-to-int",
             "Coerce to Integer",
         ));
         // integer → text
         graph.add_cap(&make_test_cap(
             "media:integer;numeric",
             "media:enc=utf8",
-            "coerce_to_text",
+            "coerce-to-text",
             "Coerce to Text",
         ));
 
@@ -3312,14 +3312,14 @@ mod tests {
         graph.add_cap(&make_test_cap(
             "media:enc=utf8",
             "media:integer;numeric",
-            "coerce_to_int",
+            "coerce-to-int",
             "Coerce to Integer",
         ));
         // integer → text
         graph.add_cap(&make_test_cap(
             "media:integer;numeric",
             "media:enc=utf8",
-            "coerce_to_text",
+            "coerce-to-text",
             "Coerce to Text",
         ));
 
@@ -3347,9 +3347,9 @@ mod tests {
         // filters its results down to bookend nodes only (the
         // production wiring populates this via the live media
         // registry; tests do it explicitly via `set_bookends`).
-        graph.add_cap(&make_test_cap("media:a", "media:b", "a_to_b", "A to B"));
-        graph.add_cap(&make_test_cap("media:b", "media:c", "b_to_c", "B to C"));
-        graph.add_cap(&make_test_cap("media:c", "media:a", "c_to_a", "C to A"));
+        graph.add_cap(&make_test_cap("media:a", "media:b", "a-to-b", "A to B"));
+        graph.add_cap(&make_test_cap("media:b", "media:c", "b-to-c", "B to C"));
+        graph.add_cap(&make_test_cap("media:c", "media:a", "c-to-a", "C to A"));
 
         let bookends: HashSet<MediaUrn> = ["media:a", "media:b", "media:c"]
             .iter()
@@ -3390,7 +3390,7 @@ mod tests {
         let mut graph = LiveCapFab::new();
 
         // Only one direction — no round trip possible
-        graph.add_cap(&make_test_cap("media:a", "media:b", "a_to_b", "A to B"));
+        graph.add_cap(&make_test_cap("media:a", "media:b", "a-to-b", "A to B"));
 
         let source = MediaUrn::from_string("media:a").unwrap();
         let target = MediaUrn::from_string("media:a").unwrap();
@@ -3408,10 +3408,10 @@ mod tests {
     fn test0121_step_title_query_filters_paths_server_side() {
         let mut graph = LiveCapFab::new();
 
-        graph.add_cap(&make_test_cap("media:a", "media:b", "a_to_b", "Resize"));
-        graph.add_cap(&make_test_cap("media:b", "media:c", "b_to_c", "Export"));
-        graph.add_cap(&make_test_cap("media:a", "media:d", "a_to_d", "Decimate"));
-        graph.add_cap(&make_test_cap("media:d", "media:c", "d_to_c", "Export"));
+        graph.add_cap(&make_test_cap("media:a", "media:b", "a-to-b", "Resize"));
+        graph.add_cap(&make_test_cap("media:b", "media:c", "b-to-c", "Export"));
+        graph.add_cap(&make_test_cap("media:a", "media:d", "a-to-d", "Decimate"));
+        graph.add_cap(&make_test_cap("media:d", "media:c", "d-to-c", "Export"));
 
         let source = MediaUrn::from_string("media:a").unwrap();
         let target = MediaUrn::from_string("media:c").unwrap();
@@ -3450,10 +3450,10 @@ mod tests {
     fn test0122_step_title_query_constrains_streaming_progress_counts() {
         let mut graph = LiveCapFab::new();
 
-        graph.add_cap(&make_test_cap("media:a", "media:b", "a_to_b", "Resize"));
-        graph.add_cap(&make_test_cap("media:b", "media:c", "b_to_c", "Export"));
-        graph.add_cap(&make_test_cap("media:a", "media:d", "a_to_d", "Decimate"));
-        graph.add_cap(&make_test_cap("media:d", "media:c", "d_to_c", "Export"));
+        graph.add_cap(&make_test_cap("media:a", "media:b", "a-to-b", "Resize"));
+        graph.add_cap(&make_test_cap("media:b", "media:c", "b-to-c", "Export"));
+        graph.add_cap(&make_test_cap("media:a", "media:d", "a-to-d", "Decimate"));
+        graph.add_cap(&make_test_cap("media:d", "media:c", "d-to-c", "Export"));
 
         let source = MediaUrn::from_string("media:a").unwrap();
         let target = MediaUrn::from_string("media:c").unwrap();
