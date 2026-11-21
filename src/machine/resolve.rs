@@ -29,10 +29,12 @@
 //!   `10-VALIDATION-RULES` enforces uniqueness across the args
 //!   of a single cap).
 //! - **Fit** of source `s` to arg `a`: a node some step of the strand
-//!   produces holds what that step gives, a complete thing, so it fits when
-//!   `s.satisfies(a)` — what it does not mention it does not have. A node
-//!   nothing produces (an input of the machine) holds the type the text or an
-//!   input anchor wrote, so it fits when `s.conforms_to(a)`
+//!   produces from a declared output holds what that step gives, a complete
+//!   thing, so it fits when `s.satisfies(a)` — what it does not mention it
+//!   does not have. Any other node holds a type, and fits when
+//!   `s.conforms_to(a)`: an input of the machine, which the text or an input
+//!   anchor wrote, and the main output of an `effect=none` or `effect=patch`
+//!   cap, which says how what it gives follows from what it takes
 //!   (04 §Complete things).
 //! - **Cost** of pairing source `s` with arg `a` that it fits:
 //!   `spec(s) - spec(a)`, the signed specificity distance. A complete source
@@ -70,7 +72,7 @@ use std::collections::HashMap;
 
 use crate::cap::registry::FabricRegistry;
 use crate::planner::{ArgSourceRef, StepToken, Strand, StrandStepType};
-use crate::urn::cap_urn::CapUrn;
+use crate::urn::cap_urn::{CapEffect, CapUrn};
 use crate::urn::media_urn::MediaUrn;
 
 use super::error::{MachineAbstractionError, UndecidedMember};
@@ -373,8 +375,11 @@ fn resolve_wirings(
     // what it is from outside the map is `IterationStructure`'s to say.) An
     // input of the machine is one value: notation has no run shape.
     //
-    // A node some wiring produces holds what that step gives, a complete
-    // thing; every other node holds a type the text or an input anchor wrote.
+    // A node some wiring produces from a declared output holds what that step
+    // gives, a complete thing. The main output of an `effect=none` or
+    // `effect=patch` cap says how what it gives follows from what it takes, not
+    // what it gives, so a node it produces holds a type, as every node nothing
+    // produces does: one the text or an input anchor wrote.
     let mut node_is_sequence = vec![false; nodes.len()];
     let mut node_is_given = vec![false; nodes.len()];
     let mut wiring_outputs: Vec<Vec<EdgeOutput>> = Vec::with_capacity(wirings.len());
@@ -414,7 +419,7 @@ fn resolve_wirings(
                 });
             }
             node_is_sequence[*node as usize] = output.is_sequence;
-            node_is_given[*node as usize] = true;
+            node_is_given[*node as usize] = main_output_is_given(&cap) || !is_main_output(&cap, output);
             outputs.push(EdgeOutput {
                 output_media_urn,
                 output_name: output.name.clone(),
@@ -1039,6 +1044,19 @@ pub(crate) fn match_sources_to_args(
         return Err(MatchFailure::Unmatched { source: 0 });
     }
     one_assignment(best_assignments, sources, args)
+}
+
+/// Whether a cap's main output says what the cap gives, so that what it
+/// produces there is a complete thing: it does unless the cap's effect is
+/// `none` or `patch`, whose main output says how what it gives follows from
+/// what it takes (07 §What a cap gives).
+pub(crate) fn main_output_is_given(cap: &crate::Cap) -> bool {
+    !matches!(cap.urn.effect(), CapEffect::None | CapEffect::Patch)
+}
+
+/// Whether `output` is the cap's main output.
+pub(crate) fn is_main_output(cap: &crate::Cap, output: &crate::CapOutput) -> bool {
+    cap.main_output().is_some_and(|main| main.name == output.name)
 }
 
 /// Whether a source fits a type an arg accepts. A source that is what a step
