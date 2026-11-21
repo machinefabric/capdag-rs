@@ -4636,25 +4636,9 @@ fn demux_peer_response(
                         }
                     }
                 }
-                FrameType::End => {
-                    // A stream the peer never ended, with part of an item
-                    // still held, ended mid-item with the request.
-                    for stream in streams.values_mut() {
-                        if let Some(seq) = stream.seq.take() {
-                            if !seq.buf.is_empty() {
-                                let _ = item_tx.send(stream.item(
-                                    Err(StreamError::Decode(format!(
-                                        "sequence stream ended mid-item: {} trailing bytes \
-                                         do not form a complete CBOR item",
-                                        seq.buf.len()
-                                    ))),
-                                    None,
-                                ));
-                            }
-                        }
-                    }
-                    break;
-                }
+                // Every stream has ended by now: END with one open is refused
+                // by the order check above.
+                FrameType::End => break,
                 FrameType::Err => {
                     let (code, class, message, arg_urn) = match remote_error_fields(&frame) {
                         Ok(fields) => fields,
@@ -13922,7 +13906,7 @@ mod tests {
         assert!(matches!(twice.recv().await, Some(PeerResponseItem::Data(Ok(_), _))));
         match twice.recv().await {
             Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
-                assert!(message.contains("a second STREAM_START for stream 'head'"), "{message}")
+                assert!(message.contains("stream head started twice"), "{message}")
             }
             _ => panic!("expected a protocol error"),
         }
@@ -13968,14 +13952,15 @@ mod tests {
                 .map(|_| ()),
         );
 
-        // A sequence stream of another output that the request's END cuts
-        // inside an item ends with that error, under its output.
+        // A sequence stream of another output that its STREAM_END cuts inside
+        // an item ends with that error, under its output.
         let mut whole = Vec::new();
         ciborium::into_writer(&ciborium::Value::Text("a long enough item".into()), &mut whole).unwrap();
         let half = whole[..whole.len() / 2].to_vec();
         let mut cut = feed_frames(vec![
             start("rows", true).for_output(rest.as_str()),
             Frame::chunk(rid.clone(), "rows".into(), 0, half.clone(), 0, Frame::compute_checksum(&half)),
+            Frame::stream_end(rid.clone(), "rows".into(), 1),
             Frame::end_ok(rid.clone(), None),
         ]);
         match cut.recv().await {
@@ -13986,6 +13971,20 @@ mod tests {
             _ => panic!("expected the unfinished item's error, under its output"),
         }
         assert!(cut.recv().await.is_none());
+        // The request's END with that stream still open is a protocol error
+        // naming it.
+        let mut open = feed_frames(vec![
+            start("rows", true).for_output(rest.as_str()),
+            Frame::chunk(rid.clone(), "rows".into(), 0, half.clone(), 0, Frame::compute_checksum(&half)),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        match open.recv().await {
+            Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
+                assert!(message.contains("END with stream rows still open"), "{message}")
+            }
+            _ => panic!("expected END with an open stream to be a protocol error"),
+        }
+        assert!(open.recv().await.is_none());
     }
 
     // TEST8126: derive_response_media — the response label is the effect

@@ -2701,8 +2701,9 @@ mod tests {
         }
     }
 
-    fn chunk_of(rid: &MessageId, sid: &str, payload: &[u8]) -> Frame {
-        Frame::chunk(rid.clone(), sid.to_string(), 0, payload.to_vec(), 0, Frame::compute_checksum(payload))
+    /// The CHUNK numbered `index` on stream `sid`, carrying `payload`.
+    fn chunk_of(rid: &MessageId, sid: &str, index: u64, payload: &[u8]) -> Frame {
+        Frame::chunk(rid.clone(), sid.to_string(), index, payload.to_vec(), index, Frame::compute_checksum(payload))
     }
 
     fn breach_detail(result: Result<&DeclaredOutput, StreamIoError>) -> String {
@@ -2913,12 +2914,12 @@ mod tests {
             // and metadata are its own, and do not become the collection's.
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
-            chunk_of(&rid, "res", b"R1"),
-            chunk_of(&rid, "fit", b"FIT-"),
-            chunk_of(&rid, "res", b"R2"),
-            chunk_of(&rid, "fit", b"DONE"),
-            chunk_of(&rid, "res", b"R3"),
-            chunk_of(&rid, "res", b"R4"),
+            chunk_of(&rid, "res", 0, b"R1"),
+            chunk_of(&rid, "fit", 0, b"FIT-"),
+            chunk_of(&rid, "res", 1, b"R2"),
+            chunk_of(&rid, "fit", 1, b"DONE"),
+            chunk_of(&rid, "res", 2, b"R3"),
+            chunk_of(&rid, "res", 3, b"R4"),
             Frame::stream_end(rid.clone(), "res".to_string(), 4),
             Frame::stream_end(rid.clone(), "fit".to_string(), 2),
             Frame::end_ok(rid.clone(), None),
@@ -2936,7 +2937,7 @@ mod tests {
         // The request ends without the required residuals.
         let (result, _) = collect_regress(vec![
             response_start(&rid, "fit", FIT, FIT, false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
         ])
@@ -2951,7 +2952,7 @@ mod tests {
         let (result, _) = collect_regress(vec![
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "x", "media:enc=utf8;extra", "media:enc=utf8;extra", false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::end_ok(rid.clone(), None),
         ])
         .await;
@@ -3075,12 +3076,12 @@ mod tests {
             vec![
                 response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "res", b"R1"),
+                chunk_of(&rid, "res", 0, b"R1"),
                 response_start(&rid, "rej", REJECTED, SERIES, false),
-                chunk_of(&rid, "fit", b"FIT-"),
-                chunk_of(&rid, "rej", b"seen"),
-                chunk_of(&rid, "res", b"R2"),
-                chunk_of(&rid, "fit", b"DONE"),
+                chunk_of(&rid, "fit", 0, b"FIT-"),
+                chunk_of(&rid, "rej", 0, b"seen"),
+                chunk_of(&rid, "res", 1, b"R2"),
+                chunk_of(&rid, "fit", 1, b"DONE"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 2),
                 Frame::stream_end(rid.clone(), "rej".to_string(), 1),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 2),
@@ -3133,7 +3134,7 @@ mod tests {
             vec![
                 response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "fit", b"FIT"),
+                chunk_of(&rid, "fit", 0, b"FIT"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 0),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 1),
                 Frame::end_ok(rid.clone(), None),
@@ -3169,8 +3170,8 @@ mod tests {
             vec![
                 unbounded("res", RESIDUALS, RESIDUALS),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "res", b"R1"),
-                chunk_of(&rid, "fit", b"FIT"),
+                chunk_of(&rid, "res", 0, b"R1"),
+                chunk_of(&rid, "fit", 0, b"FIT"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 1),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 1),
                 Frame::end_ok(rid.clone(), None),
@@ -3273,9 +3274,9 @@ mod tests {
         let mut whole = reader(vec![
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
-            chunk_of(&rid, "res", b"R1"),
-            chunk_of(&rid, "fit", b"FIT"),
-            chunk_of(&rid, "res", b"R2"),
+            chunk_of(&rid, "res", 0, b"R1"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
+            chunk_of(&rid, "res", 1, b"R2"),
             Frame::stream_end(rid.clone(), "res".to_string(), 2),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
@@ -3291,7 +3292,7 @@ mod tests {
 
         let mut short = reader(vec![
             response_start(&rid, "fit", FIT, FIT, false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
         ]);
@@ -3699,6 +3700,7 @@ mod tests {
         tx.send(chunk(&rid, b"payload")).unwrap();
         tx.send(Frame::progress(rid.clone(), 0.5, "halfway"))
             .unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
         drop(tx);
 
@@ -3739,6 +3741,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(stream_start(&rid)).unwrap();
         tx.send(chunk(&rid, b"x")).unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok_with(
             rid.clone(),
             None,
@@ -3779,6 +3782,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(stream_start(&rid)).unwrap();
         tx.send(chunk(&rid, b"data")).unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
         // Stragglers already queued when END is processed (the enqueue race):
         tx.send(Frame::log(
@@ -3909,11 +3913,12 @@ mod tests {
         );
 
         // A later item without meta yields None meta — no leakage between items.
-        tx.send(chunk(&rid, b"item-1")).unwrap();
+        tx.send(chunk_of(&rid, "out", 1, b"item-1")).unwrap();
         let item = terminal.next_item().await.unwrap().unwrap();
         assert_eq!(item.payload, b"item-1");
         assert!(item.meta.is_none());
 
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 2)).unwrap();
         tx.send(Frame::end_ok(rid, None)).unwrap();
         drop(tx);
         assert!(terminal.next_item().await.is_none());

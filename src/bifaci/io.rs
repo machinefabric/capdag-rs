@@ -1014,7 +1014,8 @@ pub(crate) struct IdentityEcho {
 
 impl IdentityEcho {
     /// `Ok(Some(()))` when the echo is complete and right, `Ok(None)` while it
-    /// goes on, and the error naming what is wrong otherwise.
+    /// goes on, and otherwise what is wrong with it, for the caller to say
+    /// whose identity verification failed.
     pub(crate) fn accept(&mut self, frame: &Frame) -> Result<Option<()>, String> {
         match frame.frame_type {
             FrameType::Chunk => {
@@ -1035,7 +1036,7 @@ impl IdentityEcho {
                     Ok(Some(()))
                 } else {
                     Err(format!(
-                        "Identity verification failed: payload mismatch (expected {} bytes, got {})",
+                        "payload mismatch (expected {} bytes, got {})",
                         nonce.len(),
                         self.bytes.len()
                     ))
@@ -1048,7 +1049,7 @@ impl IdentityEcho {
                 let msg = frame
                     .error_message()
                     .ok_or_else(|| "ERR frame missing required text message".to_string())?;
-                Err(format!("Identity verification failed: [{code}] {msg}"))
+                Err(format!("[{code}] {msg}"))
             }
             // Control/side-channel frames are legal ANYWHERE during the probe
             // (12.4: LOG interleaves without affecting data flow; CREDIT and
@@ -1060,7 +1061,7 @@ impl IdentityEcho {
             | FrameType::Log
             | FrameType::Credit
             | FrameType::Heartbeat => Ok(None),
-            other => Err(format!("Identity verification: unexpected frame type {:?}", other)),
+            other => Err(format!("unexpected frame type {:?}", other)),
         }
     }
 }

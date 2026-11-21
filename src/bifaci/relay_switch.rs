@@ -966,7 +966,7 @@ impl RelaySwitch {
                         Ok(None) => {}
                         Err(e) => {
                             return Err(RelaySwitchError::Protocol(format!(
-                                "master {}: identity verification: {}",
+                                "master {}: identity verification failed: {}",
                                 master_idx, e
                             )))
                         }
@@ -2497,7 +2497,11 @@ impl RelaySwitch {
                         ));
                     }
                 };
-                if echo.accept(&frame)?.is_some() {
+                if echo
+                    .accept(&frame)
+                    .map_err(|e| format!("identity verification failed: {e}"))?
+                    .is_some()
+                {
                     return Ok(());
                 }
             }
@@ -2965,7 +2969,11 @@ impl RelaySwitch {
                             .map_err(|e| format!("RelayNotify: {}", e))?;
                         continue;
                     }
-                    if echo.accept(&frame)?.is_some() {
+                    if echo
+                        .accept(&frame)
+                        .map_err(|e| format!("identity verification failed: {e}"))?
+                        .is_some()
+                    {
                         return Ok(());
                     }
                 }
@@ -5152,25 +5160,33 @@ mod tests {
                 let (read_half, write_half) = slave_sock.into_split();
                 let mut reader = FrameReader::new(BufReader::new(read_half));
                 let mut writer = FrameWriter::new(BufWriter::new(write_half));
-                let mut identity = crate::standard::caps::identity_cap();
-                identity.urn = crate::CapUrn::from_string(CAP_IDENTITY).unwrap();
-                let record = InstalledCartridgeRecord {
-                    registry_url: None,
-                    channel: crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
-                    id: "cart".to_string(),
-                    version: "1.0.0".to_string(),
-                    sha256: "aa".repeat(32),
-                    cap_groups: vec![crate::bifaci::manifest::CapGroup {
-                        name: "default".to_string(),
-                        caps: vec![identity],
-                        adapter_urns: Vec::new(),
-                    }],
-                    attachment_error: None,
-                    runtime_stats: None,
-                    lifecycle: CartridgeLifecycle::Operational,
-                };
-                let manifest = serde_json::to_vec(&RelayNotifyCapabilitiesPayload::new(vec![record])).unwrap();
-                writer.write(&Frame::relay_notify(&manifest, &Limits::default())).await.unwrap();
+                let manifest = serde_json::json!({
+                    "installed_cartridges": [{
+                        "registry_url": null,
+                        "channel": "release",
+                        "id": "cart",
+                        "version": "1.0.0",
+                        "sha256": "aa".repeat(32),
+                        "runtime_stats": {
+                            "running": true,
+                            "pools": test_pool_states_json(&[CAP_IDENTITY], 0, 0),
+                            "active_request_count": 0,
+                            "peer_request_count": 0,
+                            "memory_footprint_mb": 0,
+                            "memory_rss_mb": 0,
+                            "restart_count": 0
+                        },
+                        "cap_groups": [{
+                            "name": "default",
+                            "caps": [{"urn": CAP_IDENTITY, "title": "identity", "aliases": ["identity"], "args": []}],
+                            "adapter_urns": []
+                        }]
+                    }]
+                });
+                writer
+                    .write(&Frame::relay_notify(&serde_json::to_vec(&manifest).unwrap(), &Limits::default()))
+                    .await
+                    .unwrap();
                 expect_policy(&mut reader).await;
                 answer_identity_probe(&mut reader, &mut writer, echo).await;
                 hold_until_hangup(&mut reader).await;
