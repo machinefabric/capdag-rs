@@ -208,7 +208,6 @@ fn same_media(a: &str, b: &str) -> bool {
     crate::MediaUrn::from_string(a)
         .unwrap()
         .is_equivalent(&crate::MediaUrn::from_string(b).unwrap())
-        .unwrap()
 }
 
 enum Emit {

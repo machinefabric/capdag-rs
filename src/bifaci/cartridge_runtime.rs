@@ -1037,7 +1037,7 @@ pub fn find_stream<'a>(
     };
     streams.iter().find_map(|(urn_str, bytes, _meta)| {
         let urn = crate::MediaUrn::from_string(urn_str).ok()?;
-        if target.is_equivalent(&urn).unwrap_or(false) {
+        if target.is_equivalent(&urn) {
             Some(bytes.as_slice())
         } else {
             None
@@ -1073,7 +1073,7 @@ pub fn find_stream_conforming<'a>(
     streams.iter().find_map(|(urn_str, bytes, _meta)| {
         let urn = crate::MediaUrn::from_string(urn_str).ok()?;
         // A stream that arrived is a value: it satisfies the pattern, or not.
-        if urn.satisfies(&p).unwrap_or(false) {
+        if urn.satisfies(&p) {
             Some(bytes.as_slice())
         } else {
             None
@@ -1100,7 +1100,7 @@ pub fn find_stream_meta<'a>(
     };
     streams.iter().find_map(|(urn_str, _bytes, meta)| {
         let urn = crate::MediaUrn::from_string(urn_str).ok()?;
-        if target.is_equivalent(&urn).unwrap_or(false) {
+        if target.is_equivalent(&urn) {
             meta.as_ref()
         } else {
             None
@@ -2681,8 +2681,7 @@ impl ResponseOutputs {
         let declared_main = definition.and_then(|d| d.main_output());
         let out_spec = cap.out_spec().to_string();
         let out_is_void = parse(&out_spec)?
-            .is_equivalent(&parse(crate::urn::media_urn::MEDIA_VOID)?)
-            .unwrap_or(false);
+            .is_equivalent(&parse(crate::urn::media_urn::MEDIA_VOID)?);
 
         let main_urn = declared_main.map_or(out_spec, |o| o.media_urn.clone());
         let main = ResponseOutput {
@@ -2750,7 +2749,7 @@ impl ResponseOutputs {
         let wanted = MediaUrn::from_string(media_urn).map_err(|_| unknown())?;
         std::iter::once(&self.main)
             .chain(self.others.iter())
-            .find(|output| output.urn.is_equivalent(&wanted).unwrap_or(false))
+            .find(|output| output.urn.is_equivalent(&wanted))
             .map(|output| &output.stream)
             .ok_or_else(unknown)
     }
@@ -3118,7 +3117,7 @@ fn extract_effective_payload(
         // compare) — the arg we received may carry the same tags in a
         // different textual order.
         let arg_def = arg_defs.iter().find_map(|(parsed, info)| {
-            if parsed.is_equivalent(&arg_urn).unwrap_or(false) {
+            if parsed.is_equivalent(&arg_urn) {
                 Some(info)
             } else {
                 None
@@ -3178,8 +3177,7 @@ fn extract_effective_payload(
         .map_err(|e| RuntimeError::Handler(format!("Invalid void URN literal: {}", e)))?;
     let is_void_input = expected_media_urn
         .as_ref()
-        .and_then(|expected| expected.is_equivalent(&void_urn).ok())
-        .unwrap_or(false);
+        .is_some_and(|expected| expected.is_equivalent(&void_urn));
 
     if !is_void_input {
         // Collect all valid target URNs: in_spec + every arg-def's stdin
@@ -3213,7 +3211,7 @@ fn extract_effective_payload(
                             if let Ok(arg_urn) = MediaUrn::from_string(urn_str) {
                                 for target in &valid_targets {
                                     // Use is_comparable for discovery: are they on the same chain?
-                                    if arg_urn.is_comparable(target).unwrap_or(false) {
+                                    if arg_urn.is_comparable(target) {
                                         found_matching_arg = true;
                                         break;
                                     }
@@ -3330,7 +3328,7 @@ fn build_cli_foreach_iterations(
 
         let is_sequence_arg = arg_defs
             .iter()
-            .find(|(p, _)| p.is_equivalent(&arg_urn).unwrap_or(false))
+            .find(|(p, _)| p.is_equivalent(&arg_urn))
             .map(|(_, s)| *s)
             .unwrap_or(false);
 
@@ -3573,7 +3571,7 @@ impl FilePathContext {
             Ok(u) => u,
             Err(_) => return false,
         };
-        arg_urn.satisfies(&self.file_path_pattern).unwrap_or(false)
+        arg_urn.satisfies(&self.file_path_pattern)
     }
 
     /// Find a cap arg whose media URN is equivalent to the incoming URN.
@@ -3587,7 +3585,7 @@ impl FilePathContext {
             .find(|c| c.urn.to_string() == self.cap_urn)?;
         cap_def.args.iter().find(|a| {
             MediaUrn::from_string(&a.media_urn)
-                .map(|arg_urn| arg_urn.is_equivalent(incoming).unwrap_or(false))
+                .map(|arg_urn| arg_urn.is_equivalent(incoming))
                 .unwrap_or(false)
         })
     }
@@ -3683,7 +3681,7 @@ impl LiveFeedContext {
             .find(|c| c.urn.to_string() == self.cap_urn)?;
         cap_def.args.iter().find(|a| {
             MediaUrn::from_string(&a.media_urn)
-                .map(|arg_urn| arg_urn.is_equivalent(incoming).unwrap_or(false))
+                .map(|arg_urn| arg_urn.is_equivalent(incoming))
                 .unwrap_or(false)
         })
     }
@@ -3781,7 +3779,7 @@ impl LiveFeedContext {
                         main.media_urn, self.cap_urn
                     ))
                 })?;
-                if !content.conforms_to(&main_urn).unwrap_or(false) {
+                if !content.conforms_to(&main_urn) {
                     return Err(StreamError::Protocol(format!(
                         "live-feed reference '{}' delivers '{}' which does not conform to \
                          cap '{}' main input '{}' — this machine cannot consume that device",
@@ -10697,7 +10695,7 @@ mod tests {
                 // Match against in_spec using is_comparable for discovery
                 if let (Some(urn_str), Some(val)) = (arg_urn_str, arg_value) {
                     if let Ok(arg_urn) = MediaUrn::from_string(&urn_str) {
-                        if in_spec.is_comparable(&arg_urn).unwrap_or(false) {
+                        if in_spec.is_comparable(&arg_urn) {
                             found_value = Some(val);
                             break;
                         }
@@ -12199,7 +12197,7 @@ mod tests {
 
                 if let (Some(urn_str), Some(val)) = (arg_urn_str, arg_value) {
                     if let Ok(arg_urn) = MediaUrn::from_string(&urn_str) {
-                        let matches = arg_urn.satisfies(&in_spec).unwrap_or(false);
+                        let matches = arg_urn.satisfies(&in_spec);
                         if matches {
                             found_value = Some(val);
                             break;

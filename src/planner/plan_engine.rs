@@ -229,7 +229,6 @@ fn fold_gathered(strand: &MachineStrand, fold_token: &StepToken, n: usize) -> bo
     edge.assignment.windows(2).all(|w| {
         w[0].cap_arg_media_urn
             .is_equivalent(&w[1].cap_arg_media_urn)
-            .unwrap_or(false)
     })
 }
 
@@ -454,7 +453,7 @@ impl LiveCapFab {
     ) -> bool {
         if targets
             .iter()
-            .any(|t| source.media_urn.is_equivalent(t).unwrap_or(false))
+            .any(|t| source.media_urn.is_equivalent(t))
         {
             return true;
         }
@@ -466,7 +465,7 @@ impl LiveCapFab {
         reach.iter().any(|((media, _), _)| {
             targets
                 .iter()
-                .any(|t| media.is_equivalent(t).unwrap_or(false))
+                .any(|t| media.is_equivalent(t))
         })
     }
 
@@ -806,7 +805,7 @@ impl LiveCapFab {
             policy.mechanism == ConvergenceMechanism::Any || policy.mechanism == m
         };
         let type_admits = |media: &MediaUrn| match &policy.at_type {
-            Some(pin) => media.conforms_to(pin).unwrap_or(false),
+            Some(pin) => media.conforms_to(pin),
             None => true,
         };
 
@@ -872,7 +871,7 @@ impl LiveCapFab {
             ConvergenceLocation::AtDepth(k) => a.depth == k,
             ConvergenceLocation::AtTarget => targets
                 .iter()
-                .any(|t| a.media.is_equivalent(t).unwrap_or(false)),
+                .any(|t| a.media.is_equivalent(t)),
             ConvergenceLocation::Earliest
             | ConvergenceLocation::Latest
             | ConvergenceLocation::Auto => true,
@@ -992,7 +991,7 @@ impl LiveCapFab {
                     request
                         .sources
                         .iter()
-                        .all(|s| s.media_urn.conforms_to(&entry_in).unwrap_or(false))
+                        .all(|s| s.media_urn.conforms_to(&entry_in))
                 })
                 .collect();
             for strand in strands.iter().take(MAX_FOLDS_PER_APEX) {
@@ -1056,7 +1055,7 @@ impl LiveCapFab {
         // Best leg per source (paths are canonically sorted; take the first).
         let mut legs: Vec<Option<Strand>> = Vec::with_capacity(sources.len());
         for s in sources {
-            if s.media_urn.is_equivalent(&apex.media).unwrap_or(false)
+            if s.media_urn.is_equivalent(&apex.media)
                 && !s.cardinality.is_sequence()
             {
                 legs.push(None); // already AT the apex — a zero-cap leg
@@ -1205,7 +1204,7 @@ impl LiveCapFab {
                         continue;
                     }
                     for ((media, is_seq), depth) in reach.iter() {
-                        if *is_seq || !media.conforms_to(arg).unwrap_or(false) {
+                        if *is_seq || !media.conforms_to(arg) {
                             continue;
                         }
                         let better = match &best {
@@ -1240,7 +1239,7 @@ impl LiveCapFab {
             let mut ok = true;
             for (s, (_a_idx, media)) in sources.iter().zip(assignments.iter()) {
                 let entry = asm.add_node(s.media_urn.clone());
-                if s.media_urn.is_equivalent(media).unwrap_or(false) {
+                if s.media_urn.is_equivalent(media) {
                     leg_exits.push(entry);
                     continue;
                 }
@@ -1274,7 +1273,7 @@ impl LiveCapFab {
             let mut tail_steps = 0usize;
             let mut reached: Vec<MediaUrn> = Vec::new();
             for target in targets {
-                if merge_out.is_equivalent(target).unwrap_or(false) {
+                if merge_out.is_equivalent(target) {
                     reached.push(target.clone());
                     continue;
                 }
@@ -1815,7 +1814,7 @@ fn shared_prefix_len(strands: &[Strand], location: &DivergenceLocation) -> usize
         let (cap0, out0) = &seqs[0][common];
         for s in &seqs[1..] {
             let (cap, out) = &s[common];
-            if cap != cap0 || !out.is_equivalent(out0).unwrap_or(false) {
+            if cap != cap0 || !out.is_equivalent(out0) {
                 break 'outer;
             }
         }
@@ -2144,7 +2143,7 @@ mod tests {
             .targets;
         let txt_entry = targets
             .iter()
-            .find(|t| t.media_def.is_equivalent(&txt()).unwrap())
+            .find(|t| t.media_def.is_equivalent(&txt()))
             .expect("txt must be discovered for pdf+md");
         assert!(
             txt_entry.convergent,
@@ -2158,8 +2157,7 @@ mod tests {
         assert!(
             !targets.iter().any(|t| t
                 .media_def
-                .is_equivalent(&media("media:enc=utf8;page"))
-                .unwrap()),
+                .is_equivalent(&media("media:enc=utf8;page"))),
             "non-bookend media must not be discovered as targets"
         );
     }
@@ -2461,7 +2459,7 @@ mod tests {
             candidates
                 .iter()
                 .flat_map(|c| c.profile.apexes.iter())
-                .all(|a| { a.media_urn.conforms_to(&media("media:page")).unwrap() }),
+                .all(|a| { a.media_urn.conforms_to(&media("media:page")) }),
             "every apex must conform to the at_type pin"
         );
     }
@@ -2510,14 +2508,13 @@ mod tests {
         assert!(
             targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&txt()).unwrap()),
+                .any(|t| t.media_def.is_equivalent(&txt())),
             "txt must be discovered for a single pdf"
         );
         assert!(
             !targets.iter().any(|t| t
                 .media_def
-                .is_equivalent(&media("media:enc=utf8;page"))
-                .unwrap()),
+                .is_equivalent(&media("media:enc=utf8;page"))),
             "internal (non-bookend) media must not be discovered"
         );
     }
@@ -2542,7 +2539,7 @@ mod tests {
             .targets;
         let txt_entry = seq_targets
             .iter()
-            .find(|t| t.media_def.is_equivalent(&txt()).unwrap())
+            .find(|t| t.media_def.is_equivalent(&txt()))
             .expect("txt must be discovered for a pdf sequence");
         assert!(
             txt_entry.convergent,
@@ -2792,7 +2789,7 @@ mod tests {
             discovered
                 .targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&txt()).unwrap()),
+                .any(|t| t.media_def.is_equivalent(&txt())),
             "the routable source's targets must still be discovered"
         );
     }
