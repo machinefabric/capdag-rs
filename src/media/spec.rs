@@ -1397,4 +1397,36 @@ mod tests {
         // No rule, nothing broken.
         assert_eq!(broken(&MediaValidation::default(), json!("anything")), None);
     }
+
+    // TEST7242: A resolved media definition's kind predicates read the marker: !x and ?x are not x
+    #[test]
+    fn test7242_media_def_kind_predicates_read_the_marker() {
+        let resolved = |urn: String| ResolvedMediaDef {
+            media_urn: urn,
+            media_type: "application/octet-stream".to_string(),
+            profile_uri: None,
+            schema: None,
+            title: None,
+            description: None,
+            documentation: None,
+            dims: Vec::new(),
+            validation: None,
+            metadata: None,
+            extensions: Vec::new(),
+        };
+        let predicates: [(&str, fn(&ResolvedMediaDef) -> bool); 7] = [
+            ("image", ResolvedMediaDef::is_image),
+            ("audio", ResolvedMediaDef::is_audio),
+            ("video", ResolvedMediaDef::is_video),
+            ("numeric", ResolvedMediaDef::is_numeric),
+            ("bool", ResolvedMediaDef::is_bool),
+            ("record", ResolvedMediaDef::is_record),
+            ("list", ResolvedMediaDef::is_list),
+        ];
+        for (marker, predicate) in predicates {
+            assert!(predicate(&resolved(format!("media:{marker}"))), "media:{marker}");
+            assert!(!predicate(&resolved(format!("media:!{marker}"))), "media:!{marker}");
+            assert!(!predicate(&resolved(format!("media:?{marker}"))), "media:?{marker}");
+        }
+    }
 }
