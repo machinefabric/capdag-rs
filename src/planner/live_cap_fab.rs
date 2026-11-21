@@ -13,8 +13,9 @@
 //! 2. **Exact matching**: For target matching, use `is_equivalent()` not `conforms_to()`.
 //!    This ensures "media:X" does NOT match paths ending in "media:X;list".
 //!
-//! 3. **Conformance for traversal**: Use `conforms_to()` only for graph traversal
-//!    (can this output feed into that input?).
+//! 3. **Satisfaction for traversal**: a node, read complete, satisfies the next cap's
+//!    input (`satisfies()`): a node is what a step gave or a file's detected type,
+//!    and what it does not mention, it does not have.
 //!
 //! 4. **Deterministic ordering**: Results are sorted by (path_length, specificity, urn).
 //!
@@ -907,7 +908,7 @@ impl LiveCapFab {
     ///
     /// Get outgoing edges from a source media URN at a given `is_sequence` state.
     ///
-    /// Cap edges are matched purely on `conforms_to` — cardinality is irrelevant
+    /// Cap edges are matched purely on `satisfies` — cardinality is irrelevant
     /// to type matching. Cardinality transitions (ForEach/Collect) are synthesized
     /// based on the current `is_sequence` state:
     ///
@@ -929,7 +930,9 @@ impl LiveCapFab {
                     "Non-cap edge found in graph storage: {:?}",
                     edge.edge_type
                 );
-                if !source.conforms_to(&edge.from_spec).unwrap_or(false) {
+                // A node is a value a step gave or a file's detected type:
+                // complete, so it is held to the cap's input with `satisfies`.
+                if !source.satisfies(&edge.from_spec).unwrap_or(false) {
                     return false;
                 }
                 // Check cardinality compatibility:
@@ -996,7 +999,7 @@ impl LiveCapFab {
                     input_is_sequence, ..
                 } = &edge.edge_type
                 {
-                    !input_is_sequence && source.conforms_to(&edge.from_spec).unwrap_or(false)
+                    !input_is_sequence && source.satisfies(&edge.from_spec).unwrap_or(false)
                 } else {
                     false
                 }

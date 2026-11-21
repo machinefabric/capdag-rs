@@ -154,7 +154,9 @@ pub enum MachineAbstractionError {
         declared: Vec<String>,
     },
 
-    /// A named member's URN does not conform to the type that arg accepts.
+    /// A named member does not fit the type that arg accepts: a node a step
+    /// gave does not satisfy it, or a node the text typed does not conform to
+    /// it.
     #[error("strand {strand_index}: cap '{cap_urn}' arg '{name}' accepts '{accepts}', and its source is '{source_urn}'")]
     SourceDoesNotConformToArg {
         strand_index: usize,

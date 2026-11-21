@@ -183,7 +183,8 @@ impl MachinePlanBuilder {
                      never guesses; supply one entry per input anchor"
                 ))
             })?;
-            if !given.media.conforms_to(declared).map_err(|e| {
+            // What a run binds is a value: complete.
+            if !given.media.satisfies(declared).map_err(|e| {
                 PlannerError::InvalidInput(format!(
                     "comparing '{}' with input anchor {anchor}'s type '{declared}': {e}",
                     given.media
