@@ -217,20 +217,26 @@ pub fn surviving_candidates(
 
 /// Refine what stands through the value adapters and keep only the most
 /// specific member of each line of refinement (the model's
-/// `mostSpecific`), in order.
+/// `mostSpecific`), in order. Content that is not UTF-8 holds no text, so no
+/// value adapter is asked of it.
 pub fn settle(
     survivors: &[MediaUrn],
     value_adapters: &ValueAdapterRegistry,
     content: &[u8],
 ) -> Result<Vec<String>, String> {
-    let text = std::str::from_utf8(content).unwrap_or("");
+    let text = std::str::from_utf8(content).ok();
     let mut refined: Vec<MediaUrn> = Vec::new();
     for urn in survivors {
-        let urn_str = value_adapters.refine_media_urn(&urn.to_string(), text);
-        let urn = MediaUrn::from_string(&urn_str).map_err(|e| {
-            format!("a value adapter refined a file's media to '{urn_str}', which is no media URN: {e}")
-        })?;
-        if !refined.iter().any(|seen| seen.is_equivalent(&urn).unwrap_or(false)) {
+        let urn = match text {
+            None => urn.clone(),
+            Some(text) => {
+                let urn_str = value_adapters.refine_media_urn(&urn.to_string(), text);
+                MediaUrn::from_string(&urn_str).map_err(|e| {
+                    format!("a value adapter refined a file's media to '{urn_str}', which is no media URN: {e}")
+                })?
+            }
+        };
+        if !refined.iter().any(|seen| seen.is_equivalent(&urn)) {
             refined.push(urn);
         }
     }
@@ -417,8 +423,38 @@ pub async fn extension_media(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input_resolver::value_adapter::{ValueAdapter, ValueAdapterResult};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    /// A value adapter that refines any text it is given, empty text included.
+    struct RefinesAnyText;
+
+    impl ValueAdapter for RefinesAnyText {
+        fn name(&self) -> &'static str {
+            "RefinesAnyText"
+        }
+
+        fn refine(&self, base_media_urn: &str, _value: &str) -> Option<ValueAdapterResult> {
+            Some(ValueAdapterResult { media_urn: format!("{base_media_urn};refined") })
+        }
+    }
+
+    // TEST1984: Content that is not UTF-8 holds no text, so settle asks no value
+    // adapter of it and keeps the survivor as it stands; UTF-8 content is refined.
+    #[test]
+    fn test1984_settle_asks_no_value_adapter_of_binary_content() {
+        let mut adapters = ValueAdapterRegistry::new();
+        adapters.register("media:", Arc::new(RefinesAnyText));
+        let survivor = MediaUrn::from_string("media:enc=utf8;fmt=json").unwrap();
+
+        let binary = settle(std::slice::from_ref(&survivor), &adapters, &[0xff, 0xfe, 0x00]).unwrap();
+        assert_eq!(binary, vec![survivor.to_string()]);
+
+        let text = settle(std::slice::from_ref(&survivor), &adapters, b"x").unwrap();
+        let refined = MediaUrn::from_string("media:enc=utf8;fmt=json;refined").unwrap();
+        assert_eq!(text, vec![refined.to_string()]);
+    }
 
     /// A cartridge that claims every file as one media type, counting how
     /// often it is asked.

@@ -25,14 +25,14 @@ fn test12166_the_implementation_is_the_proved_model() {
     for r in refines {
         let a = MediaUrn::from_string(&text(&r["instance"])).unwrap();
         let b = MediaUrn::from_string(&text(&r["pattern"])).unwrap();
-        let got = a.conforms_to(&b).unwrap();
+        let got = a.conforms_to(&b);
         if got != r["refines"].as_bool().unwrap() {
             wrong.push(format!("{a} ⪯ {b}: model {}, got {got}", r["refines"]));
         }
         for (name, got) in [
-            ("meets", a.meets(&b).unwrap()),
-            ("satisfies", a.satisfies(&b).unwrap()),
-            ("may_satisfy", a.may_satisfy(&b).unwrap()),
+            ("meets", a.meets(&b)),
+            ("satisfies", a.satisfies(&b)),
+            ("may_satisfy", a.may_satisfy(&b)),
         ] {
             if got != r[name].as_bool().unwrap() {
                 wrong.push(format!("{a} {name} {b}: model {}, got {got}", r[name]));

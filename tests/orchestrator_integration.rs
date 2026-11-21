@@ -60,7 +60,7 @@ async fn test919_parse_simple_testcartridge_graph() {
         .expect("resolves");
     assert_eq!(resolved.strand_count(), 1);
     let same = |a: &capdag::MediaUrn, b: &str| {
-        a.is_equivalent(&capdag::MediaUrn::from_string(b).unwrap()).unwrap()
+        a.is_equivalent(&capdag::MediaUrn::from_string(b).unwrap())
     };
     let inputs = resolved.inputs().unwrap();
     assert_eq!(inputs.len(), 1);

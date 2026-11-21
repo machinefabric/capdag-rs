@@ -929,7 +929,7 @@ impl LiveCapFab {
                     "Non-cap edge found in graph storage: {:?}",
                     edge.edge_type
                 );
-                if !source.conforms_to(&edge.from_spec).unwrap_or(false) {
+                if !source.conforms_to(&edge.from_spec) {
                     return false;
                 }
                 // Check cardinality compatibility:
@@ -996,7 +996,7 @@ impl LiveCapFab {
                     input_is_sequence, ..
                 } = &edge.edge_type
                 {
-                    !input_is_sequence && source.conforms_to(&edge.from_spec).unwrap_or(false)
+                    !input_is_sequence && source.conforms_to(&edge.from_spec)
                 } else {
                     false
                 }
@@ -1047,7 +1047,7 @@ impl LiveCapFab {
                 if pending_foreach && !Self::can_follow_foreach(&edge) {
                     continue;
                 }
-                if edge.is_cap() && edge.to_spec.is_equivalent(target).unwrap_or(false) {
+                if edge.is_cap() && edge.to_spec.is_equivalent(target) {
                     return true;
                 }
 
@@ -1457,7 +1457,7 @@ impl LiveCapFab {
             current_path.last().map(|step| &step.step_type),
             Some(StrandStepType::ForEach { .. })
         );
-        if !current_path.is_empty() && current.is_equivalent(target).unwrap_or(false) {
+        if !current_path.is_empty() && current.is_equivalent(target) {
             if current_path.len() == depth_limit {
                 let cap_step_count = current_path.iter().filter(|s| s.is_cap()).count() as i32;
 
@@ -1484,7 +1484,7 @@ impl LiveCapFab {
             }
             // For round-trip paths (source==target), don't return early —
             // continue exploring edges to find longer paths through this node.
-            if !pending_foreach && !source.is_equivalent(target).unwrap_or(false) {
+            if !pending_foreach && !source.is_equivalent(target) {
                 return;
             }
         }
@@ -1497,8 +1497,8 @@ impl LiveCapFab {
         // For round-trip paths (source==target), don't mark target-equivalent nodes
         // as visited. This allows the DFS to return to the target through different
         // intermediate paths. Cycle prevention is handled by depth_limit.
-        let is_roundtrip = source.is_equivalent(target).unwrap_or(false);
-        if !(is_roundtrip && current.is_equivalent(target).unwrap_or(false)) {
+        let is_roundtrip = source.is_equivalent(target);
+        if !(is_roundtrip && current.is_equivalent(target)) {
             visited.insert(visit_key.clone());
         }
 
@@ -1821,7 +1821,7 @@ mod tests {
         let digitized_text = MediaUrn::from_string("media:digitized").unwrap();
         let cap_target = targets
             .iter()
-            .find(|t| t.media_def.is_equivalent(&digitized_text).unwrap_or(false));
+            .find(|t| t.media_def.is_equivalent(&digitized_text));
         assert!(cap_target.is_some(), "digitized-text should be reachable");
         assert_eq!(cap_target.unwrap().min_path_length, 1);
     }
@@ -1835,11 +1835,11 @@ mod tests {
 
         // These should NOT be equivalent
         assert!(
-            !singular.is_equivalent(&list).unwrap(),
+            !singular.is_equivalent(&list),
             "singular and list should NOT be equivalent"
         );
         assert!(
-            !list.is_equivalent(&singular).unwrap(),
+            !list.is_equivalent(&singular),
             "list and singular should NOT be equivalent (reverse check)"
         );
 
@@ -2098,7 +2098,7 @@ mod tests {
         let reaches = |needle: &MediaUrn| -> bool {
             targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(needle).unwrap_or(false))
+                .any(|t| t.media_def.is_equivalent(needle))
         };
         assert!(reaches(&media_b), "B should be reachable");
         assert!(reaches(&media_d), "D should be reachable");
@@ -2194,13 +2194,13 @@ mod tests {
         assert!(
             png_targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&media_thumbnail).unwrap_or(false)),
+                .any(|t| t.media_def.is_equivalent(&media_thumbnail)),
             "PNG should reach thumbnail"
         );
         assert!(
             !png_targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&media_textable).unwrap_or(false)),
+                .any(|t| t.media_def.is_equivalent(&media_textable)),
             "PNG should NOT reach textable"
         );
 
@@ -2210,13 +2210,13 @@ mod tests {
         assert!(
             pdf_targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&media_textable).unwrap_or(false)),
+                .any(|t| t.media_def.is_equivalent(&media_textable)),
             "PDF should reach textable"
         );
         assert!(
             !pdf_targets
                 .iter()
-                .any(|t| t.media_def.is_equivalent(&media_thumbnail).unwrap_or(false)),
+                .any(|t| t.media_def.is_equivalent(&media_thumbnail)),
             "PDF should NOT reach thumbnail"
         );
     }
@@ -2544,15 +2544,13 @@ mod tests {
         assert!(
             recovered
                 .source_media_urn
-                .is_equivalent(&expected_source)
-                .expect("URN equivalence check"),
+                .is_equivalent(&expected_source),
             "source_media_urn must round-trip structurally as media:document;ext=pdf"
         );
         assert!(
             recovered
                 .target_media_urn
-                .is_equivalent(&expected_target)
-                .expect("URN equivalence check"),
+                .is_equivalent(&expected_target),
             "target_media_urn must round-trip structurally as media:enc=utf8;page"
         );
         assert_eq!(recovered.steps.len(), 2);
@@ -2614,7 +2612,7 @@ mod tests {
         if let StrandStepType::ForEach { media_def } = &path.steps[0].step_type {
             // ForEach doesn't change the media URN — same type, different shape (is_sequence)
             assert!(
-                media_def.is_equivalent(&source).unwrap(),
+                media_def.is_equivalent(&source),
                 "ForEach media_def should be the same as source"
             );
         }
@@ -2746,11 +2744,11 @@ mod tests {
         let (fe, next_is_seq) = foreach_edge.unwrap();
         assert!(!next_is_seq, "ForEach should flip is_sequence to false");
         assert!(
-            fe.from_spec.is_equivalent(&source).unwrap(),
+            fe.from_spec.is_equivalent(&source),
             "ForEach from_spec should be the source"
         );
         assert!(
-            fe.to_spec.is_equivalent(&source).unwrap(),
+            fe.to_spec.is_equivalent(&source),
             "ForEach to_spec should be the same URN"
         );
     }
@@ -3189,7 +3187,7 @@ mod tests {
         // Source should be reachable (via text→integer→text)
         let has_self = targets
             .iter()
-            .any(|t| t.media_def.is_equivalent(&source).unwrap_or(false));
+            .any(|t| t.media_def.is_equivalent(&source));
         assert!(
             has_self,
             "BFS must find source as reachable target in round-trip graph. Found: {:?}",
@@ -3301,7 +3299,7 @@ mod tests {
         let bfs_targets = graph.get_reachable_targets(&source, false, 5);
         let bfs_has_self = bfs_targets
             .iter()
-            .any(|t| t.media_def.is_equivalent(&source).unwrap_or(false));
+            .any(|t| t.media_def.is_equivalent(&source));
         assert!(
             bfs_has_self,
             "BFS must find A reachable from A in cyclic graph"

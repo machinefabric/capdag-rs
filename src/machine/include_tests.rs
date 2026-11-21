@@ -572,7 +572,7 @@ fn test12810_a_node_of_an_included_machine_holds_the_type_it_held_alone() {
     let alone = parse_machine(&refine, &registry).expect("the machine resolves alone");
     let note = crate::MediaUrn::from_string(NOTE).unwrap();
     assert!(
-        alone.strands()[0].nodes().iter().any(|urn| urn.is_equivalent(&note).unwrap()),
+        alone.strands()[0].nodes().iter().any(|urn| urn.is_equivalent(&note)),
         "the node between the steps holds the tighter type"
     );
 
@@ -586,7 +586,7 @@ fn test12810_a_node_of_an_included_machine_holds_the_type_it_held_alone() {
     )
     .expect("the machine resolves written into another");
     let between = names[0]["refine#1/t"];
-    assert!(inlined.strands()[0].node_urn(between).is_equivalent(&note).unwrap());
+    assert!(inlined.strands()[0].node_urn(between).is_equivalent(&note));
     let by_hand = parse_machine(
         &format!("{headers}[(reference=\"a\") -> fetch -> a][a -> loose -> t][t -> tight -> u]"),
         &registry,

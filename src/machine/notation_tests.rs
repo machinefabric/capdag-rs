@@ -249,8 +249,8 @@ fn test12737_a_named_member_binds_the_arg_it_names() {
     let slot = |name: &str| {
         edge.assignment.iter().find(|b| b.arg_name == name).map(|b| b.cap_arg_media_urn.clone()).unwrap()
     };
-    assert!(slot("benchmark").is_equivalent(&MediaUrn::from_string(BENCHMARK).unwrap()).unwrap());
-    assert!(slot("series").is_equivalent(&MediaUrn::from_string(SERIES).unwrap()).unwrap());
+    assert!(slot("benchmark").is_equivalent(&MediaUrn::from_string(BENCHMARK).unwrap()));
+    assert!(slot("series").is_equivalent(&MediaUrn::from_string(SERIES).unwrap()));
 
     // Which node is the benchmark is what the machine says: the other naming
     // binds the same two nodes the other way round. The two are inputs of one
@@ -518,7 +518,7 @@ fn test12739_outputs_sources_and_sinks() {
     assert_eq!(taken.len(), 2);
     assert!(taken.contains(&("comparison", false)) && taken.contains(&("residuals", true)), "{taken:?}");
     let main = edge.main_target().expect("the main output is taken");
-    assert!(both.strands()[0].node_urn(main).is_equivalent(&MediaUrn::from_string(COMPARISON).unwrap()).unwrap());
+    assert!(both.strands()[0].node_urn(main).is_equivalent(&MediaUrn::from_string(COMPARISON).unwrap()));
     assert_eq!(both.strands()[0].output_anchor_ids().len(), 2);
 
     // The main output need not be taken, and the one that is, is still named.
@@ -635,8 +635,8 @@ fn test12740_the_urn_of_a_node_is_position_free() {
     .unwrap();
     let urn_of = |name: &str| m.strands()[0].node_urn(names[0][name]).clone();
     let series = MediaUrn::from_string(SERIES).unwrap();
-    assert!(urn_of("bench").is_equivalent(&series).unwrap());
-    assert!(urn_of("path").is_equivalent(&series).unwrap());
+    assert!(urn_of("bench").is_equivalent(&series));
+    assert!(urn_of("path").is_equivalent(&series));
 
     // Naming the main input is allowed; then an unnamed input beside it has
     // no arg anything decides.
