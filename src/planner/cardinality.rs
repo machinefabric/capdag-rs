@@ -1,11 +1,10 @@
-//! Cardinality and Structure Detection from Media URNs
+//! Cardinality and Structure of cap inputs and outputs
 //!
 //! This module provides shape analysis for cap inputs and outputs across two orthogonal dimensions:
 //!
 //! ## 1. Cardinality (how many items)
-//! Detected from the `list` marker tag:
-//! - `media:document;ext=pdf` → Single (scalar, no list marker)
-//! - `media:document;ext=pdf;list` → Sequence (array, has list marker)
+//! Never read from the URN: it is the `is_sequence` flag a cap's arg or output
+//! declares. The `list` marker describes one value's content, not a count.
 //!
 //! ## 2. Structure (internal shape of each item)
 //! Detected from the `record` marker tag:
@@ -15,10 +14,10 @@
 //! ## The Four Combinations
 //! | Cardinality | Structure | Example |
 //! |-------------|-----------|---------|
-//! | scalar | opaque | `media:enc=utf8` - one string |
-//! | scalar | record | `media:enc=utf8;fmt=json;record` - one JSON object |
-//! | list | opaque | `media:file-path;list` - array of paths |
-//! | list | record | `media:enc=utf8;fmt=json;list;record` - array of objects |
+//! | Single | opaque | `media:enc=utf8` - one string |
+//! | Single | record | `media:enc=utf8;fmt=json;record` - one JSON object |
+//! | Sequence | opaque | a sequence of `media:file-path` - paths one by one |
+//! | Sequence | record | a sequence of `media:enc=utf8;fmt=json;record` - objects one by one |
 //!
 //! Design principle: URN handling uses proper parsing via MediaUrn, never string comparison.
 
@@ -29,9 +28,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputCardinality {
-    /// Exactly 1 item (no list marker = scalar by default)
+    /// Exactly one item: no `is_sequence` declared.
     Single,
-    /// Array of items (has list marker)
+    /// A sequence of items: `is_sequence: true` declared.
     Sequence,
     /// 1 or more items (cap can handle either)
     AtLeastOne,
@@ -76,20 +75,6 @@ impl InputCardinality {
                 CardinalityCompatibility::Direct
             }
         }
-    }
-
-    /// Create a media URN with this cardinality from a base URN.
-    ///
-    /// DEPRECATED: Cardinality is tracked by is_sequence on the wire protocol,
-    /// not by URN tags. This method is a no-op that returns the URN unchanged.
-    /// Callers should stop using this and track cardinality separately.
-    pub fn apply_to_urn(&self, base_urn: &str) -> String {
-        // Validate the URN is parseable
-        let _media_urn = MediaUrn::from_string(base_urn)
-            .unwrap_or_else(|e| panic!("Invalid media URN in apply_to_urn: {} - {}", base_urn, e));
-
-        // Cardinality does not change the URN — shape is tracked by is_sequence
-        base_urn.to_string()
     }
 }
 
@@ -220,7 +205,7 @@ impl StructureCompatibility {
 /// Complete shape of media data combining cardinality and structure
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaShape {
-    /// Cardinality: scalar (Single) or list (Sequence)
+    /// Cardinality: Single or Sequence, from `is_sequence`
     pub cardinality: InputCardinality,
     /// Structure: opaque or record
     pub structure: InputStructure,
@@ -297,12 +282,6 @@ impl MediaShape {
             CardinalityCompatibility::WrapInArray => ShapeCompatibility::WrapInArray,
             CardinalityCompatibility::RequiresFanOut => ShapeCompatibility::RequiresFanOut,
         }
-    }
-
-    /// Apply this shape to a base URN
-    pub fn apply_to_urn(&self, base_urn: &str) -> String {
-        let with_cardinality = self.cardinality.apply_to_urn(base_urn);
-        self.structure.apply_to_urn(&with_cardinality)
     }
 }
 

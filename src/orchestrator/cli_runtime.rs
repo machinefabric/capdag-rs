@@ -642,7 +642,7 @@ impl EngineRuntime for CliRuntime {
     }
 
     async fn activity_timeout_secs(&self, graph: &ResolvedGraph) -> Result<u64, ExecutionError> {
-        Ok(segment_activity_timeout(graph))
+        segment_activity_timeout(graph)
     }
 
     fn trace_sink(&self) -> Option<Arc<ProtocolTraceSink>> {

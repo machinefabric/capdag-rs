@@ -208,6 +208,17 @@ pub enum MachineAbstractionError {
         cap_urn: String,
     },
 
+    /// A step with `retry` whose cap declares a streaming output. A retried
+    /// step's outputs are held until an attempt succeeds, and an output that
+    /// may be unbounded cannot be held.
+    #[error("strand {strand_index}: cap '{cap_urn}' is given retry={retry}, and its output '{output}' is streaming — a retried step's outputs are held until an attempt succeeds, and a streaming output cannot be held")]
+    RetryOnStreamingStep {
+        strand_index: usize,
+        cap_urn: String,
+        retry: u32,
+        output: String,
+    },
+
     /// A wiring holds an unnamed member that nothing produces and whose arg
     /// nothing decides: a second such member, or one beside a named member
     /// that bound the main input. Nothing says which arg an unnamed input of
@@ -413,31 +424,6 @@ pub enum MachineAbstractionError {
     /// deterministically and source order is never used as a tiebreaker.
     #[error("strand {strand_index}: source-to-input-anchor binding is ambiguous (multiple minimum-cost assignments exist)")]
     AmbiguousAnchorBinding { strand_index: usize },
-
-    /// Realization: an input anchor has no bound source. Every input anchor must
-    /// receive exactly one concrete source media before the strand can realize.
-    #[error(
-        "strand {strand_index}: input anchor {anchor_id} ('{anchor_urn}') has no bound source"
-    )]
-    MissingAnchorSource {
-        strand_index: usize,
-        anchor_id: u32,
-        anchor_urn: String,
-    },
-
-    /// Realization: a source was bound to a node that is not an input anchor of the
-    /// strand — a caller bug, exposed hard.
-    #[error("strand {strand_index}: a source is bound to node {node_id}, which is not an input anchor of the strand")]
-    SourceBoundToNonAnchor { strand_index: usize, node_id: u32 },
-
-    /// Realization: a bound source does not conform to its input anchor's declared
-    /// media URN. Realization never coerces — the binding is invalid.
-    #[error("strand {strand_index}: bound source '{source_urn}' does not conform to input anchor '{anchor_urn}'")]
-    AnchorSourceMismatch {
-        strand_index: usize,
-        anchor_urn: String,
-        source_urn: String,
-    },
 }
 
 /// Errors raised during lexical / grammatical parsing of machine

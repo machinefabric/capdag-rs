@@ -370,6 +370,16 @@ fn resolve_wirings(
     let mut wiring_outputs: Vec<Vec<EdgeOutput>> = Vec::with_capacity(wirings.len());
     for wiring in wirings {
         let cap = cap_definition(registry, &wiring.cap_urn)?;
+        if wiring.policy.retry > 0 {
+            if let Some(output) = cap.get_outputs().iter().find(|output| output.streaming) {
+                return Err(MachineAbstractionError::RetryOnStreamingStep {
+                    strand_index,
+                    cap_urn: wiring.cap_urn.to_string(),
+                    retry: wiring.policy.retry,
+                    output: output.name.clone(),
+                });
+            }
+        }
         let mut outputs: Vec<EdgeOutput> = Vec::with_capacity(wiring.targets.len());
         for (name, node) in &wiring.targets {
             let output = match name {

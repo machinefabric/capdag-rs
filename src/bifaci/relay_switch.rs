@@ -51,7 +51,7 @@
 //! - xid_counter: AtomicU64
 //! - Routing maps: RwLock<HashMap<...>>
 //! - Per-master socket writers: Mutex<FrameWriter<...>>
-//! - Each execute_fanin spawns its own pump that cooperatively routes frames
+//! - Each run_step_chain spawns its own pump that cooperatively routes frames
 
 use crate::bifaci::frame::{CancelReason, FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
 use crate::bifaci::io::{identity_nonce, CborError, FrameReader, FrameWriter};

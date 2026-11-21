@@ -145,7 +145,8 @@ impl CapArgumentValue {
 ///
 /// List outputs carry individual CBOR values, one per list item. The bifaci
 /// transport sends each as a separate chunk via `emit_list_response`, producing
-/// an RFC 8742 CBOR sequence that `execute_fanin`'s list path stores directly.
+/// an RFC 8742 CBOR sequence that the response collector (`collect_response`)
+/// stores as it arrives.
 #[derive(Debug, Clone)]
 pub enum CapResult {
     /// Raw materialized bytes (scalar output).

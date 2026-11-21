@@ -129,6 +129,19 @@ fn score_cap() -> Cap {
     )
 }
 
+/// `tail`: follows a series as it grows, giving its rows as they come — a
+/// streaming output, which may never end.
+fn tail_cap() -> Cap {
+    let mut rows = CapOutput::new(RESIDUALS, "rows", "The rows as they come").streaming(true);
+    rows.is_sequence = true;
+    definition(
+        &format!(r#"cap:in="{SERIES}";tail;out="{RESIDUALS}""#),
+        "tail",
+        vec![CapArg::new(SERIES, "series", true, vec![ArgSource::Stdin { stdin: SERIES.to_string() }])],
+        vec![rows],
+    )
+}
+
 fn media_def(urn: &str, validation: Option<MediaValidation>, schema: Option<serde_json::Value>) -> StoredMediaDef {
     StoredMediaDef {
         dims: Vec::new(),
@@ -157,7 +170,7 @@ pub(super) fn registry() -> FabricRegistry {
 /// `registry()`, reading the fabric `config` names.
 fn registry_configured(config: crate::fabric::registry::RegistryConfig) -> FabricRegistry {
     let registry = FabricRegistry::new_for_test_with_config(config);
-    registry.add_caps_to_cache(vec![compare_cap(), fetch_cap(), publish_cap(), mean_cap(), score_cap()]);
+    registry.add_caps_to_cache(vec![compare_cap(), fetch_cap(), publish_cap(), mean_cap(), score_cap(), tail_cap()]);
     registry.insert_cached_media_def_for_test(media_def(
         WINDOW,
         Some(MediaValidation { min: Some(1.0), max: Some(365.0), ..Default::default() }),
@@ -1066,4 +1079,39 @@ fn test12868_render_payload_carries_the_texts_node_names() {
         parsed.to_render_payload_json_with_names(&registry, &[]),
         Err(MachineAbstractionError::NodeNamesMismatch { .. })
     ));
+}
+
+// TEST7270: a step given `retry` whose cap declares a streaming output is
+// refused when the machine is read. A retried step's outputs are held until an
+// attempt succeeds, and a streaming output, which may never end, cannot be
+// held. The same step with no retry, or with only `on_error`, resolves, and
+// `retry` on a step whose outputs are all bounded still does.
+#[test]
+fn test7270_retry_is_refused_on_a_step_that_streams() {
+    let with_tail = |wiring: &str| {
+        parse_machine(&format!("{HEADERS}[tail cap:in=\"{SERIES}\";tail;out=\"{RESIDUALS}\"]{wiring}"), &registry())
+    };
+
+    match with_tail("[s -> tail{retry=2} -> r]") {
+        Err(MachineParseError::Resolution(error)) => {
+            match &error {
+                MachineAbstractionError::RetryOnStreamingStep { retry, output, .. } => {
+                    assert_eq!(*retry, 2);
+                    assert_eq!(output, "rows");
+                }
+                other => panic!("expected RetryOnStreamingStep, got {other:?}"),
+            }
+            assert!(
+                error.to_string().ends_with("a streaming output cannot be held"),
+                "{error}"
+            );
+        }
+        Err(other) => panic!("expected a resolution error, got {other}"),
+        Ok(_) => panic!("retry on a streaming step must be refused"),
+    }
+
+    for wiring in ["[s -> tail -> r]", "[s -> tail{on_error=absent} -> r]"] {
+        with_tail(wiring).unwrap_or_else(|e| panic!("{wiring} must resolve: {e}"));
+    }
+    machine("[s -> compare{retry=2} -> r]");
 }

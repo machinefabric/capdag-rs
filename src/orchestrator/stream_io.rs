@@ -512,21 +512,10 @@ impl ResponseAudit {
 // Activity tracking
 // =============================================================================
 
-/// Pipeline-level stall warning threshold in seconds.
-///
-/// If no progress LOG frame arrives from ANY body in the entire pipeline
-/// for this duration, the runtime emits a one-shot warning ("no progress
-/// from any body for Ns — continuing to wait. Use Cancel to abort.")
-/// and keeps waiting. The pipeline is NOT aborted automatically —
-/// long-running caps (model loads, vision/LLM inference, large audio
-/// transcription) legitimately exceed this threshold, and aborting them
-/// produced false negatives on every honest long workload. Cancellation
-/// is the user's call, via the explicit cancel-task path.
-///
-/// The constant retains the historical "stall timeout" name (and
-/// duration) so existing telemetry and log-grep dashboards keyed on
-/// "120s" continue to land on the same event. Only the runtime's
-/// reaction changed (warn-once vs abort).
+/// How long a map may go without progress from any of its runs before it is
+/// warned about, once: "This ForEach step has had no progress for 120s;
+/// continuing to wait. Use Cancel to abort." The map keeps waiting; stopping
+/// it is a cancel.
 pub const PIPELINE_STALL_TIMEOUT_SECS: u64 = 120;
 
 /// Per-cap activity timer used by `collect_terminal_output`.
@@ -3107,6 +3096,65 @@ mod tests {
         // No sinks at all: the response is still audited, and everything dropped.
         let collected = collect_into(frames(), &mut []).await.unwrap();
         assert!(collected.is_empty());
+    }
+
+    // TEST8057: a cap that goes silent for longer than its activity timeout is
+    // warned about exactly once and waited out: the collection is not failed,
+    // and what the cap sends once it speaks again is collected.
+    #[tokio::test]
+    async fn test8057_silence_is_warned_about_once_and_waited_out() {
+        let rid = MessageId::new_uuid();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let records: Arc<Mutex<Vec<PipelineLogRecord>>> = Arc::default();
+        let recorded = Arc::clone(&records);
+        let log_fn: PipelineLogFn = Arc::new(move |record| recorded.lock().unwrap().push(record));
+
+        let sender = {
+            let rid = rid.clone();
+            tokio::spawn(async move {
+                tx.send(stream_start(&rid)).unwrap();
+                tx.send(chunk(&rid, b"before")).unwrap();
+                // Two and a half activity timeouts of silence.
+                tokio::time::sleep(Duration::from_millis(2500)).await;
+                tx.send(chunk(&rid, b"-after")).unwrap();
+                tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 2)).unwrap();
+                tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+            })
+        };
+
+        let mut sinks = vec![buffered(0)];
+        let collected = collect_response(
+            rx,
+            None,
+            "cap:test",
+            &contract("cap:test", SCALAR_CONTRACT),
+            &"step_test".parse().unwrap(),
+            Some(&log_fn),
+            None,
+            None,
+            &mut sinks,
+            1,
+            None,
+        )
+        .await
+        .expect("a silent cap is waited out, not failed");
+        sender.await.unwrap();
+
+        assert_eq!(collected.len(), 1);
+        assert_eq!(collected[0].bytes, b"before-after", "everything the cap sent is collected");
+        let records = records.lock().unwrap();
+        let warnings: Vec<&PipelineLogRecord> = records.iter().filter(|record| record.level == "warn").collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one quiet spell is warned about once, however long it lasts: {:?}",
+            records.iter().map(|record| &record.message).collect::<Vec<_>>()
+        );
+        assert!(
+            warnings[0].message.starts_with("no activity for 1s — continuing to wait"),
+            "{}",
+            warnings[0].message
+        );
     }
 
     // TEST12790: an unbounded stream is never buffered, whichever output it

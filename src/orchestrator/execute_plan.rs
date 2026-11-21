@@ -395,9 +395,10 @@ pub trait EngineRuntime: Send + Sync {
 
     /// Per-item activity timeout (seconds) for this segment. The engine reads it from
     /// its config service (a config-service failure is propagated — fail hard, never
-    /// silently defaulted); the CLI reads it from the terminal cap's metadata. A value
-    /// the source does not specify uses the documented default, but an *error* fetching
-    /// it aborts the segment.
+    /// silently defaulted); the CLI reads it from the terminal cap's metadata
+    /// (`segment_activity_timeout`). A value the source does not specify uses the
+    /// documented default; an *error* fetching it, or a value that is not a whole
+    /// number of seconds greater than 0, aborts the segment.
     async fn activity_timeout_secs(&self, graph: &ResolvedGraph) -> Result<u64, ExecutionError>;
 
     /// Disk writer factory for persisted terminal sinks. `Some` for the engine (each

@@ -16,14 +16,16 @@
 //! 3. **Conformance for traversal**: Use `conforms_to()` only for graph traversal
 //!    (can this output feed into that input?).
 //!
-//! 4. **Deterministic ordering**: Results are sorted by (path_length, specificity, urn).
+//! 4. **Deterministic ordering**: paths are sorted by cap step count (fewest
+//!    first; ForEach and Collect do not count), then the sum of their steps'
+//!    specificity (highest first), then their steps compared structurally in
+//!    turn (`compare_paths`).
 //!
-//! 5. **Cardinality is not topology**: The `list` tag is a cardinality marker, not a
-//!    type identity tag. ForEach (list→item) and Collect (item→list) are universal
-//!    operations that apply to any media URN based solely on whether it has the `list`
-//!    tag. They are synthesized dynamically during traversal, not stored as graph edges.
-//!    Collect is the single scalar→list transition — whether wrapping 1 item or
-//!    gathering N ForEach results, it is the same concept.
+//! 5. **Cardinality is not topology**: whether a value is a sequence is the
+//!    `is_sequence` flag of the output that made it, never a tag of its URN.
+//!    ForEach (a sequence into a cap that takes one value) and Collect (items
+//!    back into a sequence) are synthesized during traversal from those flags,
+//!    not stored as graph edges.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -44,7 +46,7 @@ use crate::Cap;
 ///
 /// Cap edges are stored in the graph. Cardinality transitions (ForEach, Collect)
 /// are synthesized dynamically by `get_outgoing_edges()` — they are universal
-/// operations derived from the `list` tag, not graph contents.
+/// operations derived from `is_sequence`, not graph contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiveMachinePlanEdgeType {
     /// A real capability that transforms media
@@ -61,13 +63,13 @@ pub enum LiveMachinePlanEdgeType {
         /// the main output, whose runtime type follows the cap URN's effect.
         output_urn: Option<MediaUrn>,
     },
-    /// Fan-out: iterate over list items (list → item, remove `list` tag)
-    /// Synthesized for any list-typed source.
+    /// Fan-out: iterate over a sequence's items (sequence → item)
+    /// Synthesized for a sequence going into a cap that takes one value.
     ForEach,
-    /// Collect: scalar → list (item → list, add `list` tag)
-    /// The universal scalar-to-list transition. Synthesized for any scalar source.
-    /// Works in two contexts: standalone (wrap scalar in list-of-one) or after
-    /// ForEach (gather iteration results).
+    /// Collect: items → a sequence
+    /// The one item-to-sequence transition. Works in two contexts: standalone
+    /// (one value as a sequence of one) or after ForEach (gather iteration
+    /// results).
     Collect,
 }
 
@@ -1224,8 +1226,8 @@ impl LiveCapFab {
     /// **Critical**: Uses `is_equivalent()` for target matching, NOT `conforms_to()`.
     /// `is_sequence` is the initial cardinality state (from input context).
     ///
-    /// Returns paths sorted by structural path score, then specificity,
-    /// then structural step order.
+    /// Returns paths in `compare_paths` order: fewest cap steps first, then
+    /// highest total specificity, then structural step order.
     pub fn find_paths_to_exact_target(
         &self,
         source: &MediaUrn,
@@ -1748,15 +1750,20 @@ mod tests {
     /// that arg to decide cardinality, so a fixture without it is not a cap the
     /// planner can reason about at all — it would panic rather than mis-plan.
     fn make_test_cap(in_spec: &str, out_spec: &str, op: &str, title: &str) -> Cap {
+        make_tagged_test_cap(in_spec, out_spec, &[(op, "*")], title)
+    }
+
+    /// `make_test_cap` whose cap URN carries `tags` (each `(key, value)`, a
+    /// value of `*` being a marker) in place of one operation marker.
+    fn make_tagged_test_cap(in_spec: &str, out_spec: &str, tags: &[(&str, &str)], title: &str) -> Cap {
         use crate::cap::definition::{ArgSource, CapArg};
         use crate::urn::cap_urn::CapUrnBuilder;
 
-        let cap_urn = CapUrnBuilder::new()
-            .in_spec(in_spec)
-            .out_spec(out_spec)
-            .marker(op)
-            .build()
-            .expect("Failed to build test cap URN");
+        let mut builder = CapUrnBuilder::new().in_spec(in_spec).out_spec(out_spec);
+        for (key, value) in tags {
+            builder = builder.tag(key, value);
+        }
+        let cap_urn = builder.build().expect("Failed to build test cap URN");
 
         Cap {
             dims: Vec::new(),
@@ -2481,6 +2488,60 @@ mod tests {
             "Shortest path should be first (1 step)"
         );
         assert_eq!(paths[0].steps[0].title(), "Direct");
+    }
+
+    // TEST7271: Among paths with as many cap steps, the one whose steps' specificities sum higher comes first, whatever order the caps were added in
+    #[test]
+    fn test7271_paths_of_as_many_steps_are_ordered_by_specificity() {
+        let general = make_tagged_test_cap("media:format-a", "media:format-c", &[("convert", "*")], "Convert");
+        let specific = make_tagged_test_cap(
+            "media:format-a",
+            "media:format-c",
+            &[("convert", "*"), ("fast", "*")],
+            "Convert fast",
+        );
+        assert!(specific.urn.specificity() > general.urn.specificity());
+
+        let source = MediaUrn::from_string("media:format-a").unwrap();
+        let target = MediaUrn::from_string("media:format-c").unwrap();
+        for caps in [[&general, &specific], [&specific, &general]] {
+            let mut graph = LiveCapFab::new();
+            for cap in caps {
+                graph.add_cap(cap);
+            }
+            let paths = graph.find_paths_to_exact_target(&source, &target, false, 5, 10);
+            assert_eq!(paths.len(), 2, "one path through each cap");
+            assert!(
+                paths[0].steps[0].cap_urn().expect("a cap step").is_equivalent(&specific.urn),
+                "the convert;fast path comes first, got {}",
+                paths[0].steps[0].cap_urn().unwrap()
+            );
+        }
+    }
+
+    // TEST7272: Paths equal in cap steps and specificity are ordered by their cap URNs' structure, not by their text or titles
+    #[test]
+    fn test7272_equal_paths_are_ordered_structurally_not_by_text() {
+        // Structurally the tag key `a` comes before `a-x`. As text,
+        // `cap:a-x=c;…` sorts before `cap:a=b;…` ('-' < '='), and by
+        // title "Alpha" sorts before "Zed": either would put the other path
+        // first.
+        let zed = make_tagged_test_cap("media:format-a", "media:format-c", &[("a", "b")], "Zed");
+        let alpha = make_tagged_test_cap("media:format-a", "media:format-c", &[("a-x", "c")], "Alpha");
+        assert_eq!(zed.urn.specificity(), alpha.urn.specificity());
+
+        let source = MediaUrn::from_string("media:format-a").unwrap();
+        let target = MediaUrn::from_string("media:format-c").unwrap();
+        for caps in [[&zed, &alpha], [&alpha, &zed]] {
+            let mut graph = LiveCapFab::new();
+            for cap in caps {
+                graph.add_cap(cap);
+            }
+            let paths = graph.find_paths_to_exact_target(&source, &target, false, 5, 10);
+            assert_eq!(paths.len(), 2, "one path through each cap");
+            assert_eq!(paths[0].steps[0].title(), "Zed");
+            assert_eq!(paths[1].steps[0].title(), "Alpha");
+        }
     }
 
     // TEST1110: Strand serializes to JSON and deserializes back preserving all step types

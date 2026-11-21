@@ -46,9 +46,9 @@ fn platform_binary_name(cartridge_id: &str) -> String {
     }
 }
 
-/// Default cap-level activity timeout in seconds.
-/// If a cartridge sends no frames (Chunk, Log, progress, peer requests) for this
-/// duration, the executor aborts with `ExecutionError::ActivityTimeout`.
+/// Default cap-level activity timeout in seconds. A cap that sends no frame
+/// (chunk, LOG, progress, peer request) for this long is warned about once,
+/// and the run keeps waiting: stopping it is a cancel.
 const DEFAULT_ACTIVITY_TIMEOUT_SECS: u64 = 120;
 
 /// Cap metadata key for per-cap activity timeout override.
@@ -291,6 +291,18 @@ pub enum ExecutionError {
     #[error("Registry error: {0}")]
     FabricRegistryError(String),
 
+    /// A cap declares a metadata value the executor reads and cannot use:
+    /// `activity_timeout_secs` that is not a whole number of seconds greater
+    /// than 0. Absent is the documented default; a malformed value is the
+    /// cap's own declaration broken, so it fails rather than being replaced
+    /// by the default. Attributed Internal, as every broken declaration is.
+    #[error("cap '{cap_urn}' declares {key} = '{value}': a whole number of seconds greater than 0 is required")]
+    CapMetadataInvalid {
+        cap_urn: String,
+        key: String,
+        value: String,
+    },
+
     /// The sequences a map zips are of different lengths (15.2 §Maps): run
     /// `i` of the map is given item `i` of each, so there is no run to give
     /// the items one has and another lacks. Each source is named with how
@@ -345,7 +357,8 @@ impl ExecutionError {
             | ExecutionError::HostError(_)
             | ExecutionError::EffectContractViolation { .. }
             | ExecutionError::StreamContractViolation { .. }
-            | ExecutionError::OutputContractViolation { .. } => AttributionClass::Internal,
+            | ExecutionError::OutputContractViolation { .. }
+            | ExecutionError::CapMetadataInvalid { .. } => AttributionClass::Internal,
         }
     }
 
@@ -2266,7 +2279,7 @@ pub async fn run_dag_on_context(
     }
     let chains = split_chains_at_shared_bounded_pool(linear_chains, &step_admission);
     let chains = split_chains_at_streaming_boundary(chains, &step_shapes);
-    let n_chains = chains.len();
+    let chain_ranges = chain_progress_ranges(&chains);
 
     // Spool files created for unbounded intermediates this segment; consumed
     // by later chains in THIS loop, removed when the segment completes —
@@ -2352,8 +2365,7 @@ pub async fn run_dag_on_context(
             slots.push(slot(&output.node, &output.output_media_urn, declared));
         }
 
-        let progress_base = ci as f32 / n_chains as f32;
-        let progress_span = 1.0 / n_chains as f32;
+        let (progress_base, progress_span) = chain_ranges[ci];
 
         let chain_contracts: Vec<super::stream_io::ResponseContract> =
             chain_idxs.iter().map(|&i| step_contracts[i].clone()).collect();
@@ -2601,6 +2613,22 @@ impl CapStreamShape {
             output: super::stream_io::OutputContract::of(cap),
         }
     }
+}
+
+/// The progress range of each pipeline of a segment: its share is the
+/// steps it holds over the segment's steps, as a run's units share the
+/// run (15.2 §Progress subdivision). `(base, span)` per pipeline, in order.
+fn chain_progress_ranges(chains: &[Vec<usize>]) -> Vec<(f32, f32)> {
+    let total: usize = chains.iter().map(Vec::len).sum();
+    let mut before = 0usize;
+    chains
+        .iter()
+        .map(|chain| {
+            let range = (before as f32 / total as f32, chain.len() as f32 / total as f32);
+            before += chain.len();
+            range
+        })
+        .collect()
 }
 
 /// Split chains at every hop where the producer MAY emit without a length
@@ -4063,19 +4091,28 @@ async fn forward_frames(
     }
 }
 
-/// The per-item activity timeout for a segment, read from the segment's terminal cap
-/// metadata (`activity_timeout_secs`), falling to the documented default only when the
-/// key is absent or malformed.
-pub(crate) fn segment_activity_timeout(graph: &ResolvedGraph) -> u64 {
-    // The terminal cap: the last step of the segment's order.
-    let terminal = topological_sort_steps(&graph.steps)
-        .ok()
-        .and_then(|order| order.last().map(|&i| &graph.steps[i]));
-    terminal
-        .and_then(|step| step.cap.metadata.get(ACTIVITY_TIMEOUT_METADATA_KEY))
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|&v| v > 0)
-        .unwrap_or(DEFAULT_ACTIVITY_TIMEOUT_SECS)
+/// The activity timeout for a segment, read from the `activity_timeout_secs`
+/// metadata of the segment's terminal cap (the last step of its order), and
+/// applied to every step of the segment. It is the documented default when the
+/// key is absent, and an error naming the cap when it is not a whole number of
+/// seconds greater than 0. A segment whose steps cannot be ordered is refused.
+pub(crate) fn segment_activity_timeout(graph: &ResolvedGraph) -> Result<u64, ExecutionError> {
+    let order = topological_sort_steps(&graph.steps)?;
+    let Some(&terminal) = order.last() else {
+        return Ok(DEFAULT_ACTIVITY_TIMEOUT_SECS);
+    };
+    let step = &graph.steps[terminal];
+    let Some(value) = step.cap.metadata.get(ACTIVITY_TIMEOUT_METADATA_KEY) else {
+        return Ok(DEFAULT_ACTIVITY_TIMEOUT_SECS);
+    };
+    match value.parse::<u64>() {
+        Ok(secs) if secs > 0 => Ok(secs),
+        _ => Err(ExecutionError::CapMetadataInvalid {
+            cap_urn: step.cap.urn.to_string(),
+            key: ACTIVITY_TIMEOUT_METADATA_KEY.to_string(),
+            value: value.clone(),
+        }),
+    }
 }
 
 /// One cartridge a host is given: its entry point, its identity (a dev
@@ -4714,6 +4751,95 @@ mod tests {
         }
     }
 
+    // TEST8058: the pipelines a segment is split into share its progress by the
+    // steps each holds, so every step of the segment weighs the same, as every
+    // step of a run does.
+    #[test]
+    fn test8058_a_segments_pipelines_share_its_progress_by_steps() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-6;
+
+        let ranges = chain_progress_ranges(&[vec![0], vec![1, 2]]);
+        assert_eq!(ranges.len(), 2);
+        assert!(close(ranges[0].0, 0.0) && close(ranges[0].1, 1.0 / 3.0), "{ranges:?}");
+        assert!(close(ranges[1].0, 1.0 / 3.0) && close(ranges[1].1, 2.0 / 3.0), "{ranges:?}");
+
+        let ranges = chain_progress_ranges(&[vec![0, 1, 2]]);
+        assert_eq!(ranges.len(), 1);
+        assert!(close(ranges[0].0, 0.0) && close(ranges[0].1, 1.0), "{ranges:?}");
+
+        let chains = [vec![0, 1], vec![2], vec![3]];
+        let ranges = chain_progress_ranges(&chains);
+        let bases: Vec<f32> = ranges.iter().map(|&(base, _)| base).collect();
+        assert!(close(bases[0], 0.0) && close(bases[1], 0.5) && close(bases[2], 0.75), "{bases:?}");
+        assert!(close(ranges.iter().map(|&(_, span)| span).sum::<f32>(), 1.0), "{ranges:?}");
+        for (chain, &(_, span)) in chains.iter().zip(&ranges) {
+            assert!(close(span / chain.len() as f32, 0.25), "every step weighs a quarter: {ranges:?}");
+        }
+    }
+
+    /// A segment of two steps, `a` feeding `d`, listed terminal first so that
+    /// the terminal cap is found by the segment's order, not by where it is
+    /// listed. `a_metadata` and `d_metadata` are the caps' metadata.
+    fn two_step_segment(a_metadata: &[(&str, &str)], d_metadata: &[(&str, &str)]) -> ResolvedGraph {
+        let with = |mut step: ResolvedStep, metadata: &[(&str, &str)]| {
+            for (key, value) in metadata {
+                step.cap.metadata.insert(key.to_string(), value.to_string());
+            }
+            step
+        };
+        ResolvedGraph {
+            nodes: HashMap::new(),
+            steps: vec![
+                with(step("d", OP_D, Some("a")), d_metadata),
+                with(step("a", OP_A, None), a_metadata),
+            ],
+            graph_name: None,
+        }
+    }
+
+    // TEST8059: a segment takes its activity timeout from the metadata of its
+    // last cap, and that alone: the key on an earlier cap is not read.
+    #[test]
+    fn test8059_a_segment_takes_its_timeout_from_its_last_cap() {
+        let graph = two_step_segment(&[], &[(ACTIVITY_TIMEOUT_METADATA_KEY, "600")]);
+        assert_eq!(segment_activity_timeout(&graph).unwrap(), 600);
+
+        let graph = two_step_segment(&[(ACTIVITY_TIMEOUT_METADATA_KEY, "600")], &[]);
+        assert_eq!(segment_activity_timeout(&graph).unwrap(), DEFAULT_ACTIVITY_TIMEOUT_SECS);
+        assert_eq!(DEFAULT_ACTIVITY_TIMEOUT_SECS, 120);
+    }
+
+    // TEST8069: an activity timeout a cap declares that is not a whole number of
+    // seconds greater than 0 is refused, naming the cap, the key and the value;
+    // it is never replaced by the default. A cap that declares none gets the
+    // default.
+    #[test]
+    fn test8069_a_malformed_activity_timeout_is_refused_naming_the_cap() {
+        for value in ["0", "10m", "-5", "", "1.5"] {
+            let graph = two_step_segment(&[], &[(ACTIVITY_TIMEOUT_METADATA_KEY, value)]);
+            let error = segment_activity_timeout(&graph)
+                .expect_err(&format!("activity_timeout_secs = '{value}' must be refused"));
+            let ExecutionError::CapMetadataInvalid { cap_urn, key, value: declared } = &error else {
+                panic!("activity_timeout_secs = '{value}' must be refused as CapMetadataInvalid, got {error:?}");
+            };
+            assert_eq!(cap_urn, &graph.steps[0].cap.urn.to_string(), "the terminal cap is named");
+            assert_eq!(key, ACTIVITY_TIMEOUT_METADATA_KEY);
+            assert_eq!(declared, value);
+            assert_eq!(
+                error.attribution_class(),
+                crate::failure::AttributionClass::Internal,
+                "a broken declaration is the cap's own defect"
+            );
+            let message = error.to_string();
+            assert!(message.contains(&format!("'{value}'")) && message.contains("op-d"), "{message}");
+        }
+
+        let graph = two_step_segment(&[], &[(ACTIVITY_TIMEOUT_METADATA_KEY, "30")]);
+        assert_eq!(segment_activity_timeout(&graph).unwrap(), 30);
+        let graph = two_step_segment(&[], &[]);
+        assert_eq!(segment_activity_timeout(&graph).unwrap(), DEFAULT_ACTIVITY_TIMEOUT_SECS);
+    }
+
     // TEST910: map_progress output is monotonic for monotonically increasing input
     #[test]
     fn test910_map_progress_monotonic() {
@@ -4879,6 +5005,24 @@ mod tests {
         );
     }
 
+    // TEST8068: a step's own progress is passed on as its cartridge reports it,
+    // and may go down: the step sink sees 0.8 and then 0.3, in that order.
+    #[test]
+    fn test8068_a_steps_own_progress_may_go_down() {
+        let parent: CapProgressFn = Arc::new(|_p: f32, _cap: &str, _msg: &str| {});
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&seen);
+        let sink: CapStepProgressFn = Arc::new(move |step: f32, _cap: &str, _token: &str| {
+            recorded.lock().unwrap().push(step);
+        });
+
+        let mapper = ProgressMapper::new(&parent, 0.0, 1.0).with_step_sink(&sink, &"tok-step".parse().unwrap());
+        mapper.report(0.8, "cap:x", "second pass");
+        mapper.report(0.3, "cap:x", "third pass");
+
+        assert_eq!(*seen.lock().unwrap(), vec![0.8, 0.3]);
+    }
+
     // TEST915: Per-group subdivision produces monotonic, bounded progress for N groups
     //
     // Uses pre-computed boundaries (same pattern as production code) to guarantee
@@ -5039,15 +5183,6 @@ mod tests {
         assert!(min >= 0.1, "min {} must be >= base 0.1", min);
         assert!(max <= 0.9, "max {} must be <= base+weight 0.9", max);
     }
-
-    // ActivityTimeout error variants removed: the runtime no longer
-    // aborts a cap on activity-silence; long silences surface as
-    // warnings only and the user cancels via the explicit
-    // cancel-task path. The TEST918 assertion of the
-    // `ExecutionError::ActivityTimeout` Display has been deleted
-    // along with the variant — not a tautological removal of a real
-    // test, but the deletion of an assertion about a code path that
-    // no longer exists.
 
     // TEST20078: the adapter groups a host refuses are stated per cartridge,
     // with both URNs of the conflict and whose the other is, what was done,
