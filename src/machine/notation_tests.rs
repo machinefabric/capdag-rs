@@ -45,7 +45,6 @@ pub(super) fn definition(urn: &str, title: &str, args: Vec<CapArg>, outputs: Vec
         metadata_json: None,
         registered_by: None,
         supported_model_types: Vec::new(),
-        default_model_spec: None,
     };
     crate::cap::validation::validate_cap_definition(&cap)
         .unwrap_or_else(|e| panic!("the fixture '{title}' is not a valid definition: {e}"));
