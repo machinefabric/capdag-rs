@@ -4971,29 +4971,26 @@ async fn bring_provider(
 fn parse_relay_notify_payload(
     notify_payload: &[u8],
 ) -> Result<RelayNotifyCapabilitiesPayload, RelaySwitchError> {
-    use crate::standard::caps::CAP_IDENTITY;
-    use crate::urn::cap_urn::CapUrn;
-
     let payload: RelayNotifyCapabilitiesPayload = serde_json::from_slice(notify_payload)
         .map_err(|e| RelaySwitchError::Protocol(format!("Invalid RelayNotify payload: {}", e)))?;
 
-    let cap_urns = payload.cap_urns();
-    if !cap_urns.is_empty() {
-        // A non-empty cap set must include CAP_IDENTITY — advertising any cap
-        // without the structural identity cap is a broken host. The check
-        // walks every cap URN declared across the payload's cap_groups.
-        let identity_urn =
-            CapUrn::from_string(CAP_IDENTITY).expect("BUG: CAP_IDENTITY constant is invalid");
-        let has_identity = cap_urns.iter().any(|cap_str| {
-            CapUrn::from_string(cap_str)
-                .map(|cap_urn| identity_urn.conforms_to(&cap_urn))
-                .unwrap_or(false)
-        });
-        if !has_identity {
-            return Err(RelaySwitchError::Protocol(format!(
-                "RelayNotify advertised caps but is missing required CAP_IDENTITY ({})",
-                CAP_IDENTITY
-            )));
+    // A non-empty cap set must include the identity cap — advertising any cap
+    // without it is a broken host. The identity is a definition, recognised
+    // by equivalence: a wider pattern the identity refines (`cap:?effect`)
+    // is not the identity.
+    let mut caps = payload
+        .installed_cartridges
+        .iter()
+        .flat_map(|c| c.cap_groups.iter())
+        .flat_map(|g| g.caps.iter())
+        .peekable();
+    if caps.peek().is_some() {
+        let identity = crate::standard::caps::identity_urn();
+        if !caps.any(|cap| cap.urn.is_equivalent(&identity)) {
+            return Err(RelaySwitchError::Protocol(
+                "RelayNotify advertised caps but none is the identity cap (cap:effect=none)"
+                    .to_string(),
+            ));
         }
     }
 
@@ -8303,6 +8300,56 @@ mod tests {
         let bytes = serde_json::to_vec(&bare).unwrap();
         let parsed = parse_relay_notify_payload(&bytes).expect("bare payload parses");
         assert!(parsed.host_protocol_stats.is_none());
+    }
+
+    // TEST7196: A RelayNotify that advertises caps must name the identity cap
+    // itself, recognised by equivalence: a host whose only cap the identity
+    // refines is the wider pattern `cap:?effect` is refused, and one whose
+    // identity is spelled with its directions written out is taken.
+    #[test]
+    fn test7196_relay_notify_identity_by_equivalence() {
+        let mut transform = crate::Cap::new(
+            crate::CapUrn::from_string(r#"cap:in="media:pdf";convert;out="media:png""#).unwrap(),
+            "Convert".to_string(),
+            vec!["convert".to_string()],
+        );
+        transform.add_output(crate::cap::definition::CapOutput::new("media:png", "png", "The image"));
+        let payload_with = |caps: Vec<crate::Cap>| {
+            let record = InstalledCartridgeRecord {
+                registry_url: None,
+                channel: crate::bifaci::cartridge_repo::CartridgeChannel::Nightly,
+                id: "cart".to_string(),
+                version: "1.0.0".to_string(),
+                sha256: "aa".repeat(32),
+                cap_groups: vec![crate::bifaci::manifest::CapGroup {
+                    name: "default".to_string(),
+                    caps,
+                    adapter_urns: Vec::new(),
+                }],
+                attachment_error: None,
+                runtime_stats: None,
+                lifecycle: CartridgeLifecycle::Operational,
+            };
+            serde_json::to_vec(&RelayNotifyCapabilitiesPayload::new(vec![record])).unwrap()
+        };
+
+        let wide = crate::Cap::new(
+            crate::CapUrn::from_string("cap:?effect").unwrap(),
+            "Any effect".to_string(),
+            vec!["any-effect".to_string()],
+        );
+        match parse_relay_notify_payload(&payload_with(vec![wide, transform.clone()])) {
+            Err(RelaySwitchError::Protocol(msg)) => {
+                assert!(msg.contains("identity cap"), "{msg}")
+            }
+            other => panic!("a host without the identity cap must be refused, got {other:?}"),
+        }
+
+        let mut spelled = crate::standard::caps::identity_cap();
+        spelled.urn = crate::CapUrn::from_string("cap:effect=none;in=media:;out=media:").unwrap();
+        let parsed = parse_relay_notify_payload(&payload_with(vec![spelled, transform]))
+            .expect("the identity spelled out is the identity");
+        assert_eq!(parsed.cap_urns().len(), 2);
     }
 
     // TEST7093: A response frame for a LIVE request whose external consumer is

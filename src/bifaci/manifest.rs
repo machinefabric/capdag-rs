@@ -4,7 +4,7 @@
 //! This replaces the earlier separate per-language manifest types with a single canonical format.
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::standard::caps::CAP_IDENTITY;
+use crate::standard::caps::{identity_urn, CAP_IDENTITY};
 use crate::urn::cap_urn::CapUrn;
 use crate::Cap;
 use serde::{Deserialize, Serialize};
@@ -241,12 +241,11 @@ impl CapManifest {
     /// passes the definition rules, and the pool declarations resolve.
     /// Fails hard if identity is missing — it is mandatory in every capset.
     pub fn validate(&self) -> Result<(), String> {
-        let identity_urn = CapUrn::from_string(CAP_IDENTITY)
-            .map_err(|e| format!("BUG: CAP_IDENTITY constant is invalid: {}", e))?;
+        let identity_urn = identity_urn();
         let has_identity = self
             .all_caps()
             .iter()
-            .any(|cap| identity_urn.conforms_to(&cap.urn));
+            .any(|cap| cap.urn.is_equivalent(&identity_urn));
         if !has_identity {
             return Err(format!(
                 "Manifest missing required CAP_IDENTITY ({})",
@@ -823,6 +822,41 @@ mod tests {
             "Manifest without CAP_IDENTITY must fail validation"
         );
         assert!(result.unwrap_err().contains("CAP_IDENTITY"));
+    }
+
+    // TEST7195: validate() recognises the identity cap by equivalence: a
+    // wider pattern the identity refines (`cap:?effect`) is not the identity,
+    // and the identity spelled with its directions written out is.
+    #[test]
+    fn test7195_validate_recognises_identity_by_equivalence() {
+        let manifest_with = |caps: Vec<Cap>| {
+            CapManifest::new(
+                "TestCartridge".to_string(),
+                "1.0.0".to_string(),
+                CartridgeChannel::Release,
+                None,
+                "Test".to_string(),
+                vec![default_group(caps)],
+            )
+        };
+        let mut transform = Cap::new(
+            CapUrn::from_string(&test_urn("convert")).unwrap(),
+            "Convert".to_string(),
+            vec!["convert".to_string()],
+        );
+        transform.add_output(crate::cap::definition::CapOutput::new("media:record", "record", "The record"));
+
+        let wide = Cap::new(
+            CapUrn::from_string("cap:?effect").unwrap(),
+            "Any effect".to_string(),
+            vec!["any-effect".to_string()],
+        );
+        let err = manifest_with(vec![wide, transform.clone()]).validate().unwrap_err();
+        assert!(err.contains("CAP_IDENTITY"), "{err}");
+
+        let mut spelled = crate::standard::caps::identity_cap();
+        spelled.urn = CapUrn::from_string("cap:effect=none;in=media:;out=media:").unwrap();
+        assert_eq!(manifest_with(vec![spelled, transform]).validate(), Ok(()));
     }
 
     // TEST1284: Cap group with adapter URNs serializes and deserializes correctly
