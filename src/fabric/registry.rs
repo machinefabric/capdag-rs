@@ -4831,6 +4831,104 @@ mod parity_port_tests {
         assert!(err.to_string().contains("RULE15"), "{err}");
     }
 
+    // TEST1976: a cap a registry serves is the cap that was asked for, at the
+    // version the manifest pins: another cap's body, or this cap at another
+    // version, is refused before it is cached.
+    #[test]
+    fn test1976_a_served_cap_is_the_one_asked_for_at_its_pinned_version() {
+        let urn = r#"cap:in="media:document;ext=pdf";disbind;out="media:enc=utf8;page""#;
+        let key = normalize_cap_urn(urn).unwrap();
+        let body = |urn: &str, version: u32| {
+            serde_json::json!({
+                "urn": urn, "version": version, "aliases": ["disbind"], "title": "Disbind PDF",
+                "args": [{
+                    "media_urn": "media:document;ext=pdf", "name": "document", "required": true,
+                    "sources": [{"stdin": "media:document;ext=pdf"}],
+                }],
+                "outputs": [{"media_urn": "media:enc=utf8;page", "name": "pages", "output_description": "Pages"}],
+            })
+            .to_string()
+        };
+
+        let cap = checked_cap_definition(body(urn, 3).as_bytes(), &key, 3).expect("the matching body");
+        assert_eq!(cap.version, 3);
+
+        let other = r#"cap:in="media:document;ext=pdf";bind;out="media:enc=utf8;page""#;
+        let err = checked_cap_definition(body(other, 3).as_bytes(), &key, 3).unwrap_err();
+        assert!(matches!(err, FabricRegistryError::ParseError(_)), "{err:?}");
+        assert!(err.to_string().contains("does not match requested URN"), "{err}");
+
+        let err = checked_cap_definition(body(urn, 2).as_bytes(), &key, 3).unwrap_err();
+        assert!(err.to_string().contains("reports version 2 but manifest pins defver 3"), "{err}");
+    }
+
+    // TEST1977: a media definition a registry serves is the one that was asked
+    // for, at the version the manifest pins.
+    #[test]
+    fn test1977_a_served_media_def_is_the_one_asked_for_at_its_pinned_version() {
+        let key = normalize_media_urn("media:document;ext=pdf").unwrap();
+        let body = |urn: &str, version: u32| {
+            serde_json::json!({"urn": urn, "version": version, "media_type": "application/pdf", "title": "PDF"})
+                .to_string()
+        };
+
+        let spec = checked_media_def(body("media:ext=pdf;document", 3).as_bytes(), &key, 3)
+            .expect("the matching body, its tags in another order");
+        assert_eq!(spec.version, 3);
+
+        let err = checked_media_def(body("media:ext=png;image", 3).as_bytes(), &key, 3).unwrap_err();
+        assert!(matches!(err, FabricRegistryError::ParseError(_)), "{err:?}");
+        assert!(err.to_string().contains("does not match requested URN"), "{err}");
+
+        let err = checked_media_def(body("media:document;ext=pdf", 2).as_bytes(), &key, 3).unwrap_err();
+        assert!(err.to_string().contains("reports version 2 but manifest pins defver 3"), "{err}");
+    }
+
+    // TEST1978: every definition a manifest pins is at version 1 or later; a
+    // manifest pinning one at 0 is refused, and no registry is pinned at
+    // manifest 0.
+    #[test]
+    fn test1978_a_manifest_pinning_a_definition_at_zero_is_refused() {
+        let mut manifest = Manifest::empty(14);
+        manifest.caps.insert("cap:effect=none".to_string(), 13);
+        assert!(check_manifest_defvers(&manifest).is_ok());
+
+        manifest.media.insert("media:".to_string(), 0);
+        let err = check_manifest_defvers(&manifest).unwrap_err();
+        assert!(
+            err.to_string().contains("manifest v14 pins 'media:' at 0, which is no definition version"),
+            "{err}"
+        );
+
+        let pinned_at_zero = std::panic::catch_unwind(|| {
+            FabricRegistry::new_for_test_with_config_and_version(RegistryConfig::default(), 0)
+        });
+        assert!(pinned_at_zero.is_err(), "a registry is pinned at manifest 1 or later");
+    }
+
+    // TEST1979: the identity cap is held at the version the pinned manifest
+    // holds it at, and the manifest is not rewritten; a manifest without the
+    // identity cap is refused, naming it.
+    #[test]
+    fn test1979_the_identity_cap_is_held_at_the_version_its_manifest_pins() {
+        let registry = FabricRegistry::new_for_test_with_config_and_version(RegistryConfig::default(), 14);
+        let identity = normalize_cap_urn(&crate::standard::caps::identity_cap().urn_string()).unwrap();
+        registry.manifest.lock().unwrap().caps.insert(identity.clone(), 13);
+        registry.cached_caps.lock().unwrap().clear();
+
+        registry.ensure_identity_cap().expect("the manifest holds the identity cap");
+        assert_eq!(registry.cached_caps.lock().unwrap()[&identity].version, 13);
+        assert_eq!(registry.manifest.lock().unwrap().caps[&identity], 13, "the manifest still pins 13");
+
+        registry.manifest.lock().unwrap().caps.remove(&identity);
+        registry.cached_caps.lock().unwrap().clear();
+        let err = registry.ensure_identity_cap().unwrap_err();
+        assert!(
+            err.to_string().contains("does not hold the identity cap 'cap:effect=none'"),
+            "{err}"
+        );
+    }
+
     // TEST12715: the cache holds only checked definitions, so one on disk that
     // breaks a rule was written under other rules: loading drops its file and
     // keeps the rest, and the definition is fetched anew when next asked for.

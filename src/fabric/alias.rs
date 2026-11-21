@@ -160,6 +160,31 @@ mod tests {
         ));
     }
 
+    // TEST1980: an alias name lowercases `A`-`Z` and no other character, and
+    // refuses every Unicode White_Space character as whitespace: under
+    // Unicode case mapping KELVIN SIGN lowercases to `k`, and one
+    // implementation would publish a name another refuses.
+    #[test]
+    fn test1980_alias_names_lowercase_only_ascii_letters() {
+        assert_eq!(normalize_alias_name("JSONDoc").unwrap(), "jsondoc");
+        assert!(matches!(
+            normalize_alias_name("\u{212A}ind"),
+            Err(AliasNameError::InvalidChar { ch: '\u{212A}', .. })
+        ));
+        for spaced in ["a\u{00A0}b", "a\u{0085}b"] {
+            assert!(
+                matches!(normalize_alias_name(spaced), Err(AliasNameError::ContainsWhitespace(_))),
+                "{spaced:?} holds Unicode White_Space"
+            );
+        }
+        for odd in ["a\u{FEFF}b", "a\u{001C}b"] {
+            assert!(
+                matches!(normalize_alias_name(odd), Err(AliasNameError::InvalidChar { .. })),
+                "{odd:?} holds no White_Space and is no alias character"
+            );
+        }
+    }
+
     // TEST1881: URN-vs-alias detection keys purely on the presence of ':'.
     // The whole design rests on this discriminator being exact.
     #[test]
