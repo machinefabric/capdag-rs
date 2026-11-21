@@ -46,18 +46,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 /// The anchor of MachineFabric's production fabric, used when nothing names
 /// another. Only the anchor: where its objects are is read from its charter.
 const DEFAULT_FABRIC_ANCHOR: &str = "https://fabric.capdag.com";
-
-/// Wall-clock TTL retained only for the v0 (legacy, flat-path) resolution
-/// mode. Versioned objects at v >= 1 are immutable by protocol — once a
-/// definition is published at `caps/<sha>/<defver>.json`, its bytes
-/// never change — so versioned cache entries never expire.
-const CACHE_DURATION_HOURS: u64 = 24;
 
 /// Hard wall-clock budget for the synchronous fetch attempt that
 /// `get_cached_cap` and `get_cached_media_def` each make on a cache
@@ -169,9 +163,8 @@ impl FabricLocations {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StoredMediaDef {
     pub urn: String,
-    /// Per-definition version. 0 ⇒ v0 (frozen flat-path); >= 1 ⇒ pinned
-    /// at `media/<sha256-of-urn>/<version>.json` and referenced by a
-    /// manifest at that defver.
+    /// Per-definition version, ≥1 for every definition a registry serves; 0
+    /// only for a definition no registry has published.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub version: u32,
     pub media_type: String,
@@ -228,65 +221,21 @@ impl StoredMediaDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CapCacheEntry {
     definition: Cap,
-    cached_at: u64,
-    ttl_hours: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MediaCacheEntry {
     spec: StoredMediaDef,
-    cached_at: u64,
-    ttl_hours: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AliasCacheEntry {
     alias: StoredAlias,
-    cached_at: u64,
-    ttl_hours: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DimCacheEntry {
     dim: StoredDim,
-    cached_at: u64,
-    ttl_hours: u64,
-}
-
-trait CacheEntryExt {
-    fn cached_at(&self) -> u64;
-    fn ttl_hours(&self) -> u64;
-    fn is_expired(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        now > self.cached_at() + (self.ttl_hours() * 3600)
-    }
-}
-impl CacheEntryExt for CapCacheEntry {
-    fn cached_at(&self) -> u64 {
-        self.cached_at
-    }
-    fn ttl_hours(&self) -> u64 {
-        self.ttl_hours
-    }
-}
-impl CacheEntryExt for MediaCacheEntry {
-    fn cached_at(&self) -> u64 {
-        self.cached_at
-    }
-    fn ttl_hours(&self) -> u64 {
-        self.ttl_hours
-    }
-}
-impl CacheEntryExt for AliasCacheEntry {
-    fn cached_at(&self) -> u64 {
-        self.cached_at
-    }
-    fn ttl_hours(&self) -> u64 {
-        self.ttl_hours
-    }
 }
 
 // =============================================================================
@@ -330,17 +279,9 @@ enum FetchKey {
     Alias { name: String, defver: u32 },
 }
 
-/// A versioned registry snapshot. Mirrors `fabric/manifest.schema.json`
-/// on the wire.
-///
-/// v0 (the implicit pre-versioning state) has no manifest object — the
-/// registry resolves URNs via the frozen flat R2 paths in that mode.
-/// Manifests at version >= 1 explicitly name every URN that belongs to
-/// the snapshot, paired with the defver at which it is published.
-///
-/// A defver of 0 in this manifest's `caps` or `media` map means the
-/// entry resolves through the legacy flat path; that is allowed by the
-/// wire schema even though no source TOML produces a v0 def.
+/// A versioned registry snapshot (`fabric/manifest.schema.json`): every cap
+/// and media URN, alias and dim it holds, each at the version (≥1) it is
+/// pinned at.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
@@ -790,7 +731,6 @@ impl FabricRegistry {
         };
         retain_pinned(
             &manifest,
-            manifest_version,
             &mut cached_caps_map,
             &mut cached_specs_map,
             &mut cached_aliases_map,
@@ -858,7 +798,7 @@ impl FabricRegistry {
         // into the in-memory cap cache directly (no network round-trip,
         // no disk write) so it is always available even on a fresh
         // install with no prior cache.
-        registry.ensure_identity_cap();
+        registry.ensure_identity_cap()?;
 
         Ok(registry)
     }
@@ -896,47 +836,32 @@ impl FabricRegistry {
         Ok(cache_dir)
     }
 
-    fn ensure_identity_cap(&self) {
+    /// Seed the identity cap at the version the pinned manifest holds it at.
+    /// The identity is a fabric cap like any other, so its version is the
+    /// manifest's; a manifest that does not hold it is no capability set this
+    /// library reads, and is refused.
+    fn ensure_identity_cap(&self) -> Result<(), FabricRegistryError> {
         use crate::standard::caps::identity_cap;
-        // STANDARD_CAPS travel with the manifest: their per-def version
-        // is always the registry's pinned manifest version. The
-        // publisher applies the same rule on the wire so the bytes on
-        // R2 carry `version = manifestVersion` for every snapshot.
         let mut identity = identity_cap();
-        identity.version = self.manifest_version;
-        let urn = identity.urn_string();
-        // The identity cap is a STANDARD_CAP synthesized in-process from a
-        // fixed definition, so its URN should always parse. If it ever does
-        // not, that is a build-time defect in the standard-cap definition — but
-        // we surface it as a loud error and skip caching the identity cap
-        // rather than panic. A bad URN must never crash registry construction
-        // (and the whole app with it); downstream identity resolution will then
-        // fail with its own clean, handled error instead.
-        let normalized_urn = match normalize_cap_urn(&urn) {
-            Ok(n) => n,
-            Err(e) => {
-                tracing::error!(
-                    target: "capdag::fabric::registry",
-                    urn = %urn, error = %e,
-                    "ensure_identity_cap: the standard identity cap URN does not parse; \
-                     identity cap will not be cached (this is a standard-cap definition bug)"
-                );
-                return;
-            }
+        let normalized_urn = normalize_cap_urn(&identity.urn_string())?;
+        let defver = {
+            let m = self.manifest.lock().map_err(|e| {
+                FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
+            })?;
+            m.caps.get(&normalized_urn).copied()
         };
-        if let Ok(mut cached_caps) = self.cached_caps.lock() {
-            if !cached_caps.contains_key(&normalized_urn) {
-                cached_caps.insert(normalized_urn.clone(), identity);
-            }
-        }
-        // Record the identity cap's defver in the manifest so any
-        // resolution that consults the manifest finds it. At v0 this is
-        // a no-op (manifest is `empty(0)`, never consulted).
-        if self.manifest_version >= 1 {
-            if let Ok(mut m) = self.manifest.lock() {
-                m.caps.insert(normalized_urn, self.manifest_version);
-            }
-        }
+        let Some(defver) = defver else {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "manifest v{} does not hold the identity cap '{}', which every capability set includes",
+                self.manifest_version, normalized_urn
+            )));
+        };
+        identity.version = defver;
+        let mut cached_caps = self.cached_caps.lock().map_err(|e| {
+            FabricRegistryError::CacheError(format!("Failed to lock cap cache: {}", e))
+        })?;
+        cached_caps.entry(normalized_urn).or_insert(identity);
+        Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -988,15 +913,10 @@ impl FabricRegistry {
     }
 
     /// Resolve a normalized cap URN to its defver under the pinned
-    /// manifest. At v0 this is unconditionally 0 (flat path). At v >= 1
-    /// the URN must be in the manifest's `caps` map; if absent the
-    /// caller has asked for a URN that is not part of the snapshot and
-    /// we surface that as `NotFound` rather than silently fetching from
-    /// flat paths (which would mix snapshot versions).
+    /// manifest. The URN must be in the manifest's `caps` map; if absent
+    /// the caller has asked for a URN that is not part of the snapshot and
+    /// we surface that as `NotFound`.
     fn cap_defver(&self, normalized_urn: &str) -> Result<u32, FabricRegistryError> {
-        if self.manifest_version == 0 {
-            return Ok(0);
-        }
         let m = self.manifest.lock().map_err(|e| {
             FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
         })?;
@@ -1011,9 +931,6 @@ impl FabricRegistry {
     /// Resolve a normalized media URN to its defver under the pinned
     /// manifest. Same rules as `cap_defver`.
     fn media_defver(&self, normalized_urn: &str) -> Result<u32, FabricRegistryError> {
-        if self.manifest_version == 0 {
-            return Ok(0);
-        }
         let m = self.manifest.lock().map_err(|e| {
             FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
         })?;
@@ -1030,16 +947,8 @@ impl FabricRegistry {
     // -------------------------------------------------------------------------
 
     /// Resolve a normalized alias name to its defver under the pinned
-    /// manifest. Aliases exist only in the versioned regime: at v0 there
-    /// are no aliases, so any alias lookup is a hard `NotFound`. At v >= 1
-    /// the name must be in the manifest's `aliases` map.
+    /// manifest. The name must be in the manifest's `aliases` map.
     fn alias_defver(&self, normalized_name: &str) -> Result<u32, FabricRegistryError> {
-        if self.manifest_version == 0 {
-            return Err(FabricRegistryError::NotFound(format!(
-                "alias '{}' cannot resolve: registry is pinned at v0 (aliases are a versioned-regime concept)",
-                normalized_name
-            )));
-        }
         let m = self.manifest.lock().map_err(|e| {
             FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
         })?;
@@ -1248,10 +1157,8 @@ impl FabricRegistry {
         if let Ok(mut guard) = self.cached_aliases.lock() {
             guard.insert(name.clone(), alias);
         }
-        if self.manifest_version >= 1 {
-            if let Ok(mut m) = self.manifest.lock() {
-                m.aliases.insert(name, version);
-            }
+        if let Ok(mut m) = self.manifest.lock() {
+            m.aliases.insert(name, version);
         }
     }
 
@@ -1259,16 +1166,9 @@ impl FabricRegistry {
     // DIM API
     // -------------------------------------------------------------------------
 
-    /// Resolve a dim name to its defver under the pinned manifest. Dims exist
-    /// only in the versioned regime: at v0 any dim lookup is a hard
-    /// `NotFound`. At v >= 1 the name must be in the manifest's `dims` map.
+    /// Resolve a dim name to its defver under the pinned manifest. The name
+    /// must be in the manifest's `dims` map.
     fn dim_defver(&self, name: &str) -> Result<u32, FabricRegistryError> {
-        if self.manifest_version == 0 {
-            return Err(FabricRegistryError::NotFound(format!(
-                "dim '{}' cannot resolve: registry is pinned at v0 (dims are a versioned-regime concept)",
-                name
-            )));
-        }
         let m = self.manifest.lock().map_err(|e| {
             FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
         })?;
@@ -1345,10 +1245,8 @@ impl FabricRegistry {
         if let Ok(mut guard) = self.cached_dims.lock() {
             guard.insert(name.clone(), dim);
         }
-        if self.manifest_version >= 1 {
-            if let Ok(mut m) = self.manifest.lock() {
-                m.dims.insert(name, version);
-            }
+        if let Ok(mut m) = self.manifest.lock() {
+            m.dims.insert(name, version);
         }
         publish_cache_revision(&self.cache_revision_tx);
     }
@@ -1525,10 +1423,6 @@ impl FabricRegistry {
     /// the on-demand background fetcher to retry — a single unreachable alias
     /// must not abort startup.
     pub async fn prefetch_manifest_aliases(&self) {
-        if self.manifest_version == 0 {
-            return;
-        }
-
         let to_fetch: Vec<String> = {
             let manifest = match self.manifest.lock() {
                 Ok(m) => m,
@@ -2005,14 +1899,6 @@ impl FabricRegistry {
         }
     }
 
-    /// Add caps to the in-memory cache. Test helper.
-    ///
-    /// Each cap is recorded in the manifest. If the cap's own
-    /// `version` is 0, it is stamped to the registry's pinned manifest
-    /// version (since v0 in this context means "the test forgot to set
-    /// it" and the natural assignment is the snapshot we belong to).
-    /// An explicitly-non-zero version is honored as-is — test fixtures
-    /// can simulate cross-snapshot scenarios when they need to.
     /// Seed the warm alias cache directly, parallel to [`add_caps_to_cache`]
     /// for the alias registry: the given aliases then resolve via
     /// [`get_alias`](Self::get_alias) / [`resolve_alias`](Self::resolve_alias)
@@ -2028,6 +1914,13 @@ impl FabricRegistry {
         }
     }
 
+    /// Add caps to the in-memory cache, each recorded in the manifest.
+    ///
+    /// A cap at version 0 is one no registry has published (a dev
+    /// cartridge's, or a test fixture's); it is recorded at the registry's
+    /// pinned manifest version, the snapshot it now belongs to. A non-zero
+    /// version is honored as-is — test fixtures can simulate cross-snapshot
+    /// scenarios when they need to.
     pub fn add_caps_to_cache(&self, caps: Vec<Cap>) {
         let mut changed = false;
         let pin = self.manifest_version;
@@ -2051,7 +1944,7 @@ impl FabricRegistry {
                         continue;
                     }
                 };
-                if cap.version == 0 && pin >= 1 {
+                if cap.version == 0 {
                     cap.version = pin;
                 }
                 let cap_version = cap.version;
@@ -2255,7 +2148,7 @@ impl FabricRegistry {
     ) -> Result<Option<String>, FabricRegistryError> {
         for (def_urn, content, _) in self.live_source_defs().await? {
             if let Ok(u) = crate::MediaUrn::from_string(&def_urn) {
-                if u.is_equivalent(reference_urn).unwrap_or(false) {
+                if u.is_equivalent(reference_urn) {
                     return Ok(Some(content));
                 }
             }
@@ -2275,7 +2168,7 @@ impl FabricRegistry {
     ) -> Result<Option<crate::Cap>, FabricRegistryError> {
         for (def_urn, _, _) in self.live_source_defs().await? {
             let matches = crate::MediaUrn::from_string(&def_urn)
-                .map(|u| u.is_equivalent(reference_urn).unwrap_or(false))
+                .map(|u| u.is_equivalent(reference_urn))
                 .unwrap_or(false);
             if !matches {
                 continue;
@@ -2442,9 +2335,9 @@ impl FabricRegistry {
     /// Insert a media def into the in-memory cache. Test helper.
     ///
     /// Records the media def in the manifest. If the spec's own
-    /// `version` is 0, it is stamped to the registry's pinned manifest
-    /// version (same "test forgot to set it" handling as
-    /// `add_caps_to_cache`).
+    /// `version` is 0 (a definition no registry has published), it is
+    /// recorded at the registry's pinned manifest version, as
+    /// `add_caps_to_cache` records a cap.
     pub fn insert_cached_media_def_for_test(&self, mut spec: StoredMediaDef) {
         // `spec.urn` is the canonical URN of the media def being inserted. If it
         // does not parse, skip the insert (with a warning) rather than cache it
@@ -2463,9 +2356,8 @@ impl FabricRegistry {
                 return;
             }
         };
-        let pin = self.manifest_version;
-        if spec.version == 0 && pin >= 1 {
-            spec.version = pin;
+        if spec.version == 0 {
+            spec.version = self.manifest_version;
         }
         let spec_version = spec.version;
         if let Ok(mut cache) = self.cached_media_defs.lock() {
@@ -2628,11 +2520,13 @@ impl FabricRegistry {
     }
 
     /// Full test constructor: custom config + explicit pinned manifest
-    /// version. Builds an empty manifest at that version; no network.
+    /// version. Builds a manifest at that version holding only the identity
+    /// cap, at defver 1; no network.
     pub fn new_for_test_with_config_and_version(
         config: RegistryConfig,
         manifest_version: u32,
     ) -> Self {
+        assert!(manifest_version >= 1, "a registry is pinned at manifest 1 or later");
         // The charter a published fabric at this anchor carries. It is not
         // signed: nothing is fetched from it, and a test registry is the one
         // registry that is not resolved through `resolve_charter`.
@@ -2651,7 +2545,13 @@ impl FabricRegistry {
         let cached_media_defs = Arc::new(Mutex::new(HashMap::new()));
         let cached_aliases = Arc::new(Mutex::new(HashMap::new()));
         let cached_dims = Arc::new(Mutex::new(HashMap::new()));
-        let manifest_arc = Arc::new(Mutex::new(Manifest::empty(manifest_version)));
+        let mut manifest = Manifest::empty(manifest_version);
+        manifest.caps.insert(
+            normalize_cap_urn(&crate::standard::caps::identity_cap().urn_string())
+                .expect("the identity cap URN parses"),
+            1,
+        );
+        let manifest_arc = Arc::new(Mutex::new(manifest));
         let fetch_in_queue = Arc::new(Mutex::new(HashSet::new()));
         let fetch_failures: FetchFailures = Arc::new(Mutex::new(HashMap::new()));
         let offline_flag = Arc::new(AtomicBool::new(false));
@@ -2702,7 +2602,9 @@ impl FabricRegistry {
             fetch_failures,
             cache_revision_tx,
         };
-        registry.ensure_identity_cap();
+        registry
+            .ensure_identity_cap()
+            .expect("the test manifest holds the identity cap");
         registry
     }
 }
@@ -2728,12 +2630,10 @@ pub(crate) struct PinnedEntries {
 ///
 /// An entry that is not there is not cached. One that is there and cannot be
 /// read, does not parse, or is not the definition and defver its path names
-/// is corrupt, and an error naming the file. Two rules drop an entry and leave
-/// it to be fetched anew, naming its file in the log:
-/// - a defver-0 cap or media def older than its time to live (defver 0 is the
-///   flat, mutable regime);
-/// - a cap or dim that breaks the definition rules was written by a capdag
-///   with other rules (`capdag/docs/10-validation-rules.md`).
+/// is corrupt, and an error naming the file. A cap or dim that breaks the
+/// definition rules was written by a capdag with other rules
+/// (`capdag/docs/10-validation-rules.md`): it is dropped and left to be
+/// fetched anew, naming its file in the log.
 pub(crate) fn load_pinned_entries(
     cache_dir: &Path,
     manifest: &Manifest,
@@ -2755,10 +2655,6 @@ pub(crate) fn load_pinned_entries(
                     cached_urn, entry.definition.version, urn, defver
                 ),
             ));
-        }
-        if defver == 0 && entry.is_expired() {
-            tracing::info!("the cached cap {} is past its time to live", path.display());
-            continue;
         }
         if let Err(e) = crate::cap::validation::validate_cap_definition(&entry.definition) {
             tracing::warn!("dropping the cached cap {}: {}", path.display(), e);
@@ -2783,10 +2679,6 @@ pub(crate) fn load_pinned_entries(
                     cached_urn, entry.spec.version, urn, defver
                 ),
             ));
-        }
-        if defver == 0 && entry.is_expired() {
-            tracing::info!("the cached media def {} is past its time to live", path.display());
-            continue;
         }
         entries.media.insert(cached_urn, entry.spec);
     }
@@ -2906,24 +2798,72 @@ async fn fetch_object(
     }))
 }
 
-/// A cap definition as a registry served it: parsed, then held to the
-/// definition rules (`capdag/docs/10-validation-rules.md`).
+/// A cap definition as a registry served it, for the cap `normalized_urn` at
+/// `defver`: parsed, the cap and version that were asked for, then held to
+/// the definition rules (`capdag/docs/10-validation-rules.md`).
 ///
 /// The publisher holds a definition to the rules before it is served; a
 /// registry is still another program's word, so it is checked on arrival and
-/// never cached or returned unchecked.
-fn checked_cap_definition(body: &[u8], normalized_urn: &str) -> Result<Cap, FabricRegistryError> {
+/// never cached or returned unchecked. A registry that serves another cap,
+/// or the cap at another version, is a hard error.
+fn checked_cap_definition(
+    body: &[u8],
+    normalized_urn: &str,
+    defver: u32,
+) -> Result<Cap, FabricRegistryError> {
     let cap: Cap = serde_json::from_slice(body).map_err(|e| {
         FabricRegistryError::ParseError(format!("Failed to parse cap '{}': {}", normalized_urn, e))
     })?;
+    if normalize_cap_urn(&cap.urn_string())? != normalized_urn {
+        return Err(FabricRegistryError::ParseError(format!(
+            "cap object URN '{}' does not match requested URN '{}'",
+            cap.urn_string(),
+            normalized_urn
+        )));
+    }
+    if cap.version != defver {
+        return Err(FabricRegistryError::ParseError(format!(
+            "cap '{}' object reports version {} but manifest pins defver {}",
+            normalized_urn, cap.version, defver
+        )));
+    }
     crate::cap::validation::validate_cap_definition(&cap)
         .map_err(|e| FabricRegistryError::ValidationError(e.to_string()))?;
     Ok(cap)
 }
 
+/// A media definition as a registry served it, for the media URN
+/// `normalized_urn` at `defver`: parsed, and the definition and version that
+/// were asked for. A registry that serves another definition, or this one at
+/// another version, is a hard error.
+fn checked_media_def(
+    body: &[u8],
+    normalized_urn: &str,
+    defver: u32,
+) -> Result<StoredMediaDef, FabricRegistryError> {
+    let spec: StoredMediaDef = serde_json::from_slice(body).map_err(|e| {
+        FabricRegistryError::ParseError(format!(
+            "Failed to parse media def '{}': {}",
+            normalized_urn, e
+        ))
+    })?;
+    if normalize_media_urn(&spec.urn)? != normalized_urn {
+        return Err(FabricRegistryError::ParseError(format!(
+            "media def object URN '{}' does not match requested URN '{}'",
+            spec.urn, normalized_urn
+        )));
+    }
+    if spec.version != defver {
+        return Err(FabricRegistryError::ParseError(format!(
+            "media def '{}' object reports version {} but manifest pins defver {}",
+            normalized_urn, spec.version, defver
+        )));
+    }
+    Ok(spec)
+}
+
 /// Build the R2 URL for a per-alias object at the given defver. Aliases
-/// are keyed by `sha256(normalized_name)` and are versioned-only (defver
-/// >= 1); there is no v0 flat path.
+/// are keyed by `sha256(normalized_name)`.
 fn alias_url_and_cache_path(
     cache_dir: &Path,
     locations: &FabricLocations,
@@ -3058,15 +2998,7 @@ fn cache_alias_entry(
     cached_aliases: &Arc<Mutex<HashMap<String, StoredAlias>>>,
     cache_revision_tx: &watch::Sender<u64>,
 ) -> Result<(), FabricRegistryError> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let entry = AliasCacheEntry {
-        alias: alias.clone(),
-        cached_at: now,
-        ttl_hours: CACHE_DURATION_HOURS,
-    };
+    let entry = AliasCacheEntry { alias: alias.clone() };
     cache::store_entry(cache_path, &entry, "alias")?;
     if let Ok(mut guard) = cached_aliases.lock() {
         guard.insert(alias.name.clone(), alias.clone());
@@ -3127,14 +3059,7 @@ async fn fetch_one_dim(
     )
     .await?;
     let dim = checked_dim(&body, name, defver)?;
-    let entry = DimCacheEntry {
-        dim: dim.clone(),
-        cached_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        ttl_hours: CACHE_DURATION_HOURS,
-    };
+    let entry = DimCacheEntry { dim: dim.clone() };
     cache::store_entry(&cache_path, &entry, "dim")?;
     if let Ok(mut guard) = cached_dims.lock() {
         guard.insert(dim.name.clone(), dim.clone());
@@ -3169,30 +3094,22 @@ fn checked_dim(body: &[u8], name: &str, defver: u32) -> Result<StoredDim, Fabric
 
 /// Keep, of what was loaded from the disk cache, only what the pinned
 /// manifest names at the version it names, and only definitions whose dims
-/// all survive with them. At v0 the manifest is empty and caps and media are
-/// all retained (the loaders only walk flat paths then); aliases and dims are
-/// versioned-regime concepts and are all dropped.
+/// all survive with them.
 ///
 /// A definition whose dims did not survive is dropped here and fetched again,
 /// with its dims, when it is next asked for — so a cached definition always
 /// has its dims cached.
 fn retain_pinned(
     manifest: &Manifest,
-    manifest_version: u32,
     caps: &mut HashMap<String, Cap>,
     specs: &mut HashMap<String, StoredMediaDef>,
     aliases: &mut HashMap<String, StoredAlias>,
     dims: &mut HashMap<String, StoredDim>,
 ) {
-    if manifest_version >= 1 {
-        caps.retain(|urn, cap| manifest.caps.get(urn).copied().unwrap_or(0) == cap.version);
-        specs.retain(|urn, spec| manifest.media.get(urn).copied().unwrap_or(0) == spec.version);
-        aliases.retain(|name, alias| manifest.aliases.get(name).copied().unwrap_or(0) == alias.version);
-        dims.retain(|name, dim| manifest.dims.get(name).copied().unwrap_or(0) == dim.version);
-    } else {
-        aliases.clear();
-        dims.clear();
-    }
+    caps.retain(|urn, cap| manifest.caps.get(urn).copied().unwrap_or(0) == cap.version);
+    specs.retain(|urn, spec| manifest.media.get(urn).copied().unwrap_or(0) == spec.version);
+    aliases.retain(|name, alias| manifest.aliases.get(name).copied().unwrap_or(0) == alias.version);
+    dims.retain(|name, dim| manifest.dims.get(name).copied().unwrap_or(0) == dim.version);
     caps.retain(|_, cap| dims_resolve_in(&cap.dims, dims));
     specs.retain(|_, spec| dims_resolve_in(&spec.dims, dims));
 }
@@ -3232,12 +3149,6 @@ async fn ensure_dims_cached(
         let dim = match cached {
             Some(dim) => dim,
             None => {
-                if manifest_version == 0 {
-                    return Err(FabricRegistryError::NotFound(format!(
-                        "{} names dim '{}', but the registry is pinned at v0 (dims are a versioned-regime concept)",
-                        owner, r.dim
-                    )));
-                }
                 let defver = match manifest.lock() {
                     Ok(m) => m.dims.get(&r.dim).copied(),
                     Err(e) => {
@@ -3392,7 +3303,7 @@ async fn fetch_cap_from_registry(
         manifest_version,
     )
     .await?;
-    let cap = checked_cap_definition(&body, normalized_urn)?;
+    let cap = checked_cap_definition(&body, normalized_urn, defver)?;
 
     let referenced = referenced_media_urns(&cap)?;
 
@@ -3406,26 +3317,21 @@ async fn fetch_cap_from_registry(
             continue;
         }
         // Resolve the referenced media URN's defver under the manifest.
-        // At v0 every URN maps to defver 0 (flat path).
-        let media_defver = if manifest_version == 0 {
-            0
-        } else {
-            match manifest.lock() {
-                Ok(m) => match m.media.get(media_urn).copied() {
-                    Some(v) => v,
-                    None => {
-                        return Err(FabricRegistryError::NotFound(format!(
-                            "cap '{}' references media URN '{}' which is not in manifest v{}",
-                            normalized_urn, media_urn, manifest_version
-                        )));
-                    }
-                },
-                Err(e) => {
-                    return Err(FabricRegistryError::CacheError(format!(
-                        "failed to lock manifest while resolving referenced media: {}",
-                        e
+        let media_defver = match manifest.lock() {
+            Ok(m) => match m.media.get(media_urn).copied() {
+                Some(v) => v,
+                None => {
+                    return Err(FabricRegistryError::NotFound(format!(
+                        "cap '{}' references media URN '{}' which is not in manifest v{}",
+                        normalized_urn, media_urn, manifest_version
                     )));
                 }
+            },
+            Err(e) => {
+                return Err(FabricRegistryError::CacheError(format!(
+                    "failed to lock manifest while resolving referenced media: {}",
+                    e
+                )));
             }
         };
         if let Err(e) = fetch_one_media_def(
@@ -3474,14 +3380,7 @@ async fn fetch_cap_from_registry(
     .await?;
 
     // All referenced media defs and dims in cache. Write the cap.
-    let cache_entry = CapCacheEntry {
-        definition: cap.clone(),
-        cached_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        ttl_hours: CACHE_DURATION_HOURS,
-    };
+    let cache_entry = CapCacheEntry { definition: cap.clone() };
     cache::store_entry(&cache_file, &cache_entry, "cap")?;
 
     if let Ok(mut cached) = cached_caps.lock() {
@@ -3565,12 +3464,7 @@ async fn fetch_media_def_from_registry(
         manifest_version,
     )
     .await?;
-    let spec: StoredMediaDef = serde_json::from_slice(&body).map_err(|e| {
-        FabricRegistryError::ParseError(format!(
-            "Failed to parse media def '{}': {}",
-            normalized_urn, e
-        ))
-    })?;
+    let spec = checked_media_def(&body, normalized_urn, defver)?;
 
     ensure_dims_cached(
         &format!("media def '{}'", normalized_urn),
@@ -3586,14 +3480,7 @@ async fn fetch_media_def_from_registry(
     )
     .await?;
 
-    let cache_entry = MediaCacheEntry {
-        spec: spec.clone(),
-        cached_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        ttl_hours: CACHE_DURATION_HOURS,
-    };
+    let cache_entry = MediaCacheEntry { spec: spec.clone() };
     cache::store_entry(&cache_file, &cache_entry, "media def")?;
 
     if let Ok(mut cached) = cached_media_defs.lock() {
@@ -3674,12 +3561,33 @@ fn file_types_of(
     Ok(file_types)
 }
 
+/// Refuse a manifest that pins a cap, media def, alias or dim at defver 0:
+/// every definition a registry serves is at version 1 or later, so a 0 names
+/// nothing a reader could fetch.
+fn check_manifest_defvers(manifest: &Manifest) -> Result<(), FabricRegistryError> {
+    let pins = manifest
+        .caps
+        .iter()
+        .chain(manifest.media.iter())
+        .chain(manifest.aliases.iter())
+        .chain(manifest.dims.iter());
+    for (name, &defver) in pins {
+        if defver == 0 {
+            return Err(FabricRegistryError::ParseError(format!(
+                "manifest v{} pins '{}' at 0, which is no definition version",
+                manifest.version, name
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Manifest bootstrap, in the cache folder `cache_dir` of manifest
 /// `version`. Tries the cached manifest first; falls back to a blocking
-/// network GET; if neither produces a manifest, returns an error — there is
-/// no v0 fallback (caller chose v >= 1 explicitly). A cached manifest that
-/// does not parse, or is another version's, is corrupt: an error naming its
-/// file.
+/// network GET; if neither produces a manifest, returns an error. A cached
+/// manifest that does not parse, or is another version's, is corrupt: an
+/// error naming its file. A manifest, cached or fetched, that pins anything
+/// at defver 0 is refused (`check_manifest_defvers`).
 async fn load_or_fetch_manifest(
     cache_dir: &Path,
     client: &reqwest::Client,
@@ -3699,6 +3607,7 @@ async fn load_or_fetch_manifest(
                     &format!("it is manifest {}, in the folder of manifest {}", m.version, version),
                 ));
             }
+            check_manifest_defvers(&m)?;
             return Ok(m);
         }
     }
@@ -3714,6 +3623,7 @@ async fn load_or_fetch_manifest(
             version, manifest.version
         )));
     }
+    check_manifest_defvers(&manifest)?;
     cache::write_atomically(&cache_file, &body)?;
     Ok(manifest)
 }
@@ -4662,7 +4572,7 @@ mod parity_port_tests {
         let registry = FabricRegistry::new_for_test(); // pinned at manifest v1
         assert!(
             registry.manifest_version() >= 1,
-            "the production registry must be pinned at manifest v>=1, never the legacy v0 flat-path mode"
+            "a registry is pinned at manifest 1 or later"
         );
         registry.insert_cached_media_def_for_test(spec_with_ext(
             urn,
@@ -4883,9 +4793,11 @@ mod parity_port_tests {
     #[test]
     fn test12714_a_served_definition_is_held_to_the_definition_rules() {
         let urn = r#"cap:in="media:document;ext=pdf";disbind;out="media:enc=utf8;page""#;
+        let key = normalize_cap_urn(urn).unwrap();
+        let key = key.as_str();
         let definition = |args: serde_json::Value, outputs: serde_json::Value| {
             serde_json::json!({
-                "urn": urn, "aliases": ["disbind"], "title": "Disbind PDF",
+                "urn": urn, "version": 1, "aliases": ["disbind"], "title": "Disbind PDF",
                 "args": args, "outputs": outputs,
             })
             .to_string()
@@ -4897,15 +4809,15 @@ mod parity_port_tests {
         let page = serde_json::json!({"media_urn": "media:enc=utf8;page", "name": "pages", "output_description": "Pages"});
 
         let good = definition(serde_json::json!([main]), serde_json::json!([page]));
-        let cap = checked_cap_definition(good.as_bytes(), urn).expect("a valid definition");
+        let cap = checked_cap_definition(good.as_bytes(), key, 1).expect("a valid definition");
         assert_eq!(cap.main_output().map(|o| o.get_name()), Some("pages"));
 
-        let err = checked_cap_definition(b"{not json", urn).unwrap_err();
+        let err = checked_cap_definition(b"{not json", key, 1).unwrap_err();
         assert!(matches!(err, FabricRegistryError::ParseError(_)), "{err:?}");
 
         // The cap URN says it produces pages, and the definition declares no such output.
         let no_output = definition(serde_json::json!([main]), serde_json::json!([]));
-        let err = checked_cap_definition(no_output.as_bytes(), urn).unwrap_err();
+        let err = checked_cap_definition(no_output.as_bytes(), key, 1).unwrap_err();
         assert!(matches!(err, FabricRegistryError::ValidationError(_)), "{err:?}");
         let text = err.to_string();
         assert!(text.contains("RULE21") && text.contains("disbind"), "{text}");
@@ -4914,7 +4826,7 @@ mod parity_port_tests {
         let mut wrong = main.clone();
         wrong["sources"] = serde_json::json!([{"stdin": "media:document"}]);
         let wrong_input = definition(serde_json::json!([wrong]), serde_json::json!([page]));
-        let err = checked_cap_definition(wrong_input.as_bytes(), urn).unwrap_err();
+        let err = checked_cap_definition(wrong_input.as_bytes(), key, 1).unwrap_err();
         assert!(matches!(err, FabricRegistryError::ValidationError(_)), "{err:?}");
         assert!(err.to_string().contains("RULE15"), "{err}");
     }
@@ -4942,7 +4854,7 @@ mod parity_port_tests {
             let key = normalize_cap_urn(&cap.urn_string()).unwrap();
             manifest.caps.insert(key.clone(), 3);
             let file = cache::entry_path(cache_dir, "caps", &key, 3);
-            let entry = CapCacheEntry { definition: cap.clone(), cached_at: 0, ttl_hours: 0 };
+            let entry = CapCacheEntry { definition: cap.clone() };
             cache::store_entry(&file, &entry, "cap").unwrap();
             files.push(file);
         }
@@ -5193,7 +5105,7 @@ mod concurrent_cache_tests {
 
     fn store(cache_dir: &Path, cap: &Cap) {
         let file = cache::entry_path(cache_dir, "caps", &normalize_cap_urn(URN).unwrap(), 3);
-        let entry = CapCacheEntry { definition: cap.clone(), cached_at: 0, ttl_hours: 0 };
+        let entry = CapCacheEntry { definition: cap.clone() };
         cache::store_entry(&file, &entry, "cap").expect("the entry is written");
     }
 
@@ -5381,7 +5293,7 @@ mod concurrent_cache_tests {
 
         let mut other = variant("another defver");
         other.version = 4;
-        let entry = CapCacheEntry { definition: other, cached_at: 0, ttl_hours: 0 };
+        let entry = CapCacheEntry { definition: other };
         cache::store_entry(&file, &entry, "cap").unwrap();
         let error = load_pinned_entries(&cache_dir, &manifest).expect_err("another defver is an error");
         assert!(error.to_string().contains(&file.display().to_string()), "{error}");
@@ -5644,7 +5556,7 @@ mod dim_tests {
     // TEST1971: what is loaded from the disk cache is kept only as the pinned
     // manifest names it — a dim at another version is dropped — and a
     // definition is kept only when every dim it names survives with the value
-    // it names. At v0 there are no dims.
+    // it names.
     #[test]
     fn test1971_the_disk_cache_keeps_definitions_only_with_their_pinned_dims() {
         let mut manifest = Manifest::empty(11);
@@ -5669,7 +5581,7 @@ mod dim_tests {
         dims.insert("language".into(), dim("language", 1, &["en"])); // the manifest pins 2
         dims.insert("medium".into(), dim("medium", 1, &["text"]));
 
-        retain_pinned(&manifest, 11, &mut caps, &mut specs, &mut aliases, &mut dims);
+        retain_pinned(&manifest, &mut caps, &mut specs, &mut aliases, &mut dims);
         assert_eq!(dims.keys().collect::<Vec<_>>(), vec!["medium"], "a dim at another version is dropped");
         let mut kept: Vec<_> = caps.values().map(|c| c.urn_string()).collect();
         kept.sort();
@@ -5679,10 +5591,6 @@ mod dim_tests {
             "the cap naming the dropped dim is dropped with it"
         );
         assert_eq!(specs.keys().collect::<Vec<_>>(), vec!["media:x"], "a value the dim lacks drops the definition");
-
-        let mut v0_dims = HashMap::from([("medium".to_string(), dim("medium", 1, &["text"]))]);
-        retain_pinned(&Manifest::empty(0), 0, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), &mut v0_dims);
-        assert!(v0_dims.is_empty(), "v0 has no dims");
     }
 
     // TEST1972: a definition is cached only once every dim it names is held,

@@ -937,8 +937,7 @@ pub(crate) mod tests {
                 assert!(
                     crate::MediaUrn::from_string(output_media_urn)
                         .unwrap()
-                        .is_equivalent(&crate::MediaUrn::from_string("media:enc=utf8;page").unwrap())
-                        .unwrap(),
+                        .is_equivalent(&crate::MediaUrn::from_string("media:enc=utf8;page").unwrap()),
                     "the gathered sequence's element type is the members' join, got {output_media_urn}"
                 );
             }
@@ -1463,7 +1462,6 @@ pub(crate) mod tests {
             crate::MediaUrn::from_string(a)
                 .unwrap()
                 .is_equivalent(&crate::MediaUrn::from_string(b).unwrap())
-                .unwrap()
         };
         let (doc_strand, _, doc_media) = of(&inputs, "doc");
         let (scan_strand, _, _) = of(&inputs, "scan");
@@ -1807,9 +1805,7 @@ pub(crate) mod tests {
         };
 
         let declared = resolved.plan(0, &RunInputs::declared()).await.expect("plans").plan;
-        assert!(output_media(&declared)
-            .is_equivalent(&MediaUrn::from_string("media:image").unwrap())
-            .unwrap());
+        assert!(output_media(&declared).is_equivalent(&MediaUrn::from_string("media:image").unwrap()));
 
         let png = MediaUrn::from_string("media:ext=png;image").unwrap();
         let run = RunInputs {
@@ -1818,7 +1814,7 @@ pub(crate) mod tests {
         };
         let bound = resolved.plan(0, &run).await.expect("a png is an image").plan;
         assert!(
-            output_media(&bound).is_equivalent(&png).unwrap(),
+            output_media(&bound).is_equivalent(&png),
             "the step passes its input through: a png in is a png out"
         );
 

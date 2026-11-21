@@ -157,7 +157,7 @@ impl ResolvedInputSet {
                         file.media_urn, e
                     )
                 });
-            if !first.is_equivalent(&other).unwrap_or(false) {
+            if !first.is_equivalent(&other) {
                 return None;
             }
         }

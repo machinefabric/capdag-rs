@@ -413,3 +413,63 @@ pub async fn extension_media(
         .expect("candidates with no rules are decided without reading a pattern");
     Ok(bases.iter().map(|u| u.to_string()).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A cartridge that claims every file as one media type, counting how
+    /// often it is asked.
+    struct ClaimsOne {
+        claim: String,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl CartridgeAdapterInvoker for ClaimsOne {
+        async fn invoke_adapter_selection(
+            &self,
+            _cartridge_id: &str,
+            _file_path: &Path,
+        ) -> Result<Option<Vec<String>>, InputResolverError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Some(vec![self.claim.clone()]))
+        }
+    }
+
+    // TEST1318: A cartridge with two incomparable adapters owns the candidates
+    // under both: asked once, it claims only the record type, so the list
+    // candidate under its second adapter is owned, unclaimed, and does not
+    // stand.
+    #[tokio::test]
+    async fn test1318_second_owning_adapter_keeps_unclaimed_candidate_out() {
+        let record = "media:enc=utf8;ext=json;fmt=json;record";
+        let list = "media:enc=utf8;ext=json;fmt=json;list";
+        let mut adapters = MediaAdapterRegistry::new(Arc::new(FabricRegistry::new_for_test()));
+        adapters
+            .register_cap_group("g", &[record.to_string(), list.to_string()], "datacartridge")
+            .expect("two incomparable adapters register");
+        let candidates: Vec<FileMediaCandidate> = [record, list]
+            .iter()
+            .map(|u| FileMediaCandidate { urn: MediaUrn::from_string(u).unwrap(), validation: None })
+            .collect();
+        let invoker = ClaimsOne { claim: record.to_string(), calls: AtomicUsize::new(0) };
+
+        let verdict = consult(Path::new("doc.json"), &candidates, &adapters, &invoker).await;
+        assert_eq!(invoker.calls.load(Ordering::SeqCst), 1, "the cartridge is asked once");
+        assert_eq!(verdict.owners.len(), 2, "both adapters own candidates");
+
+        let survivors: Vec<String> = surviving_candidates(br#"{"a": 1}"#, &candidates, &verdict)
+            .unwrap()
+            .iter()
+            .map(|u| u.to_string())
+            .collect();
+        assert_eq!(
+            survivors,
+            vec![MediaUrn::from_string(record).unwrap().to_string()],
+            "the list candidate is owned and unclaimed, so only the claimed record stands"
+        );
+    }
+}

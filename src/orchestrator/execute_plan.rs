@@ -1529,7 +1529,7 @@ impl Run {
                             .iter()
                             .find(|arg| {
                                 crate::MediaUrn::from_string(arg.stream_urn())
-                                    .map(|urn| urn.is_equivalent(&stream).unwrap_or(false))
+                                    .map(|urn| urn.is_equivalent(&stream))
                                     .unwrap_or(false)
                             })
                             .ok_or_else(|| {

@@ -97,7 +97,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                 "alias": names::media(&registry, &media), "urn": media.to_string(),
             }));
         }
-        match groups.iter_mut().find(|(m, _)| m.is_equivalent(&media).unwrap_or(false)) {
+        match groups.iter_mut().find(|(m, _)| m.is_equivalent(&media)) {
             Some((_, count)) => *count += 1,
             None => groups.push((media, 1)),
         }
@@ -359,12 +359,12 @@ async fn match_target(
     what: &str,
 ) -> CliResult<Matched> {
     let wanted = target_media(registry, token).await?;
-    if let Some(exact) = reachable.iter().find(|t| t.media_def.is_equivalent(&wanted).unwrap_or(false)) {
+    if let Some(exact) = reachable.iter().find(|t| t.media_def.is_equivalent(&wanted)) {
         return Ok(Matched { media: exact.media_def.clone(), named: true });
     }
     let fitting: Vec<&p::ConvergentTargetInfo> = reachable
         .iter()
-        .filter(|t| t.media_def.conforms_to(&wanted).unwrap_or(false))
+        .filter(|t| t.media_def.conforms_to(&wanted))
         .collect();
     match fitting.as_slice() {
         [one] => Ok(Matched { media: one.media_def.clone(), named: false }),
