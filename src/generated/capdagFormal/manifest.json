@@ -685,7 +685,7 @@
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 2179,
+  "declarations": 2225,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -982,25 +982,32 @@
       "source": "CapDAG/Bifaci/Request.lean:61:1"
     },
     {
+      "lean_name": "CapDAG.Detect.adapterFor",
+      "module": "CapDAG.Detect",
+      "rust_path": "detect::adapter_for",
+      "lean_type": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Detect.AdapterChoice",
+      "source": "CapDAG/Detect.lean:485:1"
+    },
+    {
       "lean_name": "CapDAG.Detect.mostSpecific",
       "module": "CapDAG.Detect",
       "rust_path": "detect::most_specific",
       "lean_type": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Bool",
-      "source": "CapDAG/Detect.lean:154:1"
+      "source": "CapDAG/Detect.lean:163:1"
     },
     {
       "lean_name": "CapDAG.Detect.primary",
       "module": "CapDAG.Detect",
       "rust_path": "detect::primary",
       "lean_type": "List TaggedUrn.Exec.Wf → Option Nat",
-      "source": "CapDAG/Detect.lean:176:1"
+      "source": "CapDAG/Detect.lean:185:1"
     },
     {
       "lean_name": "CapDAG.Detect.stands",
       "module": "CapDAG.Detect",
       "rust_path": "detect::stands",
       "lean_type": "List CapDAG.Detect.Candidate → List TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Bool",
-      "source": "CapDAG/Detect.lean:106:1"
+      "source": "CapDAG/Detect.lean:115:1"
     },
     {
       "lean_name": "CapDAG.Exec.accepts",
