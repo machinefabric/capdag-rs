@@ -2628,18 +2628,18 @@ mod tests {
     }
 
     // TEST1985: content is no file type. A cap giving a JSON record that is no
-    // file (a model list) does not end a plan: the plan reaches the JSON record
-    // file detection reads back through the save cap that writes one, and the
-    // model list is not offered as a target.
+    // file (a model list) does not end a plan: from a file, the plan reaches
+    // the JSON record file detection reads back through the save cap that
+    // writes one, and the model list is not offered as a target.
     #[test]
     fn test1985_content_reaches_a_file_through_its_save_cap() {
-        let repo = media("media:enc=utf8;fmt=json;model-repo;record");
+        let repos = txt();
         let model_list = media("media:enc=utf8;fmt=json;model-list;record");
         let record_file = media("media:enc=utf8;ext=json;fmt=json;record");
         let list_models = build_cap(
-            "cap:in=\"media:enc=utf8;fmt=json;model-repo;record\";list-models;out=\"media:enc=utf8;fmt=json;model-list;record\"",
+            "cap:in=\"media:enc=utf8;ext=txt;plain-text\";list-models;out=\"media:enc=utf8;fmt=json;model-list;record\"",
             "list-models",
-            &["media:enc=utf8;fmt=json;model-repo;record"],
+            &["media:enc=utf8;ext=txt;plain-text"],
             "media:enc=utf8;fmt=json;model-list;record",
         );
         let save_record = build_cap(
@@ -2650,15 +2650,15 @@ mod tests {
         );
         let caps = vec![list_models, save_record];
         let registry = registry_with(caps.clone());
-        // The bookends are the file types: the record file has extensions; the
-        // model list, a content type, has none.
-        let bookends: HashSet<MediaUrn> = [record_file.clone()].into_iter().collect();
+        // The bookends are the file types, the text file and the record file;
+        // the model list, a content type, has no extensions.
+        let bookends: HashSet<MediaUrn> = [repos.clone(), record_file.clone()].into_iter().collect();
         let mut fab = LiveCapFab::new();
         fab.sync_from_caps(&caps, &bookends);
 
         let targets = fab
-            .discover_convergent_targets(&[SourceSpec::single(repo.clone())], PlanRequest::DEFAULT_MAX_DEPTH)
-            .expect("discovery from a model repo must succeed")
+            .discover_convergent_targets(&[SourceSpec::single(repos.clone())], PlanRequest::DEFAULT_MAX_DEPTH)
+            .expect("discovery from a text file must succeed")
             .targets;
         assert!(
             targets.iter().any(|t| t.media_def.is_equivalent(&record_file)),
@@ -2669,10 +2669,10 @@ mod tests {
             "the model list is content, not a file type, and is offered as no target"
         );
 
-        let request = PlanRequest::auto(vec![SourceSpec::single(repo)], TargetSpec::Exact(vec![record_file]));
+        let request = PlanRequest::auto(vec![SourceSpec::single(repos)], TargetSpec::Exact(vec![record_file]));
         let candidates = fab
             .plan(&request, &registry)
-            .expect("a model repo plans to the JSON record file")
+            .expect("a text file plans to the JSON record file")
             .candidates;
         assert!(
             candidates.iter().any(|c| c.notation.contains("save-as-json") && c.notation.contains("list-models")),
