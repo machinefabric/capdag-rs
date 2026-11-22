@@ -58,10 +58,7 @@ impl ValueAdapterRegistry {
             key: key.to_string(),
             error: e.to_string(),
         })?;
-        if let Some((existing, _)) = self.adapters.iter().find(|(k, _)| {
-            k.is_equivalent(&key_urn)
-                .expect("every key is a media URN, as the one registered")
-        }) {
+        if let Some((existing, _)) = self.adapters.iter().find(|(k, _)| k.is_equivalent(&key_urn)) {
             return Err(ValueAdapterError::DuplicateKey {
                 key: key_urn.to_string(),
                 existing: existing.to_string(),
@@ -107,10 +104,7 @@ impl ValueAdapterRegistry {
                         error: e.to_string(),
                     }
                 })?;
-                let inside = refined
-                    .conforms_to(base)
-                    .expect("both are media URNs");
-                if !inside {
+                if !refined.conforms_to(base) {
                     return Err(ValueAdapterError::NotInside {
                         adapter: adapter.name().to_string(),
                         base: base.to_string(),
@@ -129,10 +123,7 @@ impl ValueAdapterRegistry {
             key: key.to_string(),
             error: e.to_string(),
         })?;
-        Ok(self.adapters.iter().any(|(k, _)| {
-            k.is_equivalent(&key_urn)
-                .expect("every key is a media URN, as the one asked")
-        }))
+        Ok(self.adapters.iter().any(|(k, _)| k.is_equivalent(&key_urn)))
     }
 
     /// Every registered key, in canonical form and registration order.
@@ -238,9 +229,7 @@ mod tests {
         let result = registry
             .refine_media_urn(&media("media:test;enc=utf8"), "a-special-value")
             .unwrap();
-        assert!(result
-            .is_equivalent(&media("media:enc=utf8;refined;test"))
-            .unwrap());
+        assert!(result.is_equivalent(&media("media:enc=utf8;refined;test")));
     }
 
     // TEST1222: Base URNs without a registered adapter are returned unchanged.
