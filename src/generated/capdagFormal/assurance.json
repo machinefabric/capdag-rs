@@ -2943,6 +2943,68 @@
       }
     },
     {
+      "name": "CapDAG.Bifaci.Request.start_opens_anything",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.Emission.start"
+      ],
+      "specifications": [],
+      "statement": "∀ (stream : String),\n  CapDAG.Bifaci.Request.Emission.start.step (CapDAG.Bifaci.Request.Emitted.streamStart stream) =\n      Except.ok { streams := [(stream, 0)], ended := [], over := false } ∧\n    CapDAG.Bifaci.Request.Emission.start.step CapDAG.Bifaci.Request.Emitted.fin =\n      Except.ok { streams := [], ended := [], over := true }",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "e11d31da483daea31ca8e411bc92a114989c2c96c4cc7d161da8aee2d76cd422",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 282,
+          "column": 1
+        },
+        "end": {
+          "line": 288,
+          "column": 55
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.step_is_check",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Bifaci.Request.Emission.step"
+      ],
+      "specifications": [],
+      "statement": "∀ (frames : List CapDAG.Bifaci.Request.Emitted),\n  CapDAG.Bifaci.Request.check frames =\n    match List.foldlM (fun e f => e.step f) CapDAG.Bifaci.Request.Emission.start frames with\n    | Except.ok a => none\n    | Except.error v => some v",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "0cb18aa4a6471eadcd3759028432b19b87ffec6640b09fda64e113b5ff8d62c4",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Laws/Request.lean",
+        "start": {
+          "line": 290,
+          "column": 1
+        },
+        "end": {
+          "line": 307,
+          "column": 33
+        }
+      }
+    },
+    {
       "name": "CapDAG.Bifaci.Request.straggler_iff",
       "relation": "lungo.law",
       "subjects": [
@@ -6796,6 +6858,70 @@
         "end": {
           "line": 214,
           "column": 86
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.Emission.start",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.start_opens_anything"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 170,
+          "column": 1
+        },
+        "end": {
+          "line": 170,
+          "column": 49
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Bifaci.Request.Emission.step",
+      "module": "CapDAG.Bifaci.Request",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Bifaci.Request.step_is_check"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Bifaci/Request.lean",
+        "start": {
+          "line": 172,
+          "column": 1
+        },
+        "end": {
+          "line": 207,
+          "column": 94
         }
       }
     },

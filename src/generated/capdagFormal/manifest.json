@@ -940,6 +940,20 @@
       "source": "CapDAG/Bifaci/Pools.lean:207:1"
     },
     {
+      "lean_name": "CapDAG.Bifaci.Request.Emission.start",
+      "module": "CapDAG.Bifaci.Request",
+      "rust_path": "bifaci::request::emission::start",
+      "lean_type": "CapDAG.Bifaci.Request.Emission",
+      "source": "CapDAG/Bifaci/Request.lean:170:1"
+    },
+    {
+      "lean_name": "CapDAG.Bifaci.Request.Emission.step",
+      "module": "CapDAG.Bifaci.Request",
+      "rust_path": "bifaci::request::emission::step",
+      "lean_type": "CapDAG.Bifaci.Request.Emission →\n  CapDAG.Bifaci.Request.Emitted → Except CapDAG.Bifaci.Request.Violation CapDAG.Bifaci.Request.Emission",
+      "source": "CapDAG/Bifaci/Request.lean:172:1"
+    },
+    {
       "lean_name": "CapDAG.Bifaci.Request.Phase.after",
       "module": "CapDAG.Bifaci.Request",
       "rust_path": "bifaci::request::phase::after",

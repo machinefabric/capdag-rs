@@ -120,6 +120,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Bifaci.Request.Emission",
+    "kind": "type",
+    "rust_path": "bifaci::request::Emission",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Request.Emitted",
     "kind": "type",
     "rust_path": "bifaci::request::Emitted",
@@ -459,6 +465,18 @@
     "lean_name": "CapDAG.Bifaci.Pools.patience",
     "kind": "function",
     "rust_path": "bifaci::pools::patience",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.start",
+    "kind": "function",
+    "rust_path": "bifaci::request::emission::start",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.step",
+    "kind": "function",
+    "rust_path": "bifaci::request::emission::step",
     "renamed": false
   },
   {
@@ -1204,6 +1222,30 @@
     "kind": "constructor",
     "rust_path": "bifaci::request::Disposition::NoRoute",
     "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.mk",
+    "kind": "constructor",
+    "rust_path": "bifaci::request::Emission",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.streams",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emission.streams",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.ended",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emission.ended",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Bifaci.Request.Emission.over",
+    "kind": "field",
+    "rust_path": "bifaci::request::Emission.over",
+    "renamed": false
   },
   {
     "lean_name": "CapDAG.Bifaci.Request.Emitted.streamStart",
