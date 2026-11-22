@@ -726,6 +726,12 @@
     "renamed": false
   },
   {
+    "lean_name": "TaggedUrn.Exec.parts",
+    "kind": "function",
+    "rust_path": "_root_::tagged_urn::exec::parts",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Credit.Acquire.acquired",
     "kind": "constructor",
     "rust_path": "bifaci::credit::Acquire::Acquired",

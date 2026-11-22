@@ -2014,7 +2014,7 @@ mod tests {
 
         // Through the resolver: a step that gives the record feeds one whose
         // input refuses lists.
-        let make = "cap:in=media:enc=utf8;make-record;out=\"media:enc=utf8;ext=json;fmt=json;record\"";
+        let make = "cap:in=\"media:enc=utf8\";make-record;out=\"media:enc=utf8;ext=json;fmt=json;record\"";
         let to_yaml = "cap:in=\"media:enc=utf8;fmt=json;record;!list\";to-yaml;out=\"media:enc=utf8;fmt=yaml;record\"";
         let registry = registry_with(vec![
             build_cap(make, "make", &["media:enc=utf8"], "media:enc=utf8;ext=json;fmt=json;record"),

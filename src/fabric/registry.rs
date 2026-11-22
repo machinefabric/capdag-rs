@@ -6175,7 +6175,7 @@ mod reference_base_tests {
             cap_description: None,
             documentation: None,
             metadata: std::collections::HashMap::new(),
-            aliases: Vec::new(),
+            aliases: vec!["reference-probe".to_string()],
             is_abstract: false,
             args: vec![CapArg::new(
                 CONTENT.to_string(),

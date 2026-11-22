@@ -686,7 +686,7 @@
     "Lean.Data.Iterators.Producers.PersistentHashMap",
     "Lean.Elab.Structure"
   ],
-  "declarations": 2324,
+  "declarations": 2325,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -1029,20 +1029,20 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::accepts",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:379:1"
+      "source": "CapDAG/Exec.lean:376:1"
     },
     {
       "lean_name": "CapDAG.Exec.audit",
       "module": "CapDAG.Exec",
       "rust_path": "exec::audit",
       "lean_type": "CapDAG.Exec.WfCap → TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Bool",
-      "source": "CapDAG/Exec.lean:114:1"
+      "source": "CapDAG/Exec.lean:111:1"
     },
     {
       "lean_name": "CapDAG.Exec.capGives",
       "module": "CapDAG.Exec",
       "rust_path": "exec::cap_gives",
-      "lean_type": "CapDAG.Exec.WfCap → TaggedUrn.Exec.Wf → List (String × TaggedUrn.Constraint)",
+      "lean_type": "CapDAG.Exec.WfCap → TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf",
       "source": "CapDAG/Exec.lean:92:1"
     },
     {
@@ -1057,14 +1057,14 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::comparable",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:426:1"
+      "source": "CapDAG/Exec.lean:423:1"
     },
     {
       "lean_name": "CapDAG.Exec.dispatch",
       "module": "CapDAG.Exec",
       "rust_path": "exec::dispatch",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:359:1"
+      "source": "CapDAG/Exec.lean:356:1"
     },
     {
       "lean_name": "CapDAG.Exec.effectOk",
@@ -1078,105 +1078,105 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::equivalent",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:425:1"
+      "source": "CapDAG/Exec.lean:422:1"
     },
     {
       "lean_name": "CapDAG.Exec.flows",
       "module": "CapDAG.Exec",
       "rust_path": "exec::flows",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:462:1"
+      "source": "CapDAG/Exec.lean:459:1"
     },
     {
       "lean_name": "CapDAG.Exec.mayDispatch",
       "module": "CapDAG.Exec",
       "rust_path": "exec::may_dispatch",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:369:1"
+      "source": "CapDAG/Exec.lean:366:1"
     },
     {
       "lean_name": "CapDAG.Exec.mayFlow",
       "module": "CapDAG.Exec",
       "rust_path": "exec::may_flow",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:469:1"
+      "source": "CapDAG/Exec.lean:466:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryAdmits",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_admits",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:300:1"
+      "source": "CapDAG/Exec.lean:297:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryBetween",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_between",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "CapDAG/Exec.lean:182:1"
+      "source": "CapDAG/Exec.lean:179:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryConsuming",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_consuming",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "CapDAG/Exec.lean:178:1"
+      "source": "CapDAG/Exec.lean:175:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryGrade",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_grade",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → CapDAG.Grade",
-      "source": "CapDAG/Exec.lean:338:1"
+      "source": "CapDAG/Exec.lean:335:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryMayAdmit",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_may_admit",
       "lean_type": "CapDAG.Exec.WfQuery → CapDAG.Exec.WfCap → Bool",
-      "source": "CapDAG/Exec.lean:313:1"
+      "source": "CapDAG/Exec.lean:310:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryOfCall",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_of_call",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
-      "source": "CapDAG/Exec.lean:160:1"
+      "source": "CapDAG/Exec.lean:157:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryOfPattern",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_of_pattern",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfQuery",
-      "source": "CapDAG/Exec.lean:165:1"
+      "source": "CapDAG/Exec.lean:162:1"
     },
     {
       "lean_name": "CapDAG.Exec.queryProducing",
       "module": "CapDAG.Exec",
       "rust_path": "exec::query_producing",
       "lean_type": "TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → CapDAG.Exec.WfQuery",
-      "source": "CapDAG/Exec.lean:173:1"
+      "source": "CapDAG/Exec.lean:170:1"
     },
     {
       "lean_name": "CapDAG.Exec.rankingKey",
       "module": "CapDAG.Exec",
       "rust_path": "exec::ranking_key",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Nat × Nat",
-      "source": "CapDAG/Exec.lean:481:1"
+      "source": "CapDAG/Exec.lean:478:1"
     },
     {
       "lean_name": "CapDAG.Exec.select",
       "module": "CapDAG.Exec",
       "rust_path": "exec::select",
       "lean_type": "List CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Option CapDAG.Exec.WfCap",
-      "source": "CapDAG/Exec.lean:489:1"
+      "source": "CapDAG/Exec.lean:486:1"
     },
     {
       "lean_name": "CapDAG.Exec.specificity",
       "module": "CapDAG.Exec",
       "rust_path": "exec::specificity",
       "lean_type": "CapDAG.Exec.WfCap → Nat",
-      "source": "CapDAG/Exec.lean:476:1"
+      "source": "CapDAG/Exec.lean:473:1"
     },
     {
       "lean_name": "CapDAG.Run.Control.admits",
@@ -1233,6 +1233,13 @@
       "rust_path": "_root_::tagged_urn::exec::make",
       "lean_type": "String → List (String × TaggedUrn.Constraint) → Option TaggedUrn.Exec.Wf",
       "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:27:1"
+    },
+    {
+      "lean_name": "TaggedUrn.Exec.parts",
+      "module": "TaggedUrn.Exec",
+      "rust_path": "_root_::tagged_urn::exec::parts",
+      "lean_type": "TaggedUrn.Exec.Wf → String × List (String × TaggedUrn.Constraint)",
+      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:47:1"
     }
   ]
 }

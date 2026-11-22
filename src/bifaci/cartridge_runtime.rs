@@ -8892,7 +8892,7 @@ mod tests {
     }
 
     // TEST8138: main-input fallback content mismatch — a provider whose
-    // content does not conform to the cap's main input is a hard error at
+    // content does not fit the cap's main input is a hard error at
     // resolution ("this machine cannot consume that device"), never a
     // mislabeled stream.
     #[tokio::test]
@@ -8909,7 +8909,7 @@ mod tests {
             Ok(_) => panic!("a non-conforming provider content must be rejected"),
         };
         assert!(
-            err.to_string().contains("does not conform"),
+            err.to_string().contains("does not fit"),
             "the error names the conformance failure: {err}"
         );
     }
@@ -9050,7 +9050,7 @@ mod tests {
         drop(raw_tx);
         let mut package = demux_multi_stream(raw_rx, None, Some(ctx), None);
         match package.recv().await.expect("the refusal is delivered") {
-            Err(e) => assert!(e.to_string().contains("does not conform"), "{e}"),
+            Err(e) => assert!(e.to_string().contains("does not fit"), "{e}"),
             Ok(_) => panic!("a family whose content the main input does not take is refused"),
         }
     }

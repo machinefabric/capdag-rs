@@ -226,12 +226,12 @@ mod tests {
         assert_eq!(wants_image.grade(&to_jpeg()), MatchGrade::Guaranteed);
         assert_eq!(wants_image.grade(&some_image()), MatchGrade::Guaranteed);
         assert_eq!(wants_image.grade(&bare_image), MatchGrade::Exact);
-        let wants_image_file = CapQuery::producing(&media("media:ext;image"), &no_tags());
+        let wants_image_file = CapQuery::producing(&media("media:ext;image"), &no_tags()).unwrap();
         assert_eq!(wants_image_file.grade(&some_image()), MatchGrade::Exact);
         // A cap that gives what it is sent, asked for an image whatever it
         // takes, gives whatever it takes — not only images.
         assert!(!wants_image.admits(&passes_through()));
-        let wants_pdf = CapQuery::producing(&media("media:document;ext=pdf"), &no_tags());
+        let wants_pdf = CapQuery::producing(&media("media:document;ext=pdf"), &no_tags()).unwrap();
         assert!(!wants_pdf.admits(&passes_through()));
         assert_eq!(wants_pdf.grade(&passes_through()), MatchGrade::Possible);
 
