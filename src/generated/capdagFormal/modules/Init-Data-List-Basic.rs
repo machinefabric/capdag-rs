@@ -85,6 +85,51 @@ pub(crate) unsafe extern "C" fn l_List_ddrop_d__redArg(mut x_1: Obj, mut x_2: Ob
     }
 }
 
+// Lean: List.elem._redArg
+// Compiled from: List.elem
+// Source: <lean>/Init/Data/List/Basic.lean:783:1
+pub(crate) unsafe extern "C" fn l_List_delem_d__redArg(mut x_1: Obj, mut x_2: Obj, mut x_3: Obj) -> u8 {
+    'tail: loop {
+        match rt::lean_obj_tag(x_3) {
+            0 => {
+                rt::lean_dec(x_2);
+                rt::lean_dec_ref(x_1);
+                let x_4: u8 = 0u8;
+                return x_4;
+            }
+            _ => {
+                let x_5: Obj = rt::lean_ctor_get(x_3, 0);
+                rt::lean_inc(x_5);
+                let x_6: Obj = rt::lean_ctor_get(x_3, 1);
+                rt::lean_inc(x_6);
+                rt::lean_dec_ref(x_3);
+                rt::lean_inc_ref(x_1);
+                rt::lean_inc(x_2);
+                let x_7: Obj = rt::lean_apply_2(x_1, x_2, x_5);
+                let x_8: u8 = rt::lean_unbox(x_7) as u8;
+                match x_8 {
+                    0 => {
+                        let t_0: Obj = x_1;
+                        let t_1: Obj = x_2;
+                        let t_2: Obj = x_6;
+                        x_1 = t_0;
+                        x_2 = t_1;
+                        x_3 = t_2;
+                        continue 'tail;
+                    }
+                    _ => {
+                        rt::lean_dec(x_6);
+                        rt::lean_dec(x_2);
+                        rt::lean_dec_ref(x_1);
+                        let x_10: u8 = rt::lean_unbox(x_7) as u8;
+                        return x_10;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Lean: List.head?._redArg
 // Compiled from: List.head?
 // Source: <lean>/Init/Data/List/Basic.lean:371:1

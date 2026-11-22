@@ -552,6 +552,18 @@
     "renamed": false
   },
   {
+    "lean_name": "CapDAG.Exec.audit",
+    "kind": "function",
+    "rust_path": "exec::audit",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.capGives",
+    "kind": "function",
+    "rust_path": "exec::cap_gives",
+    "renamed": true
+  },
+  {
     "lean_name": "CapDAG.Exec.capIllegal",
     "kind": "function",
     "rust_path": "exec::cap_illegal",
@@ -630,15 +642,15 @@
     "renamed": true
   },
   {
-    "lean_name": "CapDAG.Exec.queryOfPattern",
+    "lean_name": "CapDAG.Exec.queryOfCall",
     "kind": "function",
-    "rust_path": "exec::query_of_pattern",
+    "rust_path": "exec::query_of_call",
     "renamed": true
   },
   {
-    "lean_name": "CapDAG.Exec.queryOfRequest",
+    "lean_name": "CapDAG.Exec.queryOfPattern",
     "kind": "function",
-    "rust_path": "exec::query_of_request",
+    "rust_path": "exec::query_of_pattern",
     "renamed": true
   },
   {

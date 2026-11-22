@@ -339,6 +339,24 @@ pub(crate) unsafe extern "C" fn l_USize_dofNatLT(x_1: Obj, x_2: Obj) -> usize {
     r
 }
 
+// Lean: instBEqOfDecidableEq._redArg._lam_0
+// Compiled from: instBEqOfDecidableEq
+// Source: <lean>/Init/Prelude.lean:1069:1
+pub(crate) unsafe extern "C" fn l_instBEqOfDecidableEq_d__redArg_d__lam__0(x_1: Obj, x_2: Obj, x_3: Obj) -> u8 {
+    let x_4: Obj = rt::lean_apply_2(x_1, x_2, x_3);
+    let x_5: u8 = rt::lean_unbox(x_4) as u8;
+    return x_5;
+}
+
+// Lean: instBEqOfDecidableEq._redArg._lam_0._boxed
+// Compiled from: instBEqOfDecidableEq
+// Source: <lean>/Init/Prelude.lean:1069:1
+pub(crate) unsafe extern "C" fn l_instBEqOfDecidableEq_d__redArg_d__lam__0_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
+    let x_4: u8 = l_instBEqOfDecidableEq_d__redArg_d__lam__0(x_1, x_2, x_3);
+    let x_5: Obj = rt::lean_box(x_4 as usize);
+    return x_5;
+}
+
 // Lean: instDecidableEqList._redArg
 // Compiled from: instDecidableEqList
 // Source: <lean>/Init/Prelude.lean:3006:1

@@ -15,6 +15,45 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dConstraint_dclosed(x_1: Obj) -> Obj
     }
 }
 
+// Lean: TaggedUrn.Constraint.val
+// Source: <package:tagged_urn_formal>/TaggedUrn/Constraint.lean:87:1
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dConstraint_dval(x_1: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        2 => {
+            let x_2: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc_ref(x_2);
+            return x_2;
+        }
+        4 => {
+            let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc_ref(x_3);
+            return x_3;
+        }
+        5 => {
+            let x_4: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc_ref(x_4);
+            return x_4;
+        }
+        _ => {
+            let x_5: Obj = l_TaggedUrn_dConstraint_dval_d__closed__0();
+            return x_5;
+        }
+    }
+}
+
+// Lean: TaggedUrn.Constraint.val._closed_0
+// Compiled from: TaggedUrn.Constraint.val
+// Source: <package:tagged_urn_formal>/TaggedUrn/Constraint.lean:87:1
+static C_l_TaggedUrn_dConstraint_dval_d__closed__0: rt::LazyObj = rt::LazyObj::new();
+unsafe fn l_TaggedUrn_dConstraint_dval_d__closed__0__init() -> Obj {
+    let x_1: Obj = rt::lean_mk_string_unchecked(b"", 0);
+    return x_1;
+}
+#[inline]
+pub(crate) unsafe fn l_TaggedUrn_dConstraint_dval_d__closed__0() -> Obj {
+    C_l_TaggedUrn_dConstraint_dval_d__closed__0.get(l_TaggedUrn_dConstraint_dval_d__closed__0__init)
+}
+
 // Lean: TaggedUrn.instDecidableEqConstraint
 // Source: <package:tagged_urn_formal>/TaggedUrn/Constraint.lean:26:12
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableEqConstraint(x_1: Obj, x_2: Obj) -> u8 {
@@ -229,6 +268,46 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableEqConstraint_ddecEq(x_
                 _ => {
                     let x_34: u8 = 0u8;
                     return x_34;
+                }
+            }
+        }
+    }
+}
+
+// Lean: TaggedUrn.instDecidableEqKeyState.decEq
+// Source: <package:tagged_urn_formal>/TaggedUrn/Constraint.lean:32:12
+pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableEqKeyState_ddecEq(x_1: Obj, x_2: Obj) -> u8 {
+    match rt::lean_obj_tag(x_1) {
+        0 => {
+            match rt::lean_obj_tag(x_2) {
+                0 => {
+                    let x_3: u8 = 1u8;
+                    return x_3;
+                }
+                _ => {
+                    let x_4: u8 = 0u8;
+                    return x_4;
+                }
+            }
+        }
+        _ => {
+            let x_5: Obj = rt::lean_ctor_get(x_1, 0);
+            let x_6: u8 = 0u8;
+            match rt::lean_obj_tag(x_2) {
+                0 => {
+                    return x_6;
+                }
+                _ => {
+                    let x_7: Obj = rt::lean_ctor_get(x_2, 0);
+                    let x_8: u8 = l_String_ddecEq(x_5, x_7);
+                    match x_8 {
+                        0 => {
+                            return x_6;
+                        }
+                        _ => {
+                            return x_8;
+                        }
+                    }
                 }
             }
         }
