@@ -2627,6 +2627,59 @@ mod tests {
         );
     }
 
+    // TEST1985: content is no file type. A cap giving a JSON record that is no
+    // file (a model list) does not end a plan: the plan reaches the JSON record
+    // file detection reads back through the save cap that writes one, and the
+    // model list is not offered as a target.
+    #[test]
+    fn test1985_content_reaches_a_file_through_its_save_cap() {
+        let repo = media("media:enc=utf8;fmt=json;model-repo;record");
+        let model_list = media("media:enc=utf8;fmt=json;model-list;record");
+        let record_file = media("media:enc=utf8;ext=json;fmt=json;record");
+        let list_models = build_cap(
+            "cap:in=\"media:enc=utf8;fmt=json;model-repo;record\";list-models;out=\"media:enc=utf8;fmt=json;model-list;record\"",
+            "list-models",
+            &["media:enc=utf8;fmt=json;model-repo;record"],
+            "media:enc=utf8;fmt=json;model-list;record",
+        );
+        let save_record = build_cap(
+            "cap:in=\"media:enc=utf8;fmt=json;!list;record;!ext\";out=\"media:enc=utf8;ext=json;fmt=json;record\";save-as-json",
+            "save-as-json-record",
+            &["media:enc=utf8;fmt=json;!list;record;!ext"],
+            "media:enc=utf8;ext=json;fmt=json;record",
+        );
+        let caps = vec![list_models, save_record];
+        let registry = registry_with(caps.clone());
+        // The bookends are the file types: the record file has extensions; the
+        // model list, a content type, has none.
+        let bookends: HashSet<MediaUrn> = [record_file.clone()].into_iter().collect();
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+
+        let targets = fab
+            .discover_convergent_targets(&[SourceSpec::single(repo.clone())], PlanRequest::DEFAULT_MAX_DEPTH)
+            .expect("discovery from a model repo must succeed")
+            .targets;
+        assert!(
+            targets.iter().any(|t| t.media_def.is_equivalent(&record_file)),
+            "the JSON record file is reachable through the save cap"
+        );
+        assert!(
+            targets.iter().all(|t| !t.media_def.is_equivalent(&model_list)),
+            "the model list is content, not a file type, and is offered as no target"
+        );
+
+        let request = PlanRequest::auto(vec![SourceSpec::single(repo)], TargetSpec::Exact(vec![record_file]));
+        let candidates = fab
+            .plan(&request, &registry)
+            .expect("a model repo plans to the JSON record file")
+            .candidates;
+        assert!(
+            candidates.iter().any(|c| c.notation.contains("save-as-json") && c.notation.contains("list-models")),
+            "the plan lists the models, then saves the list as a JSON record file"
+        );
+    }
+
     // TEST1981: a route that runs a one-value cap per item after a ForEach
     // arrives with a sequence, as a machine's iteration gives it: from a
     // sequence of pdfs, a thumbnail is reached only per item (no fold), so it
