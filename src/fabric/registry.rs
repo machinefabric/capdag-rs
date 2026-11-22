@@ -260,9 +260,15 @@ fn normalize_cap_urn(urn: &str) -> Result<String, FabricRegistryError> {
         .map_err(|e| FabricRegistryError::ParseError(format!("malformed cap URN '{}': {}", urn, e)))
 }
 
+/// The key the registry holds the media definition `urn` resolves to under:
+/// the canonical text of its [`reference_base`](crate::MediaUrn::reference_base).
+/// A URN that refines a published type by an absence or an open key
+/// (`media:enc=utf8;fmt=json;!ext`, `…;?list;?record`) names that published
+/// definition, and a published definition writes no such tag, so it is its own
+/// key.
 fn normalize_media_urn(urn: &str) -> Result<String, FabricRegistryError> {
     crate::MediaUrn::from_string(urn)
-        .map(|parsed| parsed.to_string())
+        .map(|parsed| parsed.reference_base().to_string())
         .map_err(|e| {
             FabricRegistryError::ParseError(format!("malformed media URN '{}': {}", urn, e))
         })
@@ -3196,6 +3202,12 @@ async fn ensure_dims_cached(
 /// the others alike, since each is the type of a node a machine can hold.
 /// The universal type `media:` is among them: the fabric defines it like any
 /// other media URN, and a node of that type is drawn with its title.
+///
+/// Each is the published definition the reference resolves to, its
+/// [`reference_base`](crate::MediaUrn::reference_base): a cap that names
+/// `media:enc=utf8;fmt=json;!ext` refines the published
+/// `media:enc=utf8;fmt=json` by an absence, and that definition is the one the
+/// manifest pins and the registry serves. The cap keeps its own URN as written.
 ///
 /// A malformed URN means the definition is corrupt: it is an error, never a
 /// URN quietly skipped.
@@ -6134,6 +6146,107 @@ mod universal_type_tests {
             assert_eq!(node["title"], "Any Media");
         }
         assert_eq!(stub.requests_for(stub.path_of(&url)), 1);
+    }
+}
+
+/// A cap may name a published media type refined by an absence (`!k`) or
+/// leaving a key open (`?k`): the registry holds the published definition the
+/// reference resolves to, and the cap keeps its own URN.
+#[cfg(test)]
+mod reference_base_tests {
+    use super::*;
+    use crate::cap::definition::{ArgSource, CapArg, CapOutput};
+    use crate::fabric::stub_registry::{Answer, StubRegistry};
+    use crate::{CapUrn, MediaUrn};
+
+    const JSON: &str = "media:enc=utf8;fmt=json";
+    const JSON_BODY: &str = r#"{"urn":"media:enc=utf8;fmt=json","version":1,"title":"JSON","media_type":"application/json"}"#;
+    const CONTENT: &str = "media:enc=utf8;fmt=json;!ext";
+    const ANY_SHAPE: &str = "media:enc=utf8;fmt=json;?list;?record";
+
+    fn save_probe() -> Cap {
+        let urn = CapUrn::from_string(&format!(r#"cap:in="{CONTENT}";out="{ANY_SHAPE}";reference-probe"#))
+            .unwrap();
+        Cap {
+            dims: Vec::new(),
+            urn,
+            version: 1,
+            title: "Reference probe".to_string(),
+            cap_description: None,
+            documentation: None,
+            metadata: std::collections::HashMap::new(),
+            aliases: Vec::new(),
+            is_abstract: false,
+            args: vec![CapArg::new(
+                CONTENT.to_string(),
+                "input",
+                true,
+                vec![ArgSource::Stdin { stdin: CONTENT.to_string() }],
+            )],
+            outputs: vec![CapOutput::new(ANY_SHAPE.to_string(), "output", "out".to_string())],
+            metadata_json: None,
+            registered_by: None,
+            supported_model_types: Vec::new(),
+        }
+    }
+
+    // TEST7211: a cap whose sides name the published media:enc=utf8;fmt=json
+    // refined by an absence (!ext) and by open keys (?list;?record) is held: its
+    // media footprint is that one definition, fetched at the version the
+    // manifest pins for it, and the cap keeps its URN as written.
+    #[tokio::test]
+    async fn test7211_a_cap_naming_a_published_type_refined_by_absence_is_held() {
+        let cap = save_probe();
+        let cap_urn = normalize_cap_urn(&cap.urn.to_string()).unwrap();
+        assert_eq!(referenced_media_urns(&cap).unwrap(), vec![normalize_media_urn(JSON).unwrap()]);
+
+        let cap_body = serde_json::to_vec(&cap).unwrap();
+        let cap_path = layout_locations("http://stub")
+            .definition("caps", &cache::key_hash(&cap_urn), 1)
+            .strip_prefix("http://stub")
+            .unwrap()
+            .to_string();
+        let media_path = layout_locations("http://stub")
+            .definition("media", &cache::key_hash(&normalize_media_urn(JSON).unwrap()), 1)
+            .strip_prefix("http://stub")
+            .unwrap()
+            .to_string();
+        let (served_cap, served_media) = (cap_path.clone(), media_path.clone());
+        let stub = StubRegistry::start(move |path| {
+            if path == served_cap {
+                Answer::Body(cap_body.clone())
+            } else if path == served_media {
+                Answer::Body(JSON_BODY.as_bytes().to_vec())
+            } else {
+                Answer::Status(404)
+            }
+        })
+        .await;
+        let cache = tempfile::tempdir().unwrap();
+        let mut registry = FabricRegistry::new_for_test_with_config_and_version(
+            RegistryConfig::new().with_anchor(stub.anchor.clone()),
+            12,
+        );
+        registry.cache_dir = cache.path().to_path_buf();
+        for kind in cache::KIND_FOLDERS {
+            fs::create_dir_all(registry.cache_dir.join(kind)).unwrap();
+        }
+        {
+            let mut manifest = registry.manifest.lock().unwrap();
+            manifest.caps.insert(cap_urn.clone(), 1);
+            manifest.media.insert(normalize_media_urn(JSON).unwrap(), 1);
+        }
+
+        let held = registry.get_cap(&cap_urn).await.unwrap();
+        assert_eq!(held.urn.in_spec(), MediaUrn::from_string(CONTENT).unwrap().to_string());
+        assert_eq!(held.urn.out_spec(), MediaUrn::from_string(ANY_SHAPE).unwrap().to_string());
+        assert_eq!(stub.requests_for(&media_path), 1, "the base definition is fetched once");
+        assert_eq!(stub.total_requests(), 2, "the cap and its one media definition");
+        // Each side's type is drawn with the title of the definition it resolves to.
+        for side in [CONTENT, ANY_SHAPE] {
+            assert_eq!(registry.get_cached_media_def(side).unwrap().title, "JSON", "{side}");
+        }
+        assert_eq!(stub.total_requests(), 2, "already held: nothing more is fetched");
     }
 }
 

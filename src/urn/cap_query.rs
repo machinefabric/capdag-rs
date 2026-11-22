@@ -1,14 +1,20 @@
 //! Asking the fabric for a cap.
 //!
 //! A request is not a cap. A cap takes this and gives that; a request is a
-//! QUESTION about caps, and may leave a side unasked: "what gives me this
-//! file, whatever it takes?", "what can this input become?". Those are not cap
-//! URNs with `media:` on a side — `media:` is the type "anything", a claim
-//! about every input — they are queries with that side unknown.
+//! QUESTION about caps. A call always says what it sends, but a search may
+//! leave a side unasked: "what gives me this file, whatever it takes?", "what
+//! can this input become?". Those are not cap URNs with `media:` on a side —
+//! `media:` is the type "anything", a claim about every input — they are
+//! queries with that side unknown.
+//!
+//! A query asks of what a cap GIVES for what is sent: a declared output, read
+//! complete — what it does not mention, the cap does not give — or, for an
+//! `effect=none` or `effect=patch` cap, what it was sent with its effect
+//! applied.
 //!
 //! [`CapQuery`] is such a question, and [`MatchGrade`] is how a registered cap
-//! answers it. A cap URN read as a request or as a pattern is one
-//! ([`CapQuery::from_request`], [`CapQuery::from_pattern`]) — which is what
+//! answers it. A cap URN read as a typed call or as a pattern is one
+//! ([`CapQuery::from_call`], [`CapQuery::from_pattern`]) — which is what
 //! [`CapUrn::is_dispatchable`] and [`CapUrn::accepts`] ask — and so are the
 //! questions no cap URN can spell ([`CapQuery::producing`],
 //! [`CapQuery::consuming`], [`CapQuery::between`]).
@@ -74,17 +80,19 @@ fn tag_pattern(tags: &BTreeMap<String, Constraint>) -> Result<TaggedUrn, TaggedU
 }
 
 impl CapQuery {
-    /// The cap URN `request`, read as a request: an input it leaves open is
-    /// not established. What [`CapUrn::is_dispatchable`] asks.
-    pub fn from_request(request: &CapUrn) -> Self {
+    /// The cap URN `call`, read as a typed call: it sends what its input says
+    /// — `media:`, if it says nothing, is anything — and asks for its output,
+    /// tags and effect. What [`CapUrn::is_dispatchable`] asks.
+    pub fn from_call(call: &CapUrn) -> Self {
         Self {
-            formal: crate::formal::exec::query_of_request(request.formal().clone()),
-            asked: format!("request {request}"),
+            formal: crate::formal::exec::query_of_call(call.formal().clone()),
+            asked: format!("call {call}"),
         }
     }
 
-    /// The cap URN `pattern`, read as a pattern over caps: an output it leaves
-    /// open is not established. What [`CapUrn::accepts`] asks.
+    /// The cap URN `pattern`, read as a pattern over caps: caps taking within
+    /// its input, everything they give of the type its output names; an output
+    /// it leaves open asks nothing. What [`CapUrn::accepts`] asks.
     pub fn from_pattern(pattern: &CapUrn) -> Self {
         Self {
             formal: crate::formal::exec::query_of_pattern(pattern.formal().clone()),
@@ -184,7 +192,7 @@ mod tests {
     }
 
     fn some_image() -> CapUrn {
-        cap(r#"cap:render;in="media:document;ext=pdf";out="media:image""#)
+        cap(r#"cap:render;in="media:document;ext=pdf";out="media:ext;image""#)
     }
 
     fn passes_through() -> CapUrn {
@@ -203,17 +211,29 @@ mod tests {
         let wants_jpeg = CapQuery::producing(&media("media:ext=jpeg;image"), &no_tags()).unwrap();
         assert_eq!(wants_jpeg.grade(&to_jpeg()), MatchGrade::Exact);
         assert!(wants_jpeg.admits(&to_jpeg()), "whatever it takes: a png here");
-        // "Some image" is not a jpeg, and not excluded: possible, never routed on.
+        // An image file of some type is not a jpeg, and not excluded: possible,
+        // never routed on.
         assert_eq!(wants_jpeg.grade(&some_image()), MatchGrade::Possible);
         assert!(!wants_jpeg.admits(&some_image()) && wants_jpeg.may_admit(&some_image()));
         assert_eq!(wants_jpeg.grade(&pages()), MatchGrade::None);
+        // A declared output says what the cap gives: one giving `media:image`
+        // gives an image with no file type, never a jpeg.
+        let bare_image = cap(r#"cap:render;in="media:document;ext=pdf";out="media:image""#);
+        assert_eq!(wants_jpeg.grade(&bare_image), MatchGrade::None);
 
         // Asked for any image, a jpeg is guaranteed to be one, not exactly it.
         let wants_image = CapQuery::producing(&media("media:image"), &no_tags()).unwrap();
         assert_eq!(wants_image.grade(&to_jpeg()), MatchGrade::Guaranteed);
-        assert_eq!(wants_image.grade(&some_image()), MatchGrade::Exact);
-        // A cap that gives `media:` promises no image at all.
+        assert_eq!(wants_image.grade(&some_image()), MatchGrade::Guaranteed);
+        assert_eq!(wants_image.grade(&bare_image), MatchGrade::Exact);
+        let wants_image_file = CapQuery::producing(&media("media:ext;image"), &no_tags());
+        assert_eq!(wants_image_file.grade(&some_image()), MatchGrade::Exact);
+        // A cap that gives what it is sent, asked for an image whatever it
+        // takes, gives whatever it takes — not only images.
         assert!(!wants_image.admits(&passes_through()));
+        let wants_pdf = CapQuery::producing(&media("media:document;ext=pdf"), &no_tags());
+        assert!(!wants_pdf.admits(&passes_through()));
+        assert_eq!(wants_pdf.grade(&passes_through()), MatchGrade::Possible);
 
         // What can a pdf become? Whatever takes a pdf — or takes anything.
         let has_pdf = CapQuery::consuming(&media("media:document;ext=pdf"), &no_tags()).unwrap();
@@ -254,10 +274,11 @@ mod tests {
         assert!(!not_converters.admits(&to_jpeg()), "it has it");
         assert_eq!(not_converters.grade(&to_jpeg()), MatchGrade::None);
 
-        // The same holds of a request: `!x` is served by a cap silent on x.
-        let request = cap(r#"cap:!convert-image;out="media:image""#);
-        assert!(some_image().is_dispatchable(&request));
-        assert!(!to_jpeg().is_dispatchable(&request));
-        assert_eq!(CapQuery::from_request(&request).grade(&some_image()), MatchGrade::Exact);
+        // The same holds of a call: `!x` is served by a cap silent on x.
+        let call = cap(r#"cap:!convert-image;in="media:ext=png;image";out="media:ext;image""#);
+        let renders_png = cap(r#"cap:render;in="media:ext=png;image";out="media:ext;image""#);
+        assert!(renders_png.is_dispatchable(&call));
+        assert!(!to_jpeg().is_dispatchable(&call), "it takes a png and gives an image file, and is tagged convert-image");
+        assert_eq!(CapQuery::from_call(&call).grade(&renders_png), MatchGrade::Exact);
     }
 }
