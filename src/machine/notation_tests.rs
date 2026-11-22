@@ -1114,3 +1114,66 @@ fn test7270_retry_is_refused_on_a_step_that_streams() {
     }
     machine("[s -> compare{retry=2} -> r]");
 }
+
+// TEST7222: the node a patch cap produces holds what the cap gives for the node
+// it is sent, not its declared output: a series (a JSON list of records)
+// converted to YAML is a YAML list of records, so a step that takes YAML lists
+// of records takes it, whichever order the text writes the steps in.
+#[test]
+fn test7222_a_patch_output_node_holds_what_the_cap_gives() {
+    const YAML_RECORDS: &str = "media:enc=utf8;fmt=yaml;list;record";
+    let to_yaml_urn = r#"cap:effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;fmt=yaml;!ext""#;
+    let count_urn = format!(r#"cap:in="{YAML_RECORDS}";count;out="media:count;numeric""#);
+    let stdin = |media_urn: &str, name: &str| {
+        CapArg::new(media_urn, name, true, vec![ArgSource::Stdin { stdin: media_urn.to_string() }])
+    };
+    let registry = registry();
+    registry.add_caps_to_cache(vec![
+        definition(
+            to_yaml_urn,
+            "to-yaml",
+            vec![stdin("media:enc=utf8;fmt=json", "input")],
+            vec![CapOutput::new("media:enc=utf8;fmt=yaml;!ext", "output", "YAML")],
+        ),
+        definition(
+            &count_urn,
+            "count",
+            vec![stdin(YAML_RECORDS, "rows")],
+            vec![CapOutput::new("media:count;numeric", "count", "How many")],
+        ),
+    ]);
+    let headers = format!("{HEADERS}[to_yaml {to_yaml_urn}][count {count_urn}]");
+    for wirings in [
+        r#"[(reference="a") -> fetch -> s][s -> to_yaml -> y][y -> count -> n]"#,
+        r#"[y -> count -> n][s -> to_yaml -> y][(reference="a") -> fetch -> s]"#,
+    ] {
+        let (parsed, names) = parse_machine_with_node_names(&format!("{headers}{wirings}"), &registry)
+            .unwrap_or_else(|e| panic!("{wirings} must resolve: {e}"));
+        let strand = &parsed.strands()[0];
+        let y = strand.node_urn(names[0]["y"]);
+        assert!(
+            y.is_equivalent(&MediaUrn::from_string("media:enc=utf8;fmt=yaml;list;record;time-series;!ext").unwrap()),
+            "{wirings}: the YAML node is what the patch gives for the series, got {y}"
+        );
+        assert_eq!(strand.edges().len(), 3, "{wirings}");
+    }
+
+    // An input of the machine converted for a step that takes YAML lists of
+    // records is a JSON list of records: what that step takes, read back
+    // through the patch.
+    for wirings in ["[x -> to_yaml -> y][y -> count -> n]", "[y -> count -> n][x -> to_yaml -> y]"] {
+        let (parsed, names) = parse_machine_with_node_names(&format!("{headers}{wirings}"), &registry)
+            .unwrap_or_else(|e| panic!("{wirings} must resolve: {e}"));
+        let strand = &parsed.strands()[0];
+        let x = strand.node_urn(names[0]["x"]);
+        assert!(
+            x.is_equivalent(&MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap()),
+            "{wirings}: the input is what the step after the patch takes, read back, got {x}"
+        );
+        let y = strand.node_urn(names[0]["y"]);
+        assert!(
+            y.is_equivalent(&MediaUrn::from_string("media:enc=utf8;fmt=yaml;list;record;!ext").unwrap()),
+            "{wirings}: got {y}"
+        );
+    }
+}
