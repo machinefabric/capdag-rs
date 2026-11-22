@@ -937,10 +937,7 @@ impl InProcessCartridgeHost {
                     {
                         (Arc::clone(&identity_handler), CAP_IDENTITY.to_string())
                     } else {
-                        let chosen = CapUrn::from_string(&cap_urn).ok().and_then(|request| {
-                            Self::find_handler_for_cap(&registered_caps, &owners, &request)
-                        });
-                        match chosen {
+                        match Self::find_handler_for_cap(&registered_caps, &owners, &parsed_cap) {
                             Some((idx, registered)) => {
                                 (Arc::clone(&handlers[idx].handler), registered.to_string())
                             }
