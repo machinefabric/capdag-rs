@@ -11,7 +11,10 @@
 //!    This avoids reparsing and provides order-theoretic methods.
 //!
 //! 2. **Exact matching**: For target matching, use `is_equivalent()` not `conforms_to()`.
-//!    This ensures "media:X" does NOT match paths ending in "media:X;list".
+//!    This ensures "media:X" does NOT match paths ending in "media:X;list". A node
+//!    that may have several shapes (`…;fmt=json;?list;?record`) ends on the
+//!    bookends its shapes are, read complete (`MediaUrn::ends_on`), and a route
+//!    reaching it reaches each of them.
 //!
 //! 3. **Satisfaction for traversal**: a node, read complete, satisfies the next cap's
 //!    input (`satisfies()`): a node is what a step gave or a file's detected type,
@@ -152,10 +155,12 @@ pub struct LiveCapFab {
     nodes: HashSet<MediaUrn>,
     /// Cap URN → edge indices for removal.
     cap_to_edges: HashMap<CapUrn, Vec<usize>>,
-    /// Subset of `nodes` that are eligible to serve as a strand bookend
-    /// (source or target of a transmute) — a URN has at least one file
-    /// extension registered in the media registry, i.e. concrete content
-    /// can actually exist as a file of that type.
+    /// The nodes that end on bookends (sources or targets of a transmute),
+    /// each with the bookends it ends on: one for each shape the node may
+    /// have, the published file type that shape is read complete
+    /// (`MediaUrn::ends_on`). A node of one shape that is a file type ends
+    /// on that file type; a node any of whose shapes is no file type ends
+    /// on none and is not listed.
     ///
     /// Computed at sync time from the registry snapshot supplied to
     /// `sync_from_caps` / `sync_from_cap_urns`. The graph is rebuilt on
@@ -163,7 +168,7 @@ pub struct LiveCapFab {
     /// state exactly: new media defs with extensions added between
     /// syncs become bookends after the next sync; specs whose extensions
     /// are removed stop being bookends after the next sync.
-    bookend_nodes: HashSet<MediaUrn>,
+    bookend_nodes: HashMap<MediaUrn, Vec<MediaUrn>>,
 }
 
 /// Information about a reachable target from a source media type.
@@ -575,7 +580,7 @@ impl LiveCapFab {
             incoming: HashMap::new(),
             nodes: HashSet::new(),
             cap_to_edges: HashMap::new(),
-            bookend_nodes: HashSet::new(),
+            bookend_nodes: HashMap::new(),
         }
     }
 
@@ -589,18 +594,30 @@ impl LiveCapFab {
         self.bookend_nodes.clear();
     }
 
-    /// Returns `true` if the given URN is a bookend-eligible node — a node
-    /// whose registered media def has at least one file extension, so
-    /// concrete file content of that type can exist on disk.
+    /// Returns `true` if the given node ends on bookends: every shape it may
+    /// have is a file type, so whatever a route reaching it gives can sit on
+    /// disk as a file.
     ///
-    /// Strand bookends (transmute source or target) MUST be bookend-eligible.
+    /// Strand bookends (transmute source or target) MUST end on bookends.
     /// Internal URNs that appear as cap inputs/outputs but do not name a
     /// concrete file format (wildcards like `media:enc=utf8`, primitives
     /// like `media:integer;numeric`, role markers like
     /// `media:enc=utf8;page`) are tracked as nodes for path-finding but
-    /// are not valid bookends and never appear as transmute sources/targets.
+    /// end on no bookend and never appear as transmute sources/targets.
     pub fn is_bookend(&self, urn: &MediaUrn) -> bool {
-        self.bookend_nodes.contains(urn)
+        self.bookend_nodes.contains_key(urn)
+    }
+
+    /// The bookends `node` ends on, one for each shape it may have; empty
+    /// when it ends on none.
+    pub fn ends_on(&self, node: &MediaUrn) -> &[MediaUrn] {
+        self.bookend_nodes.get(node).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Whether a route reaching `node` reaches `target`: the node is the
+    /// target, or ends on bookends one of which is.
+    fn reaches(&self, node: &MediaUrn, target: &MediaUrn) -> bool {
+        node.is_equivalent(target) || self.ends_on(node).iter().any(|b| b.is_equivalent(target))
     }
 
     /// Rebuild the graph from a list of capabilities.
@@ -613,10 +630,10 @@ impl LiveCapFab {
     /// `get_outgoing_edges()` based on source cardinality.
     ///
     /// `bookend_urns` is the live snapshot of media-registry URNs whose
-    /// stored spec has at least one file extension. Nodes in the graph
-    /// are intersected with this set to mark which can serve as strand
-    /// bookends. The intersection is computed once per sync; lookups
-    /// during traversal are O(1) HashSet hits with no registry calls.
+    /// stored spec has at least one file extension. Each node in the graph
+    /// is marked with the bookends among them it ends on. This is computed
+    /// once per sync; lookups during traversal are O(1) map hits with no
+    /// registry calls.
     pub fn sync_from_caps(&mut self, caps: &[Cap], bookend_urns: &HashSet<MediaUrn>) {
         self.clear();
 
@@ -627,23 +644,37 @@ impl LiveCapFab {
         self.refresh_bookends(bookend_urns);
     }
 
-    /// Recompute the bookend node set as the intersection of `self.nodes`
-    /// and the supplied registry snapshot. Public so callers that build the
+    /// Recompute which nodes end on bookends, and on which, from the
+    /// supplied registry snapshot. Public so callers that build the
     /// graph incrementally via `add_cap` (e.g. tests) can refresh the
     /// bookend set independently of a full sync.
     pub fn set_bookends(&mut self, bookend_urns: &HashSet<MediaUrn>) {
         self.refresh_bookends(bookend_urns);
     }
 
-    /// Recompute the bookend node set as the intersection of `self.nodes`
-    /// and the supplied registry snapshot.
+    /// Recompute which nodes end on bookends, and on which, from the
+    /// supplied registry snapshot.
     fn refresh_bookends(&mut self, bookend_urns: &HashSet<MediaUrn>) {
-        self.bookend_nodes = self
-            .nodes
+        let mut bookends: Vec<MediaUrn> = bookend_urns.iter().cloned().collect();
+        bookends.sort();
+        self.bookend_nodes = Self::nodes_ending_on(&self.nodes, &bookends);
+    }
+
+    /// Each of `nodes` that ends on `bookends`, with the bookends it ends on,
+    /// each named once.
+    fn nodes_ending_on(
+        nodes: &HashSet<MediaUrn>,
+        bookends: &[MediaUrn],
+    ) -> HashMap<MediaUrn, Vec<MediaUrn>> {
+        nodes
             .iter()
-            .filter(|n| bookend_urns.contains(*n))
-            .cloned()
-            .collect();
+            .filter_map(|node| {
+                let mut ends = node.ends_on(bookends)?;
+                ends.sort();
+                ends.dedup();
+                Some((node.clone(), ends))
+            })
+            .collect()
     }
 
     /// Rebuild the graph from a list of cap URN strings using the registry.
@@ -758,13 +789,15 @@ impl LiveCapFab {
     }
 
     /// The graph of the whole fabric: every cap the registry's pinned
-    /// manifest names ([`FabricRegistry::manifest_caps`]), each node marked a
-    /// bookend by its own media definition ([`StoredMediaDef::is_bookend`]).
+    /// manifest names ([`FabricRegistry::manifest_caps`]), each node marked
+    /// with the bookends it ends on: for each shape it may have, the media
+    /// definition the manifest publishes for that shape, read complete, when
+    /// that definition is a bookend ([`StoredMediaDef::is_bookend`]).
     ///
     /// Nothing comes from what the cache happens to hold: the caps not cached
-    /// are fetched, and every node's definition is one its cap was fetched
-    /// with. A cap or a node's definition that cannot be had is an error
-    /// naming it, never a graph with a part of the fabric missing.
+    /// are fetched, and so is every definition a node's shape is. A cap or a
+    /// definition that cannot be had is an error naming it, never a graph with
+    /// a part of the fabric missing.
     ///
     /// [`StoredMediaDef::is_bookend`]: crate::fabric::registry::StoredMediaDef::is_bookend
     pub async fn from_fabric(registry: &FabricRegistry) -> Result<Self, FabricRegistryError> {
@@ -773,18 +806,32 @@ impl LiveCapFab {
         for cap in &caps {
             fab.add_cap(cap);
         }
-        let mut bookends = HashSet::new();
-        for node in &fab.nodes {
-            // `media:` takes anything and names no definition: nothing is a
-            // file of it.
-            if node.is_top() {
-                continue;
+        // `media:` takes anything and names no definition: nothing is a file
+        // of it.
+        let mut published: Vec<MediaUrn> = registry
+            .manifest_media_urns()?
+            .into_iter()
+            .filter(|urn| !urn.is_top())
+            .collect();
+        published.sort();
+        let mut is_bookend: HashMap<MediaUrn, bool> = HashMap::new();
+        for (node, shapes) in Self::nodes_ending_on(&fab.nodes, &published) {
+            let mut ends_on_bookends = true;
+            for shape in &shapes {
+                let bookend = match is_bookend.get(shape) {
+                    Some(known) => *known,
+                    None => {
+                        let known = registry.get_media_def(&shape.to_string()).await?.is_bookend();
+                        is_bookend.insert(shape.clone(), known);
+                        known
+                    }
+                };
+                ends_on_bookends &= bookend;
             }
-            if registry.get_media_def(&node.to_string()).await?.is_bookend() {
-                bookends.insert(node.clone());
+            if ends_on_bookends {
+                fab.bookend_nodes.insert(node, shapes);
             }
         }
-        fab.bookend_nodes = bookends;
         Ok(fab)
     }
 
@@ -1104,7 +1151,7 @@ impl LiveCapFab {
         let mut distances: HashMap<SearchState, usize> = HashMap::new();
         let mut backward: VecDeque<SearchState> = VecDeque::new();
         for state in &reached_by_a_step {
-            if !state.2 && state.0.is_equivalent(target) {
+            if !state.2 && self.reaches(&state.0, target) {
                 distances.insert(state.clone(), 0);
                 backward.push_back(state.clone());
             }
@@ -1253,17 +1300,42 @@ impl LiveCapFab {
             }
         }
 
-        // Filter to bookend-eligible targets. Reachability in the cap graph
-        // includes URNs that exist only as cap-input wildcards (e.g.
-        // `media:enc=utf8`, `media:integer;numeric`). Such URNs
-        // describe the value type a cap accepts, not a file format that
-        // can sit on disk, so they are never valid transmute targets. The
-        // bookend set is precomputed at sync time from the live media
-        // registry — no registry call here.
-        let mut targets: Vec<_> = results
-            .into_values()
-            .filter(|t| self.bookend_nodes.contains(&t.info.media_def))
-            .collect();
+        // The targets are the bookends the reached nodes end on. Reachability
+        // in the cap graph includes URNs that exist only as cap-input
+        // wildcards (e.g. `media:enc=utf8`, `media:integer;numeric`). Such
+        // URNs describe the value type a cap accepts, not a file format that
+        // can sit on disk, so they are never valid transmute targets. A node
+        // that may have several shapes reaches each bookend it ends on, one
+        // target each. The bookends are precomputed at sync time from the
+        // live media registry — no registry call here.
+        let mut by_bookend: HashMap<MediaUrn, ReachableTargetCardinality> = HashMap::new();
+        for reached in results.into_values() {
+            for bookend in self.ends_on(&reached.info.media_def) {
+                match by_bookend.get_mut(bookend) {
+                    Some(target) => {
+                        target.info.min_path_length =
+                            target.info.min_path_length.min(reached.info.min_path_length);
+                        target.info.path_count += reached.info.path_count;
+                        target.reached_scalar |= reached.reached_scalar;
+                        target.reached_sequence |= reached.reached_sequence;
+                    }
+                    None => {
+                        by_bookend.insert(
+                            bookend.clone(),
+                            ReachableTargetCardinality {
+                                info: ReachableTargetInfo {
+                                    media_def: bookend.clone(),
+                                    display_name: bookend.to_string(),
+                                    ..reached.info.clone()
+                                },
+                                ..reached.clone()
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        let mut targets: Vec<_> = by_bookend.into_values().collect();
 
         // Sort by (min_path_length, display_name).
         //
@@ -1535,14 +1607,14 @@ impl LiveCapFab {
             return;
         }
 
-        // Check if we've reached the EXACT target using is_equivalent().
-        // Skip this check at the starting node (empty path) — when source==target,
+        // Check if we've reached the EXACT target: the node is it, or ends on
+        // bookends one of which is (`reaches`). Skip this check at the starting node (empty path) — when source==target,
         // we still want to explore edges to find round-trip transformation paths.
         let pending_foreach = matches!(
             current_path.last().map(|step| &step.step_type),
             Some(StrandStepType::ForEach { .. })
         );
-        if !current_path.is_empty() && current.is_equivalent(target) {
+        if !current_path.is_empty() && self.reaches(current, target) {
             if current_path.len() == depth_limit {
                 let cap_step_count = current_path.iter().filter(|s| s.is_cap()).count() as i32;
 
@@ -1583,7 +1655,7 @@ impl LiveCapFab {
         // as visited. This allows the DFS to return to the target through different
         // intermediate paths. Cycle prevention is handled by depth_limit.
         let is_roundtrip = source.is_equivalent(target);
-        if !(is_roundtrip && current.is_equivalent(target)) {
+        if !(is_roundtrip && self.reaches(current, target)) {
             visited.insert(visit_key.clone());
         }
 
@@ -1845,7 +1917,7 @@ mod tests {
     /// that arg to decide cardinality, so a fixture without it is not a cap the
     /// planner can reason about at all — it would panic rather than mis-plan.
     fn make_test_cap(in_spec: &str, out_spec: &str, op: &str, title: &str) -> Cap {
-        make_tagged_test_cap(in_spec, out_spec, &[(op, Constraint::Present)], title)
+        make_tagged_test_cap(in_spec, out_spec, &[(op, Constraint::present())], title)
     }
 
     /// `make_test_cap` whose cap URN carries `tags` (each a key and its
@@ -2665,11 +2737,11 @@ mod tests {
     // TEST7271: Among paths with as many cap steps, the one whose steps' specificities sum higher comes first, whatever order the caps were added in
     #[test]
     fn test7271_paths_of_as_many_steps_are_ordered_by_specificity() {
-        let general = make_tagged_test_cap("media:format-a", "media:format-c", &[("convert", Constraint::Present)], "Convert");
+        let general = make_tagged_test_cap("media:format-a", "media:format-c", &[("convert", Constraint::present())], "Convert");
         let specific = make_tagged_test_cap(
             "media:format-a",
             "media:format-c",
-            &[("convert", Constraint::Present), ("fast", Constraint::Present)],
+            &[("convert", Constraint::present()), ("fast", Constraint::present())],
             "Convert fast",
         );
         assert!(specific.urn.specificity() > general.urn.specificity());
@@ -2698,8 +2770,8 @@ mod tests {
         // `cap:a-x=c;…` sorts before `cap:a=b;…` ('-' < '='), and by
         // title "Alpha" sorts before "Zed": either would put the other path
         // first.
-        let zed = make_tagged_test_cap("media:format-a", "media:format-c", &[("a", Constraint::Exact { value: "b".into() })], "Zed");
-        let alpha = make_tagged_test_cap("media:format-a", "media:format-c", &[("a-x", Constraint::Exact { value: "c".into() })], "Alpha");
+        let zed = make_tagged_test_cap("media:format-a", "media:format-c", &[("a", Constraint::exact("b"))], "Zed");
+        let alpha = make_tagged_test_cap("media:format-a", "media:format-c", &[("a-x", Constraint::exact("c"))], "Alpha");
         assert_eq!(zed.urn.specificity(), alpha.urn.specificity());
 
         let source = MediaUrn::from_string("media:format-a").unwrap();
@@ -3550,6 +3622,58 @@ mod tests {
         // Shortest path should be 3 steps (A→B→C→A)
         let shortest = iddfs_paths.iter().min_by_key(|p| p.total_steps).unwrap();
         assert_eq!(shortest.total_steps, 3);
+    }
+
+    // TEST7229: a node that may have several shapes ends on the bookends its
+    // shapes are, read complete. A save that gives JSON which may or may not
+    // be a list and may or may not be a record ends on the four JSON file
+    // types: each is a target of a route through it, and a search for one of
+    // them finds the route. A node one of whose shapes is no file type ends on
+    // none, and no search ends at it.
+    #[test]
+    fn test7229_a_node_of_several_shapes_ends_on_each_bookend_it_may_be() {
+        const SAVED: &str = "media:enc=utf8;ext=json;fmt=json;?list;?record";
+        const FILES: [&str; 4] = [
+            "media:enc=utf8;ext=json;fmt=json",
+            "media:enc=utf8;ext=json;fmt=json;list",
+            "media:enc=utf8;ext=json;fmt=json;record",
+            "media:enc=utf8;ext=json;fmt=json;list;record",
+        ];
+        let urn = |s: &str| MediaUrn::from_string(s).unwrap();
+        let mut graph = LiveCapFab::new();
+        graph.add_cap(&make_test_cap("media:enc=utf8;fmt=json;!ext", SAVED, "save-as-json", "Save as JSON"));
+        let source = urn("media:enc=utf8;fmt=json;list;record");
+        let record_file = urn("media:enc=utf8;ext=json;fmt=json;record");
+
+        graph.set_bookends(&FILES.iter().map(|f| urn(f)).collect());
+        let mut files: Vec<MediaUrn> = FILES.iter().map(|f| urn(f)).collect();
+        files.sort();
+        assert!(graph.is_bookend(&urn(SAVED)));
+        assert_eq!(graph.ends_on(&urn(SAVED)), files.as_slice(), "one bookend for each shape");
+
+        let mut targets: Vec<MediaUrn> = graph
+            .get_reachable_targets(&source, false, 3)
+            .into_iter()
+            .map(|t| {
+                assert_eq!(t.min_path_length, 1, "{} is one save away", t.media_def);
+                t.media_def
+            })
+            .collect();
+        targets.sort();
+        assert_eq!(targets, files, "every file type the save may give is a target");
+
+        let paths = graph.find_paths_to_exact_target(&source, &record_file, false, 3, 10);
+        assert_eq!(paths.len(), 1, "the route through the save");
+        assert_eq!(paths[0].cap_step_count, 1);
+        assert!(paths[0].target_media_urn.is_equivalent(&record_file));
+
+        // Without a file type for JSON that is neither a list nor a record,
+        // one of the save's shapes is no file: the node ends on nothing.
+        graph.set_bookends(&FILES[1..].iter().map(|f| urn(f)).collect());
+        assert!(!graph.is_bookend(&urn(SAVED)));
+        assert!(graph.ends_on(&urn(SAVED)).is_empty());
+        assert!(graph.get_reachable_targets(&source, false, 3).is_empty());
+        assert!(graph.find_paths_to_exact_target(&source, &record_file, false, 3, 10).is_empty());
     }
 
     // TEST1293: IDDFS round-trip does not produce paths with 0 cap steps.

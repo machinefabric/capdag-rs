@@ -49,8 +49,8 @@
 //!   accepted type of the step's main input — at most one such member per
 //!   wiring, and only while no named member bound the main input
 //!   (`UntypedMachineInput` otherwise);
-//! - URNs given to one node must be on one specialization chain
-//!   (`NodeMediaConflict` otherwise); the node has the most specific.
+//! - of two URNs given to one node, one must be inside the other
+//!   (`NodeMediaConflict` otherwise); the node has the narrower.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -871,8 +871,10 @@ fn main_source<'w>(w: &'w RawWiring, cap: &Cap, in_media: &MediaUrn) -> Option<&
     }
 }
 
-/// Give `node` the URN `urn`, beside any URN it was already given: the two must
-/// be on one specialization chain, and the node holds the more specific.
+/// Give `node` the URN `urn`, beside any URN it was already given: one of the
+/// two must be inside the other, and the node holds the narrower. Two types can
+/// score the same and still differ (`ext=a|b` and `ext=a|b|c`), so specificity
+/// never decides it.
 fn give(
     node_media: &mut HashMap<String, MediaUrn>,
     node: &str,
@@ -883,7 +885,11 @@ fn give(
             node_media.insert(node.to_string(), urn);
         }
         Some(existing) => {
-            if !existing.is_comparable(&urn) {
+            if let Some(narrower) = narrower_of(existing, &urn) {
+                if narrower {
+                    node_media.insert(node.to_string(), urn);
+                }
+            } else {
                 return Err(MachineAbstractionError::NodeMediaConflict {
                     node: node.to_string(),
                     first: existing.to_string(),
@@ -891,12 +897,23 @@ fn give(
                 }
                 .into());
             }
-            if urn.specificity() > existing.specificity() {
-                node_media.insert(node.to_string(), urn);
-            }
         }
     }
     Ok(())
+}
+
+/// Whether `given` should replace `held` as one node's type: `Some(true)` when
+/// `given` is strictly inside `held`, `Some(false)` when `held` is inside
+/// `given` (equivalent types included), `None` when neither is inside the
+/// other.
+pub(crate) fn narrower_of(held: &MediaUrn, given: &MediaUrn) -> Option<bool> {
+    let given_inside = given.conforms_to(held);
+    let held_inside = held.conforms_to(given);
+    match (given_inside, held_inside) {
+        (true, false) => Some(true),
+        (_, true) => Some(false),
+        (false, false) => None,
+    }
 }
 
 /// Give every node of one strand its media URN (see the module documentation

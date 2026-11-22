@@ -377,8 +377,11 @@ impl CapUrn {
     /// canonical form; any other form is refused.
     fn process_direction_tag(tag: Option<Constraint>, side: &str) -> Result<String, CapUrnError> {
         match tag {
-            None | Some(Constraint::Present) => Ok(MEDIA_IDENTITY.to_string()),
-            Some(Constraint::Exact { value }) => direction_media(side, &value),
+            None => Ok(MEDIA_IDENTITY.to_string()),
+            Some(c) if c == Constraint::present() => Ok(MEDIA_IDENTITY.to_string()),
+            Some(c) if c.exact_value().is_some() => {
+                direction_media(side, c.exact_value().expect("an exact value"))
+            }
             Some(other) => Err(direction_spec_error(
                 side,
                 format!(
@@ -396,11 +399,11 @@ impl CapUrn {
     fn normalize_effect_value(raw: Option<&Constraint>) -> Result<String, CapUrnError> {
         match raw {
             None => Ok("declared".to_string()),
-            Some(Constraint::Present) | Some(Constraint::Unconstrained) => Ok("?".to_string()),
-            Some(Constraint::Exact { value })
-                if matches!(value.as_str(), "declared" | "none" | "patch") =>
-            {
-                Ok(value.clone())
+            Some(c) if *c == Constraint::present() || *c == Constraint::unconstrained() => {
+                Ok("?".to_string())
+            }
+            Some(c) if matches!(c.exact_value(), Some("declared" | "none" | "patch")) => {
+                Ok(c.exact_value().expect("an exact value").to_string())
             }
             Some(other) => Err(CapUrnError::InvalidEffect(format!(
                 "Unsupported effect '{}'. Supported values are declared, none, patch, or explicit unconstrained ?effect/effect=*",
@@ -452,7 +455,7 @@ impl CapUrn {
             "declared" => {}
             "?" => {
                 builder = builder
-                    .constraint("effect", Constraint::Unconstrained)
+                    .constraint("effect", Constraint::unconstrained())
                     .expect("effect is an identifier");
             }
             effect => {
@@ -500,10 +503,7 @@ impl CapUrn {
     /// `None` when it does not mention the key or constrains it in another
     /// form.
     pub fn exact_value(&self, key: &str) -> Option<&str> {
-        match self.get_tag(key) {
-            Some(Constraint::Exact { value }) => Some(value.as_str()),
-            _ => None,
-        }
+        self.get_tag(key).and_then(Constraint::exact_value)
     }
 
     /// Get the input media URN string
@@ -596,7 +596,7 @@ impl CapUrn {
     /// Whether the cap-tag `tag_name` is present as a marker (written as just
     /// the key). Example: `cap:constrained;...` has marker tag "constrained".
     pub fn has_marker_tag(&self, tag_name: &str) -> bool {
-        self.get_tag(tag_name) == Some(&Constraint::Present)
+        self.get_tag(tag_name) == Some(&Constraint::present())
     }
 
     /// Add or replace a cap-tag. The key must be an identifier and is
@@ -893,14 +893,14 @@ impl CapUrn {
     /// across the three axes (`out`, `in`, `y`), each axis scored as
     /// a Tagged URN per [`tagged_urn::TaggedUrn::specificity`]:
     ///
-    /// | Constraint       | Form           | Score |
-    /// |------------------|----------------|------:|
-    /// | unconstrained    | `?x`           |     0 |
-    /// | optionalNot v    | `x?=v`         |     1 |
-    /// | present          | `x` (`x=*`)    |     2 |
-    /// | presentNot v     | `x!=v`         |     3 |
-    /// | exact v          | `x=v`          |     4 |
-    /// | absent           | `!x`           |     5 |
+    /// | What a tag allows                      | Forms                       | Score |
+    /// |----------------------------------------|-----------------------------|------:|
+    /// | absence and every value                | `?x`                        |     0 |
+    /// | absence and some values, not every one | `x?=v`, `x?=a\|b`, `x=a\|!`   |     1 |
+    /// | every value                            | `x` (`x=*`)                 |     2 |
+    /// | two or more values, not every value    | `x!=v`, `x=a\|b`             |     3 |
+    /// | exactly one value                      | `x=v`                       |     4 |
+    /// | only absence                           | `!x`                        |     5 |
     ///
     /// Axis weighting:
     ///
@@ -952,7 +952,7 @@ impl CapUrn {
             "effect" => effect = "?".to_string(),
             _ => {
                 if tags.contains_key(&key_lower) {
-                    tags.insert(key_lower, Constraint::Present);
+                    tags.insert(key_lower, Constraint::present());
                 }
             }
         }
@@ -1037,6 +1037,8 @@ pub enum CapUrnError {
     InvalidEffectApplication(String),
     /// Error code 17: Structurally parseable but inadmissible cap declaration
     IllegalDeclaration(String),
+    /// Error code 18: A value given twice in one set of values
+    DuplicateValue(String),
 }
 
 impl CapUrnError {
@@ -1054,6 +1056,7 @@ impl CapUrnError {
             TaggedUrnError::InvalidEscapeSequence(pos) => CapUrnError::InvalidEscapeSequence(pos),
             TaggedUrnError::PrefixMismatch { .. } => CapUrnError::MissingCapPrefix,
             TaggedUrnError::WhitespaceInInput(s) => CapUrnError::InvalidCharacter(s),
+            TaggedUrnError::DuplicateValue(s) => CapUrnError::DuplicateValue(s),
         }
     }
 }
@@ -1106,6 +1109,9 @@ impl fmt::Display for CapUrnError {
             }
             CapUrnError::IllegalDeclaration(msg) => {
                 write!(f, "Illegal cap declaration: {}", msg)
+            }
+            CapUrnError::DuplicateValue(msg) => {
+                write!(f, "Duplicate value: {}", msg)
             }
         }
     }
@@ -1301,17 +1307,12 @@ impl CapUrnBuilder {
 
     /// Add a cap-tag with the exact value `value`, taken literally.
     pub fn tag(self, key: &str, value: &str) -> Self {
-        self.constraint(
-            key,
-            Constraint::Exact {
-                value: value.to_string(),
-            },
-        )
+        self.constraint(key, Constraint::exact(value))
     }
 
     /// Add a cap-tag as a marker (written as just the key).
     pub fn marker(self, key: &str) -> Self {
-        self.constraint(key, Constraint::Present)
+        self.constraint(key, Constraint::present())
     }
 
     pub fn build(self) -> Result<CapUrn, CapUrnError> {
@@ -1335,9 +1336,7 @@ mod tests {
 
     /// The exact constraint `value`, as a tag `key=value` writes it.
     pub(super) fn exact(value: &str) -> Constraint {
-        Constraint::Exact {
-            value: value.to_string(),
-        }
+        Constraint::exact(value)
     }
 
     // All cap URNs now require in and out specs. Use these helpers:
@@ -1974,7 +1973,7 @@ mod tests {
         let cap = CapUrn::from_string(&test_urn("ext=pdf")).unwrap();
         let wildcarded = cap.clone().with_wildcard_tag("ext");
 
-        assert_eq!(wildcarded.get_tag("ext"), Some(&Constraint::Present));
+        assert_eq!(wildcarded.get_tag("ext"), Some(&Constraint::present()));
 
         // Test wildcarding in/out
         let wildcard_in = cap.clone().with_wildcard_tag("in");
@@ -2039,7 +2038,23 @@ mod tests {
 
         // Wildcard should be accepted in values
         let cap = CapUrn::from_string(&test_urn("key=*")).unwrap();
-        assert_eq!(cap.get_tag("key"), Some(&Constraint::Present));
+        assert_eq!(cap.get_tag("key"), Some(&Constraint::present()));
+    }
+
+    // TEST7230: a cap-tag may be a set of values, and a value given twice in
+    // one set is refused as a DuplicateValue.
+    #[test]
+    fn test7230_a_cap_tag_set_and_a_value_given_twice() {
+        let cap = CapUrn::from_string(&test_urn("format=yaml|json")).unwrap();
+        assert_eq!(
+            cap.get_tag("format"),
+            Some(&Constraint::one_of(["json".to_string(), "yaml".to_string()], false))
+        );
+        assert!(cap.to_string().contains("format=json|yaml"), "{}", cap);
+        match CapUrn::from_string(&test_urn("format=json|json")) {
+            Err(CapUrnError::DuplicateValue(msg)) => assert!(msg.contains("json"), "{}", msg),
+            other => panic!("expected a duplicate value, got {:?}", other),
+        }
     }
 
     // TEST032: Test duplicate keys are rejected with DuplicateKey error
@@ -3936,14 +3951,14 @@ mod tier_tests {
             "*".to_string(),
             "media:record".to_string(),
             "declared".to_string(),
-            op(Constraint::Present),
+            op(Constraint::present()),
         )
         .unwrap();
         assert_eq!(made, CapUrn::from_string("cap:op;out=media:record").unwrap());
 
-        let mut tags = op(Constraint::Present);
-        tags.insert("in".to_string(), Constraint::Present);
-        tags.insert("out".to_string(), Constraint::Present);
+        let mut tags = op(Constraint::present());
+        tags.insert("in".to_string(), Constraint::present());
+        tags.insert("out".to_string(), Constraint::present());
         assert_eq!(
             CapUrn::from_tags(tags).unwrap(),
             CapUrn::from_string("cap:in=*;op;out=*").unwrap()
@@ -3954,12 +3969,12 @@ mod tier_tests {
                 String::new(),
                 "media:record".to_string(),
                 "declared".to_string(),
-                op(Constraint::Present)
+                op(Constraint::present())
             ),
             Err(CapUrnError::InvalidInSpec(_))
         ));
 
-        let mut structural = op(Constraint::Present);
+        let mut structural = op(Constraint::present());
         structural.insert("in".to_string(), exact("media:pdf"));
         assert!(matches!(
             CapUrn::new(

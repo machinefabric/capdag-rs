@@ -153,11 +153,11 @@
     "lean_name": "CapDAG.Ask.exactly",
     "file": "CapDAG/Query.lean",
     "start": [
-      597,
+      652,
       1
     ],
     "end": [
-      600,
+      655,
       43
     ]
   },
@@ -3291,11 +3291,11 @@
     "lean_name": "CapDAG.Cap.change",
     "file": "CapDAG/Query.lean",
     "start": [
-      121,
+      127,
       1
     ],
     "end": [
-      126,
+      132,
       43
     ]
   },
@@ -3339,11 +3339,11 @@
     "lean_name": "CapDAG.Cap.mayGiveAt",
     "file": "CapDAG/Query.lean",
     "start": [
-      150,
+      187,
       1
     ],
     "end": [
-      155,
+      192,
       53
     ]
   },
@@ -3900,6 +3900,18 @@
     ]
   },
   {
+    "lean_name": "CapDAG.Exec.endsOn",
+    "file": "CapDAG/Exec.lean",
+    "start": [
+      502,
+      1
+    ],
+    "end": [
+      504,
+      98
+    ]
+  },
+  {
     "lean_name": "CapDAG.Exec.equivalent",
     "file": "CapDAG/Exec.lean",
     "start": [
@@ -4047,11 +4059,11 @@
     "lean_name": "CapDAG.Exec.rankingKey",
     "file": "CapDAG/Exec.lean",
     "start": [
-      478,
+      533,
       1
     ],
     "end": [
-      480,
+      535,
       50
     ]
   },
@@ -4059,11 +4071,11 @@
     "lean_name": "CapDAG.Exec.select",
     "file": "CapDAG/Exec.lean",
     "start": [
-      486,
+      541,
       1
     ],
     "end": [
-      497,
+      552,
       9
     ]
   },
@@ -4071,23 +4083,35 @@
     "lean_name": "CapDAG.Exec.specificity",
     "file": "CapDAG/Exec.lean",
     "start": [
-      473,
+      528,
       1
     ],
     "end": [
-      473,
+      528,
       54
+    ]
+  },
+  {
+    "lean_name": "CapDAG.Exec.splits",
+    "file": "CapDAG/Exec.lean",
+    "start": [
+      475,
+      1
+    ],
+    "end": [
+      478,
+      72
     ]
   },
   {
     "lean_name": "CapDAG.Grade.ctorElim",
     "file": "CapDAG/Query.lean",
     "start": [
-      585,
+      640,
       1
     ],
     "end": [
-      595,
+      650,
       29
     ]
   },
@@ -4101,11 +4125,11 @@
     "lean_name": "CapDAG.Grade.exact.elim",
     "file": "CapDAG/Query.lean",
     "start": [
-      587,
+      642,
       3
     ],
     "end": [
-      588,
+      643,
       10
     ]
   },
@@ -4113,11 +4137,11 @@
     "lean_name": "CapDAG.Grade.guaranteed.elim",
     "file": "CapDAG/Query.lean",
     "start": [
-      589,
+      644,
       3
     ],
     "end": [
-      590,
+      645,
       15
     ]
   },
@@ -4125,11 +4149,11 @@
     "lean_name": "CapDAG.Grade.none.elim",
     "file": "CapDAG/Query.lean",
     "start": [
-      593,
+      648,
       3
     ],
     "end": [
-      594,
+      649,
       9
     ]
   },
@@ -4143,11 +4167,11 @@
     "lean_name": "CapDAG.Grade.possible.elim",
     "file": "CapDAG/Query.lean",
     "start": [
-      591,
+      646,
       3
     ],
     "end": [
-      592,
+      647,
       13
     ]
   },
@@ -4203,11 +4227,11 @@
     "lean_name": "CapDAG.Query.consuming",
     "file": "CapDAG/Query.lean",
     "start": [
-      404,
+      457,
       1
     ],
     "end": [
-      407,
+      460,
       93
     ]
   },
@@ -4215,11 +4239,11 @@
     "lean_name": "CapDAG.Query.exactly",
     "file": "CapDAG/Query.lean",
     "start": [
-      602,
+      657,
       1
     ],
     "end": [
-      603,
+      658,
       66
     ]
   },
@@ -4227,11 +4251,11 @@
     "lean_name": "CapDAG.Query.given",
     "file": "CapDAG/Query.lean",
     "start": [
-      268,
+      305,
       1
     ],
     "end": [
-      273,
+      310,
       36
     ]
   },
@@ -4239,11 +4263,11 @@
     "lean_name": "CapDAG.Query.grade",
     "file": "CapDAG/Query.lean",
     "start": [
-      605,
+      660,
       1
     ],
     "end": [
-      610,
+      665,
       18
     ]
   },
@@ -4251,11 +4275,11 @@
     "lean_name": "CapDAG.Query.ofCall",
     "file": "CapDAG/Query.lean",
     "start": [
-      382,
+      435,
       1
     ],
     "end": [
-      387,
+      440,
       96
     ]
   },
@@ -4263,11 +4287,11 @@
     "lean_name": "CapDAG.Query.ofPattern",
     "file": "CapDAG/Query.lean",
     "start": [
-      389,
+      442,
       1
     ],
     "end": [
-      397,
+      450,
       42
     ]
   },
@@ -4275,11 +4299,11 @@
     "lean_name": "CapDAG.Query.producing",
     "file": "CapDAG/Query.lean",
     "start": [
-      399,
+      452,
       1
     ],
     "end": [
-      402,
+      455,
       94
     ]
   },
@@ -5202,14 +5226,38 @@
     ]
   },
   {
-    "lean_name": "CapDAG.identity",
-    "file": "CapDAG/Query.lean",
+    "lean_name": "CapDAG.endsOn",
+    "file": "CapDAG/Route.lean",
     "start": [
-      561,
+      116,
       1
     ],
     "end": [
-      561,
+      119,
+      35
+    ]
+  },
+  {
+    "lean_name": "CapDAG.endsOnParts",
+    "file": "CapDAG/Route.lean",
+    "start": [
+      107,
+      1
+    ],
+    "end": [
+      114,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapDAG.identity",
+    "file": "CapDAG/Query.lean",
+    "start": [
+      616,
+      1
+    ],
+    "end": [
+      616,
       97
     ]
   },
@@ -5253,11 +5301,11 @@
     "lean_name": "CapDAG.instDecidableAdmits_1",
     "file": "CapDAG/Query.lean",
     "start": [
-      284,
+      321,
       1
     ],
     "end": [
-      285,
+      322,
       43
     ]
   },
@@ -5265,11 +5313,11 @@
     "lean_name": "CapDAG.instDecidableAudits",
     "file": "CapDAG/Query.lean",
     "start": [
-      116,
+      122,
       1
     ],
     "end": [
-      117,
+      123,
       41
     ]
   },
@@ -5385,11 +5433,11 @@
     "lean_name": "CapDAG.instDecidableEqGrade",
     "file": "CapDAG/Query.lean",
     "start": [
-      595,
+      650,
       18
     ],
     "end": [
-      595,
+      650,
       29
     ]
   },
@@ -5409,11 +5457,11 @@
     "lean_name": "CapDAG.instDecidableEqQuery",
     "file": "CapDAG/Query.lean",
     "start": [
-      266,
+      303,
       18
     ],
     "end": [
-      266,
+      303,
       29
     ]
   },
@@ -5421,11 +5469,11 @@
     "lean_name": "CapDAG.instDecidableEqQuery.decEq",
     "file": "CapDAG/Query.lean",
     "start": [
-      266,
+      303,
       18
     ],
     "end": [
-      266,
+      303,
       29
     ]
   },
@@ -5433,11 +5481,11 @@
     "lean_name": "CapDAG.instDecidableFits",
     "file": "CapDAG/Query.lean",
     "start": [
-      425,
+      478,
       1
     ],
     "end": [
-      425,
+      478,
       83
     ]
   },
@@ -5457,11 +5505,11 @@
     "lean_name": "CapDAG.instDecidableGivesOk",
     "file": "CapDAG/Query.lean",
     "start": [
-      100,
+      106,
       1
     ],
     "end": [
-      101,
+      107,
       42
     ]
   },
@@ -5481,11 +5529,11 @@
     "lean_name": "CapDAG.instDecidableMayAdmit_1",
     "file": "CapDAG/Query.lean",
     "start": [
-      293,
+      330,
       1
     ],
     "end": [
-      294,
+      331,
       45
     ]
   },
@@ -5505,11 +5553,11 @@
     "lean_name": "CapDAG.instDecidableMayGive",
     "file": "CapDAG/Query.lean",
     "start": [
-      253,
+      290,
       1
     ],
     "end": [
-      254,
+      291,
       57
     ]
   },
@@ -5517,11 +5565,11 @@
     "lean_name": "CapDAG.instDecidableMayGiveFrom",
     "file": "CapDAG/Query.lean",
     "start": [
-      164,
+      201,
       1
     ],
     "end": [
-      165,
+      202,
       46
     ]
   },
@@ -5529,11 +5577,11 @@
     "lean_name": "CapDAG.instDecidableMayServe",
     "file": "CapDAG/Query.lean",
     "start": [
-      419,
+      472,
       1
     ],
     "end": [
-      419,
+      472,
       91
     ]
   },
@@ -5550,14 +5598,26 @@
     ]
   },
   {
-    "lean_name": "CapDAG.instDecidableServes",
-    "file": "CapDAG/Query.lean",
+    "lean_name": "CapDAG.instDecidableSameClosed",
+    "file": "CapDAG/Route.lean",
     "start": [
-      413,
+      105,
       1
     ],
     "end": [
-      413,
+      105,
+      95
+    ]
+  },
+  {
+    "lean_name": "CapDAG.instDecidableServes",
+    "file": "CapDAG/Query.lean",
+    "start": [
+      466,
+      1
+    ],
+    "end": [
+      466,
       87
     ]
   },
@@ -5673,11 +5733,11 @@
     "lean_name": "CapDAG.instReprGrade",
     "file": "CapDAG/Query.lean",
     "start": [
-      595,
+      650,
       12
     ],
     "end": [
-      595,
+      650,
       16
     ]
   },
@@ -5685,11 +5745,11 @@
     "lean_name": "CapDAG.instReprGrade.repr",
     "file": "CapDAG/Query.lean",
     "start": [
-      595,
+      650,
       12
     ],
     "end": [
-      595,
+      650,
       16
     ]
   },
@@ -5721,11 +5781,11 @@
     "lean_name": "CapDAG.instReprQuery",
     "file": "CapDAG/Query.lean",
     "start": [
-      266,
+      303,
       12
     ],
     "end": [
-      266,
+      303,
       16
     ]
   },
@@ -5733,11 +5793,11 @@
     "lean_name": "CapDAG.instReprQuery.repr",
     "file": "CapDAG/Query.lean",
     "start": [
-      266,
+      303,
       12
     ],
     "end": [
-      266,
+      303,
       16
     ]
   },
@@ -5745,11 +5805,11 @@
     "lean_name": "CapDAG.jsonToYaml",
     "file": "CapDAG/Query.lean",
     "start": [
-      563,
+      618,
       1
     ],
     "end": [
-      566,
+      621,
       58
     ]
   },
@@ -6462,6 +6522,42 @@
     ]
   },
   {
+    "lean_name": "List.eraseDups",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2287,
+      1
+    ],
+    "end": [
+      2296,
+      76
+    ]
+  },
+  {
+    "lean_name": "List.eraseDupsBy",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2267,
+      1
+    ],
+    "end": [
+      2283,
+      31
+    ]
+  },
+  {
+    "lean_name": "List.eraseDupsBy.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2279,
+      3
+    ],
+    "end": [
+      2283,
+      31
+    ]
+  },
+  {
     "lean_name": "List.filterMapTR.go",
     "file": "<lean>/Init/Data/List/Impl.lean",
     "start": [
@@ -7170,18 +7266,6 @@
     ]
   },
   {
-    "lean_name": "String.length",
-    "file": "<lean>/Init/Data/String/Length.lean",
-    "start": [
-      16,
-      1
-    ],
-    "end": [
-      26,
-      18
-    ]
-  },
-  {
     "lean_name": "String.ofList",
     "file": "<lean>/Init/Prelude.lean",
     "start": [
@@ -7254,38 +7338,134 @@
     ]
   },
   {
-    "lean_name": "TaggedUrn.Constraint.closed",
+    "lean_name": "TaggedUrn.Constraint.absent",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      228,
+      219,
       1
     ],
     "end": [
-      230,
+      220,
+      52
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.closed",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      489,
+      1
+    ],
+    "end": [
+      491,
       11
     ]
   },
   {
-    "lean_name": "TaggedUrn.Constraint.val",
+    "lean_name": "TaggedUrn.Constraint.empty",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      87,
+      319,
       1
     ],
     "end": [
-      90,
-      12
+      320,
+      78
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.exact",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      217,
+      1
+    ],
+    "end": [
+      218,
+      66
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.mayBeAbsent",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      222,
+      1
+    ],
+    "end": [
+      225,
+      21
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.meet",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      448,
+      1
+    ],
+    "end": [
+      450,
+      64
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.parts",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Split.lean",
+    "start": [
+      22,
+      1
+    ],
+    "end": [
+      30,
+      49
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.present",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      213,
+      1
+    ],
+    "end": [
+      214,
+      55
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.unconstrained",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      209,
+      1
+    ],
+    "end": [
+      210,
+      60
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Constraint.vals",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      227,
+      1
+    ],
+    "end": [
+      230,
+      23
     ]
   },
   {
     "lean_name": "TaggedUrn.Exec.make",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      27,
+      28,
       1
     ],
     "end": [
-      30,
+      31,
       61
     ]
   },
@@ -7293,11 +7473,11 @@
     "lean_name": "TaggedUrn.Exec.meets",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      99,
+      106,
       1
     ],
     "end": [
-      101,
+      108,
       75
     ]
   },
@@ -7305,11 +7485,11 @@
     "lean_name": "TaggedUrn.Exec.meetsClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      125,
+      132,
       1
     ],
     "end": [
-      127,
+      134,
       81
     ]
   },
@@ -7317,11 +7497,11 @@
     "lean_name": "TaggedUrn.Exec.parts",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      47,
+      48,
       1
     ],
     "end": [
-      50,
+      51,
       87
     ]
   },
@@ -7329,11 +7509,11 @@
     "lean_name": "TaggedUrn.Exec.refines",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      64,
+      65,
       1
     ],
     "end": [
-      66,
+      67,
       66
     ]
   },
@@ -7341,11 +7521,11 @@
     "lean_name": "TaggedUrn.Exec.refinesBothClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      135,
+      142,
       1
     ],
     "end": [
-      137,
+      144,
       85
     ]
   },
@@ -7353,11 +7533,11 @@
     "lean_name": "TaggedUrn.Exec.refinesClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean",
     "start": [
-      114,
+      121,
       1
     ],
     "end": [
-      117,
+      124,
       81
     ]
   },
@@ -7377,12 +7557,24 @@
     "lean_name": "TaggedUrn.Urn.override",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
     "start": [
-      184,
+      146,
       1
     ],
     "end": [
-      185,
+      147,
       76
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Urn.splits",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Split.lean",
+    "start": [
+      185,
+      1
+    ],
+    "end": [
+      186,
+      91
     ]
   },
   {
@@ -7398,38 +7590,62 @@
     ]
   },
   {
-    "lean_name": "TaggedUrn.deltaTags",
-    "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
+    "lean_name": "TaggedUrn.Values.meet",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      118,
+      78,
       1
     ],
     "end": [
-      122,
-      74
+      82,
+      45
     ]
   },
   {
-    "lean_name": "TaggedUrn.freshFor",
-    "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
+    "lean_name": "TaggedUrn.Values.none",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      28,
+      90,
       1
     ],
     "end": [
-      29,
-      88
+      93,
+      23
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.Values.sub",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      71,
+      1
+    ],
+    "end": [
+      76,
+      58
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.deltaTags",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
+    "start": [
+      80,
+      1
+    ],
+    "end": [
+      84,
+      74
     ]
   },
   {
     "lean_name": "TaggedUrn.insertKey",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Join.lean",
     "start": [
-      323,
+      95,
       1
     ],
     "end": [
-      326,
+      98,
       94
     ]
   },
@@ -7437,35 +7653,23 @@
     "lean_name": "TaggedUrn.insertKeys",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Join.lean",
     "start": [
-      369,
+      141,
       1
     ],
     "end": [
-      372,
+      144,
       54
-    ]
-  },
-  {
-    "lean_name": "TaggedUrn.instDecidableAllows",
-    "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
-    "start": [
-      23,
-      1
-    ],
-    "end": [
-      24,
-      75
     ]
   },
   {
     "lean_name": "TaggedUrn.instDecidableEqConstraint",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      26,
+      59,
       12
     ],
     "end": [
-      26,
+      59,
       23
     ]
   },
@@ -7473,23 +7677,11 @@
     "lean_name": "TaggedUrn.instDecidableEqConstraint.decEq",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      26,
+      59,
       12
     ],
     "end": [
-      26,
-      23
-    ]
-  },
-  {
-    "lean_name": "TaggedUrn.instDecidableEqKeyState.decEq",
-    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
-    "start": [
-      32,
-      12
-    ],
-    "end": [
-      32,
+      59,
       23
     ]
   },
@@ -7506,14 +7698,26 @@
     ]
   },
   {
+    "lean_name": "TaggedUrn.instDecidableEqValues.decEq",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      52,
+      12
+    ],
+    "end": [
+      52,
+      23
+    ]
+  },
+  {
     "lean_name": "TaggedUrn.instDecidableMeets",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      147,
+      165,
       1
     ],
     "end": [
-      148,
+      166,
       36
     ]
   },
@@ -7521,11 +7725,11 @@
     "lean_name": "TaggedUrn.instDecidableMeetsClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      265,
+      284,
       1
     ],
     "end": [
-      266,
+      285,
       42
     ]
   },
@@ -7533,11 +7737,11 @@
     "lean_name": "TaggedUrn.instDecidableRefines",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      33,
+      51,
       1
     ],
     "end": [
-      34,
+      52,
       38
     ]
   },
@@ -7545,11 +7749,11 @@
     "lean_name": "TaggedUrn.instDecidableRefinesBothClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      308,
+      329,
       1
     ],
     "end": [
-      309,
+      330,
       48
     ]
   },
@@ -7557,11 +7761,11 @@
     "lean_name": "TaggedUrn.instDecidableRefinesClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      205,
+      223,
       1
     ],
     "end": [
-      206,
+      224,
       44
     ]
   },
@@ -7581,11 +7785,23 @@
     "lean_name": "TaggedUrn.instReprConstraint.repr",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      26,
+      59,
       25
     ],
     "end": [
-      26,
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.instReprKeyState.repr",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      44,
+      25
+    ],
+    "end": [
+      44,
       29
     ]
   },
@@ -7602,14 +7818,26 @@
     ]
   },
   {
+    "lean_name": "TaggedUrn.instReprValues.repr",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
+    "start": [
+      52,
+      25
+    ],
+    "end": [
+      52,
+      29
+    ]
+  },
+  {
     "lean_name": "TaggedUrn.keysOf",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Join.lean",
     "start": [
-      389,
+      161,
       1
     ],
     "end": [
-      392,
+      164,
       45
     ]
   },
@@ -7629,11 +7857,11 @@
     "lean_name": "TaggedUrn.mergeTags",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean",
     "start": [
-      81,
+      82,
       1
     ],
     "end": [
-      89,
+      90,
       46
     ]
   },
@@ -7641,11 +7869,11 @@
     "lean_name": "TaggedUrn.mergeWith",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean",
     "start": [
-      209,
+      210,
       1
     ],
     "end": [
-      216,
+      217,
       46
     ]
   },
@@ -7653,11 +7881,11 @@
     "lean_name": "TaggedUrn.overrideAt",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
     "start": [
-      174,
+      136,
       1
     ],
     "end": [
-      176,
+      138,
       53
     ]
   },
@@ -7665,35 +7893,47 @@
     "lean_name": "TaggedUrn.overrideTags",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
     "start": [
-      178,
+      140,
       1
     ],
     "end": [
-      182,
+      144,
       76
+    ]
+  },
+  {
+    "lean_name": "TaggedUrn.splitTags",
+    "file": "<package:tagged_urn_formal>/TaggedUrn/Split.lean",
+    "start": [
+      116,
+      1
+    ],
+    "end": [
+      119,
+      89
     ]
   },
   {
     "lean_name": "TaggedUrn.tagMatch",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      46,
+      245,
       1
     ],
     "end": [
-      63,
-      29
+      248,
+      57
     ]
   },
   {
     "lean_name": "TaggedUrn.tagMatchBothClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean",
     "start": [
-      338,
+      339,
       1
     ],
     "end": [
-      339,
+      340,
       79
     ]
   },
@@ -7701,11 +7941,11 @@
     "lean_name": "TaggedUrn.tagMatchClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean",
     "start": [
-      315,
+      316,
       1
     ],
     "end": [
-      316,
+      317,
       68
     ]
   },
@@ -7713,35 +7953,35 @@
     "lean_name": "TaggedUrn.tagMeets",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Constraint.lean",
     "start": [
-      158,
+      361,
       1
     ],
     "end": [
-      167,
-      17
+      364,
+      65
     ]
   },
   {
     "lean_name": "TaggedUrn.tagMeets3",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
     "start": [
-      53,
+      25,
       1
     ],
     "end": [
-      56,
-      70
+      26,
+      72
     ]
   },
   {
     "lean_name": "TaggedUrn.tagMeetsClosed",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Sorted.lean",
     "start": [
-      318,
+      319,
       1
     ],
     "end": [
-      319,
+      320,
       68
     ]
   },
@@ -7749,11 +7989,11 @@
     "lean_name": "TaggedUrn.tagSame",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Patch.lean",
     "start": [
-      84,
+      46,
       1
     ],
     "end": [
-      85,
+      47,
       70
     ]
   },
@@ -7761,23 +8001,23 @@
     "lean_name": "TaggedUrn.tagScore",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      357,
+      399,
       1
     ],
     "end": [
-      364,
-      16
+      406,
+      61
     ]
   },
   {
     "lean_name": "TaggedUrn.urnScore",
     "file": "<package:tagged_urn_formal>/TaggedUrn/Urn.lean",
     "start": [
-      366,
+      415,
       1
     ],
     "end": [
-      369,
+      418,
       49
     ]
   },
@@ -8154,6 +8394,30 @@
     ]
   },
   {
+    "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf",
+    "file": "CapDAG/Exec.lean",
+    "start": [
+      495,
+      1
+    ],
+    "end": [
+      500,
+      19
+    ]
+  },
+  {
+    "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_1.splitter",
+    "file": "CapDAG/Exec.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_4.splitter",
+    "file": "CapDAG/Exec.lean",
+    "start": null,
+    "end": null
+  },
+  {
     "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.given",
     "file": "CapDAG/Exec.lean",
     "start": [
@@ -8214,6 +8478,18 @@
     ]
   },
   {
+    "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.sameClosedWf",
+    "file": "CapDAG/Exec.lean",
+    "start": [
+      486,
+      1
+    ],
+    "end": [
+      487,
+      79
+    ]
+  },
+  {
     "lean_name": "_private.CapDAG.Exec.0.CapDAG.Exec.sameSides",
     "file": "CapDAG/Exec.lean",
     "start": [
@@ -8256,6 +8532,12 @@
     ]
   },
   {
+    "lean_name": "_private.CapDAG.Exec.0.CapDAG.endsOnParts.match_1.splitter",
+    "file": "CapDAG/Exec.lean",
+    "start": null,
+    "end": null
+  },
+  {
     "lean_name": "_private.CapDAG.Exec.0.CapDAG.instReprAsk.repr.match_1.splitter",
     "file": "CapDAG/Exec.lean",
     "start": null,
@@ -8274,6 +8556,30 @@
     "end": null
   },
   {
+    "lean_name": "_private.CapDAG.Route.0.CapDAG.endsOnParts.match_1.splitter",
+    "file": "CapDAG/Route.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "_private.CapDAG.Route.0.CapDAG.endsOnParts.match_4.splitter",
+    "file": "CapDAG/Route.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "_private.Init.Data.List.Impl.0.List.flatMapTR.go",
+    "file": "<lean>/Init/Data/List/Impl.lean",
+    "start": [
+      161,
+      17
+    ],
+    "end": [
+      163,
+      37
+    ]
+  },
+  {
     "lean_name": "_private.Init.Data.List.Impl.0.List.takeWhileTR.go",
     "file": "<lean>/Init/Data/List/Impl.lean",
     "start": [
@@ -8283,18 +8589,6 @@
     "end": [
       239,
       66
-    ]
-  },
-  {
-    "lean_name": "_private.Init.Data.Nat.Basic.0.Nat.repeatTR.loop",
-    "file": "<lean>/Init/Data/Nat/Basic.lean",
-    "start": [
-      78,
-      25
-    ],
-    "end": [
-      80,
-      32
     ]
   },
   {

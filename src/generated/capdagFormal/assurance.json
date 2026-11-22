@@ -19,16 +19,16 @@
       "statement": "CapDAG.Cap → TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun c input emitted =>\n  if c.readsComplete then TaggedUrn.refinesBothClosed emitted c.output\n  else TaggedUrn.refinesBothClosed emitted (c.gives input) ∧ TaggedUrn.refinesBothClosed (c.gives input) emitted",
       "package": "capdagFormal",
-      "fingerprint": "c2a2f874f07c19ccb1e1718fcc55308ed04afd838a3a9e0c21b0260da1aba9cf",
+      "fingerprint": "4fdb88941770448a7b68c5c751a2f27140188825eca30cfb851aede389e0619a",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 107,
+          "line": 113,
           "column": 1
         },
         "end": {
-          "line": 114,
+          "line": 120,
           "column": 93
         }
       }
@@ -39,7 +39,7 @@
       "statement": "CapDAG.Cap → TaggedUrn.Urn → TaggedUrn.Urn",
       "definition": "fun c x =>\n  match c.effect with\n  | CapDAG.Effect.declared => c.output\n  | CapDAG.Effect.unspecified => c.output\n  | CapDAG.Effect.none => x\n  | CapDAG.Effect.patch => x.override (c.input.delta c.output)",
       "package": "capdagFormal",
-      "fingerprint": "dd44e70d52ffab6bdf2fe7a1839c2a2511a55584f61b0040948ce7e58aad496d",
+      "fingerprint": "0ba6bdc4044c0051195acb7b1f910faa542522519e3951199f38c656807a422c",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Cap.lean",
@@ -59,7 +59,7 @@
       "statement": "CapDAG.Cap → Option CapDAG.Illegal",
       "definition": "fun c =>\n  if c.input = CapDAG.mediaTop ∧ c.output = CapDAG.mediaTop ∧ c.other.tags = [] ∧ c.effect = CapDAG.Effect.declared then\n    some CapDAG.Illegal.bareTop\n  else\n    if c.effect = CapDAG.Effect.none ∧ ¬TaggedUrn.refines c.input c.output then some CapDAG.Illegal.noneNotInside\n    else none",
       "package": "capdagFormal",
-      "fingerprint": "357c930fb66eccdd2a0ab3a8d83bb7bc3c6c5d5a8511fe3d6448920cec1f8fe7",
+      "fingerprint": "6a798f80b6991572c67481bdc9b48783113317ce865723ffa4d3abb451ecab1b",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Cap.lean",
@@ -79,7 +79,7 @@
       "statement": "List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
       "definition": "fun claims c => ∃ r, r ∈ claims ∧ TaggedUrn.refines r.urn c.urn.urn",
       "package": "capdagFormal",
-      "fingerprint": "249af298f26b14507e0f8d7fc25030c5284b52e2d753d10b1fccab5861117784",
+      "fingerprint": "fe4a974ca9d2bc8bd67853439b9dd65ecb4c2be9fb37f98adea3b89d4f296996",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -99,7 +99,7 @@
       "statement": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Nat → Prop",
       "definition": "fun keys base i => ∃ k, keys[i]? = some k ∧ TaggedUrn.refines base.urn k.urn",
       "package": "capdagFormal",
-      "fingerprint": "1ad9a5464edc019d773d00a1d863a9ab78e35d253a3bf30c0bf5b34368ff5977",
+      "fingerprint": "0d6ec43f9c62f387b282da20a95e1ef2091253c36cfb37d0e3d4bf1e074be357",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -119,7 +119,7 @@
       "statement": "List CapDAG.Detect.Candidate → CapDAG.Detect.Candidate → Prop",
       "definition": "fun cs c => ∀ (o : CapDAG.Detect.Candidate), o ∈ cs → ¬CapDAG.Detect.Strictly c.urn.urn o.urn.urn",
       "package": "capdagFormal",
-      "fingerprint": "9d5cb42a71b758ed98f59d6b0e75b7546d9c8c1a5ddbb94e96db4400ef79fe2a",
+      "fingerprint": "65bfde085f4449bcf4bfbf02ae114fc7c733ba44a1b32b76bb313ae5b4be2286",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -139,7 +139,7 @@
       "statement": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Prop",
       "definition": "fun us u => ∀ (t : TaggedUrn.Exec.Wf), t ∈ us → ¬CapDAG.Detect.Strictly t.urn u.urn",
       "package": "capdagFormal",
-      "fingerprint": "121858f8139ae67c4a9fc47977c17e8decec246270316f70921daddd67e428e3",
+      "fingerprint": "8832cde6be5a839010dc8a410973f0620bc95406ef5f4f2732b2dedfdf5c3899",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -159,7 +159,7 @@
       "statement": "List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
       "definition": "fun owners c => ∃ o, o ∈ owners ∧ TaggedUrn.refines c.urn.urn o.urn",
       "package": "capdagFormal",
-      "fingerprint": "8a10a685d786b29a3f6176fa55b16e4a81f892c0de2e954aff1e5e22ce24e8f8",
+      "fingerprint": "e7428d706ab8847945e526151c7fcdf6be12f3757eed9063edbc3e1193a65b38",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -179,7 +179,7 @@
       "statement": "List CapDAG.Detect.Candidate → List TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf → CapDAG.Detect.Candidate → Prop",
       "definition": "fun cs owners claims c =>\n  c.rules ≠ CapDAG.Detect.Rules.unmet ∧\n    (CapDAG.Detect.Owned owners c → CapDAG.Detect.Claimed claims c) ∧\n      (¬CapDAG.Detect.Owned owners c → c.rules = CapDAG.Detect.Rules.met ∨ CapDAG.Detect.IsBase cs c)",
       "package": "capdagFormal",
-      "fingerprint": "6d4d1fa80aeec229c02701e5e2f6642bbbc241e76cfd76874b3c244223aeba60",
+      "fingerprint": "0c719a96c3f2c4afef959c9a78c39b4e351d7a0f06fdb7ad393fe1713ee887e0",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -199,7 +199,7 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b => TaggedUrn.refines a b ∧ ¬TaggedUrn.refines b a",
       "package": "capdagFormal",
-      "fingerprint": "40b122f9aef7763dddb2d7fa476c75043292436fc0f6efb654b0ad4577122da9",
+      "fingerprint": "c987cab555b7fd73757eada83e1a1cb5a9ebdbef6701e595814a341db4d78366",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -219,16 +219,16 @@
       "statement": "CapDAG.Query → CapDAG.Cap → Prop",
       "definition": "fun q c =>\n  q.input.admits c.input ∧\n    q.output.givesOk c (q.given c) ∧ CapDAG.effectOk c.effect q.effect ∧ TaggedUrn.refinesClosed c.other q.tags",
       "package": "capdagFormal",
-      "fingerprint": "9ea3c4932166ef3709226857476201ee8988076acf4cc30642f718c41b9dfd10",
+      "fingerprint": "487e9e67f3bf18495efc90c0eb901fce115b2de03637b33068279c91ce5b8ec8",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 275,
+          "line": 312,
           "column": 1
         },
         "end": {
-          "line": 282,
+          "line": 319,
           "column": 62
         }
       }
@@ -239,16 +239,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → CapDAG.Query",
       "definition": "fun input tags =>\n  { input := CapDAG.Ask.covers input, output := CapDAG.Ask.unknown, tags := tags, effect := CapDAG.Effect.unspecified }",
       "package": "capdagFormal",
-      "fingerprint": "d8bcdf4ec49371cf4d69e3e792babf0ac43254022de8d5ecf6e05838d540a11a",
+      "fingerprint": "725379ac449b781bdf8c9a04050105edc142fc330d7aa17a4110ee67ac4f2dbd",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 404,
+          "line": 457,
           "column": 1
         },
         "end": {
-          "line": 407,
+          "line": 460,
           "column": 93
         }
       }
@@ -259,16 +259,16 @@
       "statement": "CapDAG.Query → CapDAG.Cap → CapDAG.Grade",
       "definition": "fun q c =>\n  if q.exactly.admits c then CapDAG.Grade.exact\n  else if q.admits c then CapDAG.Grade.guaranteed else if q.mayAdmit c then CapDAG.Grade.possible else CapDAG.Grade.none",
       "package": "capdagFormal",
-      "fingerprint": "7f1efdf543e13a33e4d27c2027b6e017c41a102f2ebf29f636ee2e1dbef7e77e",
+      "fingerprint": "6bc62b45a351eb0decbb63d375310149b90eee18df3c42d3d41a9b12e4fc9d0b",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 605,
+          "line": 660,
           "column": 1
         },
         "end": {
-          "line": 610,
+          "line": 665,
           "column": 18
         }
       }
@@ -279,16 +279,16 @@
       "statement": "CapDAG.Query → CapDAG.Cap → Prop",
       "definition": "fun q c =>\n  q.input.mayAdmit c.input ∧\n    q.output.mayGive c (q.given c) ∧ CapDAG.effectOk c.effect q.effect ∧ TaggedUrn.meetsClosed c.other q.tags",
       "package": "capdagFormal",
-      "fingerprint": "ad920022ad53d6c56d4414bb834f0fbe7100a33d54fc65c50b935e1272f4b76e",
+      "fingerprint": "e48ae51953abbb775dccaea2dafa995eaf2f767f673a940f6d0366d2e31c0412",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 287,
+          "line": 324,
           "column": 1
         },
         "end": {
-          "line": 291,
+          "line": 328,
           "column": 60
         }
       }
@@ -299,16 +299,16 @@
       "statement": "CapDAG.Cap → CapDAG.Query",
       "definition": "fun r =>\n  { input := CapDAG.Ask.covers r.input, output := CapDAG.Ask.within r.output, tags := r.other, effect := r.effect }",
       "package": "capdagFormal",
-      "fingerprint": "1087f3037e9879380a692613a8038887cb6ab29b9eac95d42f6c6f9b085e06dc",
+      "fingerprint": "1eea11c1fabe2c5f7dabf93f88e1703ef8f076a4f2e6a79894c6025a2e2f4d42",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 382,
+          "line": 435,
           "column": 1
         },
         "end": {
-          "line": 387,
+          "line": 440,
           "column": 96
         }
       }
@@ -319,16 +319,16 @@
       "statement": "CapDAG.Cap → CapDAG.Query",
       "definition": "fun p =>\n  { input := CapDAG.Ask.within p.input,\n    output := if CapDAG.unconstrainedMedia p.output then CapDAG.Ask.unknown else CapDAG.Ask.within p.output,\n    tags := p.other, effect := p.effect }",
       "package": "capdagFormal",
-      "fingerprint": "780f9cc2d713ba957251b6529fd7dcd5d7971888fa05b82cb9aac4816a8a4a27",
+      "fingerprint": "542c174d88cf3f52952e2da3c3e6c238068275194c21224a71c7544c173b3d20",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 389,
+          "line": 442,
           "column": 1
         },
         "end": {
-          "line": 397,
+          "line": 450,
           "column": 42
         }
       }
@@ -339,16 +339,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → CapDAG.Query",
       "definition": "fun output tags =>\n  { input := CapDAG.Ask.unknown, output := CapDAG.Ask.within output, tags := tags, effect := CapDAG.Effect.unspecified }",
       "package": "capdagFormal",
-      "fingerprint": "c2bd4c2597c860e665f1ad3b312bffb087f925de87e5a5e19b0b91ca5756273b",
+      "fingerprint": "e32174813d88d21d29045e128d6f78395b5112697ea179043ac5088db96856dc",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 399,
+          "line": 452,
           "column": 1
         },
         "end": {
-          "line": 402,
+          "line": 455,
           "column": 94
         }
       }
@@ -359,7 +359,7 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun pattern request =>\n  TaggedUrn.refines request.input pattern.input ∧\n    TaggedUrn.refines pattern.output request.output ∧\n      (pattern.effect = CapDAG.Effect.unspecified ∨ pattern.effect = request.effect) ∧\n        TaggedUrn.refines request.other pattern.other",
       "package": "capdagFormal",
-      "fingerprint": "c18f8e9ce4042fc70ca4a7d2e0a46c2c49c4e6917f2f5d397436f5acfc320a17",
+      "fingerprint": "cff5c85e194b54cb8f51d4a5fd47cc6bcdbcb4a1cdea5a645755616aad4b8ee5",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Cap.lean",
@@ -379,7 +379,7 @@
       "statement": "CapDAG.Cap → Nat",
       "definition": "fun c => 10000 * TaggedUrn.urnScore c.output + 100 * TaggedUrn.urnScore c.input + TaggedUrn.urnScore c.other",
       "package": "capdagFormal",
-      "fingerprint": "9cd834336ec1de1df991042508a9be46e712def7d2d750031422a7be49afc7a3",
+      "fingerprint": "e87d987d37550126e7bfdd25311db22f88274663ed3124a6bd997aa16026ddbc",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Ranking.lean",
@@ -414,21 +414,41 @@
       }
     },
     {
+      "name": "CapDAG.endsOn",
+      "kind": "lungo.model",
+      "statement": "List TaggedUrn.Urn → TaggedUrn.Urn → Option (List TaggedUrn.Urn)",
+      "definition": "fun bookends node => CapDAG.endsOnParts bookends node.splits",
+      "package": "capdagFormal",
+      "fingerprint": "cbb9716571d0af09e7b57753827077cc7b24f3f2843097164ff954cd3bf2b92a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Route.lean",
+        "start": {
+          "line": 116,
+          "column": 1
+        },
+        "end": {
+          "line": 119,
+          "column": 35
+        }
+      }
+    },
+    {
       "name": "CapDAG.fits",
       "kind": "lungo.relation",
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun pattern cap => (CapDAG.Query.ofPattern pattern).admits cap",
       "package": "capdagFormal",
-      "fingerprint": "1b17338dbed463de7fcb34ac562ca65c37835815f1e78eaaff27f14b332de955",
+      "fingerprint": "5e3351cedf5c7d161008646b3a274ac231ad5cec34e0614fc612033575bda9d6",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 421,
+          "line": 474,
           "column": 1
         },
         "end": {
-          "line": 423,
+          "line": 476,
           "column": 76
         }
       }
@@ -439,7 +459,7 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun a b => TaggedUrn.refines a.output b.input",
       "package": "capdagFormal",
-      "fingerprint": "423b0de20a671b4fd66d53ba96d9207ee6938fb28cdc93612389731765c5940a",
+      "fingerprint": "bedb5698f3e8e96f348c462f904ba02ca7e8d293134ab22e41dfafbe6656793d",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Route.lean",
@@ -459,7 +479,7 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun a b => TaggedUrn.meets a.output b.input",
       "package": "capdagFormal",
-      "fingerprint": "4a8ed4e20b01f138e83a0b10d6023cf31eef9e3ee7b0e15330e1ee641213099f",
+      "fingerprint": "d065bb667d6534651a9cea34af9f885474c1ba62494e509c218547f3b70bfc2b",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Route.lean",
@@ -479,16 +499,16 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun candidate request => (CapDAG.Query.ofCall request).mayAdmit candidate",
       "package": "capdagFormal",
-      "fingerprint": "4fa171d95bfc0a0817b28fedab8b890164ad520c5a10e65cdfaa00bf148d9420",
+      "fingerprint": "c8815eceb33351e0a7d19e7d4688cf75b104b1531e784696c299eecf1b6629a4",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 415,
+          "line": 468,
           "column": 1
         },
         "end": {
-          "line": 417,
+          "line": 470,
           "column": 91
         }
       }
@@ -499,7 +519,7 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Nat × Nat",
       "definition": "fun candidate request =>\n  have p := CapDAG.capScore candidate;\n  have r := CapDAG.capScore request;\n  if r ≤ p then (0, p - r) else (1, r - p)",
       "package": "capdagFormal",
-      "fingerprint": "4f2415cc5a1495bfc32e96889660d9f445bdc6a53fde552d234f4f0d2e1535dc",
+      "fingerprint": "df96dfb3900a88db1e78897a875c07c2d119dd9282c7592073965e63bc4f57d9",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Ranking.lean",
@@ -519,7 +539,7 @@
       "statement": "List CapDAG.Cap → CapDAG.Cap → Option CapDAG.Cap",
       "definition": "fun candidates request => List.foldl (CapDAG.selectStep request) none candidates",
       "package": "capdagFormal",
-      "fingerprint": "c59ef8d9e50f9ded9e5b20766b0e6c9d1c9a1ccb9f76a14e64b6ad1db7dc769e",
+      "fingerprint": "c296f2d0330e42f3eb988d3840585ed93e6d99e421f15bcf108e216671406c02",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Ranking.lean",
@@ -539,16 +559,16 @@
       "statement": "CapDAG.Cap → CapDAG.Cap → Prop",
       "definition": "fun candidate request => (CapDAG.Query.ofCall request).admits candidate",
       "package": "capdagFormal",
-      "fingerprint": "bd478c095fae9dcc94aa352617f22ff9fa812b38055426aa22a41aa5e8ac029f",
+      "fingerprint": "80b3a6d09822cfd1c56fd245a50039b26eb66b03e9529e712abfea9d88172612",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Query.lean",
         "start": {
-          "line": 409,
+          "line": 462,
           "column": 1
         },
         "end": {
-          "line": 411,
+          "line": 464,
           "column": 87
         }
       }
@@ -557,19 +577,19 @@
       "name": "TaggedUrn.Constraint.allows",
       "kind": "lungo.relation",
       "statement": "TaggedUrn.Constraint → TaggedUrn.KeyState → Prop",
-      "definition": "fun x x_1 =>\n  match x, x_1 with\n  | TaggedUrn.Constraint.missing, x => True\n  | TaggedUrn.Constraint.unconstrained, x => True\n  | TaggedUrn.Constraint.optionalNot p, s => s ≠ TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.present, s => s ≠ TaggedUrn.KeyState.unset\n  | TaggedUrn.Constraint.presentNot p, s => s ≠ TaggedUrn.KeyState.unset ∧ s ≠ TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.exact p, s => s = TaggedUrn.KeyState.set p\n  | TaggedUrn.Constraint.absent, s => s = TaggedUrn.KeyState.unset",
+      "definition": "fun c x =>\n  match x with\n  | TaggedUrn.KeyState.unset => c.mayBeAbsent = true\n  | TaggedUrn.KeyState.set v => c.vals.allows v = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "aee80a946434e6281e1210e8eb0085e8ec8f9e2a0fbdb2103966191d5637ecb1",
+      "fingerprint": "d87addcb03fbe00cf243d45db9cbb5817d518471dab54ea00707f9c5f0deff2f",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Constraint.lean",
         "start": {
-          "line": 36,
+          "line": 232,
           "column": 1
         },
         "end": {
-          "line": 44,
-          "column": 27
+          "line": 236,
+          "column": 37
         }
       }
     },
@@ -579,16 +599,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b => TaggedUrn.refines a b ∨ TaggedUrn.refines b a",
       "package": "tagged_urn_formal",
-      "fingerprint": "a383cafc8c675c9125a90a66a5d9c1d5e0183f54485365327b5b702b952fe396",
+      "fingerprint": "8de6c2a435501807aacc87948e00f4605fdd0fe748dfe68d8c938fd3ce938435",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 72,
+          "line": 90,
           "column": 1
         },
         "end": {
-          "line": 73,
+          "line": 91,
           "column": 63
         }
       }
@@ -599,16 +619,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b => TaggedUrn.refines a b ∧ TaggedUrn.refines b a",
       "package": "tagged_urn_formal",
-      "fingerprint": "62a798359c0f814cc5a5394753eac1851acacdc70d11ed2b7d2ce62b8f87d09e",
+      "fingerprint": "1739e2478d32a7d38bb82783f3472b0cae33dd06d75030a5e50d79077d539eed",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 74,
+          "line": 92,
           "column": 1
         },
         "end": {
-          "line": 75,
+          "line": 93,
           "column": 63
         }
       }
@@ -619,16 +639,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b =>\n  a.scheme = b.scheme ∧ ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMeets (a.tag key) (b.tag key) = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "97f190a845fd77fd75c747f99f5d5712b0d48e64d18d4b48d5aad541d77594a1",
+      "fingerprint": "f7708576cc85b55da1af7fbf2247346d1d6f411d770ab79d61be9ba3de8da43b",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 140,
+          "line": 158,
           "column": 1
         },
         "end": {
-          "line": 145,
+          "line": 163,
           "column": 70
         }
       }
@@ -639,16 +659,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b =>\n  a.scheme = b.scheme ∧\n    ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMeets (a.tag key).closed (b.tag key) = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "ea159e28955c8c84fb3f58e391783b9414880e49ed323718c41e539e02a9a43d",
+      "fingerprint": "cdea31c4d6783e8fd489b4894d48f33b30ed176096401ba2b98a66833e3a217b",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 257,
+          "line": 276,
           "column": 1
         },
         "end": {
-          "line": 263,
+          "line": 282,
           "column": 77
         }
       }
@@ -659,16 +679,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b =>\n  a.scheme = b.scheme ∧ ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMatch (a.tag key) (b.tag key) = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "6942509bbefdfaf5c81174a0da7421e8743d07ddcb0c63a386b768195f3b3c11",
+      "fingerprint": "39a3119a85ffb2deb9d56a61bdacac71b747a361e203680ed1e7ea2359b04992",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 27,
+          "line": 45,
           "column": 1
         },
         "end": {
-          "line": 31,
+          "line": 49,
           "column": 70
         }
       }
@@ -679,16 +699,16 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b =>\n  a.scheme = b.scheme ∧\n    ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMatch (a.tag key).closed (b.tag key).closed = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "4a0fda7a3a680f164025d12206556982e0119f949ebd16273cf8a0b771ba7278",
+      "fingerprint": "ee71b20d9fc9a386e0816090f26337e5ea7475d57fe5476aefda6460ec759b90",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 303,
+          "line": 324,
           "column": 1
         },
         "end": {
-          "line": 306,
+          "line": 327,
           "column": 84
         }
       }
@@ -699,17 +719,37 @@
       "statement": "TaggedUrn.Urn → TaggedUrn.Urn → Prop",
       "definition": "fun a b =>\n  a.scheme = b.scheme ∧\n    ∀ (key : String), key ∈ a.keys ++ b.keys → TaggedUrn.tagMatch (a.tag key).closed (b.tag key) = true",
       "package": "tagged_urn_formal",
-      "fingerprint": "9b564936877f0ec34c42054ba630d51450ae609899c55e3b9ae2568d66c76998",
+      "fingerprint": "f08fd8db228dd4b040a0fbdf4c53cad99716f2b573d16443090752bb165b61c3",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 200,
+          "line": 218,
           "column": 1
         },
         "end": {
-          "line": 203,
+          "line": 221,
           "column": 77
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.tagScore",
+      "kind": "lungo.model",
+      "statement": "TaggedUrn.Constraint → Nat",
+      "definition": "fun x =>\n  match x with\n  | TaggedUrn.Constraint.missing => 0\n  | TaggedUrn.Constraint.written false (TaggedUrn.Values.oneOf vs) =>\n    if vs.isEmpty = true then 5 else if TaggedUrn.twoDistinct vs = true then 3 else 4\n  | TaggedUrn.Constraint.written false (TaggedUrn.Values.noneOf vs) => if vs.isEmpty = true then 2 else 3\n  | TaggedUrn.Constraint.written true (TaggedUrn.Values.oneOf vs) => if vs.isEmpty = true then 5 else 1\n  | TaggedUrn.Constraint.written true (TaggedUrn.Values.noneOf vs) => if vs.isEmpty = true then 0 else 1",
+      "package": "tagged_urn_formal",
+      "fingerprint": "a07ea4bc4564c6b54e8aa1672350cd0047f268ba0287657a608a496ad3d302e7",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Urn.lean",
+        "start": {
+          "line": 399,
+          "column": 1
+        },
+        "end": {
+          "line": 406,
+          "column": 61
         }
       }
     },
@@ -719,16 +759,16 @@
       "statement": "TaggedUrn.Urn → Nat",
       "definition": "fun u => (List.map (fun pair => TaggedUrn.tagScore pair.snd) u.tags).sum",
       "package": "tagged_urn_formal",
-      "fingerprint": "7776afd6ad1380896e6b0b3fa9877251656ee579aa9a52fe97fec91efc508edf",
+      "fingerprint": "2c02313e746f309546f338bd32c08fbffbbaf1ffa5f95af36a2f4964755ea3f5",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Urn.lean",
         "start": {
-          "line": 366,
+          "line": 415,
           "column": 1
         },
         "end": {
-          "line": 369,
+          "line": 418,
           "column": 49
         }
       }
@@ -3176,7 +3216,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "31df2ad07974b9c2aa8a35520bd82afa515e5e3e765fa6a6728aec437a0d2210",
+      "fingerprint": "d3f9b65884267c0ff672cd2e0c814ce1bf6b891192782eccaa379022dc553716",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3209,7 +3249,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "35d6342822e049c9aec0337ebc3c909c5f26b486a280702aebc7684eef74093f",
+      "fingerprint": "87921c30021ce79bb60aebc69a442570df0ff15e5320d8970d181b554f6297c9",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3242,7 +3282,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "cb8b51d23f491e6183919571663eab923314a0819dad46b6c690acf2803d1636",
+      "fingerprint": "c6c8442eaf8043422e2b7f583f21bca3cf7b117e78f710a0cab26810faa31154",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3275,7 +3315,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "89a6c8c94ee396ba253c54174f2480b83fcb0872bfb1abd98b0af70c6589aad6",
+      "fingerprint": "b7319bb150e2449fe8bdd40fee3e6369d6a39cae23061bc1efc0f287c9f57d61",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3308,7 +3348,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "8d67020077b83549e8403da50ed988a4f335ea8a8c9b8b42c61b92acd937ddc6",
+      "fingerprint": "af18e1f9d572798503c8308ce382fd2a85c0ec4db14774eb081a73b4bffc9a82",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3343,7 +3383,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "c478e69d53db1c20f06b2b6baefcf9a7a13e8cd50e8682036c04f6d21d78effb",
+      "fingerprint": "f21da7a59be1a48aa4b0ea6f06bd5609e4eb7ef33afaec669d56fc5a41f627ef",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3376,7 +3416,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "6a91971e53e99627673a3a78f1716a02867c6b93bce80003618aa701e2e8dcf3",
+      "fingerprint": "d3529542dc27a17805647d930bd8e1961f23154f1dd8588094f5a12052d38a6a",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3409,7 +3449,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "6ecb557af1e3484bf733bcc7b9a88879fcd7e1bee6b3f283becc4a4d90856f09",
+      "fingerprint": "68fa2e4e4040b28fdf6f4f95ca0c4e8db3750198fb1356bbd0b61172b6c4db69",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3442,7 +3482,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "0080ba55d4f3b0d5dde4f9d954ab042dfac7cac8623d42cde0386fd27e3218dd",
+      "fingerprint": "1b311f9a4b9795dc14ab80b930ac1e8aa0595ae74e8f85bd17af6c2bfe981aba",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3477,7 +3517,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "e30e48362ebb377adbff7e8df0f2436f863c4b88a00b2f2f14ca8a252ffb9094",
+      "fingerprint": "b1468c0380f48dadafb8565bf6d94eb3c523d8f865914998a390ddf5ee0987d3",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3510,7 +3550,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "8b54eb6f55360db2c5274c008635d574fe9ca106fca6f026ae6d7620626f3fdb",
+      "fingerprint": "05573b0613bcf36118c8af926e99ff859fc155cbd17afc2e01333fae96494a7a",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Detect.lean",
@@ -3545,7 +3585,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "0868c42074a25588b998f9095a8983f560a476bc132efd26bab7ad053d0961d3",
+      "fingerprint": "18601d7d815029676d7ace6ec0eeabcc5a0ec3089b7ce62f401cf6345c86dd15",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3580,7 +3620,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "5852a040c7b528a9d1fdd365d5ecb7cc78aa591ccfda3c97ee71f44702149bf6",
+      "fingerprint": "03e2f0d721341777fecfd4073c43240895751b9ac3a6e1047f5318eb8ccf2769",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3613,7 +3653,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "6a8a3e4cb1fe3ec29e9781d4562a06be88c7113f6add3d168aa1ee447f0fb9a5",
+      "fingerprint": "d0ca270456916cac92efbc763d79d1a20c1c21500b34f3b6834a24aaf6975d56",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3648,7 +3688,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "a1a0bf8fb07f640bde8c307bd341573de7f45ead70a3a0c6f6b84fd7d13762e0",
+      "fingerprint": "eee4798b2acda9b9f3a6822f733341fc69594e9c9a35671daca68f0895b8705e",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3683,7 +3723,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "45cb44aeda00c089306a387031b585acdd0addad30f62c3993a0f53d730bfadd",
+      "fingerprint": "be7c813e7cb6d2420b1efdb10fbc6103ece165aa25617e102929c521255edf12",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3718,7 +3758,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "ad33309b0c33693d272ba1d1e8ae0010b2cab2cd87bdeedfbcf87b97cd77798c",
+      "fingerprint": "1a012c3117df593b24e99b59228ee2084eb25a31461e531a903d5d66efbdfcb2",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3764,6 +3804,39 @@
       }
     },
     {
+      "name": "CapDAG.Exec.endsOn_urns",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Exec.endsOn"
+      ],
+      "specifications": [],
+      "statement": "∀ (bookends : List TaggedUrn.Exec.Wf) (node : TaggedUrn.Exec.Wf),\n  Option.map (List.map fun x => x.urn) (CapDAG.Exec.endsOn bookends node) =\n    CapDAG.endsOn (List.map (fun x => x.urn) bookends) node.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "65204d38c3626cc432b2a4a2587e0a03c1a2c2f71ed07896be19f3ff2c7c5658",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 520,
+          "column": 1
+        },
+        "end": {
+          "line": 526,
+          "column": 34
+        }
+      }
+    },
+    {
       "name": "CapDAG.Exec.equivalent_axiswise",
       "relation": "lungo.law",
       "subjects": [
@@ -3782,7 +3855,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "66b5aa8fc901769999771806b5f47bd5fc6517f5452b29ce77e722519f4a41c7",
+      "fingerprint": "23968fae0d1c4bda3e7ea59c8799d67b10fd8891069545e4397fd0acf5019354",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3817,7 +3890,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "8d33fafc9815d6512ffb3e281fb97345f46f759e8fb4491e7782925ecb2a14ef",
+      "fingerprint": "073867060d53b476f037f01b090f2a15f763ea8bb672215a69f7f52be932cf67",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3852,7 +3925,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "07725a2ee1432c277c910cbcc117920a292e1f92ab7f7091a75667d08e5793ae",
+      "fingerprint": "7f90b3a07119247c340dc0fa70487a624470cc2db8f0853c0320e7d192bd09ac",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3887,7 +3960,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "d3156ccc9526c721b3e26372b899524dfbb5f69a866e1b7f60b4aa48be3b939f",
+      "fingerprint": "2228c1342bbb03f14a9d5316c17b603530c714c352bfa5df1f66fa5f86f6094d",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3922,7 +3995,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "2e715b26b1a13405391b89b8ef26cb1ed2a30c1b6004fe0b4ec47532224353b0",
+      "fingerprint": "b8bbe98cc2d4348529759bccb0dc53fdd13c9c1d7c46c47e326c724e710ec13d",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3957,7 +4030,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "ed4b6c82bbe2f1caeea7657e23a77bd4f3edc04f5e8ad50aa22b5505eff64f19",
+      "fingerprint": "981ac6c36dfb4f8b07041783565df5c74e099cdf912bd7ddab357f9330aa2fa6",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3992,7 +4065,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "2f9a2376a4b6e8f0b74bde020d6cfe9f59deb9778272068a7d1982c03b45b83e",
+      "fingerprint": "c686560b89999cb98fd7877b58a31e7f7576b8b31bf70ff40435417f5cc62201",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4027,7 +4100,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "d7b28611d6d6872eee4f2f7e833f9968c6f59c6eb10376cd85b2ddde0722c3ec",
+      "fingerprint": "2a5398309bca46a388d15c4196f2a39f18625dbdb7886b6d7a3793e995569237",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4062,7 +4135,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "fd9b1acadbc1fe963257ed03e13626aea9f2ed913ea498109b820d6bb2bd2eb0",
+      "fingerprint": "1123f63a768467bd3b974b9d483625985e91f549bad44f58df6fda5c3c5cbc4f",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4097,7 +4170,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "4b73c1dc31ecad4345cba6f30366d80271d637dbc22f892bd66b2ca7d27a53d6",
+      "fingerprint": "5be0eb7b0927f12fbd2e239ec9198ea33981c0238a7fdb4584a4bc6e87ed38f6",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4132,7 +4205,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "2c4fc82410284eebc258c66c81308773a811516484e8ebaf6668180f826c3446",
+      "fingerprint": "cf40b2035c3ce8bc018270c949bfac6fe033a337db67cac6741b475b330bbe02",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4167,7 +4240,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "39171d6de933ff1436512531706045da6421ec028127bb96237b87abe1c14e85",
+      "fingerprint": "5067bd167fa4763de69d9e05331372ddd28812a4112f345123bae065ad82a771",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4202,7 +4275,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "5ca842294e4d51cc523add226b35a976bb0ff806a01de78e5bdf9d85909ecd32",
+      "fingerprint": "4551ddb58e87a6921994ad497d0711d5c585680d432e7b19c73c3de93e7742b3",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -4237,16 +4310,16 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "c541ba86eafa91833f0157dd3d4bd2b7340db713213c38c072df6518a651a85a",
+      "fingerprint": "50ad368dfbf974a237cd167e47bd343feaa252c06012a65554ef771b474b3e13",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 482,
+          "line": 537,
           "column": 1
         },
         "end": {
-          "line": 484,
+          "line": 539,
           "column": 90
         }
       }
@@ -4272,16 +4345,16 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "213cf88f0b00a0052234bda1fa773e12aa432cff41b5fc8931134f5f867b6b4e",
+      "fingerprint": "621411e15bfaad91634695a765091bfe58acf53fab8a0cf740d79a2d2e3780cd",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 499,
+          "line": 554,
           "column": 1
         },
         "end": {
-          "line": 541,
+          "line": 596,
           "column": 77
         }
       }
@@ -4307,17 +4380,50 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "b492b78a71c1e820bb282dcfe5c64cb5baaa7c6e3c4761c4e41400bd5cf1b5dd",
+      "fingerprint": "290cabbc87d1f9a3709ee75a3993e24329ea74ecbeee0a84eafc2db5554224bb",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 475,
+          "line": 530,
           "column": 1
         },
         "end": {
-          "line": 476,
+          "line": 531,
           "column": 77
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.splits_urns",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapDAG.Exec.splits"
+      ],
+      "specifications": [],
+      "statement": "∀ (u : TaggedUrn.Exec.Wf), List.map (fun x => x.urn) (CapDAG.Exec.splits u) = u.urn.splits",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagFormal",
+      "fingerprint": "eaca8851f59a40aee4544abec0343c8018737f1038199e07bcbe52b0acb1332a",
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 480,
+          "column": 1
+        },
+        "end": {
+          "line": 484,
+          "column": 7
         }
       }
     },
@@ -5341,16 +5447,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "ca6a514570a3773c7c219fcbab650705b8ec3209cdf2747bc5d1a247d549f441",
+      "fingerprint": "19621863b21c3b7d87a8512c6323899cdad77d30b70abc1c87d831c77757d1a6",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 81,
+          "line": 82,
           "column": 1
         },
         "end": {
-          "line": 84,
+          "line": 85,
           "column": 74
         }
       }
@@ -5376,16 +5482,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "df5c2ec9f21e6e2e994d7f754d0682b6552c34ec0b91eb3340675177fb51add2",
+      "fingerprint": "b3ac2ffe13c920ddecc2b1df39ac8a23e257e46282f2465ff5ec1d21568fe5a8",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 74,
+          "line": 75,
           "column": 1
         },
         "end": {
-          "line": 77,
+          "line": 78,
           "column": 75
         }
       }
@@ -5409,16 +5515,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "115a733718825f3e1f4a36a3caee9fe8d6454f336652eabd03d7191248d203ca",
+      "fingerprint": "8e311f0d1e5fc8799f2dfed355c9d02eed42ce182545906eed041cf0a4a1bb50",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 168,
+          "line": 175,
           "column": 1
         },
         "end": {
-          "line": 177,
+          "line": 184,
           "column": 12
         }
       }
@@ -5442,16 +5548,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "fd4f0e45e28d285cb8361305402dc37cd11658a47f365dc0e2b75f62ea97f66c",
+      "fingerprint": "9670f2e6209c9141d4ed7c0a091236bba0528958213113fb9f0e49f4ccdb525d",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 161,
+          "line": 168,
           "column": 1
         },
         "end": {
-          "line": 166,
+          "line": 173,
           "column": 21
         }
       }
@@ -5463,7 +5569,7 @@
         "TaggedUrn.Exec.leastUpperBound"
       ],
       "specifications": [],
-      "statement": "∀ {scheme : String} {us : List TaggedUrn.Exec.Wf} {out : List (String × TaggedUrn.Constraint)},\n  TaggedUrn.Exec.leastUpperBound scheme us = some out →\n    us ≠ [] →\n      ∀ (b : TaggedUrn.Urn),\n        (∀ (u : TaggedUrn.Exec.Wf), u ∈ us → TaggedUrn.refines u.urn b) →\n          (∀ (k r : String),\n              b.tag k = TaggedUrn.Constraint.presentNot r ∨ b.tag k = TaggedUrn.Constraint.optionalNot r →\n                ∃ u, u ∈ us ∧ (u.urn.tag k).named = some r) →\n            TaggedUrn.refines (TaggedUrn.boundUrn scheme (List.map (fun x => x.urn) us)) b",
+      "statement": "∀ {scheme : String} {us : List TaggedUrn.Exec.Wf} {out : List (String × TaggedUrn.Constraint)},\n  TaggedUrn.Exec.leastUpperBound scheme us = some out →\n    us ≠ [] →\n      ∀ (b : TaggedUrn.Urn),\n        (∀ (u : TaggedUrn.Exec.Wf), u ∈ us → TaggedUrn.refines u.urn b) →\n          TaggedUrn.refines (TaggedUrn.boundUrn scheme (List.map (fun x => x.urn) us)) b",
       "status": "proved",
       "evidence_trust": {
         "axioms": [
@@ -5475,16 +5581,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "879df22171190fda9e358ecb2d94cb8808151d59b62c1f9a15bf61fc6e63ea80",
+      "fingerprint": "2c947e92e39f417180367d10c4ddcf8c1409dadcc2a306829914a14cda3282f6",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 205,
+          "line": 212,
           "column": 1
         },
         "end": {
-          "line": 224,
+          "line": 225,
           "column": 46
         }
       }
@@ -5508,16 +5614,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "e05372e3884dc9d35d8eb79e6eaa17d32af8294d827042eb1c849742d46b1d9b",
+      "fingerprint": "e118ba0ca88a24dec5c5249fce309dd1031259e5ee180eeabbacfbb168d7f4cc",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 179,
+          "line": 186,
           "column": 1
         },
         "end": {
-          "line": 194,
+          "line": 201,
           "column": 12
         }
       }
@@ -5541,16 +5647,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "b39ceb9b5509ab9297e0e400884e70e63fa6396313ab7b2d14ed17185c0b87ac",
+      "fingerprint": "35524e13de3af1435de69a06d7e319f0de2572781d87860c3acdc40519a88e40",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 196,
+          "line": 203,
           "column": 1
         },
         "end": {
-          "line": 203,
+          "line": 210,
           "column": 67
         }
       }
@@ -5574,16 +5680,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "3d6be601f0230b53d77e6b9268e6039a279c909d4847b67a80349a369c651102",
+      "fingerprint": "aaa35e5167550e716b6286127ef522b3e83ef8db8c822eaf4b733687e693469b",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 40,
+          "line": 41,
           "column": 1
         },
         "end": {
-          "line": 45,
+          "line": 46,
           "column": 21
         }
       }
@@ -5607,16 +5713,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "c8a0d59be68c4e53ad705b7f8e779e3815628db8b4e74448f5bc1571f7b75d45",
+      "fingerprint": "6f055e7403a1c7d1c5fa1d38e83be4f88961861fd438d459dc73ab9ba0f0d850",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 57,
+          "line": 58,
           "column": 1
         },
         "end": {
-          "line": 62,
+          "line": 63,
           "column": 6
         }
       }
@@ -5640,16 +5746,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "eb8b8b268fa3e023d48a4ca7e20eae3f0a2811c946a39c7a89d9c3f3a93c5a96",
+      "fingerprint": "fcf94db2a477e409d7182efa0c00672681547d5a022d10dcdfee75e3b71bc63d",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 32,
+          "line": 33,
           "column": 1
         },
         "end": {
-          "line": 38,
+          "line": 39,
           "column": 12
         }
       }
@@ -5675,16 +5781,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "89f769c0a0097cc699aa52a956b77849bc84ff675ee51fdc366ece46b0559b3e",
+      "fingerprint": "8d956ad2a0a0d8c6478cc5a7a609a026ed8fd3208626facd271aabea03992b45",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 129,
+          "line": 136,
           "column": 1
         },
         "end": {
-          "line": 133,
+          "line": 140,
           "column": 16
         }
       }
@@ -5710,16 +5816,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "796d3d22175ecf4a6767ede9143e1900ff445cd1c826b51c6745c1744a176379",
+      "fingerprint": "d199536dae1c43220d3bb0fbdb45e9ee38f481a3e59c71ae8def6577af69b82b",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 103,
+          "line": 110,
           "column": 1
         },
         "end": {
-          "line": 105,
+          "line": 112,
           "column": 90
         }
       }
@@ -5743,16 +5849,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "3c389a9c5b3d0b92c65d126c934395b16cc6b13be125931cdb80b1afa6d6bab3",
+      "fingerprint": "15095d672f7a28cfdde3f60c5ae45ca635025541a582b7d892238694d0741f63",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 52,
+          "line": 53,
           "column": 1
         },
         "end": {
-          "line": 55,
+          "line": 56,
           "column": 18
         }
       }
@@ -5778,16 +5884,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "15d236a8d5b863c8cbacddb185d6344d34df12530e083288881b1e1451992a1d",
+      "fingerprint": "d0e7573ded5679260f93759792afcfa5086a472fdc9309e3e5dfe51037b4638a",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 139,
+          "line": 146,
           "column": 1
         },
         "end": {
-          "line": 143,
+          "line": 150,
           "column": 34
         }
       }
@@ -5813,16 +5919,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "7bc6b885dcedfad9aab7ed91489bad62a953e5ee4cfac5fe04bb5926ab393cc8",
+      "fingerprint": "fddbe6e88eaf1c2f6afd468ee1970200ad1e45db9af694ccafc439b23a6c258f",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 119,
+          "line": 126,
           "column": 1
         },
         "end": {
-          "line": 123,
+          "line": 130,
           "column": 16
         }
       }
@@ -5848,16 +5954,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "51e6d6fa43ae51d3dbd9e94fe8c45377e8e90b7a1c87f42ce22bee72cb9948a8",
+      "fingerprint": "175907228521fb7d79e10fb6c0757ea7648d84db636f084938233d68ebb92419",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 68,
+          "line": 69,
           "column": 1
         },
         "end": {
-          "line": 70,
+          "line": 71,
           "column": 94
         }
       }
@@ -5883,17 +5989,48 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "5de9289b98772acc1a3bdeb6f5490dc17554f3b80e70cc1134bbad4a7de782d4",
+      "fingerprint": "3cf172bdac7846c9af925111ba9337558954bfd3ca68fccaef9f0c5859dd4756",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 89,
+          "line": 90,
           "column": 1
         },
         "end": {
-          "line": 90,
+          "line": 91,
           "column": 72
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.tagSpecificity_eq",
+      "relation": "lungo.equals",
+      "subjects": [
+        "TaggedUrn.Exec.tagSpecificity"
+      ],
+      "specifications": [
+        "TaggedUrn.tagScore"
+      ],
+      "statement": "∀ (c : TaggedUrn.Constraint), TaggedUrn.Exec.tagSpecificity c = TaggedUrn.tagScore c",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "d845f4b85d6d4667fe961b79c26e6c660f689b1fac7ae3d6993178458039e7c8",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 96,
+          "column": 1
+        },
+        "end": {
+          "line": 97,
+          "column": 82
         }
       }
     },
@@ -5918,16 +6055,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "70fe94fa81c48ecfc901f59fedb0eac182494901a83ae15e2dbf767985c1c468",
+      "fingerprint": "643de0330cb767f0a8fbd0318ecaec6354e8623e9ff00f644bbcd6553f7e08cd",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 148,
+          "line": 155,
           "column": 1
         },
         "end": {
-          "line": 151,
+          "line": 158,
           "column": 33
         }
       }
@@ -5953,16 +6090,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "f203615e0a8f0df1a8bf18fef1af72a3154cc1bf1760848c11b1502b5d89b1bb",
+      "fingerprint": "6b16797143839fa3231f3d7ff80eacdd63d67654186b4fa313807d7402c92980",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 95,
+          "line": 102,
           "column": 1
         },
         "end": {
-          "line": 97,
+          "line": 104,
           "column": 85
         }
       }
@@ -5988,16 +6125,16 @@
       },
       "assumptions": [],
       "package": "tagged_urn_formal",
-      "fingerprint": "fe9f085b676ca28a62abc13fe46fa03a2761f604a851ffb2698ea9b17bf259ac",
+      "fingerprint": "a6f21c607f3b246f444c664260828a52f723d17247a2aa3db8cb2f1ecfc4ed94",
       "source": {
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 110,
+          "line": 117,
           "column": 1
         },
         "end": {
-          "line": 112,
+          "line": 119,
           "column": 84
         }
       }
@@ -7582,7 +7719,8 @@
         "partial_dependencies": [],
         "extern_dependencies": [
           "lean_nat_add",
-          "lean_nat_dec_lt"
+          "lean_nat_dec_lt",
+          "lean_string_dec_eq"
         ]
       },
       "claims": [
@@ -7918,6 +8056,46 @@
       }
     },
     {
+      "name": "CapDAG.Exec.endsOn",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_string_dec_eq",
+          "lean_string_dec_lt"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.endsOn_urns"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 502,
+          "column": 1
+        },
+        "end": {
+          "line": 504,
+          "column": 98
+        }
+      }
+    },
+    {
       "name": "CapDAG.Exec.equivalent",
       "module": "CapDAG.Exec",
       "async": false,
@@ -8010,13 +8188,9 @@
           "lean_array_push",
           "lean_array_to_list",
           "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
           "lean_nat_dec_eq",
-          "lean_nat_sub",
           "lean_string_dec_eq",
-          "lean_string_dec_lt",
-          "lean_string_length",
-          "lean_string_push"
+          "lean_string_dec_lt"
         ]
       },
       "claims": [
@@ -8201,13 +8375,9 @@
           "lean_array_push",
           "lean_array_to_list",
           "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
           "lean_nat_dec_eq",
-          "lean_nat_sub",
           "lean_string_dec_eq",
-          "lean_string_dec_lt",
-          "lean_string_length",
-          "lean_string_push"
+          "lean_string_dec_lt"
         ]
       },
       "claims": [
@@ -8246,13 +8416,9 @@
           "lean_array_push",
           "lean_array_to_list",
           "lean_mk_empty_array_with_capacity",
-          "lean_nat_add",
           "lean_nat_dec_eq",
-          "lean_nat_sub",
           "lean_string_dec_eq",
-          "lean_string_dec_lt",
-          "lean_string_length",
-          "lean_string_push"
+          "lean_string_dec_lt"
         ]
       },
       "claims": [
@@ -8396,7 +8562,8 @@
           "lean_nat_add",
           "lean_nat_dec_le",
           "lean_nat_mul",
-          "lean_nat_sub"
+          "lean_nat_sub",
+          "lean_string_dec_eq"
         ]
       },
       "claims": [
@@ -8409,11 +8576,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 478,
+          "line": 533,
           "column": 1
         },
         "end": {
-          "line": 480,
+          "line": 535,
           "column": 50
         }
       }
@@ -8455,11 +8622,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 486,
+          "line": 541,
           "column": 1
         },
         "end": {
-          "line": 497,
+          "line": 552,
           "column": 9
         }
       }
@@ -8479,7 +8646,8 @@
         "partial_dependencies": [],
         "extern_dependencies": [
           "lean_nat_add",
-          "lean_nat_mul"
+          "lean_nat_mul",
+          "lean_string_dec_eq"
         ]
       },
       "claims": [
@@ -8492,12 +8660,51 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 473,
+          "line": 528,
           "column": 1
         },
         "end": {
-          "line": 473,
+          "line": 528,
           "column": 54
+        }
+      }
+    },
+    {
+      "name": "CapDAG.Exec.splits",
+      "module": "CapDAG.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_string_dec_eq"
+        ]
+      },
+      "claims": [
+        "CapDAG.Exec.splits_urns"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagFormal",
+        "file": "CapDAG/Exec.lean",
+        "start": {
+          "line": 475,
+          "column": 1
+        },
+        "end": {
+          "line": 478,
+          "column": 72
         }
       }
     },
@@ -8774,11 +8981,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 27,
+          "line": 28,
           "column": 1
         },
         "end": {
-          "line": 30,
+          "line": 31,
           "column": 61
         }
       }
@@ -8809,11 +9016,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 47,
+          "line": 48,
           "column": 1
         },
         "end": {
-          "line": 50,
+          "line": 51,
           "column": 87
         }
       }

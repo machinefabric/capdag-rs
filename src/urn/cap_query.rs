@@ -263,12 +263,12 @@ mod tests {
         };
         let any_image = media("media:image");
 
-        let converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::Present)]))
+        let converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::present())]))
             .unwrap();
         assert!(converters.admits(&to_jpeg()));
         assert!(!converters.admits(&some_image()), "it renders; it is not tagged convert-image");
 
-        let not_converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::Absent)]))
+        let not_converters = CapQuery::producing(&any_image, &tagged(&[("convert-image", Constraint::absent())]))
             .unwrap();
         assert!(not_converters.admits(&some_image()), "it does not have the tag");
         assert!(!not_converters.admits(&to_jpeg()), "it has it");

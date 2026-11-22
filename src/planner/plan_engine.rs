@@ -1616,8 +1616,8 @@ impl LiveCapFab {
                     .into_iter()
                     .map(|t| (t.media_def, t.min_path_length))
                     .collect();
-                if self.is_bookend(&edge.to_spec) {
-                    cone.push((edge.to_spec.clone(), 0));
+                for bookend in self.ends_on(&edge.to_spec) {
+                    cone.push((bookend.clone(), 0));
                 }
                 for (media, extra) in cone {
                     let steps = apex.depth as i32 + 1 + extra;

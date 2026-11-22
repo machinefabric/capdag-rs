@@ -352,14 +352,6 @@
     "source": "<lean>/Init/Data/String/Basic.lean:1152:1"
   },
   {
-    "declaration": "String.length",
-    "key": "lean_string_length",
-    "resolution": "runtime",
-    "implementation": "lungo::__runtime::intrinsics::lean_string_length",
-    "lean_type": "String → Nat",
-    "source": "<lean>/Init/Data/String/Length.lean:16:1"
-  },
-  {
     "declaration": "String.ofList",
     "key": "lean_string_mk",
     "resolution": "runtime",

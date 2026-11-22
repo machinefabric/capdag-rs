@@ -390,6 +390,14 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dExec_deffectOk_d__boxed(x_1: Obj, x_2:
     return x_6;
 }
 
+// Lean: CapDAG.Exec.endsOn
+// Source: CapDAG/Exec.lean:502:1
+pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dendsOn(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: Obj = l_CapDAG_dExec_dsplits(x_2);
+    let x_4: Obj = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf(x_1, x_3);
+    return x_4;
+}
+
 // Lean: CapDAG.Exec.equivalent
 // Source: CapDAG/Exec.lean:422:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dequivalent(x_1: Obj, x_2: Obj) -> u8 {
@@ -846,7 +854,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dqueryProducing(x_1: Obj, x_2: Ob
 }
 
 // Lean: CapDAG.Exec.rankingKey
-// Source: CapDAG/Exec.lean:478:1
+// Source: CapDAG/Exec.lean:533:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dExec_drankingKey(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: Obj = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dWfCap_dtoCap(x_1);
     let x_4: Obj = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dWfCap_dtoCap(x_2);
@@ -855,7 +863,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dExec_drankingKey(x_1: Obj, x_2: Obj) -
 }
 
 // Lean: CapDAG.Exec.select
-// Source: CapDAG/Exec.lean:486:1
+// Source: CapDAG/Exec.lean:541:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dselect(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: Obj = rt::lean_box(0);
     let x_4: Obj = l_List_dfoldl_d__at___dCapDAG_dExec_dselect_dspec__0(x_2, x_3, x_1);
@@ -863,11 +871,61 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dselect(x_1: Obj, x_2: Obj) -> Ob
 }
 
 // Lean: CapDAG.Exec.specificity
-// Source: CapDAG/Exec.lean:473:1
+// Source: CapDAG/Exec.lean:528:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dspecificity(x_1: Obj) -> Obj {
     let x_2: Obj = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dWfCap_dtoCap(x_1);
     let x_3: Obj = l_CapDAG_dcapScore(x_2);
     return x_3;
+}
+
+// Lean: CapDAG.Exec.splits
+// Source: CapDAG/Exec.lean:475:1
+pub(crate) unsafe extern "C" fn l_CapDAG_dExec_dsplits(x_1: Obj) -> Obj {
+    let x_2: Obj = l_TaggedUrn_dUrn_dsplits(x_1);
+    let x_3: Obj = rt::lean_box(0);
+    let x_4: Obj = l_List_dmapTR_dloop_d__at___dCapDAG_dExec_dsplits_dspec__0(x_2, x_3);
+    return x_4;
+}
+
+// Lean: List.find?._at_._private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.spec_0
+// Compiled from: List.find?
+// Source: <lean>/Init/Data/List/Basic.lean:1606:1
+pub(crate) unsafe extern "C" fn l_List_dfind_x3f__d__at___d__private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dspec__0(mut x_1: Obj, mut x_2: Obj) -> Obj {
+    'tail: loop {
+        match rt::lean_obj_tag(x_2) {
+            0 => {
+                rt::lean_dec_ref(x_1);
+                let x_3: Obj = rt::lean_box(0);
+                return x_3;
+            }
+            _ => {
+                let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+                rt::lean_inc_n(x_4, 2);
+                let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+                rt::lean_inc(x_5);
+                rt::lean_dec_ref(x_2);
+                rt::lean_inc_ref(x_1);
+                let x_6: u8 = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dsameClosedWf(x_1, x_4);
+                match x_6 {
+                    0 => {
+                        rt::lean_dec(x_4);
+                        let t_0: Obj = x_1;
+                        let t_1: Obj = x_5;
+                        x_1 = t_0;
+                        x_2 = t_1;
+                        continue 'tail;
+                    }
+                    _ => {
+                        rt::lean_dec(x_5);
+                        rt::lean_dec_ref(x_1);
+                        let x_8: Obj = rt::lean_alloc_ctor(1, 1, 0);
+                        rt::lean_ctor_set(x_8, 0, x_4);
+                        return x_8;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Lean: List.foldl._at_.CapDAG.Exec.select.spec_0
@@ -983,6 +1041,66 @@ pub(crate) unsafe extern "C" fn l_List_dfoldl_d__at___dCapDAG_dExec_dselect_dspe
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// Lean: List.mapTR.loop._at_.CapDAG.Exec.splits.spec_0
+// Compiled from: List.mapTR.loop
+// Source: <lean>/Init/Data/List/Basic.lean:2440:17
+pub(crate) unsafe extern "C" fn l_List_dmapTR_dloop_d__at___dCapDAG_dExec_dsplits_dspec__0(mut x_1: Obj, mut x_2: Obj) -> Obj {
+    'tail: loop {
+        match rt::lean_obj_tag(x_1) {
+            0 => {
+                let x_3: Obj = l_List_dreverse_d__redArg(x_2);
+                return x_3;
+            }
+            _ => {
+                let x_4: Obj = rt::lean_ctor_get(x_1, 0);
+                let x_5: Obj = rt::lean_ctor_get(x_1, 1);
+                let mut x_7: Obj;
+                let mut x_8: u8;
+                'b6: {
+                    let x_13: u8 = (!rt::lean_is_exclusive(x_1)) as u8;
+                    match x_13 {
+                        0 => {
+                            x_7 = x_1;
+                            x_8 = x_13;
+                            break 'b6;
+                        }
+                        _ => {
+                            rt::lean_inc(x_5);
+                            rt::lean_inc(x_4);
+                            rt::lean_dec(x_1);
+                            x_7 = rt::lean_box(0);
+                            x_8 = x_13;
+                            break 'b6;
+                        }
+                    }
+                }
+                let mut x_10: Obj;
+                'b9: {
+                    match x_8 {
+                        0 => {
+                            rt::lean_ctor_set(x_7, 1, x_2);
+                            x_10 = x_7;
+                            break 'b9;
+                        }
+                        _ => {
+                            let x_12: Obj = rt::lean_alloc_ctor(1, 2, 0);
+                            rt::lean_ctor_set(x_12, 0, x_4);
+                            rt::lean_ctor_set(x_12, 1, x_2);
+                            x_10 = x_12;
+                            break 'b9;
+                        }
+                    }
+                }
+                let t_0: Obj = x_5;
+                let t_1: Obj = x_10;
+                x_1 = t_0;
+                x_2 = t_1;
+                continue 'tail;
             }
         }
     }
@@ -1830,6 +1948,239 @@ pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_daskM
     return x_5;
 }
 
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf
+// Source: CapDAG/Exec.lean:495:1
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf(x_1: Obj, x_2: Obj) -> Obj {
+    match rt::lean_obj_tag(x_2) {
+        0 => {
+            rt::lean_dec(x_1);
+            let x_3: Obj = rt::lean_alloc_ctor(1, 1, 0);
+            rt::lean_ctor_set(x_3, 0, x_2);
+            return x_3;
+        }
+        _ => {
+            let x_4: Obj = rt::lean_ctor_get(x_2, 0);
+            let x_5: Obj = rt::lean_ctor_get(x_2, 1);
+            let mut x_7: Obj;
+            let mut x_8: u8;
+            'b6: {
+                let x_25: u8 = (!rt::lean_is_exclusive(x_2)) as u8;
+                match x_25 {
+                    0 => {
+                        x_7 = x_2;
+                        x_8 = x_25;
+                        break 'b6;
+                    }
+                    _ => {
+                        rt::lean_inc(x_5);
+                        rt::lean_inc(x_4);
+                        rt::lean_dec(x_2);
+                        x_7 = rt::lean_box(0);
+                        x_8 = x_25;
+                        break 'b6;
+                    }
+                }
+            }
+            rt::lean_inc(x_1);
+            let x_9: Obj = l_List_dfind_x3f__d__at___d__private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dspec__0(x_4, x_1);
+            match rt::lean_obj_tag(x_9) {
+                1 => {
+                    let x_10: Obj = rt::lean_ctor_get(x_9, 0);
+                    rt::lean_inc(x_10);
+                    rt::lean_dec_ref(x_9);
+                    let x_11: Obj = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf(x_1, x_5);
+                    match rt::lean_obj_tag(x_11) {
+                        1 => {
+                            let x_12: Obj = rt::lean_ctor_get(x_11, 0);
+                            let mut x_14: Obj;
+                            let mut x_15: u8;
+                            'b13: {
+                                let x_22: u8 = (!rt::lean_is_exclusive(x_11)) as u8;
+                                match x_22 {
+                                    0 => {
+                                        x_14 = x_11;
+                                        x_15 = x_22;
+                                        break 'b13;
+                                    }
+                                    _ => {
+                                        rt::lean_inc(x_12);
+                                        rt::lean_dec(x_11);
+                                        x_14 = rt::lean_box(0);
+                                        x_15 = x_22;
+                                        break 'b13;
+                                    }
+                                }
+                            }
+                            let mut x_17: Obj;
+                            'b16: {
+                                match x_8 {
+                                    0 => {
+                                        rt::lean_ctor_set(x_7, 1, x_12);
+                                        rt::lean_ctor_set(x_7, 0, x_10);
+                                        x_17 = x_7;
+                                        break 'b16;
+                                    }
+                                    _ => {
+                                        let x_21: Obj = rt::lean_alloc_ctor(1, 2, 0);
+                                        rt::lean_ctor_set(x_21, 0, x_10);
+                                        rt::lean_ctor_set(x_21, 1, x_12);
+                                        x_17 = x_21;
+                                        break 'b16;
+                                    }
+                                }
+                            }
+                            let mut x_19: Obj;
+                            'b18: {
+                                match x_15 {
+                                    0 => {
+                                        rt::lean_ctor_set(x_14, 0, x_17);
+                                        x_19 = x_14;
+                                        break 'b18;
+                                    }
+                                    _ => {
+                                        let x_20: Obj = rt::lean_alloc_ctor(1, 1, 0);
+                                        rt::lean_ctor_set(x_20, 0, x_17);
+                                        x_19 = x_20;
+                                        break 'b18;
+                                    }
+                                }
+                            }
+                            return x_19;
+                        }
+                        _ => {
+                            rt::lean_dec(x_11);
+                            rt::lean_dec(x_10);
+                            rt::lean_del_object(x_7);
+                            let x_23: Obj = rt::lean_box(0);
+                            return x_23;
+                        }
+                    }
+                }
+                _ => {
+                    rt::lean_dec(x_9);
+                    rt::lean_del_object(x_7);
+                    rt::lean_dec(x_5);
+                    rt::lean_dec(x_1);
+                    let x_24: Obj = rt::lean_box(0);
+                    return x_24;
+                }
+            }
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_1.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dmatch__1_dsplitter(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj, x_5: Obj) -> Obj {
+    match rt::lean_obj_tag(x_2) {
+        1 => {
+            match rt::lean_obj_tag(x_3) {
+                1 => {
+                    rt::lean_dec(x_5);
+                    let x_6: Obj = rt::lean_ctor_get(x_2, 0);
+                    rt::lean_inc(x_6);
+                    rt::lean_dec_ref(x_2);
+                    let x_7: Obj = rt::lean_ctor_get(x_3, 0);
+                    rt::lean_inc(x_7);
+                    rt::lean_dec_ref(x_3);
+                    let x_8: Obj = rt::lean_apply_2(x_4, x_6, x_7);
+                    return x_8;
+                }
+                _ => {
+                    rt::lean_dec(x_4);
+                    let x_9: Obj = rt::lean_apply_3(x_5, x_2, x_3, rt::lean_box(0));
+                    return x_9;
+                }
+            }
+        }
+        _ => {
+            rt::lean_dec(x_4);
+            let x_10: Obj = rt::lean_apply_3(x_5, x_2, x_3, rt::lean_box(0));
+            return x_10;
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_1.splitter._redArg
+// Compiled from: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_1.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dmatch__1_dsplitter_d__redArg(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        1 => {
+            match rt::lean_obj_tag(x_2) {
+                1 => {
+                    rt::lean_dec(x_4);
+                    let x_5: Obj = rt::lean_ctor_get(x_1, 0);
+                    rt::lean_inc(x_5);
+                    rt::lean_dec_ref(x_1);
+                    let x_6: Obj = rt::lean_ctor_get(x_2, 0);
+                    rt::lean_inc(x_6);
+                    rt::lean_dec_ref(x_2);
+                    let x_7: Obj = rt::lean_apply_2(x_3, x_5, x_6);
+                    return x_7;
+                }
+                _ => {
+                    rt::lean_dec(x_3);
+                    let x_8: Obj = rt::lean_apply_3(x_4, x_1, x_2, rt::lean_box(0));
+                    return x_8;
+                }
+            }
+        }
+        _ => {
+            rt::lean_dec(x_3);
+            let x_9: Obj = rt::lean_apply_3(x_4, x_1, x_2, rt::lean_box(0));
+            return x_9;
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_4.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dmatch__4_dsplitter(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
+    match rt::lean_obj_tag(x_2) {
+        0 => {
+            rt::lean_dec(x_4);
+            let x_5: Obj = rt::lean_box(0);
+            let x_6: Obj = rt::lean_apply_1(x_3, x_5);
+            return x_6;
+        }
+        _ => {
+            rt::lean_dec(x_3);
+            let x_7: Obj = rt::lean_ctor_get(x_2, 0);
+            rt::lean_inc(x_7);
+            let x_8: Obj = rt::lean_ctor_get(x_2, 1);
+            rt::lean_inc(x_8);
+            rt::lean_dec_ref(x_2);
+            let x_9: Obj = rt::lean_apply_2(x_4, x_7, x_8);
+            return x_9;
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_4.splitter._redArg
+// Compiled from: _private.CapDAG.Exec.0.CapDAG.Exec.endsOnWf.match_4.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dendsOnWf_dmatch__4_dsplitter_d__redArg(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        0 => {
+            rt::lean_dec(x_3);
+            let x_4: Obj = rt::lean_box(0);
+            let x_5: Obj = rt::lean_apply_1(x_2, x_4);
+            return x_5;
+        }
+        _ => {
+            rt::lean_dec(x_2);
+            let x_6: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc(x_6);
+            let x_7: Obj = rt::lean_ctor_get(x_1, 1);
+            rt::lean_inc(x_7);
+            rt::lean_dec_ref(x_1);
+            let x_8: Obj = rt::lean_apply_2(x_3, x_6, x_7);
+            return x_8;
+        }
+    }
+}
+
 // Lean: _private.CapDAG.Exec.0.CapDAG.Exec.given
 // Source: CapDAG/Exec.lean:232:1
 pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dgiven(x_1: Obj, x_2: Obj) -> Obj {
@@ -1987,6 +2338,34 @@ pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dread
     return x_3;
 }
 
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.sameClosedWf
+// Source: CapDAG/Exec.lean:486:1
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dsameClosedWf(x_1: Obj, x_2: Obj) -> u8 {
+    rt::lean_inc_ref(x_2);
+    rt::lean_inc_ref(x_1);
+    let x_3: u8 = l_TaggedUrn_dExec_drefinesBothClosed(x_1, x_2);
+    match x_3 {
+        0 => {
+            rt::lean_dec_ref(x_2);
+            rt::lean_dec_ref(x_1);
+            return x_3;
+        }
+        _ => {
+            let x_4: u8 = l_TaggedUrn_dExec_drefinesBothClosed(x_2, x_1);
+            return x_4;
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.Exec.sameClosedWf._boxed
+// Compiled from: _private.CapDAG.Exec.0.CapDAG.Exec.sameClosedWf
+// Source: CapDAG/Exec.lean:486:1
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dsameClosedWf_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dsameClosedWf(x_1, x_2);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
+}
+
 // Lean: _private.CapDAG.Exec.0.CapDAG.Exec.sameSides
 // Source: CapDAG/Exec.lean:395:1
 pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dsameSides(x_1: Obj, x_2: Obj) -> u8 {
@@ -2129,6 +2508,71 @@ pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dExec_dunco
     rt::lean_dec_ref(x_1);
     let x_3: Obj = rt::lean_box(x_2 as usize);
     return x_3;
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.endsOnParts.match_1.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dendsOnParts_dmatch__1_dsplitter(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj, x_5: Obj) -> Obj {
+    match rt::lean_obj_tag(x_2) {
+        1 => {
+            match rt::lean_obj_tag(x_3) {
+                1 => {
+                    rt::lean_dec(x_5);
+                    let x_6: Obj = rt::lean_ctor_get(x_2, 0);
+                    rt::lean_inc(x_6);
+                    rt::lean_dec_ref(x_2);
+                    let x_7: Obj = rt::lean_ctor_get(x_3, 0);
+                    rt::lean_inc(x_7);
+                    rt::lean_dec_ref(x_3);
+                    let x_8: Obj = rt::lean_apply_2(x_4, x_6, x_7);
+                    return x_8;
+                }
+                _ => {
+                    rt::lean_dec(x_4);
+                    let x_9: Obj = rt::lean_apply_3(x_5, x_2, x_3, rt::lean_box(0));
+                    return x_9;
+                }
+            }
+        }
+        _ => {
+            rt::lean_dec(x_4);
+            let x_10: Obj = rt::lean_apply_3(x_5, x_2, x_3, rt::lean_box(0));
+            return x_10;
+        }
+    }
+}
+
+// Lean: _private.CapDAG.Exec.0.CapDAG.endsOnParts.match_1.splitter._redArg
+// Compiled from: _private.CapDAG.Exec.0.CapDAG.endsOnParts.match_1.splitter
+// Source: CapDAG/Exec.lean
+pub(crate) unsafe extern "C" fn l___private_dCapDAG_dExec_d0_dCapDAG_dendsOnParts_dmatch__1_dsplitter_d__redArg(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        1 => {
+            match rt::lean_obj_tag(x_2) {
+                1 => {
+                    rt::lean_dec(x_4);
+                    let x_5: Obj = rt::lean_ctor_get(x_1, 0);
+                    rt::lean_inc(x_5);
+                    rt::lean_dec_ref(x_1);
+                    let x_6: Obj = rt::lean_ctor_get(x_2, 0);
+                    rt::lean_inc(x_6);
+                    rt::lean_dec_ref(x_2);
+                    let x_7: Obj = rt::lean_apply_2(x_3, x_5, x_6);
+                    return x_7;
+                }
+                _ => {
+                    rt::lean_dec(x_3);
+                    let x_8: Obj = rt::lean_apply_3(x_4, x_1, x_2, rt::lean_box(0));
+                    return x_8;
+                }
+            }
+        }
+        _ => {
+            rt::lean_dec(x_3);
+            let x_9: Obj = rt::lean_apply_3(x_4, x_1, x_2, rt::lean_box(0));
+            return x_9;
+        }
+    }
 }
 
 // Lean: _private.CapDAG.Exec.0.CapDAG.instReprAsk.repr.match_1.splitter

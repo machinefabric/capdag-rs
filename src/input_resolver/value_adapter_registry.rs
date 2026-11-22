@@ -151,7 +151,7 @@ mod tests {
     /// `base` with a marker added, through the tagged-URN API.
     fn with_marker(base: &str, marker: &str) -> String {
         media(base)
-            .with_tag(marker, Constraint::Present)
+            .with_tag(marker, Constraint::present())
             .unwrap()
             .to_string()
     }

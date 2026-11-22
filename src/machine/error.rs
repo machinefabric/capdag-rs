@@ -350,9 +350,9 @@ pub enum MachineAbstractionError {
         source_urn: String,
     },
 
-    /// The wirings that touch a node give it URNs that are not on one
-    /// specialization chain.
-    #[error("node '{node}' is given media URNs that are not on one specialization chain: '{first}' and '{second}'")]
+    /// The wirings that touch a node give it two URNs neither of which is
+    /// inside the other.
+    #[error("node '{node}' is given media URNs neither of which is inside the other: '{first}' and '{second}'")]
     NodeMediaConflict {
         node: String,
         first: String,
