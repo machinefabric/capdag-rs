@@ -383,10 +383,7 @@ impl MediaKind {
         }
         // A format or an encoding counts only where the URN guarantees one:
         // `?fmt` and `!enc` say neither.
-        let guarantees = |any: &str| {
-            urn.conforms_to(&MediaUrn::from_string(any).expect("a media URN"))
-                .expect("two media URNs compare")
-        };
+        let guarantees = |any: &str| urn.conforms_to(&MediaUrn::from_string(any).expect("a media URN"));
         if urn.exact_value("fmt") == Some("csv") || marker("list") {
             return MediaKind::Table;
         }
