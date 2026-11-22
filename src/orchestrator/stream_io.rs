@@ -388,11 +388,11 @@ impl ResponseAudit {
             }
         }
 
-        // An emission that does not state its cardinality mode is an empty
-        // stream (no items were ever written): it can be neither a lie about
-        // sequence mode nor unbounded in any consequential way — but an
-        // unbounded flag on it is still a contract question.
-        let emitted_is_sequence = frame.is_sequence.unwrap_or(output.shape.is_sequence);
+        // Every stream a cap's output opens states its cardinality: one that
+        // does not is a breach of the output contract, not assumed to match.
+        let emitted_is_sequence = frame.is_sequence.ok_or_else(|| {
+            self.breach(format!("the stream for output '{}' does not state is_sequence", named))
+        })?;
         let emitted_unbounded = frame.is_unbounded();
         let sequence_lie = emitted_is_sequence != output.shape.is_sequence;
         let boundedness_lie = emitted_unbounded && !output.shape.streaming;
@@ -955,6 +955,22 @@ const SPOOL_READ_WINDOW: usize = 256 * 1024;
 /// while keeping only a bounded window of the file in memory. The file holds
 /// the `node_data` byte form written by [`SpoolWriter`].
 #[allow(clippy::too_many_arguments)]
+/// The negotiated chunk size a sender cuts by: a zero `max_chunk` is a broken
+/// negotiation, refused rather than raised to one.
+fn nonzero_max_chunk(max_chunk: usize) -> Result<usize, StreamIoError> {
+    if max_chunk == 0 {
+        return Err(StreamIoError::Protocol("max_chunk is 0".into()));
+    }
+    Ok(max_chunk)
+}
+
+/// The CHUNK payloads one sequence item is sent as: its CBOR bytes cut at
+/// `max_chunk`, by every sender alike (12.4); the receiver reassembles them
+/// into the item.
+fn item_fragments(item: &[u8], max_chunk: usize) -> Result<std::slice::Chunks<'_, u8>, StreamIoError> {
+    Ok(item.chunks(nonzero_max_chunk(max_chunk)?))
+}
+
 pub async fn send_file_stream(
     switch: &Arc<RelaySwitch>,
     rid: &MessageId,
@@ -997,7 +1013,7 @@ pub async fn send_file_stream(
         rid.clone(),
         stream_id.clone(),
         media_urn.to_string(),
-        if is_sequence { Some(true) } else { None },
+        Some(is_sequence),
     );
     ss.meta = meta;
     switch
@@ -1039,12 +1055,14 @@ pub async fn send_file_stream(
                 }
                 let consumed = cursor.position() as usize;
                 let item: Vec<u8> = buf.drain(..consumed).collect();
-                acquire(credit).await?;
-                let chunk = send_chunk(item);
-                switch
-                    .send_to_master(chunk, None)
-                    .await
-                    .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                for fragment in item_fragments(&item, max_chunk)? {
+                    acquire(credit).await?;
+                    let chunk = send_chunk(fragment.to_vec());
+                    switch
+                        .send_to_master(chunk, None)
+                        .await
+                        .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                }
             }
         }
         if !buf.is_empty() {
@@ -1056,7 +1074,7 @@ pub async fn send_file_stream(
             )));
         }
     } else {
-        let mut read_buf = vec![0u8; max_chunk.max(1)];
+        let mut read_buf = vec![0u8; nonzero_max_chunk(max_chunk)?];
         let mut sent_any = false;
         loop {
             let n = file.read(&mut read_buf).await.map_err(|e| {
@@ -1231,13 +1249,17 @@ pub async fn send_gathered_stream(
                                 ))
                             })?;
                         let end = cursor.position() as usize;
-                        send_payload!(data[start..end].to_vec());
+                        for fragment in item_fragments(&data[start..end], max_chunk)? {
+                            send_payload!(fragment.to_vec());
+                        }
                     }
                 } else {
                     let mut payload = Vec::new();
                     ciborium::into_writer(&ciborium::Value::Bytes(data), &mut payload)
                         .map_err(|e| StreamIoError::CborEncode(format!("{}", e)))?;
-                    send_payload!(payload);
+                    for fragment in item_fragments(&payload, max_chunk)? {
+                        send_payload!(fragment.to_vec());
+                    }
                 }
             }
             GatherMember::Spooled { path, is_sequence } => {
@@ -1274,7 +1296,9 @@ pub async fn send_gathered_stream(
                             }
                             let consumed = cursor.position() as usize;
                             let item: Vec<u8> = buf.drain(..consumed).collect();
-                            send_payload!(item);
+                            for fragment in item_fragments(&item, max_chunk)? {
+                                send_payload!(fragment.to_vec());
+                            }
                         }
                     }
                     if !buf.is_empty() {
@@ -1301,7 +1325,7 @@ pub async fn send_gathered_stream(
                         .len();
                     send_payload!(cbor_bytes_header(len));
                     let mut sent: u64 = 0;
-                    let mut read_buf = vec![0u8; max_chunk.max(1)];
+                    let mut read_buf = vec![0u8; nonzero_max_chunk(max_chunk)?];
                     loop {
                         let n = file.read(&mut read_buf).await.map_err(|e| {
                             StreamIoError::Protocol(format!(
@@ -1370,6 +1394,7 @@ pub async fn send_one_stream(
     max_chunk: usize,
     credit: Option<(&crate::bifaci::credit::CreditRouter, u64)>,
 ) -> Result<(), StreamIoError> {
+    let max_chunk = nonzero_max_chunk(max_chunk)?;
     let stream_id = uuid::Uuid::new_v4().to_string();
 
     // Flow-control window for this stream (L9): the receiving cartridge's
@@ -1406,7 +1431,7 @@ pub async fn send_one_stream(
         rid.clone(),
         stream_id.clone(),
         media_urn.to_string(),
-        if is_sequence { Some(true) } else { None },
+        Some(is_sequence),
     );
     ss.meta = meta;
     switch
@@ -1431,21 +1456,23 @@ pub async fn send_one_stream(
                 let end_pos = cursor.position() as usize;
                 let item_cbor = &data[start_pos..end_pos];
 
-                acquire(credit).await?;
-                let checksum = Frame::compute_checksum(item_cbor);
-                let chunk = Frame::chunk(
-                    rid.clone(),
-                    stream_id.clone(),
-                    chunk_index,
-                    item_cbor.to_vec(),
-                    chunk_index,
-                    checksum,
-                );
-                switch
-                    .send_to_master(chunk, None)
-                    .await
-                    .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
-                chunk_index += 1;
+                for fragment in item_fragments(item_cbor, max_chunk)? {
+                    acquire(credit).await?;
+                    let checksum = Frame::compute_checksum(fragment);
+                    let chunk = Frame::chunk(
+                        rid.clone(),
+                        stream_id.clone(),
+                        chunk_index,
+                        fragment.to_vec(),
+                        chunk_index,
+                        checksum,
+                    );
+                    switch
+                        .send_to_master(chunk, None)
+                        .await
+                        .map_err(|e| StreamIoError::Transport(format!("CHUNK: {}", e)))?;
+                    chunk_index += 1;
+                }
             }
         }
     } else {
@@ -1604,6 +1631,8 @@ pub struct TerminalOutput {
     /// Audits every STREAM_START emission against the cap's declared
     /// effect contract before its items are yielded.
     effect_audit: ResponseAudit,
+    /// The response's frames in order, by the proved model (12.4).
+    flow: crate::bifaci::request_state::ReceivedFlow,
 }
 
 impl TerminalOutput {
@@ -1634,6 +1663,7 @@ impl TerminalOutput {
             ended: false,
             unbounded: false,
             effect_audit,
+            flow: crate::bifaci::request_state::ReceivedFlow::new(),
         })
     }
 
@@ -1686,6 +1716,13 @@ impl TerminalOutput {
                     }));
                 }
             };
+            if let Err(violation) = self.flow.receive(&frame) {
+                self.ended = true;
+                return Some(Err(StreamIoError::Protocol(format!(
+                    "response of cap '{}': {}",
+                    self.cap_urn, violation
+                ))));
+            }
             match frame.frame_type {
                 FrameType::StreamStart => {
                     // Effect audit at receipt: the emission must satisfy the
@@ -1999,6 +2036,8 @@ pub async fn collect_response(
     // operator knows the cap is alive-but-quiet, without log-spam every
     // 500 ms. The flag resets to false the next time any frame arrives.
     let mut activity_warning_logged = false;
+    // The response's frames in order, by the proved model (12.4).
+    let mut flow = crate::bifaci::request_state::ReceivedFlow::new();
 
     loop {
         let frame = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
@@ -2011,6 +2050,9 @@ pub async fn collect_response(
                 }
                 // Re-arm the warn-once gate for any subsequent silence.
                 activity_warning_logged = false;
+                flow.receive(&frame).map_err(|violation| {
+                    StreamIoError::Protocol(format!("response of cap '{}': {}", cap_urn, violation))
+                })?;
                 match frame.frame_type {
                     FrameType::Chunk => {
                         timer.touch();
@@ -2642,8 +2684,9 @@ mod tests {
         }
     }
 
-    fn chunk_of(rid: &MessageId, sid: &str, payload: &[u8]) -> Frame {
-        Frame::chunk(rid.clone(), sid.to_string(), 0, payload.to_vec(), 0, Frame::compute_checksum(payload))
+    /// The CHUNK numbered `index` on stream `sid`, carrying `payload`.
+    fn chunk_of(rid: &MessageId, sid: &str, index: u64, payload: &[u8]) -> Frame {
+        Frame::chunk(rid.clone(), sid.to_string(), index, payload.to_vec(), index, Frame::compute_checksum(payload))
     }
 
     fn breach_detail(result: Result<&DeclaredOutput, StreamIoError>) -> String {
@@ -2854,12 +2897,12 @@ mod tests {
             // and metadata are its own, and do not become the collection's.
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
-            chunk_of(&rid, "res", b"R1"),
-            chunk_of(&rid, "fit", b"FIT-"),
-            chunk_of(&rid, "res", b"R2"),
-            chunk_of(&rid, "fit", b"DONE"),
-            chunk_of(&rid, "res", b"R3"),
-            chunk_of(&rid, "res", b"R4"),
+            chunk_of(&rid, "res", 0, b"R1"),
+            chunk_of(&rid, "fit", 0, b"FIT-"),
+            chunk_of(&rid, "res", 1, b"R2"),
+            chunk_of(&rid, "fit", 1, b"DONE"),
+            chunk_of(&rid, "res", 2, b"R3"),
+            chunk_of(&rid, "res", 3, b"R4"),
             Frame::stream_end(rid.clone(), "res".to_string(), 4),
             Frame::stream_end(rid.clone(), "fit".to_string(), 2),
             Frame::end_ok(rid.clone(), None),
@@ -2877,7 +2920,7 @@ mod tests {
         // The request ends without the required residuals.
         let (result, _) = collect_regress(vec![
             response_start(&rid, "fit", FIT, FIT, false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
         ])
@@ -2892,7 +2935,7 @@ mod tests {
         let (result, _) = collect_regress(vec![
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "x", "media:enc=utf8;extra", "media:enc=utf8;extra", false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::end_ok(rid.clone(), None),
         ])
         .await;
@@ -3016,12 +3059,12 @@ mod tests {
             vec![
                 response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "res", b"R1"),
+                chunk_of(&rid, "res", 0, b"R1"),
                 response_start(&rid, "rej", REJECTED, SERIES, false),
-                chunk_of(&rid, "fit", b"FIT-"),
-                chunk_of(&rid, "rej", b"seen"),
-                chunk_of(&rid, "res", b"R2"),
-                chunk_of(&rid, "fit", b"DONE"),
+                chunk_of(&rid, "fit", 0, b"FIT-"),
+                chunk_of(&rid, "rej", 0, b"seen"),
+                chunk_of(&rid, "res", 1, b"R2"),
+                chunk_of(&rid, "fit", 1, b"DONE"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 2),
                 Frame::stream_end(rid.clone(), "rej".to_string(), 1),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 2),
@@ -3074,7 +3117,7 @@ mod tests {
             vec![
                 response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "fit", b"FIT"),
+                chunk_of(&rid, "fit", 0, b"FIT"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 0),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 1),
                 Frame::end_ok(rid.clone(), None),
@@ -3169,8 +3212,8 @@ mod tests {
             vec![
                 unbounded("res", RESIDUALS, RESIDUALS),
                 response_start(&rid, "fit", FIT, FIT, false),
-                chunk_of(&rid, "res", b"R1"),
-                chunk_of(&rid, "fit", b"FIT"),
+                chunk_of(&rid, "res", 0, b"R1"),
+                chunk_of(&rid, "fit", 0, b"FIT"),
                 Frame::stream_end(rid.clone(), "res".to_string(), 1),
                 Frame::stream_end(rid.clone(), "fit".to_string(), 1),
                 Frame::end_ok(rid.clone(), None),
@@ -3273,9 +3316,9 @@ mod tests {
         let mut whole = reader(vec![
             response_start(&rid, "fit", FIT, FIT, false),
             response_start(&rid, "res", RESIDUALS, RESIDUALS, true),
-            chunk_of(&rid, "res", b"R1"),
-            chunk_of(&rid, "fit", b"FIT"),
-            chunk_of(&rid, "res", b"R2"),
+            chunk_of(&rid, "res", 0, b"R1"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
+            chunk_of(&rid, "res", 1, b"R2"),
             Frame::stream_end(rid.clone(), "res".to_string(), 2),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
@@ -3291,7 +3334,7 @@ mod tests {
 
         let mut short = reader(vec![
             response_start(&rid, "fit", FIT, FIT, false),
-            chunk_of(&rid, "fit", b"FIT"),
+            chunk_of(&rid, "fit", 0, b"FIT"),
             Frame::stream_end(rid.clone(), "fit".to_string(), 1),
             Frame::end_ok(rid.clone(), None),
         ]);
@@ -3358,6 +3401,43 @@ mod tests {
         }
     }
 
+    // TEST8213: a response STREAM_START that does not state is_sequence is an
+    // output-contract breach naming is_sequence, under a scalar contract and
+    // under a sequence contract alike: it is not assumed to match.
+    #[tokio::test]
+    async fn test8213_stream_without_is_sequence_breaches_the_contract() {
+        let rid = MessageId::new_uuid();
+        for shape in [SCALAR_CONTRACT, OutputContract { is_sequence: true, streaming: false }] {
+            let (tx, rx) = mpsc::unbounded_channel();
+            tx.send(Frame::stream_start(rid.clone(), "out".to_string(), "media:".to_string(), None)).unwrap();
+            tx.send(chunk(&rid, b"payload")).unwrap();
+            tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
+            tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+            drop(tx);
+            let result = collect_terminal_output(
+                rx,
+                None,
+                "cap:echo;effect=none",
+                &contract("cap:echo;effect=none", shape),
+                &"step_test".parse().unwrap(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                5,
+                None,
+            )
+            .await;
+            match result {
+                Err(StreamIoError::OutputContract { detail, .. }) => {
+                    assert!(detail.contains("is_sequence"), "{detail}")
+                }
+                other => panic!("a stream without is_sequence must breach the contract, got {other:?}"),
+            }
+        }
+    }
+
     // TEST1957: the stream-contract audit fires at receipt, on the same
     // STREAM_START as the effect audit: an UNBOUNDED emission from an output
     // declared `streaming: false`, and an emission whose cardinality mode
@@ -3388,6 +3468,7 @@ mod tests {
             let (tx, rx) = mpsc::unbounded_channel();
             tx.send(first).unwrap();
             tx.send(chunk(&rid, b"payload")).unwrap();
+            tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
             tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
             drop(tx);
             collect_terminal_output(
@@ -3661,6 +3742,7 @@ mod tests {
         tx.send(chunk(&rid, b"payload")).unwrap();
         tx.send(Frame::progress(rid.clone(), 0.5, "halfway"))
             .unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
         drop(tx);
 
@@ -3701,6 +3783,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(stream_start(&rid)).unwrap();
         tx.send(chunk(&rid, b"x")).unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok_with(
             rid.clone(),
             None,
@@ -3741,6 +3824,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(stream_start(&rid)).unwrap();
         tx.send(chunk(&rid, b"data")).unwrap();
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 1)).unwrap();
         tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
         // Stragglers already queued when END is processed (the enqueue race):
         tx.send(Frame::log(
@@ -3871,11 +3955,12 @@ mod tests {
         );
 
         // A later item without meta yields None meta — no leakage between items.
-        tx.send(chunk(&rid, b"item-1")).unwrap();
+        tx.send(chunk_of(&rid, "out", 1, b"item-1")).unwrap();
         let item = terminal.next_item().await.unwrap().unwrap();
         assert_eq!(item.payload, b"item-1");
         assert!(item.meta.is_none());
 
+        tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 2)).unwrap();
         tx.send(Frame::end_ok(rid, None)).unwrap();
         drop(tx);
         assert!(terminal.next_item().await.is_none());

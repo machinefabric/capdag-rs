@@ -475,6 +475,95 @@ impl Disposition {
     }
 }
 
+/// The order of one call's frames as a receiver takes them in, checked frame
+/// by frame with the proved model (`formal/CapDAG/Bifaci/Request.lean`,
+/// `Emission.step`; stepping is `check`, `step_is_check`): a stream started
+/// twice, a chunk or an end for a stream that is not open, a `chunk_index`
+/// other than the number of chunks received on its stream, a `chunk_count`
+/// that differs from it, END with a stream open, and any frame after END or
+/// ERR are each refused, naming what is wrong. Frames that are not of the
+/// flow (`Frame::is_flow_frame`) are not passed to the model.
+#[derive(Debug, Clone)]
+pub struct ReceivedFlow {
+    state: crate::formal::bifaci::request::Emission,
+}
+
+impl Default for ReceivedFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReceivedFlow {
+    pub fn new() -> Self {
+        Self {
+            state: crate::formal::bifaci::request::emission::start(),
+        }
+    }
+
+    /// Take in the next frame of the call. On a violation the flow is
+    /// broken: the error says what is wrong, and the state is left where the
+    /// last frame in order put it.
+    pub fn receive(&mut self, frame: &Frame) -> Result<(), String> {
+        use crate::formal::bifaci::request::{emission, Emitted};
+        if !frame.is_flow_frame() {
+            return Ok(());
+        }
+        let stream = || {
+            frame
+                .stream_id
+                .clone()
+                .ok_or_else(|| format!("{:?} frame names no stream", frame.frame_type))
+        };
+        let emitted = match frame.frame_type {
+            FrameType::StreamStart => Emitted::StreamStart { stream: stream()? },
+            FrameType::Chunk => Emitted::Chunk {
+                stream: stream()?,
+                index: lungo::Nat::from(frame.chunk_index.ok_or_else(|| {
+                    format!(
+                        "chunk on stream {} carries no chunk_index",
+                        frame.stream_id.as_deref().unwrap_or("?")
+                    )
+                })?),
+            },
+            FrameType::StreamEnd => Emitted::StreamEnd {
+                stream: stream()?,
+                count: frame.chunk_count.map(lungo::Nat::from),
+            },
+            FrameType::End => Emitted::Fin,
+            FrameType::Err => Emitted::Err,
+            _ => Emitted::Other,
+        };
+        match emission::step(self.state.clone(), emitted) {
+            Ok(next) => {
+                self.state = next;
+                Ok(())
+            }
+            Err(violation) => Err(Self::describe(violation)),
+        }
+    }
+
+    fn describe(violation: crate::formal::bifaci::request::Violation) -> String {
+        use crate::formal::bifaci::request::Violation;
+        match violation {
+            Violation::AfterEnd => "a frame after the call's END or ERR".to_string(),
+            Violation::StreamRestarted { stream } => format!("stream {stream} started twice"),
+            Violation::StreamNotOpen { stream } => {
+                format!("a chunk or end for stream {stream}, which is not open")
+            }
+            Violation::ChunkOutOfPlace { stream, expected, got } => {
+                format!("chunk out of place on stream {stream}: expected {expected}, got {got}")
+            }
+            Violation::ChunkCountWrong { stream, sent, said } => {
+                format!("chunk count wrong on stream {stream}: sent {sent}, said {said}")
+            }
+            Violation::EndWithOpenStream { stream } => {
+                format!("END with stream {stream} still open")
+            }
+        }
+    }
+}
+
 /// Live phase of a request. `Terminated` never appears in the active table —
 /// termination removes the entry (L7) and leaves a `TerminatedSummary` in the
 /// recent ring instead.

@@ -3976,7 +3976,6 @@ fn parse_cap_groups_from_manifest(
     manifest: &[u8],
 ) -> Result<Vec<crate::bifaci::manifest::CapGroup>, ParseCapsError> {
     use crate::standard::caps::CAP_IDENTITY;
-    use crate::urn::cap_urn::CapUrn;
     use crate::CapManifest;
 
     // The definitions the host is about to route by are held to the rules
@@ -3994,12 +3993,11 @@ fn parse_cap_groups_from_manifest(
         }
     })?;
 
-    let identity_urn =
-        CapUrn::from_string(CAP_IDENTITY).expect("BUG: CAP_IDENTITY constant is invalid");
+    let identity_urn = crate::standard::caps::identity_urn();
     let has_identity = manifest_obj
         .all_caps()
         .iter()
-        .any(|cap| identity_urn.conforms_to(&cap.urn));
+        .any(|cap| cap.urn.is_equivalent(&identity_urn));
     if !has_identity {
         return Err(ParseCapsError::Incompatible(AsyncHostError::Protocol(
             format!(
@@ -4946,14 +4944,14 @@ mod tests {
 
         assert_eq!(idx, 0);
         assert!(runtime.cartridges[0].running);
-        // Verify cartridge has identity cap via semantic comparison (not string comparison)
-        let identity_urn = crate::CapUrn::from_string(CAP_IDENTITY).unwrap();
+        // Verify cartridge has the identity cap, by equivalence
+        let identity_urn = crate::standard::caps::identity_urn();
         assert!(
             runtime.cartridges[0]
                 .cap_groups
                 .iter()
                 .flat_map(|g| g.caps.iter())
-                .any(|c| identity_urn.conforms_to(&c.urn)),
+                .any(|c| c.urn.is_equivalent(&identity_urn)),
             "Cartridge must have identity cap"
         );
         // Cap routing table is populated from the cartridge's
@@ -4963,7 +4961,7 @@ mod tests {
         assert!(
             runtime.cap_table.iter().any(|(urn, _)| {
                 crate::CapUrn::from_string(urn)
-                    .map(|u| identity_urn.conforms_to(&u))
+                    .map(|u| u.is_equivalent(&identity_urn))
                     .unwrap_or(false)
             }),
             "Cap table must include the identity cap for routing"
@@ -6155,7 +6153,7 @@ mod tests {
             .flat_map(|g| g.caps.iter())
             .collect();
         assert!(
-            parsed_caps.iter().any(|c| identity_urn.conforms_to(&c.urn)),
+            parsed_caps.iter().any(|c| c.urn.is_equivalent(&identity_urn)),
             "Must have identity cap"
         );
         assert_eq!(parsed_caps.len(), 2, "Must have both caps");
@@ -7525,7 +7523,7 @@ mod tests {
                 loop {
                     match r.read().await {
                         Ok(Some(f)) if f.frame_type == FrameType::RelayNotify => {
-                            let bytes = f.relay_notify_manifest().unwrap_or_default();
+                            let bytes = f.relay_notify_manifest().expect("a RelayNotify carries its manifest");
                             let payload: RelayNotifyCapabilitiesPayload =
                                 serde_json::from_slice(bytes).unwrap();
                             return payload

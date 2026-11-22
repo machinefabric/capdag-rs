@@ -286,14 +286,8 @@ impl RelayMaster {
             )));
         }
 
-        let manifest = frame
-            .relay_notify_manifest()
-            .ok_or_else(|| CborError::Protocol("RelayNotify missing manifest".to_string()))?
-            .to_vec();
-
-        let limits = frame
-            .relay_notify_limits()
-            .ok_or_else(|| CborError::Protocol("RelayNotify missing limits".to_string()))?;
+        let manifest = frame.relay_notify_manifest()?.to_vec();
+        let limits = frame.relay_notify_limits()?;
 
         let reorder = ReorderBuffer::new(limits.max_reorder_buffer);
         Ok(Self {
@@ -341,12 +335,12 @@ impl RelayMaster {
             match socket_read.read().await? {
                 Some(frame) => {
                     if frame.frame_type == FrameType::RelayNotify {
-                        if let Some(manifest) = frame.relay_notify_manifest() {
-                            self.manifest = manifest.to_vec();
-                        }
-                        if let Some(limits) = frame.relay_notify_limits() {
-                            self.limits = limits;
-                        }
+                        // Both are read before either is kept: a RelayNotify
+                        // missing one is refused and leaves what was last said.
+                        let manifest = frame.relay_notify_manifest()?.to_vec();
+                        let limits = frame.relay_notify_limits()?;
+                        self.manifest = manifest;
+                        self.limits = limits;
                         continue;
                     } else if frame.frame_type == FrameType::RelayState {
                         continue;
@@ -418,7 +412,7 @@ mod tests {
             .expect("should have frame");
 
         assert_eq!(frame.frame_type, FrameType::RelayNotify);
-        assert_eq!(frame.relay_notify_manifest(), Some(manifest.as_slice()));
+        assert_eq!(frame.relay_notify_manifest().unwrap(), manifest.as_slice());
         let extracted = frame.relay_notify_limits().unwrap();
         assert_eq!(extracted.max_frame, limits.max_frame);
         assert_eq!(extracted.max_chunk, limits.max_chunk);
@@ -722,8 +716,8 @@ mod tests {
             let f1 = reader.read().await.unwrap().expect("frame 1");
             assert_eq!(f1.frame_type, FrameType::RelayNotify);
             assert_eq!(
-                f1.relay_notify_manifest(),
-                Some(b"{\"caps\":[\"cap:in=\"media:void\";test;out=\"media:void\"\"]}".as_slice())
+                f1.relay_notify_manifest().unwrap(),
+                b"{\"caps\":[\"cap:in=\"media:void\";test;out=\"media:void\"\"]}".as_slice()
             );
 
             // Read CHUNK (passed through)
@@ -734,8 +728,8 @@ mod tests {
             let f3 = reader.read().await.unwrap().expect("frame 3");
             assert_eq!(f3.frame_type, FrameType::RelayNotify);
             assert_eq!(
-                f3.relay_notify_manifest(),
-                Some(b"{\"caps\":[\"cap:in=\"media:void\";test;out=\"media:void\"\",\"cap:in=\"media:void\";convert;out=\"media:void\"\"]}".as_slice())
+                f3.relay_notify_manifest().unwrap(),
+                b"{\"caps\":[\"cap:in=\"media:void\";test;out=\"media:void\"\",\"cap:in=\"media:void\";convert;out=\"media:void\"\"]}".as_slice()
             );
         });
 
@@ -1046,7 +1040,7 @@ mod tests {
                 "forwarded RelayNotify (RelayState must be dropped, RelayNotify forwarded)",
             );
         assert_eq!(f2.frame_type, FrameType::RelayNotify);
-        assert_eq!(f2.relay_notify_manifest(), Some(manifest.as_slice()));
+        assert_eq!(f2.relay_notify_manifest().unwrap(), manifest.as_slice());
 
         slave_handle.abort();
     }

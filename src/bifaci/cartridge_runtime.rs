@@ -1212,8 +1212,47 @@ pub struct StreamSender {
     coalesce: Arc<Mutex<CoalesceBuf>>,
 }
 
+/// The CHUNK values a non-Bytes CBOR value is sent as, split exactly as both
+/// emitters split it (13.2): a `Text` into pieces of at most `max_chunk`
+/// bytes cut on character boundaries, an `Array` into its elements, a `Map`
+/// into one `[key, value]` pair per entry, and any other value as itself.
+/// `Bytes` never reaches it: both callers coalesce bytes.
+fn cbor_chunk_values(
+    value: &ciborium::Value,
+    max_chunk: usize,
+) -> Result<Vec<ciborium::Value>, RuntimeError> {
+    Ok(match value {
+        ciborium::Value::Text(text) => {
+            let text_bytes = text.as_bytes();
+            let mut pieces = Vec::new();
+            let mut offset = 0;
+            while offset < text_bytes.len() {
+                let mut chunk_size = (text_bytes.len() - offset).min(max_chunk);
+                while chunk_size > 0 && !text.is_char_boundary(offset + chunk_size) {
+                    chunk_size -= 1;
+                }
+                if chunk_size == 0 {
+                    return Err(RuntimeError::Handler(
+                        "Cannot split text on character boundary".to_string(),
+                    ));
+                }
+                pieces.push(ciborium::Value::Text(text[offset..offset + chunk_size].to_string()));
+                offset += chunk_size;
+            }
+            pieces
+        }
+        ciborium::Value::Array(elements) => elements.clone(),
+        ciborium::Value::Map(entries) => entries
+            .iter()
+            .map(|(key, val)| ciborium::Value::Array(vec![key.clone(), val.clone()]))
+            .collect(),
+        other => vec![other.clone()],
+    })
+}
+
 impl StreamSender {
-    /// Emit a single CBOR value as one or more CHUNK frames.
+    /// Emit a single CBOR value as one or more CHUNK frames, split exactly as
+    /// `OutputStream::emit_cbor` splits it (`cbor_chunk_values`).
     ///
     /// Bytes values COALESCE (see [`CoalesceBuf`]): per-token emissions from
     /// blocking inference threads accumulate and ship as one CHUNK per
@@ -1233,7 +1272,9 @@ impl StreamSender {
                 if let Some(batch) = coalesce_take(&self.coalesce) {
                     self.send_bytes_batch(&batch)?;
                 }
-                self.send_chunk(value)?;
+                for piece in cbor_chunk_values(value, self.max_chunk)? {
+                    self.send_chunk(&piece)?;
+                }
             }
         }
         Ok(())
@@ -1410,6 +1451,12 @@ impl FrameSender for DiscardingFrameSender {
         Ok(())
     }
 }
+
+/// How often `run_with_keepalive` emits its progress frame: short enough to
+/// survive OS thread suspension under memory pressure (e.g. Metal loading
+/// large models) while still resetting the engine's 120 s activity timer with
+/// plenty of margin.
+pub const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl OutputStream {
     /// Build an `OutputStream` whose every frame is silently dropped.
@@ -1799,46 +1846,14 @@ impl OutputStream {
                     self.write_batch(&batch).await?;
                 }
             }
-            ciborium::Value::Text(text) => {
+            _ => {
                 // ORDERING BARRIER: a non-Bytes value must not overtake bytes
                 // still sitting in the coalescing buffer.
                 self.flush().await?;
-                let text_bytes = text.as_bytes();
-                let mut offset = 0;
-                while offset < text_bytes.len() {
-                    let mut chunk_size = (text_bytes.len() - offset).min(self.max_chunk);
-                    while chunk_size > 0 && !text.is_char_boundary(offset + chunk_size) {
-                        chunk_size -= 1;
-                    }
-                    if chunk_size == 0 {
-                        return Err(RuntimeError::Handler(
-                            "Cannot split text on character boundary".to_string(),
-                        ));
-                    }
-                    let chunk_text = text[offset..offset + chunk_size].to_string();
+                for piece in cbor_chunk_values(value, self.max_chunk)? {
                     self.acquire_credit().await?;
-                    self.send_chunk(&ciborium::Value::Text(chunk_text))?;
-                    offset += chunk_size;
+                    self.send_chunk(&piece)?;
                 }
-            }
-            ciborium::Value::Array(elements) => {
-                for element in elements {
-                    self.acquire_credit().await?;
-                    self.send_chunk(element)?;
-                }
-            }
-            ciborium::Value::Map(entries) => {
-                self.flush().await?;
-                for (key, val) in entries {
-                    let entry = ciborium::Value::Array(vec![key.clone(), val.clone()]);
-                    self.acquire_credit().await?;
-                    self.send_chunk(&entry)?;
-                }
-            }
-            _ => {
-                self.flush().await?;
-                self.acquire_credit().await?;
-                self.send_chunk(value)?;
             }
         }
         Ok(())
@@ -1977,7 +1992,8 @@ impl OutputStream {
     }
 
     /// Run a blocking closure on a dedicated OS thread while emitting keepalive
-    /// progress frames every 30 seconds from a separate ticker thread.
+    /// progress frames every `KEEPALIVE_INTERVAL` (5 s) from a separate ticker
+    /// thread.
     ///
     /// Model loading (GGUF, Candle, Metal, etc.) is synchronous FFI that can take
     /// minutes for large models. The engine's 120s activity timeout kills the task
@@ -2055,17 +2071,18 @@ impl OutputStream {
                 &ticker_rid,
                 &ticker_xid,
                 "debug",
-                &format!("[keepalive] ticker started (interval=5s, msg={:?})", msg),
+                &format!(
+                    "[keepalive] ticker started (interval={}s, msg={:?})",
+                    KEEPALIVE_INTERVAL.as_secs(),
+                    msg
+                ),
             );
             let _ = sender.send(&started);
         }
 
         std::thread::spawn(move || {
             loop {
-                // 5s interval — short enough to survive OS thread suspension under
-                // memory pressure (e.g. Metal loading large models) while still
-                // resetting the engine's 120s activity timer with plenty of margin.
-                match done_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                match done_rx.recv_timeout(KEEPALIVE_INTERVAL) {
                     Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         let n = tick_counter_for_ticker.load(std::sync::atomic::Ordering::Relaxed);
                         let stopped = keepalive_log_frame(
@@ -3883,7 +3900,9 @@ fn demux_multi_stream(
         let mut lf_accumulators: HashMap<String, (String, Vec<Vec<u8>>)> = HashMap::new();
         // Per-stream credit windows (L10/L12). The window starts at the
         // negotiated initial_credit; handler consumption (grants) extends it; a
-        // chunk arriving with nothing left of it is a fatal CREDIT_VIOLATION.
+        // chunk arriving with nothing left of its window is a CREDIT_VIOLATION:
+        // that stream is broken and delivers the error to whoever reads it; the
+        // request goes on.
         // The demux itself never blocks — accounting keeps control frames
         // flowing regardless of data pressure.
         let mut stream_windows: HashMap<String, Arc<crate::bifaci::credit::CreditWindow>> =
@@ -3897,6 +3916,10 @@ fn demux_multi_stream(
         // ended. Every other way out of the loop is END, an ERR, or an error
         // already delivered.
         let mut cut_short = false;
+        // The call's frames in order, by the proved model (12.4): a frame out
+        // of order breaks the whole input, delivered to the handler and to
+        // every stream it is reading.
+        let mut flow = crate::bifaci::request_state::ReceivedFlow::new();
 
         loop {
             let frame = match raw_rx.recv() {
@@ -3906,6 +3929,13 @@ fn demux_multi_stream(
                     break;
                 }
             };
+            if let Err(violation) = flow.receive(&frame) {
+                for tx in stream_channels.values() {
+                    let _ = tx.send(Err(StreamError::Protocol(violation.clone())));
+                }
+                let _ = streams_tx.send(Err(StreamError::Protocol(violation)));
+                break;
+            }
             match frame.frame_type {
                 FrameType::StreamStart => {
                     let stream_id = match frame.stream_id.as_ref() {
@@ -4007,8 +4037,10 @@ fn demux_multi_stream(
                         continue;
                     }
 
-                    // Credit-violation check (L12): a chunk beyond the granted
-                    // window is a fatal protocol error for this request.
+                    // Credit-violation check (L12): a chunk arriving with nothing
+                    // left of its window is a CREDIT_VIOLATION: that stream is
+                    // broken and delivers the error to whoever reads it; the
+                    // request goes on.
                     if let Some(window) = stream_windows.get(&stream_id) {
                         if window.arrive().is_err() {
                             if let Some(tx) = stream_channels.get(&stream_id) {
@@ -4462,6 +4494,8 @@ fn demux_peer_response(
     tokio::spawn(async move {
         let mut streams: HashMap<String, PeerStream> = HashMap::new();
         let protocol = |message: String| (PeerResponseItem::Data(Err(StreamError::Protocol(message)), None), None);
+        // The response's frames in order, by the proved model (12.4).
+        let mut flow = crate::bifaci::request_state::ReceivedFlow::new();
         loop {
             // A response channel that closes before the response's END was
             // cut short — the peer call was cancelled, or the connection
@@ -4470,6 +4504,10 @@ fn demux_peer_response(
                 let _ = item_tx.send((PeerResponseItem::Data(Err(StreamError::Abandoned), None), None));
                 break;
             };
+            if let Err(violation) = flow.receive(&frame) {
+                let _ = item_tx.send(protocol(violation));
+                break;
+            }
             match frame.frame_type {
                 FrameType::StreamStart => {
                     let Some(stream_id) = frame.stream_id.clone() else {
@@ -4590,25 +4628,9 @@ fn demux_peer_response(
                         }
                     }
                 }
-                FrameType::End => {
-                    // A stream the peer never ended, with part of an item
-                    // still held, ended mid-item with the request.
-                    for stream in streams.values_mut() {
-                        if let Some(seq) = stream.seq.take() {
-                            if !seq.buf.is_empty() {
-                                let _ = item_tx.send(stream.item(
-                                    Err(StreamError::Decode(format!(
-                                        "sequence stream ended mid-item: {} trailing bytes \
-                                         do not form a complete CBOR item",
-                                        seq.buf.len()
-                                    ))),
-                                    None,
-                                ));
-                            }
-                        }
-                    }
-                    break;
-                }
+                // Every stream has ended by now: END with one open is refused
+                // by the order check above.
+                FrameType::End => break,
                 FrameType::Err => {
                     let (code, class, message, arg_urn) = match remote_error_fields(&frame) {
                         Ok(fields) => fields,
@@ -9475,7 +9497,9 @@ mod tests {
         consumer.abort();
     }
 
-    // TEST7053: A chunk received beyond the granted window is a fatal CREDIT_VIOLATION surfaced to the consumer (L12).
+    // TEST7053: A chunk received beyond the granted window is a CREDIT_VIOLATION
+    // error on that stream; the request goes on: another stream of the same
+    // request is still delivered whole (L12).
     #[tokio::test]
     async fn test7053_over_window_chunk_is_credit_violation() {
         let (grant_tx, _grant_rx) = tokio::sync::mpsc::unbounded_channel::<Frame>();
@@ -9485,31 +9509,33 @@ mod tests {
         });
         let rid = MessageId::new_uuid();
         let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
-
-        let ss = Frame::stream_start(
-            rid.clone(),
-            "s1".to_string(),
-            "media:enc=utf8".to_string(),
-            Some(false),
-        );
-        raw_tx.send(ss).unwrap();
-        // Window is 2; a misbehaving sender pushes 3 chunks with no grants
-        // possible (nothing consumed yet).
-        for i in 0..3u64 {
+        let chunk = |stream: &str, i: u64| {
             let mut payload = Vec::new();
             ciborium::into_writer(&ciborium::Value::Bytes(vec![i as u8]), &mut payload).unwrap();
             let checksum = Frame::compute_checksum(&payload);
+            Frame::chunk(rid.clone(), stream.to_string(), i, payload, i, checksum)
+        };
+
+        for stream in ["s1", "s2"] {
             raw_tx
-                .send(Frame::chunk(
+                .send(Frame::stream_start(
                     rid.clone(),
-                    "s1".to_string(),
-                    i,
-                    payload,
-                    i,
-                    checksum,
+                    stream.to_string(),
+                    "media:enc=utf8".to_string(),
+                    Some(false),
                 ))
                 .unwrap();
         }
+        // Window is 2; a misbehaving sender pushes 3 chunks on s1 with no
+        // grants possible (nothing consumed yet), and keeps to the window on s2.
+        for i in 0..3u64 {
+            raw_tx.send(chunk("s1", i)).unwrap();
+        }
+        for i in 0..2u64 {
+            raw_tx.send(chunk("s2", i)).unwrap();
+        }
+        raw_tx.send(Frame::stream_end(rid.clone(), "s1".to_string(), 3)).unwrap();
+        raw_tx.send(Frame::stream_end(rid.clone(), "s2".to_string(), 2)).unwrap();
         raw_tx.send(Frame::end(rid.clone(), None)).unwrap();
         drop(raw_tx);
 
@@ -9524,20 +9550,21 @@ mod tests {
                 initial_credit: 2,
             }),
         );
-        let mut stream = package.recv().await.unwrap().unwrap();
-        // The demux has seen all three chunks once the request has ended, and
-        // only then is anything consumed — so no grant can extend the window
-        // and the third chunk is a violation by construction, not by a sleep
-        // that a loaded machine outlasts.
+        let mut s1 = package.recv().await.unwrap().unwrap();
+        let mut s2 = package.recv().await.unwrap().unwrap();
+        // The demux has seen every chunk once the request has ended, and only
+        // then is anything consumed — so no grant can extend the window and
+        // the third chunk is a violation by construction, not by a sleep that
+        // a loaded machine outlasts.
         assert!(
             package.recv().await.is_none(),
-            "the request has one stream and then ends"
+            "the request has two streams and then ends: the violation breaks only s1"
         );
         // First two chunks are within the window.
-        assert!(stream.recv().await.unwrap().is_ok());
-        assert!(stream.recv().await.unwrap().is_ok());
+        assert!(s1.recv().await.unwrap().is_ok());
+        assert!(s1.recv().await.unwrap().is_ok());
         // The third is the violation.
-        let err = stream
+        let err = s1
             .recv()
             .await
             .expect("violation must be surfaced, not silently dropped")
@@ -9546,6 +9573,79 @@ mod tests {
             err.to_string().contains("CREDIT_VIOLATION"),
             "error must carry the CREDIT_VIOLATION code: {}",
             err
+        );
+        // The request goes on: s2 is delivered whole.
+        assert!(s2.recv().await.unwrap().is_ok());
+        assert!(s2.recv().await.unwrap().is_ok());
+        assert!(s2.recv().await.is_none(), "s2 ends after its two chunks");
+    }
+
+    /// A request whose stream `s` carries one chunk per index given, then a
+    /// STREAM_END saying `chunk_count`, then END, read by the demux as a
+    /// handler reads it.
+    fn demux_of(indices: &[u64], chunk_count: u64) -> InputPackage {
+        let rid = MessageId::new_uuid();
+        let (raw_tx, raw_rx) = crossbeam_channel::unbounded();
+        raw_tx
+            .send(Frame::stream_start(rid.clone(), "s".to_string(), "media:enc=utf8".to_string(), Some(false)))
+            .unwrap();
+        for &i in indices {
+            let mut payload = Vec::new();
+            ciborium::into_writer(&ciborium::Value::Bytes(vec![i as u8]), &mut payload).unwrap();
+            let checksum = Frame::compute_checksum(&payload);
+            raw_tx.send(Frame::chunk(rid.clone(), "s".to_string(), i, payload, i, checksum)).unwrap();
+        }
+        raw_tx.send(Frame::stream_end(rid.clone(), "s".to_string(), chunk_count)).unwrap();
+        raw_tx.send(Frame::end(rid, None)).unwrap();
+        drop(raw_tx);
+        demux_multi_stream(raw_rx, None, None, None)
+    }
+
+    /// Everything the handler is given, in order: each stream's items, and
+    /// any error, as text.
+    async fn handler_sees(mut package: InputPackage) -> Vec<String> {
+        let mut seen = Vec::new();
+        while let Some(stream) = package.recv().await {
+            match stream {
+                Ok(mut stream) => {
+                    while let Some(item) = stream.recv().await {
+                        seen.push(match item {
+                            Ok(_) => "item".to_string(),
+                            Err(e) => format!("stream error: {e}"),
+                        });
+                    }
+                }
+                Err(e) => seen.push(format!("package error: {e}")),
+            }
+        }
+        seen
+    }
+
+    // TEST7191: A request stream whose CHUNKs carry chunk_index 0 then 2 gives
+    // its handler a protocol error naming the chunk out of place, the stream,
+    // and the index expected and the one received.
+    #[tokio::test]
+    async fn test7191_chunk_out_of_place_is_a_protocol_error() {
+        let seen = handler_sees(demux_of(&[0, 2], 2)).await;
+        assert!(
+            seen.iter().any(|s| s.contains("chunk out of place on stream s: expected 1, got 2")),
+            "the out-of-place chunk must be an error, saw {seen:?}"
+        );
+        assert_eq!(
+            seen.iter().filter(|s| *s == "item").count(),
+            1,
+            "only the chunk in place is delivered: {seen:?}"
+        );
+    }
+
+    // TEST7192: A stream of two CHUNKs ended by a STREAM_END whose chunk_count
+    // is 3 gives a protocol error naming the count wrong: sent 2, said 3.
+    #[tokio::test]
+    async fn test7192_chunk_count_wrong_is_a_protocol_error() {
+        let seen = handler_sees(demux_of(&[0, 1], 3)).await;
+        assert!(
+            seen.iter().any(|s| s.contains("chunk count wrong on stream s: sent 2, said 3")),
+            "the wrong count must be an error, saw {seen:?}"
         );
     }
 
@@ -13630,6 +13730,48 @@ mod tests {
         Frame::chunk(rid.clone(), stream.to_string(), 0, cbor, index, checksum)
     }
 
+    // TEST7202: a caller that does not read a peer's response grants nothing
+    // beyond the initial window; the chunks it then reads are granted back.
+    #[tokio::test]
+    async fn test7202_unread_peer_response_is_not_granted() {
+        let rid = MessageId::new_uuid();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tx.send(Frame::stream_start(rid.clone(), "r".into(), "media:enc=utf8".into(), Some(false)))
+            .unwrap();
+        for i in 0..4u64 {
+            tx.send(value_chunk(&rid, "r", i, ciborium::Value::Bytes(vec![i as u8]))).unwrap();
+        }
+        tx.send(Frame::stream_end(rid.clone(), "r".into(), 4)).unwrap();
+        tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
+        drop(tx);
+        let (sender, sent) = MockFrameSender::new();
+        let mut response = demux_peer_response(
+            rx,
+            Some(PeerGrantSource { sender: Arc::new(sender), rid: rid.clone(), initial_credit: 4 }),
+        );
+        let granted = || -> u64 {
+            sent.lock()
+                .unwrap()
+                .iter()
+                .filter(|f| f.frame_type == FrameType::Credit)
+                .filter_map(|f| f.credit)
+                .sum()
+        };
+
+        // The demux has every frame and nothing has been read.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(granted(), 0, "a response nobody has read is granted nothing beyond the initial window");
+
+        let mut items = 0;
+        while let Some(item) = response.recv().await {
+            if matches!(item, PeerResponseItem::Data(Ok(_), _)) {
+                items += 1;
+            }
+        }
+        assert_eq!(items, 4, "the caller reads the whole response");
+        assert_eq!(granted(), 4, "the chunks the caller reads are granted back");
+    }
+
     // TEST12730: a peer call's response has one stream per output the callee
     // answers on. The stream that names no output is the callee's main output:
     // its items are the response's data. A stream that names an output yields
@@ -13756,7 +13898,7 @@ mod tests {
         assert!(matches!(twice.recv().await, Some(PeerResponseItem::Data(Ok(_), _))));
         match twice.recv().await {
             Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
-                assert!(message.contains("a second STREAM_START for stream 'head'"), "{message}")
+                assert!(message.contains("stream head started twice"), "{message}")
             }
             _ => panic!("expected a protocol error"),
         }
@@ -13802,14 +13944,15 @@ mod tests {
                 .map(|_| ()),
         );
 
-        // A sequence stream of another output that the request's END cuts
-        // inside an item ends with that error, under its output.
+        // A sequence stream of another output that its STREAM_END cuts inside
+        // an item ends with that error, under its output.
         let mut whole = Vec::new();
         ciborium::into_writer(&ciborium::Value::Text("a long enough item".into()), &mut whole).unwrap();
         let half = whole[..whole.len() / 2].to_vec();
         let mut cut = feed_frames(vec![
             start("rows", true).for_output(rest.as_str()),
             Frame::chunk(rid.clone(), "rows".into(), 0, half.clone(), 0, Frame::compute_checksum(&half)),
+            Frame::stream_end(rid.clone(), "rows".into(), 1),
             Frame::end_ok(rid.clone(), None),
         ]);
         match cut.recv().await {
@@ -13820,6 +13963,20 @@ mod tests {
             _ => panic!("expected the unfinished item's error, under its output"),
         }
         assert!(cut.recv().await.is_none());
+        // The request's END with that stream still open is a protocol error
+        // naming it.
+        let mut open = feed_frames(vec![
+            start("rows", true).for_output(rest.as_str()),
+            Frame::chunk(rid.clone(), "rows".into(), 0, half.clone(), 0, Frame::compute_checksum(&half)),
+            Frame::end_ok(rid.clone(), None),
+        ]);
+        match open.recv().await {
+            Some(PeerResponseItem::Data(Err(StreamError::Protocol(message)), _)) => {
+                assert!(message.contains("END with stream rows still open"), "{message}")
+            }
+            _ => panic!("expected END with an open stream to be a protocol error"),
+        }
+        assert!(open.recv().await.is_none());
     }
 
     // TEST8126: derive_response_media — the response label is the effect
@@ -14700,6 +14857,39 @@ mod tests {
         }
     }
 
+    // TEST7190: run_with_keepalive emits a keepalive progress frame every
+    // KEEPALIVE_INTERVAL while the work runs: an operation of 5.5 s produces at
+    // least one progress LOG carrying the given progress and message.
+    #[tokio::test]
+    async fn test7190_run_with_keepalive_emits_progress_every_interval() {
+        let (sender, frames) = MockFrameSender::new();
+        let stream = OutputStream::new(
+            Arc::new(sender),
+            "stream-1".to_string(),
+            "media:test".to_string(),
+            MessageId::new_uuid(),
+            None,
+            DEFAULT_MAX_CHUNK,
+        );
+        assert_eq!(KEEPALIVE_INTERVAL, std::time::Duration::from_secs(5));
+        stream
+            .run_with_keepalive(0.25, "Loading model", || {
+                std::thread::sleep(std::time::Duration::from_millis(5500))
+            })
+            .await;
+
+        let captured = frames.lock().unwrap();
+        let ticks: Vec<&Frame> = captured
+            .iter()
+            .filter(|f| f.frame_type == FrameType::Log && f.log_level() == Some("progress"))
+            .collect();
+        assert!(!ticks.is_empty(), "a 5.5 s operation must emit a keepalive progress frame");
+        for tick in ticks {
+            assert_eq!(tick.log_progress(), Some(0.25));
+            assert_eq!(tick.log_message(), Some("Loading model"));
+        }
+    }
+
     // TEST843: run_with_keepalive returns Ok/Err from closure
     #[tokio::test]
     async fn test843_run_with_keepalive_returns_result_type() {
@@ -14915,6 +15105,114 @@ mod tests {
             stream_end.chunk_count,
             Some(3),
             "STREAM_END promises the coalesced count"
+        );
+    }
+
+    /// The CBOR values of a stream's CHUNK payloads, in order.
+    fn chunk_values(captured: &[Frame]) -> Vec<ciborium::Value> {
+        captured
+            .iter()
+            .filter(|f| f.frame_type == FrameType::Chunk)
+            .map(|f| ciborium::from_reader(f.payload.as_ref().unwrap().as_slice()).unwrap())
+            .collect()
+    }
+
+    // TEST7189: An array emitted after bytes still in the coalescing buffer
+    // does not overtake them: the bytes ship first, then the array's elements,
+    // each its own chunk, and STREAM_END counts all three.
+    #[tokio::test]
+    async fn test7189_array_emission_is_an_ordering_barrier() {
+        let (sender, frames) = MockFrameSender::new();
+        let stream = OutputStream::new(
+            Arc::new(sender),
+            "stream-1".to_string(),
+            "media:test".to_string(),
+            MessageId::new_uuid(),
+            None,
+            256_000,
+        );
+        stream.start(false, None).unwrap();
+        stream.write(b"abc").await.unwrap();
+        stream
+            .emit_cbor(&Value::Array(vec![Value::Integer(1.into()), Value::Integer(2.into())]))
+            .await
+            .unwrap();
+        stream.close().await.unwrap();
+
+        let captured = frames.lock().unwrap();
+        assert_eq!(
+            chunk_values(&captured),
+            vec![
+                Value::Bytes(b"abc".to_vec()),
+                Value::Integer(1.into()),
+                Value::Integer(2.into())
+            ],
+            "the buffered bytes ship before the array's elements"
+        );
+        let stream_end = captured
+            .iter()
+            .find(|f| f.frame_type == FrameType::StreamEnd)
+            .expect("STREAM_END present");
+        assert_eq!(stream_end.chunk_count, Some(3));
+    }
+
+    // TEST8212: StreamSender::emit_cbor splits a value exactly as
+    // OutputStream::emit_cbor does: a text longer than max_chunk into pieces
+    // cut on character boundaries, an array into its elements, a map into its
+    // [key, value] pairs, and no chunk is longer than the split allows.
+    #[tokio::test]
+    async fn test8212_stream_sender_splits_as_output_stream_does() {
+        let values = vec![
+            Value::Text("aaaaaaaé bbbbbbbb cccc".to_string()),
+            Value::Array(vec![Value::Integer(1.into()), Value::Text("x".into()), Value::Bool(true)]),
+            Value::Map(vec![
+                (Value::Text("a".into()), Value::Integer(1.into())),
+                (Value::Text("b".into()), Value::Integer(2.into())),
+            ]),
+        ];
+        let stream_of = || {
+            let (sender, frames) = MockFrameSender::new();
+            let stream = OutputStream::new(
+                Arc::new(sender),
+                "stream-1".to_string(),
+                "media:test".to_string(),
+                MessageId::new_uuid(),
+                None,
+                8,
+            );
+            stream.start(false, None).unwrap();
+            (stream, frames)
+        };
+
+        let (by_output, output_frames) = stream_of();
+        for value in &values {
+            by_output.emit_cbor(value).await.unwrap();
+        }
+        by_output.close().await.unwrap();
+
+        let (by_sender, sender_frames) = stream_of();
+        let detached = by_sender.stream_sender();
+        for value in &values {
+            detached.emit_cbor(value).unwrap();
+        }
+        by_sender.close().await.unwrap();
+
+        let from_output = chunk_values(&output_frames.lock().unwrap());
+        let from_sender = chunk_values(&sender_frames.lock().unwrap());
+        assert_eq!(from_sender, from_output, "both handles chunk alike");
+        let texts: Vec<&String> = from_sender
+            .iter()
+            .filter_map(|v| if let Value::Text(t) = v { Some(t) } else { None })
+            .collect();
+        assert!(
+            texts.iter().filter(|t| t.len() > 1).count() >= 3,
+            "the text is split into three or more pieces: {from_sender:?}"
+        );
+        assert!(texts.iter().all(|t| t.len() <= 8), "no piece exceeds max_chunk: {texts:?}");
+        assert_eq!(
+            from_sender.len(),
+            texts.len() - 1 + 3 + 2,
+            "text pieces, three element chunks and two pair chunks: {from_sender:?}"
         );
     }
 

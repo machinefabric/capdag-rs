@@ -29,7 +29,7 @@ use crate::bifaci::io::{CborError, FrameReader, FrameWriter};
 use crate::bifaci::relay_switch::{InstalledCartridgeRecord, RelayNotifyCapabilitiesPayload};
 use crate::cap::caller::CapArgumentValue;
 use crate::cap::definition::Cap;
-use crate::standard::caps::CAP_IDENTITY;
+use crate::standard::caps::{identity_urn, CAP_IDENTITY};
 use crate::CapUrn;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -138,7 +138,7 @@ impl ResponseWriter {
             MessageId::Uint(0),
             stream_id.clone(),
             media_urn.to_string(),
-            None,
+            Some(false),
         );
         start.meta = meta;
         self.send(start);
@@ -499,7 +499,7 @@ impl FrameHandler for IdentityHandler {
             MessageId::Uint(0),
             stream_id.clone(),
             "media:".to_string(),
-            None,
+            Some(false),
         ));
 
         let checksum = Frame::compute_checksum(&data);
@@ -640,11 +640,12 @@ impl InProcessCartridgeHost {
         use crate::bifaci::manifest::CapGroup as ManifestCapGroup;
         use crate::bifaci::relay_switch::InstalledCartridgeRecord;
 
-        // Collect all handler caps; prepend CAP_IDENTITY exactly once.
+        // Collect all handler caps; prepend the identity cap exactly once.
+        let identity = identity_urn();
         let mut caps: Vec<Cap> = vec![crate::standard::caps::identity_cap()];
         for entry in &self.handlers {
             for cap in &entry.caps {
-                if cap.urn.to_string() != CAP_IDENTITY {
+                if !cap.urn.is_equivalent(&identity) {
                     caps.push(cap.clone());
                 }
             }
@@ -938,9 +939,24 @@ impl InProcessCartridgeHost {
                         }
                     };
 
-                    // Identity cap is CAP_IDENTITY / `cap:effect=none` —
-                    // exact string match, NOT conforms_to.
-                    let is_identity = cap_urn == CAP_IDENTITY;
+                    let parsed_cap = match CapUrn::from_string(&cap_urn) {
+                        Ok(parsed) => parsed,
+                        Err(e) => {
+                            let mut err = Frame::err(
+                                rid,
+                                "INVALID_REQUEST",
+                                crate::failure::AttributionClass::Internal,
+                                &format!("REQ cap '{cap_urn}' is no cap URN: {e}"),
+                                None,
+                            );
+                            err.routing_id = xid;
+                            let _ = write_tx.send(err);
+                            continue;
+                        }
+                    };
+
+                    // The identity cap, by equivalence.
+                    let is_identity = parsed_cap.is_equivalent(&identity_urn());
 
                     // Nothing but the identity check is served before the
                     // switch's policy (12.2 §Policy): the switch sends one
@@ -1583,6 +1599,57 @@ mod tests {
         host_task.await.unwrap().unwrap();
     }
 
+    // TEST7201: every response stream the in-process host opens states its
+    // cardinality: a handler's emit_response stream and the identity echo
+    // each open with is_sequence false, so the engine's output audit can
+    // hold them to the declared shape.
+    #[tokio::test]
+    async fn test7201_response_streams_state_is_sequence() {
+        let cap_urn = "cap:in=\"media:text\";echo;out=\"media:text\"";
+        let handlers = vec![(
+            "echo".to_string(),
+            vec![make_test_cap(cap_urn)],
+            Arc::new(EchoHandler) as Arc<dyn FrameHandler>,
+        )];
+        let host = InProcessCartridgeHost::new(InProcessHostIdentity::for_test("in-process-test"), handlers);
+        let (host_sock, test_sock) = UnixStream::pair().unwrap();
+        let (host_read, host_write) = host_sock.into_split();
+        let (test_read, test_write) = test_sock.into_split();
+        let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+        let mut reader = FrameReader::new(BufReader::new(test_read));
+        let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
+        let _notify = reader.read().await.unwrap().unwrap();
+
+        for (xid, cap, stream, media, payload) in [
+            (1u64, cap_urn, "arg0", "media:text", cbor_bytes_payload(b"hello")),
+            (2u64, CAP_IDENTITY, "identity-verify", "media:", crate::bifaci::io::identity_nonce()),
+        ] {
+            let rid = MessageId::new_uuid();
+            let mut req = Frame::req(rid.clone(), cap, vec![], "application/cbor");
+            req.routing_id = Some(MessageId::Uint(xid));
+            writer.write(&req).await.unwrap();
+            writer.write(&Frame::stream_start(rid.clone(), stream.to_string(), media.to_string(), None)).await.unwrap();
+            let checksum = Frame::compute_checksum(&payload);
+            writer.write(&Frame::chunk(rid.clone(), stream.to_string(), 0, payload, 0, checksum)).await.unwrap();
+            writer.write(&Frame::stream_end(rid.clone(), stream.to_string(), 1)).await.unwrap();
+            writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+
+            let start = reader.read().await.unwrap().unwrap();
+            assert_eq!(start.frame_type, FrameType::StreamStart, "{cap}");
+            assert_eq!(start.is_sequence, Some(false), "{cap}: the response stream states it is scalar");
+            loop {
+                if reader.read().await.unwrap().unwrap().frame_type == FrameType::End {
+                    break;
+                }
+            }
+        }
+
+        drop(writer);
+        drop(reader);
+        host_task.await.unwrap().unwrap();
+    }
+
     // TEST1961: the in-process host answers a Cancel in the cancel's OWN
     // attribution — ERR ABORTED/resource for a host abort (message carries
     // the reason), ERR ABORTED_COLLATERAL with the originating failure's
@@ -1761,6 +1828,90 @@ mod tests {
 
         let resp_end = reader.read().await.unwrap().unwrap();
         assert_eq!(resp_end.frame_type, FrameType::End);
+
+        drop(writer);
+        drop(reader);
+        host_task.await.unwrap().unwrap();
+    }
+
+    // TEST7197: The identity cap is recognised by equivalence, not by its
+    // text: a REQ for the identity spelled with its directions written out,
+    // sent before any policy, is served as the identity (the only request
+    // served before a policy), and a REQ whose cap is no cap URN is refused
+    // as an invalid request naming it.
+    #[tokio::test]
+    async fn test7197_identity_request_recognised_by_equivalence() {
+        let host =
+            InProcessCartridgeHost::new(InProcessHostIdentity::for_test("in-process-test"), vec![]);
+
+        let (host_sock, test_sock) = UnixStream::pair().unwrap();
+        let (host_read, host_write) = host_sock.into_split();
+        let (test_read, test_write) = test_sock.into_split();
+
+        let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+
+        let mut reader = FrameReader::new(BufReader::new(test_read));
+        let mut writer = FrameWriter::new(BufWriter::new(test_write));
+        let _notify = reader.read().await.unwrap().unwrap();
+
+        let rid = MessageId::new_uuid();
+        let mut req = Frame::req(
+            rid.clone(),
+            "cap:effect=none;in=media:;out=media:",
+            vec![],
+            "application/cbor",
+        );
+        req.routing_id = Some(MessageId::Uint(0));
+        writer.write(&req).await.unwrap();
+        let nonce = crate::bifaci::io::identity_nonce();
+        writer
+            .write(&Frame::stream_start(rid.clone(), "identity-verify".to_string(), "media:".to_string(), None))
+            .await
+            .unwrap();
+        writer
+            .write(&Frame::chunk(
+                rid.clone(),
+                "identity-verify".to_string(),
+                0,
+                nonce.clone(),
+                0,
+                Frame::compute_checksum(&nonce),
+            ))
+            .await
+            .unwrap();
+        writer
+            .write(&Frame::stream_end(rid.clone(), "identity-verify".to_string(), 1))
+            .await
+            .unwrap();
+        writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+
+        let first = reader.read().await.unwrap().unwrap();
+        assert_eq!(
+            first.frame_type,
+            FrameType::StreamStart,
+            "the identity spelled out is served before any policy, got {:?} {:?}",
+            first.error_code(),
+            first.error_message()
+        );
+        let echoed = reader.read().await.unwrap().unwrap();
+        assert_eq!(echoed.payload.as_deref(), Some(nonce.as_slice()));
+        assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::StreamEnd);
+        assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::End);
+
+        // Frame::req refuses to build a REQ for no cap URN; a peer that sends
+        // one anyway is written by hand.
+        let bad = MessageId::new_uuid();
+        let mut req = Frame::new(FrameType::Req, bad.clone());
+        req.cap = Some("cap:in=".to_string());
+        req.payload = Some(vec![]);
+        req.content_type = Some("application/cbor".to_string());
+        req.routing_id = Some(MessageId::Uint(1));
+        writer.write(&req).await.unwrap();
+        let err = reader.read().await.unwrap().unwrap();
+        assert_eq!(err.frame_type, FrameType::Err);
+        assert_eq!(err.id, bad);
+        assert_eq!(err.error_code(), Some("INVALID_REQUEST"));
+        assert!(err.error_message().unwrap_or_default().contains("cap:in="), "{:?}", err.error_message());
 
         drop(writer);
         drop(reader);

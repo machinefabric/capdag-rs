@@ -66,7 +66,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, CborError> {
     ));
     map.push((
         Value::Integer(keys::FRAME_TYPE.into()),
-        Value::Integer((frame.frame_type as u8 as i64).into()),
+        Value::Integer(frame.frame_type.code().into()),
     ));
 
     // Message ID
@@ -233,31 +233,32 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, CborError> {
         }
     }
 
-    // Extract required fields
-    let version = lookup
-        .get(&keys::VERSION)
-        .and_then(|v| match v {
-            Value::Integer(i) => {
-                let n: i128 = (*i).into();
-                Some(n as u8)
-            }
-            _ => None,
-        })
-        .ok_or_else(|| CborError::InvalidFrame("missing version".to_string()))?;
+    // Extract required fields. Every frame is of this protocol version: a
+    // frame of any other is refused here, not read as one.
+    let version_raw: i128 = match lookup.get(&keys::VERSION) {
+        Some(Value::Integer(i)) => (*i).into(),
+        _ => return Err(CborError::InvalidFrame("missing version".to_string())),
+    };
+    let version = u8::try_from(version_raw).map_err(|_| {
+        CborError::InvalidFrame(format!("version: {version_raw} is not a protocol version"))
+    })?;
+    if version != PROTOCOL_VERSION {
+        return Err(CborError::InvalidFrame(format!(
+            "protocol version mismatch: ours {}, theirs {}",
+            PROTOCOL_VERSION, version_raw
+        )));
+    }
 
-    let frame_type_u8 = lookup
-        .get(&keys::FRAME_TYPE)
-        .and_then(|v| match v {
-            Value::Integer(i) => {
-                let n: i128 = (*i).into();
-                Some(n as u8)
-            }
-            _ => None,
-        })
-        .ok_or_else(|| CborError::InvalidFrame("missing frame_type".to_string()))?;
-
-    let frame_type = FrameType::from_u8(frame_type_u8)
-        .ok_or_else(|| CborError::InvalidFrame(format!("invalid frame_type: {}", frame_type_u8)))?;
+    // The frame type is read whole and named by the model's numbering: a
+    // number that names no frame type, negative or beyond any, is refused.
+    let frame_type_raw: i128 = match lookup.get(&keys::FRAME_TYPE) {
+        Some(Value::Integer(i)) => (*i).into(),
+        _ => return Err(CborError::InvalidFrame("missing frame_type".to_string())),
+    };
+    let frame_type = u64::try_from(frame_type_raw)
+        .ok()
+        .and_then(FrameType::from_code)
+        .ok_or_else(|| CborError::InvalidFrame(format!("invalid frame_type: {}", frame_type_raw)))?;
 
     // A present-but-malformed id (wrong byte length, negative, or wrong CBOR type) is a
     // corrupt frame — fail hard. Fabricating MessageId::Uint(0) would forge a routing key
@@ -844,7 +845,7 @@ pub async fn handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let their_version = their_frame
         .hello_version()
         .ok_or_else(|| CborError::Handshake("HELLO missing required version".to_string()))?;
-    if their_version != PROTOCOL_VERSION {
+    if their_version != i128::from(PROTOCOL_VERSION) {
         return Err(CborError::Handshake(format!(
             "protocol version mismatch: ours {}, theirs {}",
             PROTOCOL_VERSION, their_version
@@ -926,7 +927,7 @@ pub async fn handshake_accept<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let their_version = their_frame
         .hello_version()
         .ok_or_else(|| CborError::Handshake("HELLO missing required version".to_string()))?;
-    if their_version != PROTOCOL_VERSION {
+    if their_version != i128::from(PROTOCOL_VERSION) {
         return Err(CborError::Handshake(format!(
             "protocol version mismatch: ours {}, theirs {}",
             PROTOCOL_VERSION, their_version
@@ -977,12 +978,99 @@ pub(crate) fn identity_nonce() -> Vec<u8> {
     buf
 }
 
+/// The frames of an identity probe for request `rid` on routing id `xid`:
+/// REQ(CAP_IDENTITY), STREAM_START, one CHUNK carrying the nonce wrapped as one
+/// CBOR byte string, STREAM_END(1) and END. The handshake's verification and
+/// every relay-switch probe send exactly these; the writer or the caller
+/// assigns their seq.
+pub(crate) fn identity_probe_frames(rid: &MessageId, xid: &MessageId) -> Vec<Frame> {
+    use crate::standard::caps::CAP_IDENTITY;
+    let stream_id = "identity-verify".to_string();
+    let mut cbor_nonce = Vec::new();
+    ciborium::into_writer(&Value::Bytes(identity_nonce()), &mut cbor_nonce)
+        .expect("BUG: failed to CBOR-encode nonce");
+    let checksum = Frame::compute_checksum(&cbor_nonce);
+    let mut frames = vec![
+        Frame::req(rid.clone(), CAP_IDENTITY, vec![], "application/cbor"),
+        Frame::stream_start(rid.clone(), stream_id.clone(), "media:".to_string(), Some(false)),
+        Frame::chunk(rid.clone(), stream_id.clone(), 0, cbor_nonce, 0, checksum),
+        Frame::stream_end(rid.clone(), stream_id, 1),
+        Frame::end(rid.clone(), None),
+    ];
+    for frame in &mut frames {
+        frame.routing_id = Some(xid.clone());
+    }
+    frames
+}
+
+/// The judge of an identity echo, frame by frame: each CHUNK must carry a CBOR
+/// byte string, their concatenation at END must be the nonce, and an ERR is
+/// the probe failing. The handshake's verification and every relay-switch
+/// probe judge the echo the same way.
+#[derive(Debug, Default)]
+pub(crate) struct IdentityEcho {
+    bytes: Vec<u8>,
+}
+
+impl IdentityEcho {
+    /// `Ok(Some(()))` when the echo is complete and right, `Ok(None)` while it
+    /// goes on, and otherwise what is wrong with it, for the caller to say
+    /// whose identity verification failed.
+    pub(crate) fn accept(&mut self, frame: &Frame) -> Result<Option<()>, String> {
+        match frame.frame_type {
+            FrameType::Chunk => {
+                let payload = frame.payload.as_deref().unwrap_or_default();
+                let value: Value = ciborium::from_reader(payload)
+                    .map_err(|e| format!("Failed to decode CBOR chunk: {}", e))?;
+                match value {
+                    Value::Bytes(bytes) => {
+                        self.bytes.extend_from_slice(&bytes);
+                        Ok(None)
+                    }
+                    other => Err(format!("Expected bytes chunk, got {:?}", other)),
+                }
+            }
+            FrameType::End => {
+                let nonce = identity_nonce();
+                if self.bytes == nonce {
+                    Ok(Some(()))
+                } else {
+                    Err(format!(
+                        "payload mismatch (expected {} bytes, got {})",
+                        nonce.len(),
+                        self.bytes.len()
+                    ))
+                }
+            }
+            FrameType::Err => {
+                let code = frame
+                    .error_code()
+                    .ok_or_else(|| "ERR frame missing required text code".to_string())?;
+                let msg = frame
+                    .error_message()
+                    .ok_or_else(|| "ERR frame missing required text message".to_string())?;
+                Err(format!("[{code}] {msg}"))
+            }
+            // Control/side-channel frames are legal ANYWHERE during the probe
+            // (12.4: LOG interleaves without affecting data flow; CREDIT and
+            // HEARTBEAT are the control plane the writer gate itself exempts,
+            // L4). A cartridge crediting its probe input as it consumes (L10)
+            // must not fail identity verification.
+            FrameType::StreamStart
+            | FrameType::StreamEnd
+            | FrameType::Log
+            | FrameType::Credit
+            | FrameType::Heartbeat => Ok(None),
+            other => Err(format!("unexpected frame type {:?}", other)),
+        }
+    }
+}
+
 /// Verify a connection by invoking the identity capability.
 ///
-/// Sends a REQ with CAP_IDENTITY carrying the "bifaci" nonce with proper
-/// XID and seq assignment, then verifies the response echoes it back unchanged.
-/// This proves the entire protocol stack works end-to-end before the connection
-/// is considered live.
+/// Sends the identity probe (`identity_probe_frames`) with proper XID and seq
+/// assignment, then judges the echo (`IdentityEcho`). This proves the entire
+/// protocol stack works end-to-end before the connection is considered live.
 ///
 /// Must be called after handshake, before any other traffic.
 pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
@@ -990,121 +1078,20 @@ pub async fn verify_identity<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     writer: &mut FrameWriter<W>,
 ) -> Result<(), CborError> {
     use crate::bifaci::frame::SeqAssigner;
-    use crate::standard::caps::CAP_IDENTITY;
 
-    let nonce = identity_nonce();
-    let req_id = MessageId::new_uuid();
-    let stream_id = "identity-verify".to_string();
-    let xid = MessageId::Uint(0);
     let mut seq = SeqAssigner::new();
+    for mut frame in identity_probe_frames(&MessageId::new_uuid(), &MessageId::Uint(0)) {
+        seq.assign(&mut frame);
+        writer.write(&frame).await?;
+    }
 
-    // Send REQ (empty payload) with XID + seq
-    let mut req = Frame::req(req_id.clone(), CAP_IDENTITY, vec![], "application/cbor");
-    req.routing_id = Some(xid.clone());
-    seq.assign(&mut req);
-    writer.write(&req).await?;
-
-    // Send request body: STREAM_START → CHUNK → STREAM_END → END
-    let mut stream_start = Frame::stream_start(
-        req_id.clone(),
-        stream_id.clone(),
-        "media:".to_string(),
-        None,
-    );
-    stream_start.routing_id = Some(xid.clone());
-    seq.assign(&mut stream_start);
-    writer.write(&stream_start).await?;
-
-    // CBOR-encode nonce before checksumming (protocol v2: CHUNK payload = CBOR-encoded data)
-    let mut cbor_nonce = Vec::new();
-    ciborium::into_writer(&Value::Bytes(nonce.clone()), &mut cbor_nonce)
-        .expect("BUG: failed to CBOR-encode nonce");
-    let checksum = Frame::compute_checksum(&cbor_nonce);
-    let mut chunk = Frame::chunk(
-        req_id.clone(),
-        stream_id.clone(),
-        0,
-        cbor_nonce,
-        0,
-        checksum,
-    );
-    chunk.routing_id = Some(xid.clone());
-    seq.assign(&mut chunk);
-    writer.write(&chunk).await?;
-
-    let mut stream_end = Frame::stream_end(req_id.clone(), stream_id, 1);
-    stream_end.routing_id = Some(xid.clone());
-    seq.assign(&mut stream_end);
-    writer.write(&stream_end).await?;
-
-    let mut end = Frame::end(req_id.clone(), None);
-    end.routing_id = Some(xid.clone());
-    seq.assign(&mut end);
-    writer.write(&end).await?;
-
-    // Read response — expect STREAM_START → CHUNK(s) → STREAM_END → END
-    // Each CHUNK payload is CBOR-encoded (protocol v2), decode each and concatenate
-    let mut cbor_chunks = Vec::new();
+    let mut echo = IdentityEcho::default();
     loop {
         let frame = reader.read().await?.ok_or_else(|| {
             CborError::Protocol("Connection closed during identity verification".to_string())
         })?;
-
-        match frame.frame_type {
-            FrameType::StreamStart => {}
-            FrameType::Chunk => {
-                if let Some(cbor_payload) = frame.payload {
-                    // Decode CBOR chunk
-                    let value: Value = ciborium::from_reader(&cbor_payload[..]).map_err(|e| {
-                        CborError::Protocol(format!("Failed to decode CBOR chunk: {}", e))
-                    })?;
-                    if let Value::Bytes(bytes) = value {
-                        cbor_chunks.push(bytes);
-                    } else {
-                        return Err(CborError::Protocol(format!(
-                            "Expected bytes chunk, got {:?}",
-                            value
-                        )));
-                    }
-                }
-            }
-            FrameType::StreamEnd => {}
-            FrameType::End => {
-                // Concatenate all decoded chunks
-                let accumulated: Vec<u8> = cbor_chunks.into_iter().flatten().collect();
-                if accumulated != nonce {
-                    return Err(CborError::Protocol(format!(
-                        "Identity verification failed: payload mismatch (expected {} bytes, got {})",
-                        nonce.len(),
-                        accumulated.len()
-                    )));
-                }
-                return Ok(());
-            }
-            FrameType::Err => {
-                let code = frame.error_code().ok_or_else(|| {
-                    CborError::Protocol("ERR frame missing required text code".to_string())
-                })?;
-                let msg = frame.error_message().ok_or_else(|| {
-                    CborError::Protocol("ERR frame missing required text message".to_string())
-                })?;
-                return Err(CborError::Protocol(format!(
-                    "Identity verification failed: [{code}] {msg}"
-                )));
-            }
-            // Control/side-channel frames are legal ANYWHERE during the
-            // probe (spec 12.4: LOG interleaves without affecting data
-            // flow; CREDIT/HEARTBEAT are the control plane the writer
-            // gate itself exempts, L4). A cartridge crediting its
-            // probe input as it consumes (L10) must not fail identity
-            // verification.
-            FrameType::Log | FrameType::Credit | FrameType::Heartbeat => {}
-            other => {
-                return Err(CborError::Protocol(format!(
-                    "Identity verification: unexpected frame type {:?}",
-                    other
-                )));
-            }
+        if echo.accept(&frame).map_err(CborError::Protocol)?.is_some() {
+            return Ok(());
         }
     }
 }
@@ -1768,7 +1755,7 @@ mod tests {
         let map = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Integer(keys::VERSION.into()),
-                ciborium::Value::Integer(1.into()),
+                ciborium::Value::Integer(PROTOCOL_VERSION.into()),
             ),
             (
                 ciborium::Value::Integer(keys::FRAME_TYPE.into()),
@@ -1786,13 +1773,71 @@ mod tests {
         assert!(matches!(result, Err(CborError::InvalidFrame(_))));
     }
 
+    /// A frame of the given version and frame type with an id and nothing
+    /// else, as bytes.
+    fn hand_built_frame(version: i64, frame_type: i64) -> Vec<u8> {
+        let map = ciborium::Value::Map(vec![
+            (
+                ciborium::Value::Integer(keys::VERSION.into()),
+                ciborium::Value::Integer(version.into()),
+            ),
+            (
+                ciborium::Value::Integer(keys::FRAME_TYPE.into()),
+                ciborium::Value::Integer(frame_type.into()),
+            ),
+            (
+                ciborium::Value::Integer(keys::ID.into()),
+                ciborium::Value::Integer(0.into()),
+            ),
+        ]);
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&map, &mut bytes).unwrap();
+        bytes
+    }
+
+    // TEST7188: Every frame is of this protocol version: decode_frame refuses
+    // a frame of another version, naming both, and a version beyond a byte is
+    // refused rather than read as the byte it wraps to (262 is not 6).
+    #[test]
+    fn test7188_decode_refuses_another_protocol_version() {
+        let heartbeat = FrameType::Heartbeat.code() as i64;
+        match decode_frame(&hand_built_frame(5, heartbeat)) {
+            Err(CborError::InvalidFrame(msg)) => {
+                assert!(msg.contains("ours 6") && msg.contains("theirs 5"), "{msg}")
+            }
+            other => panic!("version 5 must be refused, got {other:?}"),
+        }
+        match decode_frame(&hand_built_frame(262, heartbeat)) {
+            Err(CborError::InvalidFrame(msg)) => assert!(msg.contains("262"), "{msg}"),
+            other => panic!("version 262 must be refused, not read as 6, got {other:?}"),
+        }
+        let ours = decode_frame(&hand_built_frame(PROTOCOL_VERSION.into(), heartbeat))
+            .expect("a frame of this version decodes");
+        assert_eq!(ours.version, PROTOCOL_VERSION);
+    }
+
+    // TEST7200: A frame type is read whole: decode_frame refuses 257, 259 and
+    // -255, each naming the value, rather than reading them as the byte they
+    // wrap to (REQ, CHUNK, REQ).
+    #[test]
+    fn test7200_decode_refuses_frame_type_beyond_a_byte() {
+        for frame_type in [257i64, 259, -255] {
+            match decode_frame(&hand_built_frame(PROTOCOL_VERSION.into(), frame_type)) {
+                Err(CborError::InvalidFrame(msg)) => {
+                    assert!(msg.contains(&frame_type.to_string()), "{msg}")
+                }
+                other => panic!("frame type {frame_type} must be refused, got {other:?}"),
+            }
+        }
+    }
+
     // TEST228: Test decode_frame rejects CBOR map missing required id field
     #[test]
     fn test228_decode_missing_id() {
         let map = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Integer(keys::VERSION.into()),
-                ciborium::Value::Integer(1.into()),
+                ciborium::Value::Integer(PROTOCOL_VERSION.into()),
             ),
             (
                 ciborium::Value::Integer(keys::FRAME_TYPE.into()),
@@ -1815,7 +1860,7 @@ mod tests {
         let map = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Integer(keys::VERSION.into()),
-                ciborium::Value::Integer(1.into()),
+                ciborium::Value::Integer(PROTOCOL_VERSION.into()),
             ),
             (
                 ciborium::Value::Integer(keys::FRAME_TYPE.into()),
@@ -1840,7 +1885,7 @@ mod tests {
         let map = ciborium::Value::Map(vec![
             (
                 ciborium::Value::Integer(keys::VERSION.into()),
-                ciborium::Value::Integer(1.into()),
+                ciborium::Value::Integer(PROTOCOL_VERSION.into()),
             ),
             (
                 ciborium::Value::Integer(keys::FRAME_TYPE.into()),
@@ -1869,7 +1914,7 @@ mod tests {
             vec![
                 (
                     ciborium::Value::Integer(keys::VERSION.into()),
-                    ciborium::Value::Integer(1.into()),
+                    ciborium::Value::Integer(PROTOCOL_VERSION.into()),
                 ),
                 (
                     ciborium::Value::Integer(keys::FRAME_TYPE.into()),
@@ -2093,7 +2138,7 @@ mod tests {
 
         assert_eq!(decoded.frame_type, FrameType::RelayNotify);
         assert_eq!(decoded.id, MessageId::Uint(0));
-        assert_eq!(decoded.relay_notify_manifest(), Some(manifest.as_slice()));
+        assert_eq!(decoded.relay_notify_manifest().unwrap(), manifest.as_slice());
         let decoded_limits = decoded.relay_notify_limits().expect("must have limits");
         assert_eq!(decoded_limits.max_frame, 2_000_000);
         assert_eq!(decoded_limits.max_chunk, 128_000);
@@ -2372,8 +2417,10 @@ mod tests {
                 .read()
                 .await?
                 .ok_or_else(|| CborError::Handshake("closed".to_string()))?;
-            let their_version = their_frame.hello_version().unwrap_or(their_frame.version);
-            if their_version != PROTOCOL_VERSION {
+            let their_version = their_frame.hello_version().ok_or_else(|| {
+                CborError::Handshake("HELLO missing required version".to_string())
+            })?;
+            if their_version != i128::from(PROTOCOL_VERSION) {
                 return Err(CborError::Handshake(format!(
                     "protocol version mismatch: ours {}, theirs {}",
                     PROTOCOL_VERSION, their_version

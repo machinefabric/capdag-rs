@@ -55,7 +55,8 @@ use std::collections::BTreeMap;
 /// Policy frame (15), sent after the handshake and on every change. It keeps
 /// version 5's streams per declared output (key 21), explicit handler
 /// capacity, strict diagnostic attribution, credit-based flow control and
-/// terminal metadata. Every other version is rejected during handshake.
+/// terminal metadata. A frame of any other version is refused when it is
+/// decoded, and a HELLO declaring one fails the handshake.
 pub const PROTOCOL_VERSION: u8 = 6;
 
 /// Default maximum frame size (3.5 MB) - safe margin below 3.75MB limit
@@ -73,50 +74,50 @@ pub const DEFAULT_MAX_REORDER_BUFFER: usize = 64;
 /// CREDIT grant. 32 chunks ≈ 8 MiB at the default max_chunk (256 KiB).
 pub const DEFAULT_INITIAL_CREDIT: u64 = 32;
 
-/// Frame type discriminator
+/// Frame type discriminator. Its wire number is the proved model's
+/// (`formal/CapDAG/Bifaci/Flow.lean`, `FrameType.code` and `FrameType.ofCode`):
+/// `code` and `from_code` are the only way to and from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
 pub enum FrameType {
     /// Handshake frame for negotiating limits
-    Hello = 0,
+    Hello,
     /// Request to invoke a cap
-    Req = 1,
-    // Res = 2 REMOVED - old single-response protocol no longer supported
+    Req,
     /// Streaming data chunk
-    Chunk = 3,
+    Chunk,
     /// Stream complete marker
-    End = 4,
+    End,
     /// Log/progress message
-    Log = 5,
+    Log,
     /// Error message
-    Err = 6,
+    Err,
     /// Health monitoring ping/pong - either side can send, receiver must respond with same ID
-    Heartbeat = 7,
+    Heartbeat,
     /// Announce new stream for a request (multiplexed streaming)
-    StreamStart = 8,
+    StreamStart,
     /// End a specific stream (multiplexed streaming)
-    StreamEnd = 9,
+    StreamEnd,
     /// Relay capability advertisement (slave → master). Carries aggregate manifest + limits.
-    RelayNotify = 10,
+    RelayNotify,
     /// Relay host system resources + cap demands (master → slave). Carries opaque resource payload.
-    RelayState = 11,
+    RelayState,
     /// Cancel a specific in-flight request by RID. Carries optional force_kill flag.
-    Cancel = 12,
+    Cancel,
     /// Grant per-stream flow-control credit (in CHUNK units) to the sender of a
     /// stream. Non-flow: bypasses seq assignment and reorder buffers, and is
     /// forwarded end-to-end by intermediaries (never originated or absorbed).
-    Credit = 13,
+    Credit,
     /// Close a request's live input stream(s) — the tap-off (15.2 §Runs
     /// Stop). The receiving runtime closes the request's open feed taps; the
     /// request then drains and ends NATURALLY with END and complete outputs.
     /// Not a cancel: host-side request state is untouched and nothing is
     /// aborted. `stream_id` (key 11) names one stream; absent means every
     /// live feed the request holds.
-    CloseStream = 14,
+    CloseStream,
     /// What the host allows its cartridges to do, as it stands now (12.2
     /// §Policy): host → cartridge only, after the handshake and on every
     /// change. Non-flow, `id = 0`; `meta.network` is required.
-    Policy = 15,
+    Policy,
 }
 
 impl FrameType {
@@ -161,8 +162,7 @@ impl FrameType {
     }
 
     /// This frame type as the proved model names it
-    /// (`formal/CapDAG/Bifaci/Flow.lean`). The model's wire numbers are these
-    /// discriminants — `test12375` holds the two to each other for every type.
+    /// (`formal/CapDAG/Bifaci/Flow.lean`).
     pub(crate) fn model(self) -> crate::formal::bifaci::flow::FrameType {
         use crate::formal::bifaci::flow::FrameType as Model;
         match self {
@@ -197,26 +197,66 @@ impl FrameType {
         crate::formal::bifaci::flow::frame_type::is_terminal(self.model())
     }
 
-    pub fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(FrameType::Hello),
-            1 => Some(FrameType::Req),
-            // 2 = Res REMOVED - old protocol no longer supported
-            3 => Some(FrameType::Chunk),
-            4 => Some(FrameType::End),
-            5 => Some(FrameType::Log),
-            6 => Some(FrameType::Err),
-            7 => Some(FrameType::Heartbeat),
-            8 => Some(FrameType::StreamStart),
-            9 => Some(FrameType::StreamEnd),
-            10 => Some(FrameType::RelayNotify),
-            11 => Some(FrameType::RelayState),
-            12 => Some(FrameType::Cancel),
-            13 => Some(FrameType::Credit),
-            14 => Some(FrameType::CloseStream),
-            15 => Some(FrameType::Policy),
-            _ => None,
+    /// The frame type the model names, the exact inverse of `model`.
+    pub(crate) fn from_model(m: crate::formal::bifaci::flow::FrameType) -> FrameType {
+        use crate::formal::bifaci::flow::FrameType as Model;
+        match m {
+            Model::Hello => FrameType::Hello,
+            Model::Req => FrameType::Req,
+            Model::Chunk => FrameType::Chunk,
+            Model::Fin => FrameType::End,
+            Model::Log => FrameType::Log,
+            Model::Err => FrameType::Err,
+            Model::Heartbeat => FrameType::Heartbeat,
+            Model::StreamStart => FrameType::StreamStart,
+            Model::StreamEnd => FrameType::StreamEnd,
+            Model::RelayNotify => FrameType::RelayNotify,
+            Model::RelayState => FrameType::RelayState,
+            Model::Cancel => FrameType::Cancel,
+            Model::Credit => FrameType::Credit,
+            Model::CloseStream => FrameType::CloseStream,
+            Model::Policy => FrameType::Policy,
         }
+    }
+
+    /// The frame type a wire number names, by the model's `FrameType.ofCode`;
+    /// `None` for a number that names none.
+    pub fn from_code(code: u64) -> Option<FrameType> {
+        crate::formal::bifaci::flow::frame_type::of_code(lungo::Nat::from(code))
+            .map(FrameType::from_model)
+    }
+
+    /// This frame type's wire number, by the model's `FrameType.code`.
+    pub fn code(self) -> u64 {
+        crate::formal::bifaci::flow::frame_type::code(self.model())
+            .to_u64()
+            .expect("the model numbers frame types below 2^64")
+    }
+}
+
+/// One limit of a RelayNotify: present, an integer, greater than zero and no
+/// more than `max`; anything else is a protocol error naming the key.
+fn positive_limit(
+    meta: &BTreeMap<String, ciborium::Value>,
+    key: &str,
+    max: i128,
+) -> Result<i128, crate::bifaci::io::CborError> {
+    use crate::bifaci::io::CborError;
+    match meta.get(key) {
+        None => Err(CborError::Protocol(format!("RelayNotify limits: '{key}' is missing"))),
+        Some(ciborium::Value::Integer(i)) => {
+            let n: i128 = (*i).into();
+            if n > 0 && n <= max {
+                Ok(n)
+            } else {
+                Err(CborError::Protocol(format!(
+                    "RelayNotify limits: '{key}' is {n}, not a positive integer"
+                )))
+            }
+        }
+        Some(value) => Err(CborError::Protocol(format!(
+            "RelayNotify limits: '{key}' is {value:?}, not a positive integer"
+        ))),
     }
 }
 
@@ -1127,84 +1167,48 @@ impl Frame {
         })
     }
 
-    /// Extract manifest from RelayNotify metadata.
-    /// Returns None if not a RelayNotify frame or no manifest present.
-    pub fn relay_notify_manifest(&self) -> Option<&[u8]> {
-        if self.frame_type != FrameType::RelayNotify {
-            return None;
+    /// The manifest a RelayNotify carries. Every RelayNotify carries one: a
+    /// frame of another type, a RelayNotify with no meta, no manifest, or a
+    /// manifest that is not a byte string, is a protocol error naming it.
+    pub fn relay_notify_manifest(&self) -> Result<&[u8], crate::bifaci::io::CborError> {
+        use crate::bifaci::io::CborError;
+        let meta = self.relay_notify_meta()?;
+        match meta.get("manifest") {
+            Some(ciborium::Value::Bytes(bytes)) => Ok(bytes.as_slice()),
+            Some(_) => Err(CborError::Protocol("RelayNotify manifest is not a byte string".into())),
+            None => Err(CborError::Protocol("RelayNotify carries no manifest".into())),
         }
-        self.meta.as_ref().and_then(|m| {
-            m.get("manifest").and_then(|v| {
-                if let ciborium::Value::Bytes(bytes) = v {
-                    Some(bytes.as_slice())
-                } else {
-                    None
-                }
-            })
+    }
+
+    /// The four limits a RelayNotify carries. Every RelayNotify carries all
+    /// four, each a positive integer: one missing, or one that is not a
+    /// positive integer that fits, is a protocol error naming the key; a frame
+    /// of another type, or one with no meta, is a protocol error too.
+    pub fn relay_notify_limits(&self) -> Result<Limits, crate::bifaci::io::CborError> {
+        let meta = self.relay_notify_meta()?;
+        Ok(Limits {
+            max_frame: positive_limit(meta, "max_frame", usize::MAX as i128)? as usize,
+            max_chunk: positive_limit(meta, "max_chunk", usize::MAX as i128)? as usize,
+            max_reorder_buffer: positive_limit(meta, "max_reorder_buffer", usize::MAX as i128)?
+                as usize,
+            initial_credit: positive_limit(meta, "initial_credit", u64::MAX as i128)? as u64,
         })
     }
 
-    /// Extract limits from RelayNotify metadata.
-    /// Returns None if not a RelayNotify frame or limits are missing.
-    pub fn relay_notify_limits(&self) -> Option<Limits> {
+    /// The meta of a RelayNotify, or the protocol error saying why there is none.
+    fn relay_notify_meta(
+        &self,
+    ) -> Result<&BTreeMap<String, ciborium::Value>, crate::bifaci::io::CborError> {
+        use crate::bifaci::io::CborError;
         if self.frame_type != FrameType::RelayNotify {
-            return None;
+            return Err(CborError::Protocol(format!(
+                "a RelayNotify field read from a {:?} frame",
+                self.frame_type
+            )));
         }
-        let meta = self.meta.as_ref()?;
-        let max_frame = meta.get("max_frame").and_then(|v| {
-            if let ciborium::Value::Integer(i) = v {
-                let n: i128 = (*i).into();
-                if n > 0 && n <= usize::MAX as i128 {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })?;
-        let max_chunk = meta.get("max_chunk").and_then(|v| {
-            if let ciborium::Value::Integer(i) = v {
-                let n: i128 = (*i).into();
-                if n > 0 && n <= usize::MAX as i128 {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })?;
-        let max_reorder_buffer = meta.get("max_reorder_buffer").and_then(|v| {
-            if let ciborium::Value::Integer(i) = v {
-                let n: i128 = (*i).into();
-                if n > 0 && n <= usize::MAX as i128 {
-                    Some(n as usize)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })?;
-        let initial_credit = meta.get("initial_credit").and_then(|v| {
-            if let ciborium::Value::Integer(i) = v {
-                let n: i128 = (*i).into();
-                if n > 0 && n <= u64::MAX as i128 {
-                    Some(n as u64)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })?;
-        Some(Limits {
-            max_frame,
-            max_chunk,
-            max_reorder_buffer,
-            initial_credit,
-        })
+        self.meta
+            .as_ref()
+            .ok_or_else(|| CborError::Protocol("RelayNotify carries no meta".into()))
     }
 
     /// Check if this is the final frame in a stream
@@ -1513,16 +1517,16 @@ impl Frame {
         })
     }
 
-    /// Extract the protocol version declared in HELLO metadata.
-    pub fn hello_version(&self) -> Option<u8> {
+    /// Extract the protocol version declared in HELLO metadata, whole: a
+    /// number beyond a byte is not read as the byte it wraps to.
+    pub fn hello_version(&self) -> Option<i128> {
         if self.frame_type != FrameType::Hello {
             return None;
         }
         self.meta.as_ref().and_then(|m| {
             m.get("version").and_then(|v| {
                 if let ciborium::Value::Integer(i) = v {
-                    let n: i128 = (*i).into();
-                    Some(n as u8)
+                    Some((*i).into())
                 } else {
                     None
                 }
@@ -1860,13 +1864,12 @@ impl DropReason {
 mod tests {
     use super::*;
 
-    // TEST171: Test all FrameType discriminants roundtrip through u8 conversion preserving identity
+    // TEST171: Every frame type's wire number, by the model, names it again
     #[test]
     fn test171_frame_type_roundtrip() {
         for t in [
             FrameType::Hello,
             FrameType::Req,
-            // Res REMOVED - old protocol
             FrameType::Chunk,
             FrameType::End,
             FrameType::Log,
@@ -1881,41 +1884,43 @@ mod tests {
             FrameType::CloseStream,
             FrameType::Policy,
         ] {
-            let v = t as u8;
-            let recovered = FrameType::from_u8(v).expect("should recover frame type");
+            let recovered = FrameType::from_code(t.code()).expect("should recover frame type");
             assert_eq!(t, recovered);
         }
     }
 
-    // TEST172: Test FrameType::from_u8 returns None for values outside the valid discriminant range
+    // TEST172: A wire number that names no frame type is no frame type
     #[test]
     fn test172_invalid_frame_type() {
-        assert_eq!(FrameType::from_u8(14), Some(FrameType::CloseStream));
-        assert_eq!(FrameType::from_u8(15), Some(FrameType::Policy));
+        assert_eq!(FrameType::from_code(14), Some(FrameType::CloseStream));
+        assert_eq!(FrameType::from_code(15), Some(FrameType::Policy));
+        assert!(FrameType::from_code(2).is_none(), "2 names no frame type");
         assert!(
-            FrameType::from_u8(16).is_none(),
+            FrameType::from_code(16).is_none(),
             "value 16 is one past Policy"
         );
-        assert!(FrameType::from_u8(100).is_none());
-        assert!(FrameType::from_u8(255).is_none());
+        assert!(FrameType::from_code(255).is_none());
+        assert!(FrameType::from_code(u64::MAX).is_none());
     }
 
-    // TEST173: Test FrameType discriminant values match the wire protocol specification exactly
+    // TEST173: Each frame type's wire number is the one the wire protocol specifies
     #[test]
     fn test173_frame_type_discriminant_values() {
-        assert_eq!(FrameType::Hello as u8, 0);
-        assert_eq!(FrameType::Req as u8, 1);
-        // 2 = Res REMOVED - old protocol
-        assert_eq!(FrameType::Chunk as u8, 3);
-        assert_eq!(FrameType::End as u8, 4);
-        assert_eq!(FrameType::Log as u8, 5);
-        assert_eq!(FrameType::Err as u8, 6);
-        assert_eq!(FrameType::Heartbeat as u8, 7);
-        assert_eq!(FrameType::StreamStart as u8, 8);
-        assert_eq!(FrameType::StreamEnd as u8, 9);
-        assert_eq!(FrameType::RelayNotify as u8, 10);
-        assert_eq!(FrameType::RelayState as u8, 11);
-        assert_eq!(FrameType::Cancel as u8, 12);
+        assert_eq!(FrameType::Hello.code(), 0);
+        assert_eq!(FrameType::Req.code(), 1);
+        assert_eq!(FrameType::Chunk.code(), 3);
+        assert_eq!(FrameType::End.code(), 4);
+        assert_eq!(FrameType::Log.code(), 5);
+        assert_eq!(FrameType::Err.code(), 6);
+        assert_eq!(FrameType::Heartbeat.code(), 7);
+        assert_eq!(FrameType::StreamStart.code(), 8);
+        assert_eq!(FrameType::StreamEnd.code(), 9);
+        assert_eq!(FrameType::RelayNotify.code(), 10);
+        assert_eq!(FrameType::RelayState.code(), 11);
+        assert_eq!(FrameType::Cancel.code(), 12);
+        assert_eq!(FrameType::Credit.code(), 13);
+        assert_eq!(FrameType::CloseStream.code(), 14);
+        assert_eq!(FrameType::Policy.code(), 15);
     }
 
     // TEST174: Test MessageId::new_uuid generates valid UUID that roundtrips through string conversion
@@ -2677,21 +2682,21 @@ mod tests {
         // Protocol validation happens at a higher level, not in constructor
     }
 
-    // TEST399: Verify RelayNotify frame type discriminant roundtrips through u8 (value 10)
+    // TEST399: Verify RelayNotify's wire number roundtrips (value 10)
     #[test]
     fn test399_relay_notify_discriminant_roundtrip() {
-        let v = FrameType::RelayNotify as u8;
+        let v = FrameType::RelayNotify.code();
         assert_eq!(v, 10);
-        let recovered = FrameType::from_u8(v).expect("10 must map to RelayNotify");
+        let recovered = FrameType::from_code(v).expect("10 must map to RelayNotify");
         assert_eq!(recovered, FrameType::RelayNotify);
     }
 
-    // TEST400: Verify RelayState frame type discriminant roundtrips through u8 (value 11)
+    // TEST400: Verify RelayState's wire number roundtrips (value 11)
     #[test]
     fn test400_relay_state_discriminant_roundtrip() {
-        let v = FrameType::RelayState as u8;
+        let v = FrameType::RelayState.code();
         assert_eq!(v, 11);
-        let recovered = FrameType::from_u8(v).expect("11 must map to RelayState");
+        let recovered = FrameType::from_code(v).expect("11 must map to RelayState");
         assert_eq!(recovered, FrameType::RelayState);
     }
 
@@ -2708,7 +2713,7 @@ mod tests {
 
         assert_eq!(frame.frame_type, FrameType::RelayNotify);
         assert_eq!(frame.id, MessageId::Uint(0));
-        assert_eq!(frame.relay_notify_manifest(), Some(manifest.as_slice()));
+        assert_eq!(frame.relay_notify_manifest().unwrap(), manifest.as_slice());
 
         let extracted_limits = frame.relay_notify_limits().expect("must have limits");
         assert_eq!(extracted_limits.max_frame, 2_000_000);
@@ -2730,35 +2735,35 @@ mod tests {
         );
     }
 
-    // TEST403: Verify from_u8 returns None for values past the last valid frame type
+    // TEST403: Verify from_code returns None for values past the last valid frame type
     #[test]
     fn test403_invalid_frame_type_past_cancel() {
         assert_eq!(
-            FrameType::from_u8(12),
+            FrameType::from_code(12),
             Some(FrameType::Cancel),
             "12 is Cancel"
         );
         assert_eq!(
-            FrameType::from_u8(13),
+            FrameType::from_code(13),
             Some(FrameType::Credit),
             "13 is Credit"
         );
         assert_eq!(
-            FrameType::from_u8(14),
+            FrameType::from_code(14),
             Some(FrameType::CloseStream),
             "14 is CloseStream (the tap-off)"
         );
         assert_eq!(
-            FrameType::from_u8(15),
+            FrameType::from_code(15),
             Some(FrameType::Policy),
             "15 is Policy"
         );
         assert!(
-            FrameType::from_u8(16).is_none(),
+            FrameType::from_code(16).is_none(),
             "16 is past the last valid frame type"
         );
         assert!(
-            FrameType::from_u8(2).is_none(),
+            FrameType::from_code(2).is_none(),
             "2 (old Res) is permanently retired"
         );
     }
@@ -4247,6 +4252,48 @@ mod tests {
     // Relay Frame Types - Comprehensive Tests
     // =========================================================================
 
+    // TEST7198: relay_notify_limits refuses a RelayNotify whose limits are not
+    // all present and positive integers, naming the key: initial_credit
+    // missing, max_chunk zero, max_frame text. relay_notify_manifest refuses a
+    // RelayNotify with no manifest.
+    #[test]
+    fn test7198_relay_notify_limits_are_read_strictly() {
+        let with_meta = |change: &dyn Fn(&mut BTreeMap<String, ciborium::Value>)| {
+            let mut frame = Frame::relay_notify(b"{}", &Limits::default());
+            change(frame.meta.as_mut().unwrap());
+            frame
+        };
+        let missing_credit = with_meta(&|m| {
+            m.remove("initial_credit");
+        });
+        let zero_chunk = with_meta(&|m| {
+            m.insert("max_chunk".into(), ciborium::Value::Integer(0.into()));
+        });
+        let text_frame = with_meta(&|m| {
+            m.insert("max_frame".into(), ciborium::Value::Text("big".into()));
+        });
+        for (key, frame) in [("initial_credit", missing_credit), ("max_chunk", zero_chunk), ("max_frame", text_frame)] {
+            match frame.relay_notify_limits() {
+                Err(crate::bifaci::io::CborError::Protocol(msg)) => {
+                    assert!(msg.contains(key), "{key}: {msg}")
+                }
+                other => panic!("{key}: a broken limit must be refused, got {other:?}"),
+            }
+        }
+        let no_manifest = with_meta(&|m| {
+            m.remove("manifest");
+        });
+        match no_manifest.relay_notify_manifest() {
+            Err(crate::bifaci::io::CborError::Protocol(msg)) => assert!(msg.contains("manifest"), "{msg}"),
+            other => panic!("a RelayNotify without a manifest must be refused, got {other:?}"),
+        }
+        let whole = Frame::relay_notify(b"{}", &Limits::default())
+            .relay_notify_limits()
+            .expect("a RelayNotify with every limit reads");
+        assert_eq!(whole.initial_credit, Limits::default().initial_credit);
+        assert_eq!(whole.max_chunk, Limits::default().max_chunk);
+    }
+
     // TEST521: RelayNotify CBOR roundtrip preserves manifest and limits
     #[test]
     fn test521_relay_notify_cbor_roundtrip() {
@@ -4266,8 +4313,8 @@ mod tests {
 
         assert_eq!(decoded.frame_type, FrameType::RelayNotify);
         assert_eq!(
-            decoded.relay_notify_manifest(),
-            Some(manifest.as_slice()),
+            decoded.relay_notify_manifest().unwrap(),
+            manifest.as_slice(),
             "manifest must roundtrip"
         );
 
@@ -4342,8 +4389,8 @@ mod tests {
 
         assert_eq!(frame.frame_type, FrameType::RelayNotify);
         assert_eq!(
-            frame.relay_notify_manifest(),
-            Some(empty_manifest.as_slice())
+            frame.relay_notify_manifest().unwrap(),
+            empty_manifest.as_slice()
         );
     }
 
@@ -4383,8 +4430,8 @@ mod tests {
         let decoded = decode_frame(&encoded).expect("large manifest must decode");
 
         assert_eq!(
-            decoded.relay_notify_manifest(),
-            Some(large_manifest.as_bytes())
+            decoded.relay_notify_manifest().unwrap(),
+            large_manifest.as_bytes()
         );
     }
 
