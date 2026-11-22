@@ -647,3 +647,81 @@ fn test7125_peer_holds_follow_the_model() {
     }
     conclude("hold", table.len(), wrong);
 }
+
+/// A frame of an emission row, as a receiver takes it in: REQ and LOG are
+/// what the model calls `other`, and a LOG stands for them.
+fn emitted_frame(row: &Value) -> Frame {
+    let frame_type = match text(&row["frame"]).as_str() {
+        "stream_start" => FrameType::StreamStart,
+        "chunk" => FrameType::Chunk,
+        "stream_end" => FrameType::StreamEnd,
+        "end" => FrameType::End,
+        "err" => FrameType::Err,
+        "other" => FrameType::Log,
+        other => panic!("the model's table names no emitted frame '{other}'"),
+    };
+    let mut frame = Frame::new(frame_type, MessageId::Uint(1));
+    if !row["stream"].is_null() {
+        frame.stream_id = Some(text(&row["stream"]));
+    }
+    if frame_type == FrameType::Chunk {
+        frame.chunk_index = Some(uint(&row["index"]));
+    }
+    if frame_type == FrameType::StreamEnd {
+        frame.chunk_count = row["count"].as_u64();
+    }
+    frame
+}
+
+/// What a receiver says of the first frame out of order, as the model names it.
+fn violation_text(violation: &Value) -> Option<String> {
+    if violation.is_null() {
+        return None;
+    }
+    let stream = || text(&violation["stream"]);
+    Some(match text(&violation["kind"]).as_str() {
+        "after_end" => "a frame after the call's END or ERR".to_string(),
+        "stream_restarted" => format!("stream {} started twice", stream()),
+        "stream_not_open" => format!("a chunk or end for stream {}, which is not open", stream()),
+        "chunk_out_of_place" => format!(
+            "chunk out of place on stream {}: expected {}, got {}",
+            stream(),
+            uint(&violation["expected"]),
+            uint(&violation["got"])
+        ),
+        "chunk_count_wrong" => format!(
+            "chunk count wrong on stream {}: sent {}, said {}",
+            stream(),
+            uint(&violation["sent"]),
+            uint(&violation["said"])
+        ),
+        "end_with_open_stream" => format!("END with stream {} still open", stream()),
+        other => panic!("the model's table names no violation '{other}'"),
+    })
+}
+
+// TEST7126: a receiver takes a call's frames in order as the model does: it
+// refuses the first frame of every short flow that the model finds out of
+// order — a stream started twice, a chunk or an end for a stream not open, a
+// chunk out of its place, a count that is not what was sent, END with a stream
+// open, anything after END or ERR — naming what is wrong, and refuses nothing
+// in a flow the model finds in order.
+#[test]
+fn test7126_a_received_flow_is_checked_as_the_model_does() {
+    use crate::bifaci::request_state::ReceivedFlow;
+    let table = rows("emission");
+    let mut wrong = Vec::new();
+    for row in table {
+        let mut flow = ReceivedFlow::new();
+        let refused = row["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|frame| flow.receive(&emitted_frame(frame)).err());
+        let expected = violation_text(&row["violation"]);
+        if refused != expected {
+            wrong.push(format!("{row}: refused {refused:?}"));
+        }
+    }
+    conclude("emission", table.len(), wrong);
+}
