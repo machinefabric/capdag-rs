@@ -13,8 +13,9 @@
 //! 2. **Exact matching**: For target matching, use `is_equivalent()` not `conforms_to()`.
 //!    This ensures "media:X" does NOT match paths ending in "media:X;list".
 //!
-//! 3. **Conformance for traversal**: Use `conforms_to()` only for graph traversal
-//!    (can this output feed into that input?).
+//! 3. **Satisfaction for traversal**: a node, read complete, satisfies the next cap's
+//!    input (`satisfies()`): a node is what a step gave or a file's detected type,
+//!    and what it does not mention, it does not have.
 //!
 //! 4. **Deterministic ordering**: paths are sorted by cap step count (fewest
 //!    first; ForEach and Collect do not count), then the sum of their steps'
@@ -26,6 +27,12 @@
 //!    ForEach (a sequence into a cap that takes one value) and Collect (items
 //!    back into a sequence) are synthesized during traversal from those flags,
 //!    not stored as graph edges.
+//!
+//! 6. **The exact-path search steps only toward the target**: before it runs,
+//!    the states the target is reachable from, and how far each is from it, are
+//!    computed once; the search steps into a state only when the target is
+//!    within the steps it has left, so its node budget is spent on routes that
+//!    can end at the target.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -41,6 +48,11 @@ use crate::Cap;
 // =============================================================================
 // DATA STRUCTURES
 // =============================================================================
+
+/// A state of the path search: the media reached, whether it is a sequence,
+/// and whether the step that reached it was a ForEach (whose scalar cap must
+/// come next).
+pub(crate) type SearchState = (MediaUrn, bool, bool);
 
 /// Type of edge in the capability graph.
 ///
@@ -927,7 +939,7 @@ impl LiveCapFab {
     ///
     /// Get outgoing edges from a source media URN at a given `is_sequence` state.
     ///
-    /// Cap edges are matched purely on `conforms_to` — cardinality is irrelevant
+    /// Cap edges are matched purely on `satisfies` — cardinality is irrelevant
     /// to type matching. Cardinality transitions (ForEach/Collect) are synthesized
     /// based on the current `is_sequence` state:
     ///
@@ -949,7 +961,9 @@ impl LiveCapFab {
                     "Non-cap edge found in graph storage: {:?}",
                     edge.edge_type
                 );
-                if !source.conforms_to(&edge.from_spec) {
+                // A node is a value a step gave or a file's detected type:
+                // complete, so it is held to the cap's input with `satisfies`.
+                if !source.satisfies(&edge.from_spec) {
                     return false;
                 }
                 // Check cardinality compatibility:
@@ -984,7 +998,7 @@ impl LiveCapFab {
                         // effect; any other output gives its own type.
                         let runtime_out = match output_urn {
                             Some(output_urn) => output_urn.clone(),
-                            None => cap_urn.infer_runtime_output_media(source).ok()?,
+                            None => cap_urn.apply_to_runtime_input_media(source).ok()?,
                         };
                         Some((
                             LiveMachinePlanEdge {
@@ -1016,7 +1030,7 @@ impl LiveCapFab {
                     input_is_sequence, ..
                 } = &edge.edge_type
                 {
-                    !input_is_sequence && source.conforms_to(&edge.from_spec)
+                    !input_is_sequence && source.satisfies(&edge.from_spec)
                 } else {
                     false
                 }
@@ -1040,47 +1054,74 @@ impl LiveCapFab {
         result
     }
 
-    /// Fast reachability check using runtime-instantiated traversal semantics.
+    /// How few steps each search state reachable from the source is from the
+    /// target, for the states the target is reachable from within `max_depth`
+    /// of the source; `None` when no step reaches the target at all.
     ///
-    /// This deliberately avoids checking only registered literal graph nodes,
-    /// because `effect=none` and `effect=patch` can materialize concrete runtime
-    /// outputs that do not appear verbatim as stored edge endpoints.
-    pub(crate) fn has_reachable_exact_target(
+    /// A state is `(media, is_sequence, pending_foreach)`, as the path search
+    /// walks it. The states are found forward from the source over the edges
+    /// [`get_outgoing_edges`](Self::get_outgoing_edges) gives — at run time,
+    /// so the outputs `effect=none` and `effect=patch` give, which are not
+    /// stored edge endpoints, are found too — and the distances backward over
+    /// those same steps from the states that are the target. A state missing
+    /// from the map cannot reach the target; one at distance `d` cannot reach
+    /// it in fewer than `d` steps.
+    pub(crate) fn distances_to_exact_target(
         &self,
         source: &MediaUrn,
         target: &MediaUrn,
         is_sequence: bool,
         max_depth: usize,
-    ) -> bool {
-        use std::collections::VecDeque;
+    ) -> Option<HashMap<SearchState, usize>> {
+        let start: SearchState = (source.clone(), is_sequence, false);
+        let mut steps_into: HashMap<SearchState, Vec<SearchState>> = HashMap::new();
+        let mut reached_by_a_step: HashSet<SearchState> = HashSet::new();
+        let mut queue = VecDeque::from([(start.clone(), 0usize)]);
+        let mut seen: HashSet<SearchState> = HashSet::from([start]);
 
-        let mut queue = VecDeque::from([(source.clone(), is_sequence, false, 0usize)]);
-        let mut visited: HashSet<(MediaUrn, bool, bool)> =
-            HashSet::from([(source.clone(), is_sequence, false)]);
-
-        while let Some((current, current_is_seq, pending_foreach, depth)) = queue.pop_front() {
+        while let Some(((current, current_is_seq, pending_foreach), depth)) = queue.pop_front() {
             if depth >= max_depth {
                 continue;
             }
-
+            let from: SearchState = (current.clone(), current_is_seq, pending_foreach);
             for (edge, next_is_seq) in self.get_outgoing_edges(&current, current_is_seq) {
                 if pending_foreach && !Self::can_follow_foreach(&edge) {
                     continue;
                 }
-                if edge.is_cap() && edge.to_spec.is_equivalent(target) {
-                    return true;
-                }
-
                 let next_pending_foreach =
                     matches!(&edge.edge_type, LiveMachinePlanEdgeType::ForEach);
-                let visit_key = (edge.to_spec.clone(), next_is_seq, next_pending_foreach);
-                if visited.insert(visit_key.clone()) {
-                    queue.push_back((visit_key.0, visit_key.1, visit_key.2, depth + 1));
+                let next: SearchState = (edge.to_spec.clone(), next_is_seq, next_pending_foreach);
+                steps_into.entry(next.clone()).or_default().push(from.clone());
+                reached_by_a_step.insert(next.clone());
+                if seen.insert(next.clone()) {
+                    queue.push_back((next, depth + 1));
                 }
             }
         }
 
-        false
+        // The states that are the target: its media, reached by a step, not
+        // waiting on a ForEach's cap.
+        let mut distances: HashMap<SearchState, usize> = HashMap::new();
+        let mut backward: VecDeque<SearchState> = VecDeque::new();
+        for state in &reached_by_a_step {
+            if !state.2 && state.0.is_equivalent(target) {
+                distances.insert(state.clone(), 0);
+                backward.push_back(state.clone());
+            }
+        }
+        if distances.is_empty() {
+            return None;
+        }
+        while let Some(state) = backward.pop_front() {
+            let distance = distances[&state] + 1;
+            for before in steps_into.get(&state).into_iter().flatten() {
+                if !distances.contains_key(before) {
+                    distances.insert(before.clone(), distance);
+                    backward.push_back(before.clone());
+                }
+            }
+        }
+        Some(distances)
     }
 
     /// Get statistics about the graph.
@@ -1287,9 +1328,10 @@ impl LiveCapFab {
         max_paths: usize,
         step_title_query: Option<&str>,
     ) -> Vec<Strand> {
-        if !self.has_reachable_exact_target(source, target, is_sequence, max_depth) {
+        let Some(distances) = self.distances_to_exact_target(source, target, is_sequence, max_depth)
+        else {
             return Vec::new();
-        }
+        };
 
         // Iterative deepening: find ALL paths at depth N before any at depth N+1.
         let mut all_paths: Vec<Strand> = Vec::new();
@@ -1311,6 +1353,7 @@ impl LiveCapFab {
                 source,
                 is_sequence,
                 step_title_query,
+                &distances,
                 &mut current_path,
                 &mut visited,
                 &mut all_paths,
@@ -1384,9 +1427,10 @@ impl LiveCapFab {
     where
         F: FnMut(PathFindingEvent),
     {
-        if !self.has_reachable_exact_target(source, target, is_sequence, max_depth) {
+        let Some(distances) = self.distances_to_exact_target(source, target, is_sequence, max_depth)
+        else {
             return Vec::new();
-        }
+        };
 
         let mut all_paths: Vec<Strand> = Vec::new();
         let mut total_nodes_explored: u64 = 0;
@@ -1410,6 +1454,7 @@ impl LiveCapFab {
                 source,
                 is_sequence,
                 step_title_query,
+                &distances,
                 &mut current_path,
                 &mut visited,
                 &mut all_paths,
@@ -1457,6 +1502,11 @@ impl LiveCapFab {
     ///
     /// `is_sequence` tracks the current cardinality state through the path.
     /// Only records paths whose length equals `depth_limit` exactly.
+    ///
+    /// `distances` is [`distances_to_exact_target`](Self::distances_to_exact_target):
+    /// a step into a state the target is not within the steps left of is not
+    /// taken, and not counted against the node budget, since no route through
+    /// it ends at the target within `depth_limit`.
     fn iddfs_find_paths(
         &self,
         source: &MediaUrn,
@@ -1464,6 +1514,7 @@ impl LiveCapFab {
         current: &MediaUrn,
         is_sequence: bool,
         step_title_query: Option<&str>,
+        distances: &HashMap<SearchState, usize>,
         current_path: &mut Vec<StrandStep>,
         visited: &mut HashSet<(MediaUrn, bool)>,
         all_paths: &mut Vec<Strand>,
@@ -1536,8 +1587,18 @@ impl LiveCapFab {
             visited.insert(visit_key.clone());
         }
 
+        // The steps a route through the next state has left to reach the target.
+        let steps_left = depth_limit - current_path.len() - 1;
         for (edge, next_is_seq) in self.get_outgoing_edges(current, is_sequence) {
             if pending_foreach && !Self::can_follow_foreach(&edge) {
+                continue;
+            }
+            let next_state: SearchState = (
+                edge.to_spec.clone(),
+                next_is_seq,
+                matches!(&edge.edge_type, LiveMachinePlanEdgeType::ForEach),
+            );
+            if !distances.get(&next_state).is_some_and(|distance| *distance <= steps_left) {
                 continue;
             }
             let next_visit_key = (edge.to_spec.clone(), next_is_seq);
@@ -1600,6 +1661,7 @@ impl LiveCapFab {
                     &edge.to_spec,
                     next_is_seq,
                     step_title_query,
+                    distances,
                     current_path,
                     visited,
                     all_paths,
@@ -1862,6 +1924,84 @@ mod tests {
             .find(|t| t.media_def.is_equivalent(&digitized_text));
         assert!(cap_target.is_some(), "digitized-text should be reachable");
         assert_eq!(cap_target.unwrap().min_path_length, 1);
+    }
+
+    // TEST7216: a source is read complete: a JSON record file, which does not
+    // mention `list`, takes the edge of a cap whose input refuses lists, though
+    // as a type it may be a list; a JSON list does not.
+    #[test]
+    fn test7216_a_source_takes_an_edge_it_satisfies() {
+        let mut graph = LiveCapFab::new();
+        let cap = make_test_cap(
+            "media:enc=utf8;fmt=json;record;!list",
+            "media:enc=utf8;fmt=yaml;record",
+            "record_to_yaml",
+            "Record To YAML",
+        );
+        graph.add_cap(&cap);
+        graph.set_bookends(&all_bookends(&[cap.clone()]));
+
+        let yaml = MediaUrn::from_string("media:enc=utf8;fmt=yaml;record").unwrap();
+        let record = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;record").unwrap();
+        let input = MediaUrn::from_string("media:enc=utf8;fmt=json;record;!list").unwrap();
+        assert!(!record.conforms_to(&input), "as a type the file may be a list");
+
+        let targets = graph.get_reachable_targets(&record, false, 5);
+        let reached = targets
+            .iter()
+            .find(|t| t.media_def.is_equivalent(&yaml))
+            .expect("the record file takes the edge to YAML");
+        assert_eq!(reached.min_path_length, 1);
+        assert_eq!(graph.find_paths_to_exact_target(&record, &yaml, false, 5, 10).len(), 1);
+
+        let list = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;list;record").unwrap();
+        assert!(
+            graph
+                .get_reachable_targets(&list, false, 5)
+                .iter()
+                .all(|t| !t.media_def.is_equivalent(&yaml)),
+            "a list does not take an edge that refuses lists"
+        );
+    }
+
+    // TEST7219: the exact-path search steps only into states the target is
+    // reachable from. Twelve kinds of dead-end data, each convertible into
+    // every other, give far more routes than the node budget before depth six;
+    // the one route to the target is six steps long and is found.
+    #[test]
+    fn test7219_search_skips_branches_that_cannot_reach_the_target() {
+        let mut graph = LiveCapFab::new();
+        let mut caps = Vec::new();
+        let dead = |n: usize| format!("media:dead;n={n}");
+        for n in 0..12 {
+            caps.push(make_test_cap("media:start", &dead(n), &format!("into-dead-{n}"), "Into Dead"));
+            for m in 0..12 {
+                if m != n {
+                    caps.push(make_test_cap(&dead(n), &dead(m), &format!("dead-{n}-to-{m}"), "Dead To Dead"));
+                }
+            }
+        }
+        let route = |n: usize| format!("media:route;n={n}");
+        caps.push(make_test_cap("media:start", &route(1), "route-1", "Route 1"));
+        for n in 1..5 {
+            caps.push(make_test_cap(&route(n), &route(n + 1), &format!("route-{}", n + 1), "Route"));
+        }
+        caps.push(make_test_cap(&route(5), "media:finish", "finish", "Finish"));
+        for cap in &caps {
+            graph.add_cap(cap);
+        }
+
+        let start = MediaUrn::from_string("media:start").unwrap();
+        let finish = MediaUrn::from_string("media:finish").unwrap();
+        let paths = graph.find_paths_to_exact_target(&start, &finish, false, 8, 10);
+        assert_eq!(paths.len(), 1, "the one route is found");
+        assert_eq!(paths[0].cap_step_count, 6);
+
+        // The dead-end data cannot reach the target: it has no distance.
+        let distances = graph.distances_to_exact_target(&start, &finish, false, 8).unwrap();
+        assert!(!distances.contains_key(&(MediaUrn::from_string(&dead(3)).unwrap(), false, false)));
+        assert_eq!(distances[&(start.clone(), false, false)], 6);
+        assert!(graph.distances_to_exact_target(&finish, &start, false, 8).is_none());
     }
 
     // TEST1151: Exact target lookup prefers the direct singular or list-producing path over longer alternatives.

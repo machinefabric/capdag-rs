@@ -3773,9 +3773,11 @@ impl LiveFeedContext {
                         main.media_urn, self.cap_urn
                     ))
                 })?;
-                if !content.conforms_to(&main_urn) {
+                // What a provider delivers is what its items are: a complete
+                // thing, read with `satisfies`.
+                if !content.satisfies(&main_urn) {
                     return Err(StreamError::Protocol(format!(
-                        "live-feed reference '{}' delivers '{}' which does not conform to \
+                        "live-feed reference '{}' delivers '{}' which does not fit \
                          cap '{}' main input '{}' — this machine cannot consume that device",
                         reference_urn, provider_content, self.cap_urn, main.media_urn
                     )));

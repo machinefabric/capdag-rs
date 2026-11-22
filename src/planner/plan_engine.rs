@@ -1007,7 +1007,8 @@ impl LiveCapFab {
                     request
                         .sources
                         .iter()
-                        .all(|s| s.media_urn.conforms_to(&entry_in))
+                        // A source is a detected file: complete.
+                        .all(|s| s.media_urn.satisfies(&entry_in))
                 })
                 .collect();
             for strand in strands.iter().take(MAX_FOLDS_PER_APEX) {
@@ -1209,7 +1210,7 @@ impl LiveCapFab {
                 continue;
             }
             // Greedy deterministic injection: source i claims the first
-            // unclaimed arg some reached media conforms to, choosing the
+            // unclaimed arg some reached media satisfies, choosing the
             // shallowest (then most specific) reached media.
             let mut claimed: Vec<bool> = vec![false; arg_urns.len()];
             let mut assignments: Vec<(usize, MediaUrn)> = Vec::with_capacity(n); // (arg idx, concrete media)
@@ -1220,7 +1221,8 @@ impl LiveCapFab {
                         continue;
                     }
                     for ((media, is_seq), depth) in reach.iter() {
-                        if *is_seq || !media.conforms_to(arg) {
+                        // A reached node is what a step gave: complete.
+                        if *is_seq || !media.satisfies(arg) {
                             continue;
                         }
                         let better = match &best {

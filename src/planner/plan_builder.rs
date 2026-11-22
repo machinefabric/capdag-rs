@@ -183,7 +183,8 @@ impl MachinePlanBuilder {
                      never guesses; supply one entry per input anchor"
                 ))
             })?;
-            if !given.media.conforms_to(declared) {
+            // What a run binds is a value: complete.
+            if !given.media.satisfies(declared) {
                 return Err(PlannerError::InvalidInput(format!(
                     "the run binds '{}' to input anchor {anchor}, which takes '{declared}'",
                     given.media

@@ -489,7 +489,7 @@ impl ResponseAudit {
         // predicate above is the sole decision-maker).
         let expected = self
             .cap
-            .infer_runtime_output_media(&self.runtime_input)
+            .apply_to_runtime_input_media(&self.runtime_input)
             .map(|m| m.to_string())
             .unwrap_or_else(|e| format!("<uninferable: {}>", e));
         Err(StreamIoError::EffectContract {

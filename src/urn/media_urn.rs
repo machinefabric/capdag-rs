@@ -511,6 +511,28 @@ impl MediaUrn {
         Self(self.0.clone().without_tag(key))
     }
 
+    /// The published media definition this URN, written as a reference, resolves
+    /// to: the URN without every tag that lets its key be absent (`!k`, `?k`,
+    /// `k?=v`). Such a tag names no value — `!k` says the dim has none, `?k`
+    /// leaves it open — so it refines a published type rather than naming
+    /// another: `media:enc=utf8;fmt=json;!ext` and
+    /// `media:enc=utf8;fmt=json;?list;?record` both resolve to
+    /// `media:enc=utf8;fmt=json`. Which tags go is decided from the parsed
+    /// constraint by tagged-urn's model ([`TaggedUrn::admits_absence`]).
+    pub fn reference_base(&self) -> MediaUrn {
+        let absent_keys: Vec<&String> = self
+            .0
+            .tags()
+            .keys()
+            .filter(|key| self.0.admits_absence(key))
+            .collect();
+        let mut base = self.0.clone();
+        for key in absent_keys {
+            base = base.without_tag(key);
+        }
+        MediaUrn(base)
+    }
+
     /// Compute the coordinate-space delta from `base` to `self`.
     pub fn delta_from(&self, base: &MediaUrn) -> Result<TaggedUrnCoordinateDelta, TaggedUrnError> {
         self.0.delta_from(&base.0)
@@ -1782,5 +1804,20 @@ mod debug_tests {
             assert!(predicate(&parse(format!("media:!{marker}"))), "media:!{marker}");
             assert!(predicate(&parse(format!("media:?{marker}"))), "media:?{marker}");
         }
+    }
+
+    // TEST7212: a media URN written as a reference resolves to the published definition without every tag that lets its key be absent (!k, ?k, k?=v); a tag that requires its key (k, k=v, k!=v) stays, and a URN with none is its own base.
+    #[test]
+    fn test7212_reference_base_drops_tags_admitting_absence() {
+        let base = |s: &str| MediaUrn::from_string(s).unwrap().reference_base().to_string();
+        let urn = |s: &str| MediaUrn::from_string(s).unwrap().to_string();
+        assert_eq!(base("media:enc=utf8;fmt=json;!ext"), urn("media:enc=utf8;fmt=json"));
+        assert_eq!(base("media:enc=utf8;fmt=json;?list;?record"), urn("media:enc=utf8;fmt=json"));
+        assert_eq!(base("media:enc=utf8;fmt=json;list;record;!ext"), urn("media:enc=utf8;fmt=json;list;record"));
+        assert_eq!(base("media:ext?=pdf;image"), urn("media:image"));
+        assert_eq!(base("media:ext!=pdf;image"), urn("media:ext!=pdf;image"));
+        assert_eq!(base("media:enc=utf8;fmt=json"), urn("media:enc=utf8;fmt=json"));
+        assert_eq!(base("media:!void"), urn("media:"));
+        assert_eq!(base("media:void"), urn("media:void"));
     }
 }
