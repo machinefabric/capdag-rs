@@ -45,7 +45,7 @@ use crate::bifaci::manifest::CapManifest;
 use crate::cap::caller::CapArgumentValue;
 use crate::cap::definition::{ArgSource, Cap, CapArg};
 use crate::standard::caps::{CAP_ADAPTER_SELECTION, CAP_DISCARD, CAP_IDENTITY};
-use crate::urn::cap_urn::CapUrn;
+use crate::urn::cap_urn::{CapUrn, CapUrnError};
 use crate::urn::media_urn::MediaUrn;
 use async_trait::async_trait;
 // crossbeam is used for demux_multi_stream (bridging sync stdin reads to async handlers)
@@ -5077,8 +5077,9 @@ impl PoolHandle {
 /// oldest eligible waiter (global FIFO across caps) when any chain pool
 /// frees. Nothing declared = every pool unlimited.
 pub struct CartridgeRuntime {
-    /// Registered Op factories by cap URN pattern
-    handlers: HashMap<String, OpFactory>,
+    /// Registered Op factories, in registration order: of handlers that rank
+    /// alike for a request, the first registered serves
+    handlers: Vec<(CapUrn, OpFactory)>,
 
     /// Cartridge manifest JSON data - sent in HELLO response.
     /// This is REQUIRED - cartridges must provide their manifest.
@@ -5516,7 +5517,7 @@ impl CartridgeRuntime {
         };
 
         let mut rt = Self {
-            handlers: HashMap::new(),
+            handlers: Vec::new(),
             manifest_data,
             manifest: parsed_manifest,
             limits: Limits::default(),
@@ -5545,7 +5546,7 @@ impl CartridgeRuntime {
 
         let manifest_data = serde_json::to_vec(&manifest).unwrap_or_default();
         let mut rt = Self {
-            handlers: HashMap::new(),
+            handlers: Vec::new(),
             manifest_data,
             manifest: Some(manifest),
             limits: Limits::default(),
@@ -5593,15 +5594,21 @@ impl CartridgeRuntime {
     /// Register the standard identity and discard handlers.
     /// Cartridge authors can override either by calling register_op() after construction.
     fn register_standard_caps(&mut self) {
-        if self.find_handler(CAP_IDENTITY).is_none() {
+        if !self.has_standard_handler(CAP_IDENTITY) {
             self.register_op_type::<IdentityOp>(CAP_IDENTITY);
         }
-        if self.find_handler(CAP_DISCARD).is_none() {
+        if !self.has_standard_handler(CAP_DISCARD) {
             self.register_op_type::<DiscardOp>(CAP_DISCARD);
         }
-        if self.find_handler(CAP_ADAPTER_SELECTION).is_none() {
+        if !self.has_standard_handler(CAP_ADAPTER_SELECTION) {
             self.register_op_type::<AdapterSelectionOp>(CAP_ADAPTER_SELECTION);
         }
+    }
+
+    fn has_standard_handler(&self, cap_urn: &str) -> bool {
+        self.find_handler(cap_urn)
+            .unwrap_or_else(|e| panic!("standard cap URN '{}' does not parse: {}", cap_urn, e))
+            .is_some()
     }
 
     /// Set the maximum number of concurrent handler invocations.
@@ -5625,11 +5632,30 @@ impl CartridgeRuntime {
 
     /// Register an Op factory for a cap URN.
     /// The factory creates a fresh Op<()> instance per invocation.
+    ///
+    /// **PANICS** if `cap_urn` does not parse. Registering a cap equivalent to
+    /// one already registered replaces its handler.
     pub fn register_op<F>(&mut self, cap_urn: &str, factory: F)
     where
         F: Fn() -> Box<dyn Op<()>> + Send + Sync + 'static,
     {
-        self.handlers.insert(cap_urn.to_string(), Arc::new(factory));
+        self.register_factory(cap_urn, Arc::new(factory));
+    }
+
+    /// Add `factory` under `cap_urn`, or replace the factory of a registered
+    /// cap equivalent to it, keeping that cap's place in registration order.
+    fn register_factory(&mut self, cap_urn: &str, factory: OpFactory) {
+        let cap = CapUrn::from_string(cap_urn).unwrap_or_else(|e| {
+            panic!("cannot register a handler for '{}': {}", cap_urn, e)
+        });
+        match self
+            .handlers
+            .iter_mut()
+            .find(|(registered, _)| registered.is_equivalent(&cap))
+        {
+            Some(entry) => entry.1 = factory,
+            None => self.handlers.push((cap, factory)),
+        }
     }
 
     /// Register a live family this cartridge resolves itself (13.2 §Reference
@@ -5666,74 +5692,42 @@ impl CartridgeRuntime {
 
     /// Register an Op type for a cap URN. The type must implement Op<()> + Default.
     /// Creates instances via Default::default() on each invocation.
+    ///
+    /// **PANICS** if `cap_urn` does not parse. Registering a cap equivalent to
+    /// one already registered replaces its handler.
     pub fn register_op_type<T: Op<()> + Default + 'static>(&mut self, cap_urn: &str) {
-        self.handlers.insert(
-            cap_urn.to_string(),
+        self.register_factory(
+            cap_urn,
             Arc::new(|| Box::new(T::default()) as Box<dyn Op<()>>),
         );
     }
 
-    /// Find a handler for a cap URN.
-    /// Returns the OpFactory if found, None otherwise.
-    ///
-    /// Uses `is_dispatchable(candidate, request)` to find handlers that can
-    /// legally handle the request, then ranks by specificity.
-    ///
-    /// Ranking prefers:
-    /// 1. Equivalent matches (distance 0)
-    /// 2. More specific candidates (positive distance) - refinements
-    /// 3. More generic candidates (negative distance) - fallbacks
-    pub fn find_handler(&self, cap_urn: &str) -> Option<OpFactory> {
-        self.find_handler_with_pattern(cap_urn)
-            .map(|(_, handler)| handler)
+    /// Find a handler for a cap URN: `Ok(None)` when no registered cap serves
+    /// it, an error when `cap_urn` does not parse. See
+    /// [`find_handler_with_pattern`](Self::find_handler_with_pattern).
+    pub fn find_handler(&self, cap_urn: &str) -> Result<Option<OpFactory>, CapUrnError> {
+        Ok(self
+            .find_handler_with_pattern(cap_urn)?
+            .map(|(_, handler)| handler))
     }
 
     /// Find a handler AND the canonical registered pattern that won the
     /// dispatch — the pattern is the request's pool identity (its singleton
     /// queue and the key of its pool chain).
-    pub fn find_handler_with_pattern(&self, cap_urn: &str) -> Option<(String, OpFactory)> {
-        let request_urn = match CapUrn::from_string(cap_urn) {
-            Ok(u) => u,
-            Err(_) => return None,
-        };
-
-        let request_specificity = request_urn.specificity();
-        // (canonical pattern, handler, signed_distance)
-        let mut best: Option<(String, OpFactory, isize)> = None;
-
-        for (registered_cap_str, handler) in &self.handlers {
-            if let Ok(registered_urn) = CapUrn::from_string(registered_cap_str) {
-                // Use is_dispatchable: can this candidate handle this request?
-                if registered_urn.is_dispatchable(&request_urn) {
-                    let specificity = registered_urn.specificity();
-                    let signed_distance = specificity as isize - request_specificity as isize;
-
-                    let dominated = match &best {
-                        None => false,
-                        Some((_, _, best_dist)) => {
-                            // Current best dominates if:
-                            // - best is non-negative and candidate is negative
-                            // - OR both same sign and best has smaller abs distance
-                            match (best_dist >= &0, signed_distance >= 0) {
-                                (true, false) => true,  // best is refinement, candidate is fallback
-                                (false, true) => false, // candidate is refinement, best is fallback
-                                _ => best_dist.unsigned_abs() <= signed_distance.unsigned_abs(),
-                            }
-                        }
-                    };
-
-                    if !dominated {
-                        best = Some((
-                            registered_urn.to_string(),
-                            Arc::clone(handler),
-                            signed_distance,
-                        ));
-                    }
-                }
-            }
-        }
-
-        best.map(|(pattern, handler, _)| (pattern, handler))
+    ///
+    /// The proved ranking chooses ([`CapUrn::select`]) among the registered
+    /// caps that serve the request; of handlers that rank alike, the first
+    /// registered serves.
+    pub fn find_handler_with_pattern(
+        &self,
+        cap_urn: &str,
+    ) -> Result<Option<(String, OpFactory)>, CapUrnError> {
+        let request = CapUrn::from_string(cap_urn)?;
+        let caps: Vec<CapUrn> = self.handlers.iter().map(|(cap, _)| cap.clone()).collect();
+        Ok(CapUrn::select(&caps, &request).map(|i| {
+            let (cap, handler) = &self.handlers[i];
+            (cap.to_string(), Arc::clone(handler))
+        }))
     }
 
     /// Run the cartridge runtime.
@@ -5821,12 +5815,15 @@ impl CartridgeRuntime {
             })?;
 
         // Find handler factory
-        let factory = self.find_handler(&cap.urn_string()).ok_or_else(|| {
-            RuntimeError::NoHandler(format!(
-                "No handler registered for cap '{}'",
-                cap.urn_string()
-            ))
-        })?;
+        let factory = self
+            .find_handler(&cap.urn_string())
+            .map_err(|e| RuntimeError::CapUrn(format!("'{}': {}", cap.urn_string(), e)))?
+            .ok_or_else(|| {
+                RuntimeError::NoHandler(format!(
+                    "No handler registered for cap '{}'",
+                    cap.urn_string()
+                ))
+            })?;
 
         // Extract CLI arguments (everything after subcommand)
         let cli_args = &args[2..];
@@ -6478,7 +6475,8 @@ impl CartridgeRuntime {
         // duplicate registration) and fail the process at startup, precisely
         // named, rather than surfacing as capacity misbehavior later.
         let initial_pool_states = {
-            let handler_patterns: Vec<String> = self.handlers.keys().cloned().collect();
+            let handler_patterns: Vec<String> =
+                self.handlers.iter().map(|(cap, _)| cap.to_string()).collect();
             let declarations = self
                 .manifest
                 .as_ref()
@@ -6789,8 +6787,20 @@ impl CartridgeRuntime {
                     };
 
                     let (pattern, factory) = match self.find_handler_with_pattern(&cap_urn) {
-                        Some(found) => found,
-                        None => {
+                        Ok(Some(found)) => found,
+                        Err(e) => {
+                            let mut err_frame = Frame::err(
+                                frame.id.clone(),
+                                "INVALID_REQUEST",
+                                crate::failure::AttributionClass::Internal,
+                                &format!("Request cap URN '{}' does not parse: {}", cap_urn, e),
+                                None,
+                            );
+                            err_frame.routing_id = routing_id;
+                            let _ = output_tx.send(err_frame);
+                            continue;
+                        }
+                        Ok(None) => {
                             // A dispatched cap this binary doesn't handle is a
                             // deployment/manifest mismatch — Environment.
                             let mut err_frame = Frame::err(
@@ -10154,6 +10164,7 @@ mod tests {
         });
         assert!(runtime
             .find_handler("cap:in=media:;test;out=media:")
+            .unwrap()
             .is_some());
     }
 
@@ -10170,7 +10181,7 @@ mod tests {
             }) as Box<dyn Op<()>>
         });
 
-        let factory = runtime.find_handler("cap:raw").unwrap();
+        let factory = runtime.find_handler("cap:raw").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"echo this")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&factory, input, output).await.unwrap();
@@ -10233,7 +10244,7 @@ mod tests {
             }) as Box<dyn Op<()>>
         });
 
-        let factory = runtime.find_handler("cap:test").unwrap();
+        let factory = runtime.find_handler("cap:test").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"{\"key\":\"hello\"}")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&factory, input, output).await.unwrap();
@@ -10270,7 +10281,7 @@ mod tests {
         let mut runtime = CartridgeRuntime::new(TEST_MANIFEST.as_bytes());
         runtime.register_op("cap:test", || Box::new(JsonParseOp));
 
-        let factory = runtime.find_handler("cap:test").unwrap();
+        let factory = runtime.find_handler("cap:test").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"not json {{{{")]);
         let (output, _out_rx) = test_output_stream();
         let result = invoke_op(&factory, input, output).await;
@@ -10287,7 +10298,7 @@ mod tests {
     #[test]
     fn test252_find_handler_unknown_cap() {
         let runtime = CartridgeRuntime::new(TEST_MANIFEST.as_bytes());
-        assert!(runtime.find_handler("cap:nonexistent").is_none());
+        assert!(runtime.find_handler("cap:nonexistent").unwrap().is_none());
     }
 
     // TEST253: Test OpFactory can be cloned via Arc and sent across tasks (Send + Sync)
@@ -10334,7 +10345,7 @@ mod tests {
             }
         }
 
-        let factory = runtime.find_handler("cap:threaded").unwrap();
+        let factory = runtime.find_handler("cap:threaded").unwrap().unwrap();
         let factory_clone = Arc::clone(&factory);
 
         let handle = tokio::spawn(async move {
@@ -10621,17 +10632,17 @@ mod tests {
         runtime.register_op("cap:beta", || Box::new(EchoTagOp { tag: b"b".to_vec() }));
         runtime.register_op("cap:gamma", || Box::new(EchoTagOp { tag: b"g".to_vec() }));
 
-        let f_alpha = runtime.find_handler("cap:alpha").unwrap();
+        let f_alpha = runtime.find_handler("cap:alpha").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&f_alpha, input, output).await.unwrap();
 
-        let f_beta = runtime.find_handler("cap:beta").unwrap();
+        let f_beta = runtime.find_handler("cap:beta").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&f_beta, input, output).await.unwrap();
 
-        let f_gamma = runtime.find_handler("cap:gamma").unwrap();
+        let f_gamma = runtime.find_handler("cap:gamma").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&f_gamma, input, output).await.unwrap();
@@ -10695,7 +10706,7 @@ mod tests {
             }
         }
 
-        let factory = runtime.find_handler("cap:test").unwrap();
+        let factory = runtime.find_handler("cap:test").unwrap().unwrap();
         let input = test_input_package(&[("media:", b"")]);
         let (output, _out_rx) = test_output_stream();
         invoke_op(&factory, input, output).await.unwrap();
@@ -10921,7 +10932,7 @@ mod tests {
         )
         .unwrap();
 
-        let factory = runtime.find_handler(&cap.urn_string()).unwrap();
+        let factory = runtime.find_handler(&cap.urn_string()).unwrap().unwrap();
 
         // Simulate CLI mode: parse CBOR args → send as streams → InputPackage
         let input = test_input_package(&[("media:", &payload)]);
@@ -11622,7 +11633,7 @@ mod tests {
         )
         .unwrap();
 
-        let factory = runtime.find_handler(&cap.urn_string()).unwrap();
+        let factory = runtime.find_handler(&cap.urn_string()).unwrap().unwrap();
 
         let input = test_input_package(&[("media:", &payload)]);
         let (output, _out_rx) = test_output_stream();
@@ -12481,7 +12492,7 @@ mod tests {
         ])]);
         ciborium::into_writer(&cbor_args, &mut payload_bytes).unwrap();
 
-        let factory = runtime.find_handler(&cap.urn_string()).unwrap();
+        let factory = runtime.find_handler(&cap.urn_string()).unwrap().unwrap();
 
         // Send payload as InputPackage
         let input = test_input_package(&[("media:", &payload_bytes)]);
@@ -12880,13 +12891,13 @@ mod tests {
 
         // Identity handler must be registered at exact CAP_IDENTITY URN
         assert!(
-            runtime.find_handler(CAP_IDENTITY).is_some(),
+            runtime.find_handler(CAP_IDENTITY).unwrap().is_some(),
             "CartridgeRuntime must auto-register identity handler"
         );
 
         // Discard handler must be registered at exact CAP_DISCARD URN
         assert!(
-            runtime.find_handler(CAP_DISCARD).is_some(),
+            runtime.find_handler(CAP_DISCARD).unwrap().is_some(),
             "CartridgeRuntime must auto-register discard handler"
         );
 
@@ -12895,6 +12906,7 @@ mod tests {
         assert!(
             runtime
                 .find_handler("cap:in=\"media:void\";nonexistent;out=\"media:void\"")
+                .unwrap()
                 .is_none(),
             "Standard handlers must not catch arbitrary specific requests"
         );
@@ -12906,7 +12918,7 @@ mod tests {
         let runtime = CartridgeRuntime::new(VALID_MANIFEST.as_bytes());
 
         assert!(
-            runtime.find_handler(CAP_ADAPTER_SELECTION).is_some(),
+            runtime.find_handler(CAP_ADAPTER_SELECTION).unwrap().is_some(),
             "CartridgeRuntime must auto-register adapter selection handler"
         );
     }
@@ -12917,7 +12929,7 @@ mod tests {
         let mut runtime = CartridgeRuntime::new(VALID_MANIFEST.as_bytes());
 
         // Verify default is registered
-        assert!(runtime.find_handler(CAP_ADAPTER_SELECTION).is_some());
+        assert!(runtime.find_handler(CAP_ADAPTER_SELECTION).unwrap().is_some());
 
         // Override with custom handler
         #[derive(Default)]
@@ -12936,7 +12948,7 @@ mod tests {
 
         // Must still find a handler (the custom one)
         assert!(
-            runtime.find_handler(CAP_ADAPTER_SELECTION).is_some(),
+            runtime.find_handler(CAP_ADAPTER_SELECTION).unwrap().is_some(),
             "Custom adapter selection handler must be findable after override"
         );
     }
@@ -12961,7 +12973,7 @@ mod tests {
 
         // Auto-registered identity handler must exist
         assert!(
-            runtime.find_handler(CAP_IDENTITY).is_some(),
+            runtime.find_handler(CAP_IDENTITY).unwrap().is_some(),
             "Auto-registered identity must exist before override"
         );
 
@@ -12971,7 +12983,7 @@ mod tests {
         // Override identity with a custom Op
         runtime.register_op_type::<FailOp>(CAP_IDENTITY);
 
-        // Handler count must not change (HashMap insert replaces, doesn't add)
+        // Handler count must not change (an equivalent registration replaces, doesn't add)
         assert_eq!(
             runtime.handlers.len(),
             handlers_before,
@@ -12980,14 +12992,59 @@ mod tests {
 
         // The handler at CAP_IDENTITY must still be findable
         assert!(
-            runtime.find_handler(CAP_IDENTITY).is_some(),
+            runtime.find_handler(CAP_IDENTITY).unwrap().is_some(),
             "Identity handler must be findable after override"
         );
 
         // Also verify discard was NOT affected by the override
         assert!(
-            runtime.find_handler(CAP_DISCARD).is_some(),
+            runtime.find_handler(CAP_DISCARD).unwrap().is_some(),
             "Discard handler must still be present after overriding identity"
+        );
+    }
+
+    // TEST6757: Of handlers that rank alike for a request, the first registered serves, in
+    // every runtime; an equivalent registration replaces, and an unparsable one is refused
+    #[test]
+    fn test6757_handler_ties_go_to_first_registered() {
+        let noop = || -> Box<dyn Op<()>> { Box::new(EmitBytesOp { data: Vec::new() }) };
+        let x = CapUrn::from_string("cap:op;x=a").unwrap().to_string();
+        let y = CapUrn::from_string("cap:op;y=b").unwrap().to_string();
+
+        for (first, second) in [(&x, &y), (&y, &x)] {
+            for _ in 0..64 {
+                let mut runtime = CartridgeRuntime::new(TEST_MANIFEST.as_bytes());
+                runtime.register_op(first, noop);
+                runtime.register_op(second, noop);
+                let (pattern, _) = runtime
+                    .find_handler_with_pattern("cap:op")
+                    .unwrap()
+                    .expect("both handlers serve cap:op");
+                assert_eq!(
+                    &pattern, first,
+                    "the first registered of two alike handlers must serve"
+                );
+            }
+        }
+
+        let mut runtime = CartridgeRuntime::new(TEST_MANIFEST.as_bytes());
+        let before = runtime.handlers.len();
+        runtime.register_op("cap:op;x=a", noop);
+        runtime.register_op("cap:x=a;op", noop);
+        assert_eq!(
+            runtime.handlers.len(),
+            before + 1,
+            "two spellings of one cap must be one entry"
+        );
+
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.register_op("cap:op;x=", noop)
+        }));
+        assert!(refused.is_err(), "an unparsable cap must be refused when registered");
+
+        assert!(
+            runtime.find_handler_with_pattern("op;x=a").is_err(),
+            "an unparsable request must be reported, not read as no handler"
         );
     }
 

@@ -80,14 +80,16 @@ mod tests {
             .register_op_type::<TransformOp>("cap:in=\"media:void\";transform;out=\"media:void\"");
 
         // Exact match
-        assert!(runtime.find_handler(CAP_IDENTITY).is_some());
+        assert!(runtime.find_handler(CAP_IDENTITY).unwrap().is_some());
         assert!(runtime
             .find_handler("cap:in=\"media:void\";transform;out=\"media:void\"")
+            .unwrap()
             .is_some());
 
         // Non-existent
         assert!(runtime
             .find_handler("cap:in=\"media:void\";unknown;out=\"media:void\"")
+            .unwrap()
             .is_none());
     }
 
