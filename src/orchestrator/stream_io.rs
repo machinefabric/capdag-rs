@@ -3153,7 +3153,7 @@ mod tests {
                 tx.send(chunk(&rid, b"before")).unwrap();
                 // Two and a half activity timeouts of silence.
                 tokio::time::sleep(Duration::from_millis(2500)).await;
-                tx.send(chunk(&rid, b"-after")).unwrap();
+                tx.send(chunk_of(&rid, "out", 1, b"-after")).unwrap();
                 tx.send(Frame::stream_end(rid.clone(), "out".to_string(), 2)).unwrap();
                 tx.send(Frame::end_ok(rid.clone(), None)).unwrap();
             })
