@@ -510,7 +510,7 @@ fn test12383_pool_limits_are_the_models() {
 /// of `size` bytes. The REQ names its cap and has been given its routing id,
 /// as a switch hands it to its holds.
 fn held_frame(code: u64, size: u64) -> Frame {
-    let frame_type = FrameType::from_u8(code as u8)
+    let frame_type = FrameType::from_code(code)
         .unwrap_or_else(|| panic!("wire number {code} names no frame type"));
     let mut frame = Frame::new(frame_type, MessageId::Uint(1));
     frame.payload = (size > 0).then(|| vec![0u8; size as usize]);
