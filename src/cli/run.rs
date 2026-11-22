@@ -642,6 +642,31 @@ fn selector_bytes(given: Option<&str>, live: bool) -> CliResult<Vec<u8>> {
     }
 }
 
+/// The inputs a value fits most closely, by the signed specificity distance
+/// between what it is and what each takes. A value — a detected file, a live
+/// source's content — is a complete thing: what it does not mention it does not
+/// have, so it fits an input it satisfies, and may fit one that says more than
+/// it writes (a distance below zero). Several are returned only when they tie.
+fn nearest_inputs<'a, T>(media: &MediaUrn, inputs: impl IntoIterator<Item = (T, &'a MediaUrn)>) -> Vec<T> {
+    let mut best: Vec<T> = Vec::new();
+    let mut nearest: Option<i64> = None;
+    for (input, takes) in inputs {
+        if !media.satisfies(takes).unwrap_or(false) {
+            continue;
+        }
+        let distance = media.specificity() as i64 - takes.specificity() as i64;
+        match nearest {
+            Some(closest) if distance > closest => {}
+            Some(closest) if distance == closest => best.push(input),
+            _ => {
+                nearest = Some(distance);
+                best = vec![input];
+            }
+        }
+    }
+    best
+}
+
 /// What one input of a machine is given for one run.
 #[derive(Clone)]
 enum Given {
@@ -731,20 +756,15 @@ async fn plan_machine_runs(
     // `file`: the file the value is, when it is one — what `plan` can be
     // asked about.
     let closest = |media: &MediaUrn, what: &str, file: Option<&Path>| -> CliResult<String> {
-        let mut best: Vec<(&crate::orchestrator::machine_plan::MachineAnchor, i64)> = Vec::new();
-        for input in machine_inputs.iter().filter(|i| !named.contains(&i.name)) {
-            if !media.conforms_to(&input.media_urn).unwrap_or(false) {
-                continue;
-            }
-            let distance = media.specificity() as i64 - input.media_urn.specificity() as i64;
-            match best.first() {
-                Some((_, nearest)) if distance > *nearest => {}
-                Some((_, nearest)) if distance == *nearest => best.push((input, distance)),
-                _ => best = vec![(input, distance)],
-            }
-        }
+        let best = nearest_inputs(
+            media,
+            machine_inputs
+                .iter()
+                .filter(|i| !named.contains(&i.name))
+                .map(|i| (i, &i.media_urn)),
+        );
         match best.as_slice() {
-            [(input, _)] => Ok(input.name.clone()),
+            [input] => Ok(input.name.clone()),
             [] => Err({
                 let error = CliError::failed(format!("{what} is not what this machine takes"))
                     .context(format!("its inputs: {}", input_names()));
@@ -756,7 +776,7 @@ async fn plan_machine_runs(
             several => Err(CliError::usage(format!("{what} fits several inputs of this machine"))
                 .context(format!(
                     "it fits {}",
-                    several.iter().map(|(i, _)| format!("'{}'", i.name)).collect::<Vec<_>>().join(", ")
+                    several.iter().map(|i| format!("'{}'", i.name)).collect::<Vec<_>>().join(", ")
                 ))
                 .hint("say which with --input <name>=@<path>")),
         }
@@ -1426,5 +1446,25 @@ mod tests {
         assert_eq!(separated("capdag run csv2json --help"), ["capdag", "run", "csv2json", "--", "--help"]);
         assert_eq!(separated("capdag run --help"), ["capdag", "run", "--help"]);
         assert_eq!(separated("capdag plan run.pdf"), ["capdag", "plan", "run.pdf"]);
+    }
+
+    // TEST7218: a detected file goes to the input it fits most closely, read
+    // as a complete thing: a JSON record file, which does not mention `list`,
+    // fits an input that refuses lists, and that input is closer than one
+    // that takes any text.
+    #[test]
+    fn test7218_a_file_goes_to_the_closest_input_it_satisfies() {
+        let file = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;record").unwrap();
+        let record = MediaUrn::from_string("media:enc=utf8;fmt=json;record;!list").unwrap();
+        let text = MediaUrn::from_string("media:enc=utf8").unwrap();
+        assert!(!file.conforms_to(&record).unwrap(), "as a type the file may be a list");
+        for inputs in [[("record", &record), ("text", &text)], [("text", &text), ("record", &record)]] {
+            assert_eq!(nearest_inputs(&file, inputs), vec!["record"]);
+        }
+        // A file that is a list fits only the text input.
+        let list = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;list").unwrap();
+        assert_eq!(nearest_inputs(&list, [("record", &record), ("text", &text)]), vec!["text"]);
+        // Two inputs the file is equally close to are both returned.
+        assert_eq!(nearest_inputs(&file, [("one", &text), ("two", &text)]), vec!["one", "two"]);
     }
 }

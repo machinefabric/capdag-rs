@@ -686,15 +686,16 @@ impl CapUrn {
     }
 
     /// Whether `cap` fits this cap read as a PATTERN over caps — what a search
-    /// asks: `cap`'s input is within this pattern's, its output covers the
-    /// pattern's, its effect is the pattern's (a pattern's `?effect` fits
-    /// any), and its cap-tags — complete: a cap has the tags it has — satisfy
-    /// the pattern's.
+    /// asks: `cap`'s input is within this pattern's, its output is within the
+    /// pattern's — everything it gives is of the type the pattern names, its
+    /// declared output read complete — its effect is the pattern's (a
+    /// pattern's `?effect` fits any), and its cap-tags — complete: a cap has
+    /// the tags it has — satisfy the pattern's. `cap:out="media:ext=pdf"` fits
+    /// caps giving `media:ext=pdf` or `media:document;ext=pdf`, and not one
+    /// giving `media:`, which gives a thing with no tags.
     ///
-    /// A side the pattern leaves open is not asked about. `cap:candle` fits
-    /// every cap tagged `candle`, whatever it takes and gives: its open output
-    /// is "not established", not the type "anything" — which only a cap whose
-    /// output is `media:` would cover.
+    /// An output the pattern leaves open asks nothing. `cap:candle` fits every
+    /// cap tagged `candle`, whatever it gives.
     ///
     /// Decided by the proved model (`CapDAG.Exec.accepts`, which
     /// `accepts_decides` shows is `CapDAG.fits`: the query
@@ -741,28 +742,32 @@ impl CapUrn {
     /// Whether this candidate SERVES `request` — the predicate routing and
     /// dispatch act on.
     ///
-    /// The candidate takes at least what the request sends (it may take
-    /// more), gives at least what the request needs (it may give something
-    /// more specific), has the effect asked for unless the request says
-    /// `?effect`, and has the cap-tags asked for — its own tags being
-    /// complete, so a request for `!x` is served by a candidate that does not
-    /// mention `x`, and a candidate may carry tags the request does not ask
-    /// about.
+    /// The request is a call: it sends what its input says and asks for its
+    /// output. The candidate takes at least what the call sends (it may take
+    /// more); what it gives for that is inside what the call asks for; it has
+    /// the effect asked for unless the call says `?effect`; and it has the
+    /// cap-tags asked for — its own tags being complete, so a request for `!x`
+    /// is served by a candidate that does not mention `x`, and a candidate may
+    /// carry tags the request does not ask about.
     ///
-    /// An input the request leaves open is not established: the caller has
-    /// not said what it will send, and every candidate passes that side. That
-    /// is "some input", not "any input" — the type `media:` on a CANDIDATE's
-    /// input does mean it takes anything.
+    /// What the candidate gives is what its effect says: a declared output,
+    /// read complete — what it does not mention, the candidate does not give,
+    /// so a candidate declaring `out=media:` serves no call that needs some
+    /// `ext` — or, for `effect=none` and `effect=patch`, what the call sends
+    /// with the effect applied: the identity serves a call for a pdf given a
+    /// pdf.
+    ///
+    /// A call always says what it sends: one whose input is `media:` (or
+    /// omitted) sends anything, and only a candidate that takes anything
+    /// serves it.
     ///
     /// This is a guarantee. What only could serve — a candidate that gives
-    /// "some ext" for a request that needs a pdf — does not; see
+    /// "some ext" for a call that needs a pdf — does not; see
     /// [`may_dispatch`](Self::may_dispatch) and [`CapQuery::grade`].
     ///
     /// Decided by the proved model (`CapDAG.Exec.dispatch`, which
-    /// `dispatch_decides` shows is `CapDAG.serves`: the query
-    /// `Query.ofRequest` admitting the candidate, and by
-    /// `serves_unknown_iff` exactly the candidates that serve SOME typed call
-    /// the request could become).
+    /// `dispatch_decides` shows is `CapDAG.serves`: the query `Query.ofCall`
+    /// admitting the candidate).
     ///
     /// Not symmetric: `a.is_dispatchable(&b)` says nothing about the reverse.
     pub fn is_dispatchable(&self, request: &CapUrn) -> bool {
@@ -813,16 +818,20 @@ impl CapUrn {
         crate::formal::exec::may_flow(self.formal.clone(), next.formal.clone())
     }
 
-    /// Apply this cap URN to a concrete runtime input media URN.
+    /// Apply this cap URN to a concrete runtime input media URN: what the cap
+    /// gives for it.
     ///
     /// This validates that the runtime input satisfies the cap's declared
-    /// input and, if so, returns the concrete runtime output media URN after
-    /// the cap's effect semantics are applied. The resulting runtime output
-    /// must satisfy the declared output or this method fails hard.
+    /// input and, if so, returns what the cap's effect makes of it — its
+    /// declared output (`effect=declared`), the input itself (`effect=none`),
+    /// or the input with the keys the declared input and output disagree on
+    /// set to what the output says (`effect=patch`). What it gives is computed
+    /// by the proved model (`CapDAG.Exec.capGives`, which is `Cap.gives`). The
+    /// result must satisfy the declared output or this method fails hard.
     ///
     /// A runtime media URN is the media of a value that exists, so it is read
     /// complete ([`MediaUrn::satisfies`]): the tags it does not have, it does
-    /// not have. The declared input and output are types, and stay open.
+    /// not have. The declared input is a type, and stays open.
     pub fn apply_to_runtime_input_media(
         &self,
         runtime_input: &MediaUrn,
@@ -852,29 +861,25 @@ impl CapUrn {
             )));
         }
 
-        let runtime_out = match self.effect() {
-            CapEffect::Declared => declared_out.clone(),
-            CapEffect::None => runtime_input.clone(),
-            CapEffect::Patch => {
-                let delta = declared_out.delta_from(&declared_in).map_err(|e| {
-                    CapUrnError::InvalidEffectApplication(format!(
-                        "Failed to derive media delta from '{}' to '{}': {}",
-                        declared_in, declared_out, e
-                    ))
-                })?;
-                runtime_input.apply_delta(&delta).map_err(|e| {
-                    CapUrnError::InvalidEffectApplication(format!(
-                        "Failed to apply media delta to runtime input '{}': {}",
-                        runtime_input, e
-                    ))
-                })?
-            }
-            CapEffect::Any => {
-                return Err(CapUrnError::InvalidEffectApplication(
-                    "Cannot infer runtime output for an unconstrained effect request".to_string(),
-                ));
-            }
-        };
+        if self.effect() == CapEffect::Any {
+            return Err(CapUrnError::InvalidEffectApplication(
+                "Cannot infer runtime output for an unconstrained effect request".to_string(),
+            ));
+        }
+        let given = crate::formal::exec::cap_gives(
+            self.formal.clone(),
+            runtime_input.inner().formal().clone(),
+        );
+        let runtime_out = MediaUrn::new(TaggedUrn::new(
+            "media".to_string(),
+            given.into_iter().collect(),
+        ))
+        .map_err(|e| {
+            CapUrnError::InvalidEffectApplication(format!(
+                "What '{}' gives for runtime input '{}' is not a media URN: {}",
+                self, runtime_input, e
+            ))
+        })?;
 
         if !runtime_out.satisfies(&declared_out).map_err(|e| {
             CapUrnError::InvalidEffectApplication(format!(
@@ -891,69 +896,45 @@ impl CapUrn {
         Ok(runtime_out)
     }
 
-    /// Infer the runtime output media URN for a concrete runtime input.
-    ///
-    /// Alias for `apply_to_runtime_input_media()`. Kept as the runtime-output
-    /// terminology used elsewhere in the stack.
-    pub fn infer_runtime_output_media(
-        &self,
-        runtime_input: &MediaUrn,
-    ) -> Result<MediaUrn, CapUrnError> {
-        self.apply_to_runtime_input_media(runtime_input)
-    }
-
-    /// Does an actually-emitted runtime output satisfy this cap's declared
-    /// effect contract for the given runtime input?
+    /// Does an actually-emitted runtime output keep this cap's effect contract
+    /// for the given runtime input?
     ///
     /// This is THE effect-audit predicate: every check of "did the cap emit
-    /// what its effect promised" must go through it — never a hand-rolled
-    /// combination of `infer_runtime_output_media` with equality or
-    /// conformance checks, so the contract has exactly one definition.
+    /// what its effect promised" goes through it, so the contract has exactly
+    /// one definition — the proved model's (`CapDAG.Exec.audit`, which is
+    /// `Cap.audits`). Both media are those of values that exist, read
+    /// complete:
     ///
-    /// The condition is deliberately asymmetric per effect:
+    /// - `effect=declared` promises its declared `out=`, read complete — what
+    ///   it does not mention, the cap does not give — so the emission must be
+    ///   inside it, read complete: a cap declaring `out=media:record` may emit
+    ///   `media:record`, and not `media:enc=utf8;fmt=json;record`, which says
+    ///   more than the cap promised.
+    /// - `effect=none` and `effect=patch` give exactly what their effect makes
+    ///   of the input ([`apply_to_runtime_input_media`](Self::apply_to_runtime_input_media)),
+    ///   so the emission must be that, read complete.
     ///
-    /// - `effect=none` and `effect=patch` compute an EXACT runtime output
-    ///   type (the input itself / the input with the declared delta
-    ///   applied), so the emission must be tag-equivalent to the inference.
-    ///   A more specific emission would still be a lie: the effect promises
-    ///   the type is fully determined by the input.
-    /// - `effect=declared` promises only the declared `out=`, so an
-    ///   emission that is MORE specific than the declaration is legal and
-    ///   desirable (e.g. declaring `out=media:record` and emitting
-    ///   `media:enc=utf8;fmt=json;record`); the emission must `satisfy` the
-    ///   declared output. A more generic emission breaks every downstream
-    ///   plan refinement and fails.
-    ///
-    /// Errors (rather than returning `false`) when the inference itself is
-    /// impossible: the runtime input does not conform to the declared
-    /// input, the effect is the unconstrained request form (`?effect`),
-    /// or the URN state is internally inconsistent — those are upstream
-    /// contract breaks, not emission mismatches, and must surface as such.
+    /// Errors (rather than returning `false`) when the input itself is wrong:
+    /// the runtime input does not conform to the declared input, the effect is
+    /// the unconstrained request form (`?effect`), or the URN state is
+    /// internally inconsistent — those are upstream contract breaks, not
+    /// emission mismatches, and must surface as such.
     pub fn is_conformant_runtime_output(
         &self,
         runtime_input: &MediaUrn,
         runtime_output: &MediaUrn,
     ) -> Result<bool, CapUrnError> {
-        let inferred = self.apply_to_runtime_input_media(runtime_input)?;
-        match self.effect() {
-            CapEffect::None | CapEffect::Patch => {
-                runtime_output.is_equivalent(&inferred).map_err(|e| {
-                    CapUrnError::InvalidEffectApplication(format!(
-                        "Failed to compare emitted output '{}' against inferred output '{}': {}",
-                        runtime_output, inferred, e
-                    ))
-                })
-            }
-            CapEffect::Declared => runtime_output.satisfies(&inferred).map_err(|e| {
-                CapUrnError::InvalidEffectApplication(format!(
-                    "Failed to compare emitted output '{}' against declared output '{}': {}",
-                    runtime_output, inferred, e
-                ))
-            }),
-            CapEffect::Any => Err(CapUrnError::InvalidEffectApplication(
+        if self.effect() == CapEffect::Any {
+            return Err(CapUrnError::InvalidEffectApplication(
                 "Cannot audit an emission against an unconstrained effect request".to_string(),
-            )),
+            ));
         }
+        self.apply_to_runtime_input_media(runtime_input)?;
+        Ok(crate::formal::exec::audit(
+            self.formal.clone(),
+            runtime_input.inner().formal().clone(),
+            runtime_output.inner().formal().clone(),
+        ))
     }
 
     /// Calculate specificity score for cap matching.
@@ -2733,14 +2714,14 @@ fn test0125_effect_none_preserves_runtime_media() {
     let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
     assert_eq!(
         decimate
-            .infer_runtime_output_media(&png)
+            .apply_to_runtime_input_media(&png)
             .unwrap()
             .to_string(),
         png.to_string()
     );
     assert_eq!(
         decimate
-            .infer_runtime_output_media(&pdf)
+            .apply_to_runtime_input_media(&pdf)
             .unwrap()
             .to_string(),
         pdf.to_string()
@@ -2753,7 +2734,7 @@ fn test0126_effect_declared_uses_declared_output() {
     let resize = CapUrn::from_string("cap:in=media:image;out=media:image;resize").unwrap();
     let png = MediaUrn::from_string("media:ext=png;image;width=4000").unwrap();
     assert_eq!(
-        resize.infer_runtime_output_media(&png).unwrap().to_string(),
+        resize.apply_to_runtime_input_media(&png).unwrap().to_string(),
         "media:image"
     );
 }
@@ -2777,10 +2758,11 @@ fn test0128_effect_dispatch_requires_explicit_wildcard() {
     assert!(none_candidate.is_dispatchable(&any_request));
 }
 
-// TEST8121: is_conformant_runtime_output — effect=declared accepts a more
-// specific emission, rejects a more generic one
+// TEST8121: is_conformant_runtime_output — effect=declared holds an emission to
+// the declared output read complete: what it does not mention, the cap does not
+// give
 #[test]
-fn test8121_effect_conformance_declared_asymmetry() {
+fn test8121_effect_conformance_declared_output_is_complete() {
     let cap = CapUrn::from_string("cap:extract;in=\"media:document;ext=pdf\";out=\"media:record\"").unwrap();
     let input = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
@@ -2788,15 +2770,16 @@ fn test8121_effect_conformance_declared_asymmetry() {
     let declared = MediaUrn::from_string("media:record").unwrap();
     assert!(cap.is_conformant_runtime_output(&input, &declared).unwrap());
 
-    // Emitting something MORE specific than the declared out is conformant —
-    // the declaration is a lower bound, not an exact type.
-    let more_specific = MediaUrn::from_string("media:enc=utf8;fmt=json;record").unwrap();
-    assert!(cap
-        .is_conformant_runtime_output(&input, &more_specific)
+    // An emission that says more than the declared out — an encoding and a
+    // format it never promised — is not what the cap gives: the declaration
+    // says what the cap gives, not a lower bound of it.
+    let says_more = MediaUrn::from_string("media:enc=utf8;fmt=json;record").unwrap();
+    assert!(!cap
+        .is_conformant_runtime_output(&input, &says_more)
         .unwrap());
 
     // Emitting something more GENERIC than the declared out is a contract
-    // violation: downstream plan refinement relied on at least `record`.
+    // violation: downstream plan refinement relied on `record`.
     let more_generic = MediaUrn::from_string("media:").unwrap();
     assert!(!cap
         .is_conformant_runtime_output(&input, &more_generic)
@@ -2863,6 +2846,67 @@ fn test8123_effect_conformance_patch_requires_patched_input() {
 
     // Emitting the unpatched input type (ext still jpeg) is a violation.
     assert!(!cap.is_conformant_runtime_output(&input, &input).unwrap());
+}
+
+// TEST7213: a declared output says what the cap gives, read complete: a cap
+// declaring out=media: gives a thing with no tags, so it serves no call that
+// needs some ext and could not; an effect=none cap gives what it is sent, so it
+// could
+#[test]
+fn test7213_declared_output_is_read_complete_in_dispatch() {
+    let declared = CapUrn::from_string("cap:op=a").unwrap();
+    let call = CapUrn::from_string(r#"cap:op=a;out="media:ext""#).unwrap();
+    assert!(!declared.is_dispatchable(&call));
+    assert!(!declared.may_dispatch(&call));
+
+    let passes_through = CapUrn::from_string("cap:effect=none;op=a").unwrap();
+    let any_effect = CapUrn::from_string(r#"cap:?effect;op=a;out="media:ext""#).unwrap();
+    assert!(!passes_through.is_dispatchable(&any_effect), "it is sent anything");
+    assert!(passes_through.may_dispatch(&any_effect), "what it is sent may have an ext");
+}
+
+// TEST7214: what a cap gives is what its effect makes of what the call sends:
+// the identity gives what it is sent, a patch converter keeps the shape it is
+// sent, and an identity on pdfs cannot give a png
+#[test]
+fn test7214_dispatch_compares_what_the_cap_gives_for_what_is_sent() {
+    let identity = CapUrn::from_string("cap:effect=none;op=a").unwrap();
+    let ext_call = CapUrn::from_string(r#"cap:effect=none;in="media:ext";op=a;out="media:ext""#).unwrap();
+    assert!(identity.is_dispatchable(&ext_call));
+
+    let json_to_yaml = CapUrn::from_string(
+        r#"cap:effect=patch;in="media:enc=utf8;fmt=json";op=a;out="media:enc=utf8;fmt=yaml""#,
+    )
+    .unwrap();
+    let list_call = CapUrn::from_string(
+        r#"cap:effect=patch;in="media:enc=utf8;fmt=json;list";op=a;out="media:enc=utf8;fmt=yaml;list""#,
+    )
+    .unwrap();
+    assert!(json_to_yaml.is_dispatchable(&list_call), "a list converted is a list");
+
+    let pdf_identity = CapUrn::from_string(r#"cap:effect=none;in="media:ext=pdf";op=a"#).unwrap();
+    let png_call = CapUrn::from_string(r#"cap:?effect;in="media:ext";op=a;out="media:ext=png""#).unwrap();
+    assert!(!pdf_identity.may_dispatch(&png_call), "what it gives is a pdf");
+}
+
+// TEST7215: a pattern over caps fits a cap when everything the cap gives is of
+// the type the pattern's output names; a pattern that names no output asks
+// nothing of it
+#[test]
+fn test7215_a_pattern_fits_what_a_cap_gives() {
+    let gives_pdf = CapUrn::from_string(r#"cap:op=a;out="media:ext=pdf""#).unwrap();
+    let gives_pdf_document = CapUrn::from_string(r#"cap:op=a;out="media:document;ext=pdf""#).unwrap();
+    let gives_anything = CapUrn::from_string("cap:op=a").unwrap();
+
+    let wants_pdf = CapUrn::from_string(r#"cap:op=a;out="media:ext=pdf""#).unwrap();
+    assert!(wants_pdf.accepts(&gives_pdf));
+    assert!(wants_pdf.accepts(&gives_pdf_document));
+    assert!(!wants_pdf.accepts(&gives_anything), "a thing with no tags is no pdf");
+
+    let any = CapUrn::from_string("cap:op=a").unwrap();
+    for cap in [&gives_pdf, &gives_pdf_document, &gives_anything] {
+        assert!(any.accepts(cap), "{cap}");
+    }
 }
 
 #[cfg(test)]
@@ -3183,19 +3227,13 @@ mod tier_tests {
         assert!(candidate.is_dispatchable(&request));
     }
 
-    // TEST825: a request that leaves its input open has not said what it will
-    // send, and is served whatever the candidate takes
+    // TEST825: a call always says what it sends: one that sends `media:` sends
+    // anything, and only a candidate that takes anything serves it
     //
-    // The open input is unknown — "some input" — not the type "anything": the
-    // request is served by exactly the candidates that serve SOME typed call
-    // it could become (../formal, serves_unknown_iff). Read as "anything" it
-    // was served only by a candidate that takes anything, and asking the
-    // fabric "what gives me this?" found nothing.
-    //
-    // What a candidate cannot do is stand in for the request AS A DESCRIPTION
-    // — that relation is typed and composes, and is what `is_equivalent` and
-    // the model's `capRefines` are about (Legacy.wildcard_input_not_transitive
-    // is why the two were never one relation).
+    // A call that did not say what it sent was routed to a candidate that might
+    // not take it (../formal, Legacy.wildcard_input_is_not_serves). An unknown
+    // input is a search's ("what gives this?", `CapQuery::producing`), never a
+    // call's.
     #[test]
     fn test825_dispatch_request_unconstrained_input() {
         let pdf_only =
@@ -3206,8 +3244,8 @@ mod tier_tests {
         let request =
             CapUrn::from_string(r#"cap:analyze;in=media:;out="media:enc=utf8;record""#).unwrap();
         assert!(
-            pdf_only.is_dispatchable(&request),
-            "the request has not said what it sends: a PDF-only candidate serves it"
+            !pdf_only.is_dispatchable(&request),
+            "the call sends anything: a PDF-only candidate does not take it"
         );
         assert!(accepts_anything.is_dispatchable(&request));
         // A request that DOES say what it sends is held to it.
@@ -3327,7 +3365,8 @@ mod tier_tests {
         //   output: candidate out=media:enc=utf8;record conforms to request out=media:enc=utf8 → OK
         assert!(broad.is_dispatchable(&narrow));
         // narrow candidate CANNOT dispatch broad request:
-        //   input:  request in=media: unconstrained → OK
+        //   input:  the call sends anything (in=media:), and the candidate
+        //           takes only a pdf → FAIL
         //   output: candidate out=media:enc=utf8, request out=media:enc=utf8;record
         //           enc=utf8 does NOT conform to enc=utf8;record → FAIL
         assert!(!narrow.is_dispatchable(&broad));

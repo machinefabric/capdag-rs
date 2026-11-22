@@ -6,8 +6,8 @@
 //! hands itself to the generated code. Every row of `../formal/conformance.json`
 //! (written by the model, `lake exe conformance`) is parsed here and must get
 //! the model's verdict: between media, the guarantee, the possibility and the
-//! complete reading; between caps, serving, could-serve and the grade of a
-//! request, fitting a pattern, being the same cap, and flowing into one
+//! complete reading; between caps, serving, could-serve and the grade of a typed
+//! call, fitting a pattern, being the same cap, and flowing into one
 //! another. The same table runs in every mirror.
 
 use capdag::input_resolver::detection::{
@@ -153,7 +153,7 @@ fn test12166_the_implementation_is_the_proved_model() {
     for r in dispatch {
         let c = CapUrn::from_string(&text(&r["candidate"])).unwrap();
         let q = CapUrn::from_string(&text(&r["request"])).unwrap();
-        let request = CapQuery::from_request(&q);
+        let request = CapQuery::from_call(&q);
         let grade = match request.grade(&c) {
             MatchGrade::Exact => "exact",
             MatchGrade::Guaranteed => "guaranteed",

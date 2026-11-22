@@ -626,6 +626,30 @@ fn include_machines(
         }
     }
 
+    // A node a cap produces from a declared output holds what that step gives,
+    // a complete thing. Every other node holds a type: the one the text wrote,
+    // the main output of an `effect=none` or `effect=patch` cap (which says how
+    // what it gives follows from what it takes), or an output of a machine step.
+    let mut produced: HashSet<String> = HashSet::new();
+    for w in wirings.iter().filter(|w| !machines.contains_key(&w.cap_alias)) {
+        let (cap_urn, _) = alias_map.get(&w.cap_alias).expect("cap alias was validated above");
+        let cap_urn_text = cap_urn.to_string();
+        let cap = registry.get_cached_cap(&cap_urn_text).map_err(|e| {
+            MachineAbstractionError::from_lookup(&cap_urn_text, e, || MachineAbstractionError::UnknownCap {
+                cap_urn: cap_urn_text.clone(),
+            })
+        })?;
+        for (name, node) in &w.targets {
+            let is_main = match name {
+                None => true,
+                Some(name) => cap.main_output().is_some_and(|main| main.name == *name),
+            };
+            if !is_main || super::resolve::main_output_is_given(&cap) {
+                produced.insert(node.clone());
+            }
+        }
+    }
+
     let mut uses: HashMap<String, usize> = HashMap::new();
     let mut written: Vec<RawWiring> = Vec::with_capacity(wirings.len());
     for (w, node_media) in wirings.into_iter().zip(media_of) {
@@ -664,7 +688,7 @@ fn include_machines(
             }
             if let RawValue::Node(node) = &member.value {
                 let source = &node_media[node];
-                if !source.conforms_to(accepts).unwrap_or(false) {
+                if !super::resolve::source_fits(source, produced.contains(node), accepts) {
                     return Err(MachineAbstractionError::SourceDoesNotConformToMachineInput {
                         position,
                         alias: alias.clone(),
@@ -694,9 +718,11 @@ fn include_machines(
                 .filter(|(name, _)| !bound.contains_key(name))
                 .collect();
             let sources: Vec<MediaUrn> = unnamed.iter().map(|node| node_media[*node].clone()).collect();
+            let given: Vec<bool> = unnamed.iter().map(|node| produced.contains(*node)).collect();
             let accepts: Vec<MediaUrn> = free.iter().map(|(_, media)| media.clone()).collect();
             let pairs = super::resolve::match_sources_to_args(
                 &sources,
+                &given,
                 &accepts,
                 &vec![false; accepts.len()],
                 None,
@@ -807,6 +833,42 @@ fn include_machines(
         }
     }
     Ok(written)
+}
+
+/// Whether a target, by the output name it wrote, takes the cap's main output.
+fn is_main_target(cap: &Cap, name: &Option<String>) -> bool {
+    match name {
+        None => true,
+        Some(name) => cap.main_output().is_some_and(|main| main.name == *name),
+    }
+}
+
+/// The node feeding a step's main input (`in_media`): the member that names
+/// the main input's arg, or else the one member that names nothing. `None`
+/// when neither says.
+fn main_source<'w>(w: &'w RawWiring, cap: &Cap, in_media: &MediaUrn) -> Option<&'w String> {
+    let main_arg = cap.args.iter().find(|arg| arg.is_main_input(in_media));
+    let named = main_arg.and_then(|main| {
+        w.sources.iter().find_map(|m| match (&m.name, &m.value) {
+            (Some(name), RawValue::Node(node)) if *name == main.name => Some(node),
+            _ => None,
+        })
+    });
+    if named.is_some() {
+        return named;
+    }
+    let unnamed: Vec<&String> = w
+        .sources
+        .iter()
+        .filter_map(|m| match (&m.name, &m.value) {
+            (None, RawValue::Node(node)) => Some(node),
+            _ => None,
+        })
+        .collect();
+    match unnamed.as_slice() {
+        [node] => Some(*node),
+        _ => None,
+    }
 }
 
 /// Give `node` the URN `urn`, beside any URN it was already given: the two must
@@ -1037,6 +1099,127 @@ fn type_nodes(
     }
     for (node, urn) in from_main_input {
         give(&mut node_media, &node, urn)?;
+    }
+
+    // What an `effect=none` or `effect=patch` cap gives follows from what it
+    // is sent (07 §What a cap gives), so the types on either side of one are
+    // read through it, both ways:
+    //
+    // - forward, its main output's node holds what the cap gives for the type
+    //   of the node feeding its main input, which refines the declared output
+    //   it was given above: a JSON list of records sent to a patch to YAML
+    //   gives a YAML list of records;
+    // - backward, a step's main input says what the patches feeding it must
+    //   give, and so what the input of the machine at the start of them must
+    //   be: walked back through each, its input put back where its output
+    //   changes it. A YAML input of the machine converted to JSON for a step
+    //   that takes JSON lists of records is a YAML list of records.
+    //
+    // Read again until nothing changes, so a chain of such caps is typed
+    // whatever order it is written in.
+    let mut patches: HashMap<&String, &RawWiring> = HashMap::new();
+    let mut steps: Vec<(&RawWiring, CapUrn, Cap, Option<MediaUrn>)> = Vec::new();
+    for &w in wirings {
+        if machines.contains_key(&w.cap_alias) {
+            continue;
+        }
+        let (cap_urn, cap) = cap_of(w)?;
+        let in_media = main_input_of(w, &cap_urn)?;
+        if !super::resolve::main_output_is_given(&cap) {
+            for (name, node) in &w.targets {
+                if is_main_target(&cap, name) {
+                    patches.insert(node, w);
+                }
+            }
+        }
+        steps.push((w, cap_urn, cap, in_media));
+    }
+    let step_of = |w: &RawWiring| {
+        steps
+            .iter()
+            .find(|(step, ..)| std::ptr::eq(*step, w))
+            .expect("every wiring of a cap was read above")
+    };
+    for _ in 0..wirings.len() {
+        let mut changed = false;
+        for (w, cap_urn, cap, in_media) in &steps {
+            let Some(in_media) = in_media else {
+                continue;
+            };
+            let Some(source) = main_source(w, cap, in_media) else {
+                continue;
+            };
+
+            // Backward, from this step's main input to the input of the
+            // machine at the start of the patches feeding it.
+            let mut required = in_media.clone();
+            let mut start = source;
+            let mut walked = 0;
+            while let Some(patch) = patches.get(start) {
+                if walked == wirings.len() {
+                    break;
+                }
+                walked += 1;
+                let (_, patch_urn, patch_cap, patch_in) = step_of(*patch);
+                let Some(patch_in) = patch_in else {
+                    break;
+                };
+                let patch_out = patch_urn.out_media_urn().map_err(|e| MachineSyntaxError::InvalidMediaUrn {
+                    alias: patch.cap_alias.clone(),
+                    details: format!("out= spec: {}", e),
+                })?;
+                let undo = patch_in
+                    .delta_from(&patch_out)
+                    .expect("a cap's in= and out= are both media URNs");
+                required = required
+                    .apply_delta(&undo)
+                    .expect("a media URN takes a delta between media URNs");
+                let Some(feeding) = main_source(patch, patch_cap, patch_in) else {
+                    break;
+                };
+                start = feeding;
+            }
+            if walked > 0 && !produced.contains(start) {
+                if let Some(held) = node_media.get(start) {
+                    if held.is_comparable(&required).unwrap_or(false) {
+                        let before = held.to_string();
+                        give(&mut node_media, start, required)?;
+                        changed |= before != node_media[start].to_string();
+                    }
+                }
+            }
+
+            // Forward, from what this step is sent to what it gives.
+            if super::resolve::main_output_is_given(cap) {
+                continue;
+            }
+            let Some(sent) = node_media.get(source) else {
+                continue;
+            };
+            // A member that does not fit the input is the resolver's to refuse.
+            if !sent.satisfies(in_media).unwrap_or(false) {
+                continue;
+            }
+            let given = cap_urn.apply_to_runtime_input_media(sent).map_err(|e| {
+                MachineAbstractionError::RuntimeMediaInference {
+                    strand_index,
+                    cap_urn: cap_urn.to_string(),
+                    runtime_input: sent.to_string(),
+                    reason: e.to_string(),
+                }
+            })?;
+            for (name, node) in &w.targets {
+                if !is_main_target(cap, name) {
+                    continue;
+                }
+                let before = node_media.get(node).map(|urn| urn.to_string());
+                give(&mut node_media, node, given.clone())?;
+                changed |= before != node_media.get(node).map(|urn| urn.to_string());
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 
     // A machine step has no main input: an unnamed member that nothing above
