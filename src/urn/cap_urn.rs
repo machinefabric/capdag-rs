@@ -825,11 +825,10 @@ impl CapUrn {
             self.formal.clone(),
             runtime_input.inner().formal().clone(),
         );
-        let runtime_out = MediaUrn::new(TaggedUrn::new(
-            "media".to_string(),
-            given.into_iter().collect(),
-        ))
-        .map_err(|e| {
+        let runtime_out = TaggedUrn::from_formal(&given)
+            .map_err(MediaUrnError::from)
+            .and_then(MediaUrn::new)
+            .map_err(|e| {
             CapUrnError::InvalidEffectApplication(format!(
                 "What '{}' gives for runtime input '{}' is not a media URN: {}",
                 self, runtime_input, e
@@ -2402,7 +2401,8 @@ mod tests {
             "PDF-specific cap must NOT match epub request (epub lacks pdf marker)"
         );
 
-        // Output direction: cap producing more specific output matches less specific request
+        // Output direction: a pattern asking for an image fits a cap that gives
+        // png thumbnails, since everything it gives is an image
         let specific_out_cap = CapUrn::from_string(
             "cap:generate-thumbnail;in=media:;out=\"media:ext=png;image;thumbnail\"",
         )
@@ -2410,11 +2410,12 @@ mod tests {
         let generic_out_request =
             CapUrn::from_string("cap:generate-thumbnail;in=media:;out=media:image").unwrap();
         assert!(
-            specific_out_cap.accepts(&generic_out_request),
-            "Cap producing image;png;thumbnail must satisfy request for image"
+            generic_out_request.accepts(&specific_out_cap),
+            "a pattern asking for an image fits a cap producing image;png;thumbnail"
         );
 
-        // Reverse output: generic output cap does NOT match specific output request
+        // Reverse output: a pattern asking for png thumbnails does not fit a cap
+        // whose declared output is an image of no file type
         let generic_out_cap =
             CapUrn::from_string("cap:generate-thumbnail;in=media:;out=media:image").unwrap();
         let specific_out_request = CapUrn::from_string(
@@ -2422,8 +2423,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !generic_out_cap.accepts(&specific_out_request),
-            "Cap producing generic image must NOT satisfy request requiring image;png;thumbnail"
+            !specific_out_request.accepts(&generic_out_cap),
+            "a pattern requiring image;png;thumbnail does not fit a cap producing an image of no file type"
         );
     }
 
@@ -2581,8 +2582,8 @@ fn test648_wildcard_010_wildcard_accepts_specific() {
         "a media:-output candidate does not serve a request that needs text"
     );
     assert!(
-        specific_out.accepts(&wildcard),
-        "a handler producing text satisfies a request that asks for no particular output"
+        !specific_out.accepts(&wildcard),
+        "a pattern asking for text out does not fit a cap whose declared output names no tag: it gives a thing with none"
     );
     assert!(
         wildcard.accepts(&specific_in),
@@ -4086,14 +4087,16 @@ mod tier_tests {
         assert_eq!(CapUrn::select(&caps, &request), Some(2));
 
         // Refinement when no exact match.
-        let request = p("cap:convert");
-        let a = p("cap:convert;in=media:pdf;out=media:html");
-        let b = p("cap:convert;in=media:image;out=media:png");
-        let c = p("cap:convert");
-        assert_eq!(request.specificity(), 2);
-        assert_eq!((a.specificity(), b.specificity(), c.specificity()), (20202, 20202, 2));
+        let request = p("cap:convert;in=media:image;out=media:image");
+        let a = p(r#"cap:convert;in=media:image;out="media:ext=png;image""#);
+        let b = p(r#"cap:convert;in=media:image;out="media:ext=jpeg;image""#);
+        let c = p("cap:convert;in=media:image;out=media:image");
+        assert_eq!(request.specificity(), 20202);
+        assert_eq!((a.specificity(), b.specificity(), c.specificity()), (60202, 60202, 20202));
         let caps = vec![a.clone(), b.clone(), c.clone()];
         assert!(caps.iter().all(|cap| cap.is_dispatchable(&request)));
+        // A cap that takes only PDFs does not serve a request that sends any image.
+        assert!(!p("cap:convert;in=media:pdf;out=media:image").is_dispatchable(&request));
         assert_eq!(CapMatcher::find_all_matches(&caps, &request), vec![&c, &a, &b]);
         assert_eq!(CapUrn::select(&caps, &request), Some(2));
         // Without C, A and B tie, and the first in the list is chosen.

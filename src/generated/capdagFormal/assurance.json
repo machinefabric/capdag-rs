@@ -3550,11 +3550,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 383,
+          "line": 380,
           "column": 1
         },
         "end": {
-          "line": 387,
+          "line": 384,
           "column": 49
         }
       }
@@ -3585,11 +3585,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 120,
+          "line": 117,
           "column": 1
         },
         "end": {
-          "line": 131,
+          "line": 128,
           "column": 104
         }
       }
@@ -3601,7 +3601,7 @@
         "CapDAG.Exec.capGives"
       ],
       "specifications": [],
-      "statement": "∀ (c : CapDAG.Exec.WfCap) (x : TaggedUrn.Exec.Wf),\n  CapDAG.Exec.capGives c x = ((CapDAG.Exec.WfCap.toCap✝ c).gives x.urn).tags ∧\n    TaggedUrn.Sorted ((CapDAG.Exec.WfCap.toCap✝ c).gives x.urn).tags",
+      "statement": "∀ (c : CapDAG.Exec.WfCap) (x : TaggedUrn.Exec.Wf),\n  (CapDAG.Exec.capGives c x).urn = (CapDAG.Exec.WfCap.toCap✝ c).gives x.urn",
       "status": "proved",
       "evidence_trust": {
         "axioms": [
@@ -3613,7 +3613,7 @@
       },
       "assumptions": [],
       "package": "capdagFormal",
-      "fingerprint": "a1f54e87b84ad9b0152600bce4b18e099d50fed6e07209511fac223785723d81",
+      "fingerprint": "6a8a3e4cb1fe3ec29e9781d4562a06be88c7113f6add3d168aa1ee447f0fb9a5",
       "source": {
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
@@ -3622,8 +3622,8 @@
           "column": 1
         },
         "end": {
-          "line": 102,
-          "column": 54
+          "line": 99,
+          "column": 18
         }
       }
     },
@@ -3688,11 +3688,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 434,
+          "line": 431,
           "column": 1
         },
         "end": {
-          "line": 438,
+          "line": 435,
           "column": 61
         }
       }
@@ -3723,11 +3723,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 363,
+          "line": 360,
           "column": 1
         },
         "end": {
-          "line": 367,
+          "line": 364,
           "column": 46
         }
       }
@@ -3787,11 +3787,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 440,
+          "line": 437,
           "column": 1
         },
         "end": {
-          "line": 458,
+          "line": 455,
           "column": 72
         }
       }
@@ -3822,11 +3822,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 428,
+          "line": 425,
           "column": 1
         },
         "end": {
-          "line": 432,
+          "line": 429,
           "column": 62
         }
       }
@@ -3857,11 +3857,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 465,
+          "line": 462,
           "column": 1
         },
         "end": {
-          "line": 467,
+          "line": 464,
           "column": 62
         }
       }
@@ -3892,11 +3892,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 373,
+          "line": 370,
           "column": 1
         },
         "end": {
-          "line": 377,
+          "line": 374,
           "column": 48
         }
       }
@@ -3927,11 +3927,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 472,
+          "line": 469,
           "column": 1
         },
         "end": {
-          "line": 474,
+          "line": 471,
           "column": 64
         }
       }
@@ -3962,11 +3962,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 305,
+          "line": 302,
           "column": 1
         },
         "end": {
-          "line": 311,
+          "line": 308,
           "column": 24
         }
       }
@@ -3997,11 +3997,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 207,
+          "line": 204,
           "column": 1
         },
         "end": {
-          "line": 212,
+          "line": 209,
           "column": 80
         }
       }
@@ -4032,11 +4032,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 203,
+          "line": 200,
           "column": 1
         },
         "end": {
-          "line": 205,
+          "line": 202,
           "column": 84
         }
       }
@@ -4067,11 +4067,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 346,
+          "line": 343,
           "column": 1
         },
         "end": {
-          "line": 355,
+          "line": 352,
           "column": 46
         }
       }
@@ -4102,11 +4102,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 318,
+          "line": 315,
           "column": 1
         },
         "end": {
-          "line": 324,
+          "line": 321,
           "column": 24
         }
       }
@@ -4137,11 +4137,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 186,
+          "line": 183,
           "column": 1
         },
         "end": {
-          "line": 188,
+          "line": 185,
           "column": 58
         }
       }
@@ -4172,11 +4172,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 190,
+          "line": 187,
           "column": 1
         },
         "end": {
-          "line": 197,
+          "line": 194,
           "column": 30
         }
       }
@@ -4207,11 +4207,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 199,
+          "line": 196,
           "column": 1
         },
         "end": {
-          "line": 201,
+          "line": 198,
           "column": 86
         }
       }
@@ -4242,11 +4242,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 485,
+          "line": 482,
           "column": 1
         },
         "end": {
-          "line": 487,
+          "line": 484,
           "column": 90
         }
       }
@@ -4277,11 +4277,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 502,
+          "line": 499,
           "column": 1
         },
         "end": {
-          "line": 544,
+          "line": 541,
           "column": 77
         }
       }
@@ -4312,11 +4312,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 478,
+          "line": 475,
           "column": 1
         },
         "end": {
-          "line": 479,
+          "line": 476,
           "column": 77
         }
       }
@@ -5346,11 +5346,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 64,
+          "line": 81,
           "column": 1
         },
         "end": {
-          "line": 67,
+          "line": 84,
           "column": 74
         }
       }
@@ -5381,11 +5381,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 57,
+          "line": 74,
           "column": 1
         },
         "end": {
-          "line": 60,
+          "line": 77,
           "column": 75
         }
       }
@@ -5414,11 +5414,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 151,
+          "line": 168,
           "column": 1
         },
         "end": {
-          "line": 160,
+          "line": 177,
           "column": 12
         }
       }
@@ -5447,11 +5447,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 144,
+          "line": 161,
           "column": 1
         },
         "end": {
-          "line": 149,
+          "line": 166,
           "column": 21
         }
       }
@@ -5480,11 +5480,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 188,
+          "line": 205,
           "column": 1
         },
         "end": {
-          "line": 207,
+          "line": 224,
           "column": 46
         }
       }
@@ -5513,11 +5513,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 162,
+          "line": 179,
           "column": 1
         },
         "end": {
-          "line": 177,
+          "line": 194,
           "column": 12
         }
       }
@@ -5546,11 +5546,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 179,
+          "line": 196,
           "column": 1
         },
         "end": {
-          "line": 186,
+          "line": 203,
           "column": 67
         }
       }
@@ -5585,6 +5585,39 @@
         "end": {
           "line": 45,
           "column": 21
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.make_parts",
+      "relation": "lungo.law",
+      "subjects": [
+        "TaggedUrn.Exec.parts"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : TaggedUrn.Exec.Wf),\n  Option.map (fun x => x.urn) (TaggedUrn.Exec.make (TaggedUrn.Exec.parts w).fst (TaggedUrn.Exec.parts w).snd) =\n    some w.urn",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "c8a0d59be68c4e53ad705b7f8e779e3815628db8b4e74448f5bc1571f7b75d45",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 57,
+          "column": 1
+        },
+        "end": {
+          "line": 62,
+          "column": 6
         }
       }
     },
@@ -5647,11 +5680,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 112,
+          "line": 129,
           "column": 1
         },
         "end": {
-          "line": 116,
+          "line": 133,
           "column": 16
         }
       }
@@ -5682,12 +5715,45 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 86,
+          "line": 103,
           "column": 1
         },
         "end": {
-          "line": 88,
+          "line": 105,
           "column": 90
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.parts_eq",
+      "relation": "lungo.law",
+      "subjects": [
+        "TaggedUrn.Exec.parts"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : TaggedUrn.Exec.Wf), TaggedUrn.Exec.parts w = (w.urn.scheme, w.urn.tags) ∧ TaggedUrn.Sorted w.urn.tags",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "tagged_urn_formal",
+      "fingerprint": "3c389a9c5b3d0b92c65d126c934395b16cc6b13be125931cdb80b1afa6d6bab3",
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 52,
+          "column": 1
+        },
+        "end": {
+          "line": 55,
+          "column": 18
         }
       }
     },
@@ -5717,11 +5783,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 122,
+          "line": 139,
           "column": 1
         },
         "end": {
-          "line": 126,
+          "line": 143,
           "column": 34
         }
       }
@@ -5752,11 +5818,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 102,
+          "line": 119,
           "column": 1
         },
         "end": {
-          "line": 106,
+          "line": 123,
           "column": 16
         }
       }
@@ -5787,11 +5853,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 51,
+          "line": 68,
           "column": 1
         },
         "end": {
-          "line": 53,
+          "line": 70,
           "column": 94
         }
       }
@@ -5822,11 +5888,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 72,
+          "line": 89,
           "column": 1
         },
         "end": {
-          "line": 73,
+          "line": 90,
           "column": 72
         }
       }
@@ -5857,11 +5923,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 131,
+          "line": 148,
           "column": 1
         },
         "end": {
-          "line": 134,
+          "line": 151,
           "column": 33
         }
       }
@@ -5892,11 +5958,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 78,
+          "line": 95,
           "column": 1
         },
         "end": {
-          "line": 80,
+          "line": 97,
           "column": 85
         }
       }
@@ -5927,11 +5993,11 @@
         "package": "tagged_urn_formal",
         "file": "TaggedUrn/Exec.lean",
         "start": {
-          "line": 93,
+          "line": 110,
           "column": 1
         },
         "end": {
-          "line": 95,
+          "line": 112,
           "column": 84
         }
       }
@@ -7612,11 +7678,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 379,
+          "line": 376,
           "column": 1
         },
         "end": {
-          "line": 381,
+          "line": 378,
           "column": 43
         }
       }
@@ -7653,11 +7719,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 114,
+          "line": 111,
           "column": 1
         },
         "end": {
-          "line": 118,
+          "line": 115,
           "column": 63
         }
       }
@@ -7698,7 +7764,7 @@
         },
         "end": {
           "line": 94,
-          "column": 89
+          "column": 54
         }
       }
     },
@@ -7769,11 +7835,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 426,
+          "line": 423,
           "column": 1
         },
         "end": {
-          "line": 426,
+          "line": 423,
           "column": 70
         }
       }
@@ -7810,11 +7876,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 359,
+          "line": 356,
           "column": 1
         },
         "end": {
-          "line": 361,
+          "line": 358,
           "column": 46
         }
       }
@@ -7881,11 +7947,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 425,
+          "line": 422,
           "column": 1
         },
         "end": {
-          "line": 425,
+          "line": 422,
           "column": 70
         }
       }
@@ -7918,11 +7984,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 462,
+          "line": 459,
           "column": 1
         },
         "end": {
-          "line": 463,
+          "line": 460,
           "column": 74
         }
       }
@@ -7963,11 +8029,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 369,
+          "line": 366,
           "column": 1
         },
         "end": {
-          "line": 371,
+          "line": 368,
           "column": 48
         }
       }
@@ -8000,11 +8066,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 469,
+          "line": 466,
           "column": 1
         },
         "end": {
-          "line": 470,
+          "line": 467,
           "column": 74
         }
       }
@@ -8041,11 +8107,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 300,
+          "line": 297,
           "column": 1
         },
         "end": {
-          "line": 303,
+          "line": 300,
           "column": 78
         }
       }
@@ -8075,11 +8141,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 182,
+          "line": 179,
           "column": 1
         },
         "end": {
-          "line": 184,
+          "line": 181,
           "column": 99
         }
       }
@@ -8109,11 +8175,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 178,
+          "line": 175,
           "column": 1
         },
         "end": {
-          "line": 180,
+          "line": 177,
           "column": 93
         }
       }
@@ -8154,11 +8220,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 338,
+          "line": 335,
           "column": 1
         },
         "end": {
-          "line": 344,
+          "line": 341,
           "column": 18
         }
       }
@@ -8199,11 +8265,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 313,
+          "line": 310,
           "column": 1
         },
         "end": {
-          "line": 316,
+          "line": 313,
           "column": 76
         }
       }
@@ -8233,11 +8299,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 160,
+          "line": 157,
           "column": 1
         },
         "end": {
-          "line": 163,
+          "line": 160,
           "column": 96
         }
       }
@@ -8270,11 +8336,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 165,
+          "line": 162,
           "column": 1
         },
         "end": {
-          "line": 171,
+          "line": 168,
           "column": 42
         }
       }
@@ -8304,11 +8370,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 173,
+          "line": 170,
           "column": 1
         },
         "end": {
-          "line": 176,
+          "line": 173,
           "column": 94
         }
       }
@@ -8343,11 +8409,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 481,
+          "line": 478,
           "column": 1
         },
         "end": {
-          "line": 483,
+          "line": 480,
           "column": 50
         }
       }
@@ -8389,11 +8455,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 489,
+          "line": 486,
           "column": 1
         },
         "end": {
-          "line": 500,
+          "line": 497,
           "column": 9
         }
       }
@@ -8426,11 +8492,11 @@
         "package": "capdagFormal",
         "file": "CapDAG/Exec.lean",
         "start": {
-          "line": 476,
+          "line": 473,
           "column": 1
         },
         "end": {
-          "line": 476,
+          "line": 473,
           "column": 54
         }
       }
@@ -8714,6 +8780,41 @@
         "end": {
           "line": 30,
           "column": 61
+        }
+      }
+    },
+    {
+      "name": "TaggedUrn.Exec.parts",
+      "module": "TaggedUrn.Exec",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "TaggedUrn.Exec.make_parts",
+        "TaggedUrn.Exec.parts_eq"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "tagged_urn_formal",
+        "file": "TaggedUrn/Exec.lean",
+        "start": {
+          "line": 47,
+          "column": 1
+        },
+        "end": {
+          "line": 50,
+          "column": 87
         }
       }
     }

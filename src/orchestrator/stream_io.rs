@@ -2614,6 +2614,13 @@ mod tests {
         streaming: true,
     };
 
+    /// A cap that gives text, as the fixtures that open their output with
+    /// `media:enc=utf8` emit: the effect audit reads a declared output
+    /// complete, so a cap declaring `media:` would give a thing with no tags.
+    const TEXT_CAP: &str = r#"cap:out="media:enc=utf8";test"#;
+    /// A cap that gives a text record, for the fixture that emits one.
+    const TEXT_RECORD_CAP: &str = r#"cap:out="media:enc=utf8;record";test"#;
+
     /// What the response of `cap_urn` is held to when only its URN is known:
     /// the one output the URN states, in `shape`.
     fn contract(cap_urn: &str, shape: OutputContract) -> ResponseContract {
@@ -3163,8 +3170,8 @@ mod tests {
         let collected = collect_response(
             rx,
             None,
-            "cap:test",
-            &contract("cap:test", SCALAR_CONTRACT),
+            TEXT_CAP,
+            &contract(TEXT_CAP, SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&log_fn),
             None,
@@ -3582,8 +3589,8 @@ mod tests {
         let err = collect_terminal_output(
             rx,
             None,
-            "cap:test",
-            &contract("cap:test", STREAMING_SEQUENCE_CONTRACT),
+            TEXT_CAP,
+            &contract(TEXT_CAP, STREAMING_SEQUENCE_CONTRACT),
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -3713,8 +3720,8 @@ mod tests {
         let (bytes, is_seq, _meta) = collect_terminal_output(
             rx,
             None,
-            "cap:test",
-            &contract("cap:test", STREAMING_SEQUENCE_CONTRACT),
+            TEXT_RECORD_CAP,
+            &contract(TEXT_RECORD_CAP, STREAMING_SEQUENCE_CONTRACT),
             &"step_test".parse().unwrap(),
             None,
             None,
@@ -3750,8 +3757,8 @@ mod tests {
         let (bytes, _seq, _meta) = collect_terminal_output(
             rx,
             Some(&cap.progress_fn),
-            "cap:test",
-            &contract("cap:test", SCALAR_CONTRACT),
+            TEXT_CAP,
+            &contract(TEXT_CAP, SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -3797,8 +3804,8 @@ mod tests {
         collect_terminal_output(
             rx,
             Some(&cap.progress_fn),
-            "cap:test",
-            &contract("cap:test", SCALAR_CONTRACT),
+            TEXT_CAP,
+            &contract(TEXT_CAP, SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -3843,8 +3850,8 @@ mod tests {
         collect_terminal_output(
             rx,
             Some(&cap.progress_fn),
-            "cap:test",
-            &contract("cap:test", SCALAR_CONTRACT),
+            TEXT_CAP,
+            &contract(TEXT_CAP, SCALAR_CONTRACT),
             &"step_test".parse().unwrap(),
             Some(&cap.log_fn),
             None,
@@ -3891,8 +3898,8 @@ mod tests {
     async fn test7071_terminal_output_yields_before_stream_end() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", contract("cap:test", STREAMING_SEQUENCE_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
-            .expect("cap:test builds a valid effect audit");
+        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, STREAMING_SEQUENCE_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
+            .expect("the text cap builds a valid effect audit");
 
         // Announce an unbounded stream and one item — nothing has ended.
         let ss = Frame::stream_start_unbounded(
@@ -3932,8 +3939,8 @@ mod tests {
     async fn test7077_per_item_meta_incremental() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, "cap:test", contract("cap:test", SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
-            .expect("cap:test builds a valid effect audit");
+        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
+            .expect("the text cap builds a valid effect audit");
 
         tx.send(stream_start(&rid)).unwrap();
 

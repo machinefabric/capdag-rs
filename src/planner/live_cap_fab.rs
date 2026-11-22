@@ -1936,7 +1936,7 @@ mod tests {
         let cap = make_test_cap(
             "media:enc=utf8;fmt=json;record;!list",
             "media:enc=utf8;fmt=yaml;record",
-            "record_to_yaml",
+            "record-to-yaml",
             "Record To YAML",
         );
         graph.add_cap(&cap);
