@@ -845,6 +845,31 @@ impl CapUrn {
         Ok(runtime_out)
     }
 
+    /// What a need on what this cap gives asks of what it is sent: the widest
+    /// type inside the cap's input whose things the cap gives inside `need`, or
+    /// `None` when nothing it is sent could be. A declared cap gives its output
+    /// whatever it is sent, so it asks its input when its output is inside
+    /// `need`; an `effect=none` cap asks its input met with `need`; a patch asks
+    /// its input met with `need` at every key it does not write, when what it
+    /// writes is inside `need`. Computed by the proved model
+    /// (`CapDAG.Exec.capRequires`, which is `Cap.requires`, sound and widest).
+    pub fn requires(&self, need: &MediaUrn) -> Result<Option<MediaUrn>, CapUrnError> {
+        let Some(required) = crate::formal::exec::cap_requires(self.formal.clone(), need.inner().formal().clone())
+        else {
+            return Ok(None);
+        };
+        TaggedUrn::from_formal(&required)
+            .map_err(MediaUrnError::from)
+            .and_then(MediaUrn::new)
+            .map(Some)
+            .map_err(|e| {
+                CapUrnError::InvalidEffectApplication(format!(
+                    "What '{}' requires to give inside '{}' is not a media URN: {}",
+                    self, need, e
+                ))
+            })
+    }
+
     /// Does an actually-emitted runtime output keep this cap's effect contract
     /// for the given runtime input?
     ///

@@ -74,9 +74,9 @@ pub use plan_builder::{
 pub use plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePolicy,
     ConvergencePresence, ConvergentTargetInfo, ConvergentTargets, DivergenceLocation,
-    DivergencePolicy, DivergencePresence, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode,
-    PlanOutcome, PlanProfile, PlanRequest, RankPolicy, RefusedRoute, SearchDirection, SourceCardinality,
-    SourceSpec, TargetSpec,
+    DivergencePolicy, DivergencePresence, ExcludedCandidate, PlanApex, PlanCandidate, PlanCost,
+    PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest, RankPolicy, SearchDirection,
+    SourceCardinality, SourceSpec, TargetSpec,
 };
 pub use viz::{plans_to_dot, plans_to_mermaid, DiagramNames};
 

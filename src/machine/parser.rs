@@ -916,6 +916,159 @@ pub(crate) fn narrower_of(held: &MediaUrn, given: &MediaUrn) -> Option<bool> {
     }
 }
 
+/// One place a node is bound into: what it is accepted as there, and, when the
+/// node is a cap step's main member, that step, by its index among the steps.
+struct Binding {
+    accepts: MediaUrn,
+    main_of: Option<usize>,
+}
+
+/// Every place each node is bound into: by name into a cap's arg or a
+/// machine's input, or unnamed into a cap's main input, as its one unnamed
+/// member or as one of the members its main input gathers when it takes a
+/// sequence. Only a member bound by the main arg's name, or the step's one
+/// unnamed member, is the step's main member.
+fn node_bindings(
+    wirings: &[&RawWiring],
+    steps: &[(&RawWiring, CapUrn, Cap, Option<MediaUrn>)],
+    machines: &HashMap<String, Arc<IncludedMachine>>,
+) -> HashMap<String, Vec<Binding>> {
+    let mut bindings: HashMap<String, Vec<Binding>> = HashMap::new();
+    for w in wirings {
+        let Some(machine) = machines.get(&w.cap_alias) else {
+            continue;
+        };
+        for member in &w.sources {
+            if let (Some(name), RawValue::Node(node)) = (&member.name, &member.value) {
+                if let Some(accepts) = machine.input(name) {
+                    bindings
+                        .entry(node.clone())
+                        .or_default()
+                        .push(Binding { accepts: accepts.clone(), main_of: None });
+                }
+            }
+        }
+    }
+    for (index, (w, _, cap, in_media)) in steps.iter().enumerate() {
+        let main_arg = in_media
+            .as_ref()
+            .and_then(|in_media| cap.args.iter().find(|arg| arg.is_main_input(in_media)));
+        let mut main_named = false;
+        for member in &w.sources {
+            let (Some(name), RawValue::Node(node)) = (&member.name, &member.value) else {
+                continue;
+            };
+            // A name no arg has was refused above.
+            let Some(arg) = cap.arg_named(name) else {
+                continue;
+            };
+            let main = main_arg.is_some_and(|main| main.name == arg.name);
+            main_named |= main;
+            bindings.entry(node.clone()).or_default().push(Binding {
+                accepts: MediaUrn::from_string(arg.accepted_urn())
+                    .expect("cap registry invariant: a definition's media URNs are valid"),
+                main_of: main.then_some(index),
+            });
+        }
+        let (Some(in_media), Some(main_arg)) = (in_media, main_arg) else {
+            continue;
+        };
+        if main_named {
+            continue;
+        }
+        let unnamed: Vec<&String> = w
+            .sources
+            .iter()
+            .filter_map(|m| match (&m.name, &m.value) {
+                (None, RawValue::Node(node)) => Some(node),
+                _ => None,
+            })
+            .collect();
+        match unnamed.as_slice() {
+            [node] => bindings
+                .entry((*node).clone())
+                .or_default()
+                .push(Binding { accepts: in_media.clone(), main_of: Some(index) }),
+            gathered if main_arg.is_sequence => {
+                for node in gathered {
+                    bindings
+                        .entry((*node).clone())
+                        .or_default()
+                        .push(Binding { accepts: in_media.clone(), main_of: None });
+                }
+            }
+            _ => {}
+        }
+    }
+    bindings
+}
+
+/// What `node` must be for every step it is bound into: what each accepts it
+/// as, and, where it is a step's main member, what that step requires of what
+/// it is sent for what its own main output must be. `None` when nothing binds
+/// it, or when none of those is inside every other. Worked out once per node
+/// (`need`); a node met again on its own way back is a cycle, which the
+/// resolver refuses, and says nothing here.
+fn node_need(
+    node: &str,
+    bindings: &HashMap<String, Vec<Binding>>,
+    steps: &[(&RawWiring, CapUrn, Cap, Option<MediaUrn>)],
+    need: &mut HashMap<String, Option<MediaUrn>>,
+    visiting: &mut HashSet<String>,
+    strand_index: usize,
+) -> Result<Option<MediaUrn>, MachineParseError> {
+    if let Some(known) = need.get(node) {
+        return Ok(known.clone());
+    }
+    if !visiting.insert(node.to_string()) {
+        return Ok(None);
+    }
+    let mut needs: Vec<MediaUrn> = Vec::new();
+    for binding in bindings.get(node).into_iter().flatten() {
+        needs.push(binding.accepts.clone());
+        let Some(index) = binding.main_of else {
+            continue;
+        };
+        let (w, cap_urn, cap, _) = &steps[index];
+        for (name, out) in &w.targets {
+            if !is_main_target(cap, name) {
+                continue;
+            }
+            let Some(out_need) = node_need(out, bindings, steps, need, visiting, strand_index)? else {
+                continue;
+            };
+            let required = cap_urn.requires(&out_need).map_err(|e| MachineAbstractionError::RuntimeMediaInference {
+                strand_index,
+                cap_urn: cap_urn.to_string(),
+                runtime_input: out_need.to_string(),
+                reason: e.to_string(),
+            })?;
+            if let Some(required) = required {
+                needs.push(required);
+            }
+        }
+    }
+    visiting.remove(node);
+    let narrowest = narrowest_inside_all(&needs);
+    need.insert(node.to_string(), narrowest.clone());
+    Ok(narrowest)
+}
+
+/// The one of `types` that is inside every other, or `None` when there are
+/// none or no one of them is.
+fn narrowest_inside_all(types: &[MediaUrn]) -> Option<MediaUrn> {
+    let (first, rest) = types.split_first()?;
+    let mut narrowest = first.clone();
+    for urn in rest {
+        match narrower_of(&narrowest, urn) {
+            Some(true) => narrowest = urn.clone(),
+            Some(false) => {}
+            None => return None,
+        }
+    }
+    types.iter().all(|urn| narrowest.conforms_to(urn)).then_some(narrowest)
+}
+
 /// Give every node of one strand its media URN (see the module documentation
 /// and 09 §The URN of a node). The result does not depend on the order of the
 /// wirings: what produces a node and what names it are read first, for every
@@ -1118,23 +1271,22 @@ fn type_nodes(
         give(&mut node_media, &node, urn)?;
     }
 
-    // What an `effect=none` or `effect=patch` cap gives follows from what it
-    // is sent (07 §What a cap gives), so the types on either side of one are
-    // read through it, both ways:
+    // The machine's text writes no types, so a node is read with the types its
+    // steps need (09 §The URN of a node), in two passes that only narrow a node
+    // along its chain; a type on no chain with the node's is left, for the
+    // binding check to report:
     //
-    // - forward, its main output's node holds what the cap gives for the type
-    //   of the node feeding its main input, which refines the declared output
-    //   it was given above: a JSON list of records sent to a patch to YAML
-    //   gives a YAML list of records;
-    // - backward, a step's main input says what the patches feeding it must
-    //   give, and so what the input of the machine at the start of them must
-    //   be: walked back through each, its input put back where its output
-    //   changes it. A YAML input of the machine converted to JSON for a step
-    //   that takes JSON lists of records is a YAML list of records.
-    //
-    // Read again until nothing changes, so a chain of such caps is typed
-    // whatever order it is written in.
-    let mut patches: HashMap<&String, &RawWiring> = HashMap::new();
+    // - back: what a node must be is what every step it is bound into accepts
+    //   there, and where it is a step's main member, what that step requires
+    //   of what it is sent for what its own main output must be
+    //   (`CapUrn::requires`), all on one chain. An input of the machine is
+    //   narrowed to it: a YAML input converted to JSON for a step that gathers
+    //   JSON records that are not lists is a YAML record that is not a list.
+    // - forward: a step that passes on or patches what it is sent gives its
+    //   main output's node what it gives for what its main member holds, when
+    //   that is inside its input; an output that carries the input holds what
+    //   the main member holds. Read again until nothing changes, so a chain of
+    //   such steps is typed whatever order it is written in.
     let mut steps: Vec<(&RawWiring, CapUrn, Cap, Option<MediaUrn>)> = Vec::new();
     for &w in wirings {
         if machines.contains_key(&w.cap_alias) {
@@ -1142,82 +1294,46 @@ fn type_nodes(
         }
         let (cap_urn, cap) = cap_of(w)?;
         let in_media = main_input_of(w, &cap_urn)?;
-        if !super::resolve::main_output_is_given(&cap) {
-            for (name, node) in &w.targets {
-                if is_main_target(&cap, name) {
-                    patches.insert(node, w);
-                }
-            }
-        }
         steps.push((w, cap_urn, cap, in_media));
     }
-    let step_of = |w: &RawWiring| {
-        steps
-            .iter()
-            .find(|(step, ..)| std::ptr::eq(*step, w))
-            .expect("every wiring of a cap was read above")
-    };
-    for _ in 0..wirings.len() {
+    let bindings = node_bindings(wirings, &steps, machines);
+    let mut need: HashMap<String, Option<MediaUrn>> = HashMap::new();
+    for node in bindings.keys() {
+        node_need(node, &bindings, &steps, &mut need, &mut HashSet::new(), strand_index)?;
+    }
+    for (node, must) in &need {
+        let Some(must) = must else {
+            continue;
+        };
+        if produced.contains(node) {
+            continue;
+        }
+        if let Some(held) = node_media.get(node) {
+            if narrower_of(held, must) == Some(true) {
+                node_media.insert(node.clone(), must.clone());
+            }
+        }
+    }
+    for _ in 0..=wirings.len() {
         let mut changed = false;
         for (w, cap_urn, cap, in_media) in &steps {
+            if super::resolve::main_output_is_given(cap) {
+                continue;
+            }
             let Some(in_media) = in_media else {
                 continue;
             };
             let Some(source) = main_source(w, cap, in_media) else {
                 continue;
             };
-
-            // Backward, from this step's main input to the input of the
-            // machine at the start of the patches feeding it.
-            let mut required = in_media.clone();
-            let mut start = source;
-            let mut walked = 0;
-            while let Some(patch) = patches.get(start) {
-                if walked == wirings.len() {
-                    break;
-                }
-                walked += 1;
-                let (_, patch_urn, patch_cap, patch_in) = step_of(*patch);
-                let Some(patch_in) = patch_in else {
-                    break;
-                };
-                let patch_out = patch_urn.out_media_urn().map_err(|e| MachineSyntaxError::InvalidMediaUrn {
-                    alias: patch.cap_alias.clone(),
-                    details: format!("out= spec: {}", e),
-                })?;
-                let undo = patch_in
-                    .delta_from(&patch_out)
-                    .expect("a cap's in= and out= are both media URNs");
-                required = required
-                    .apply_delta(&undo)
-                    .expect("a media URN takes a delta between media URNs");
-                let Some(feeding) = main_source(patch, patch_cap, patch_in) else {
-                    break;
-                };
-                start = feeding;
-            }
-            if walked > 0 && !produced.contains(start) {
-                if let Some(held) = node_media.get(start) {
-                    if held.is_comparable(&required) {
-                        let before = held.to_string();
-                        give(&mut node_media, start, required)?;
-                        changed |= before != node_media[start].to_string();
-                    }
-                }
-            }
-
-            // Forward, from what this step is sent to what it gives.
-            if super::resolve::main_output_is_given(cap) {
-                continue;
-            }
-            let Some(sent) = node_media.get(source) else {
+            let Some(sent) = node_media.get(source).cloned() else {
                 continue;
             };
-            // A member that does not fit the input is the resolver's to refuse.
-            if !sent.satisfies(in_media) {
+            // A member that is not inside the input is the resolver's to refuse.
+            if !sent.conforms_to(in_media) {
                 continue;
             }
-            let given = cap_urn.apply_to_runtime_input_media(sent).map_err(|e| {
+            let given = cap_urn.apply_to_runtime_input_media(&sent).map_err(|e| {
                 MachineAbstractionError::RuntimeMediaInference {
                     strand_index,
                     cap_urn: cap_urn.to_string(),
@@ -1226,11 +1342,19 @@ fn type_nodes(
                 }
             })?;
             for (name, node) in &w.targets {
-                if !is_main_target(cap, name) {
+                let holds = if is_main_target(cap, name) {
+                    given.clone()
+                } else if name
+                    .as_ref()
+                    .and_then(|name| cap.output_named(name))
+                    .is_some_and(|output| output.carries.is_some())
+                {
+                    sent.clone()
+                } else {
                     continue;
-                }
+                };
                 let before = node_media.get(node).map(|urn| urn.to_string());
-                give(&mut node_media, node, given.clone())?;
+                give(&mut node_media, node, holds)?;
                 changed |= before != node_media.get(node).map(|urn| urn.to_string());
             }
         }

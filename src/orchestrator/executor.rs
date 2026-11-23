@@ -2372,6 +2372,7 @@ pub async fn run_dag_on_context(
         let chain_result = run_step_chain(
             ctx,
             &chain_steps,
+            &graph.nodes,
             &chain_contracts,
             cap_arguments,
             progress_fn,
@@ -2725,17 +2726,44 @@ async fn send_upstream_credit(
     }
 }
 
+/// What the value a step forwards down a pipelined hop is, when its stream's
+/// label cannot say it: for a step that passes on or patches what it is sent
+/// (`effect=none`, `effect=patch`), what its node holds in `holds`. `None` for
+/// a step whose main output is given: its audited label is what it gives.
+fn pipelined_holds(
+    step: &ResolvedStep,
+    holds: &HashMap<String, String>,
+) -> Result<Option<crate::MediaUrn>, ExecutionError> {
+    if crate::machine::resolve::main_output_is_given(&step.cap) {
+        return Ok(None);
+    }
+    let media = holds.get(&step.node).ok_or_else(|| {
+        ExecutionError::HostError(format!(
+            "step '{}' (cap '{}') has no media in its graph",
+            step.node, step.cap_urn
+        ))
+    })?;
+    crate::MediaUrn::from_string(media).map(Some).map_err(|e| {
+        ExecutionError::HostError(format!(
+            "step '{}' holds '{media}', which is not a media URN: {e}",
+            step.node
+        ))
+    })
+}
+
 /// Execute ONE pipelined chain of steps as a live pipeline: the head's inputs
 /// are read from `ctx`'s materialised node_data ([`send_step_input`] sends
 /// one stream per input — none for a step nothing is wired into),
 /// intermediate hops stream cap-to-cap through [`forward_frames`] with
 /// per-hop credit, and every kept output of the last step is collected into
 /// its sink in `slots`. Returns one [`SinkResult`] per slot. Progress is
-/// scaled into `[progress_base, progress_base + progress_span]`.
+/// scaled into `[progress_base, progress_base + progress_span]`. `holds` is
+/// what each node of the graph holds ([`ResolvedGraph::nodes`]).
 #[allow(clippy::too_many_arguments)]
 async fn run_step_chain(
     ctx: &ExecutionContext,
     chain: &[&ResolvedStep],
+    holds: &HashMap<String, String>,
     contracts: &[super::stream_io::ResponseContract],
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     progress_fn: Option<&CapProgressFn>,
@@ -2935,6 +2963,8 @@ async fn run_step_chain(
             }
         };
 
+        let prev_holds = pipelined_holds(chain[i], holds)?;
+
         let (dummy_tx, dummy_rx) = mpsc::unbounded_channel();
         let taken_rx = std::mem::replace(&mut invocations[i].1, dummy_rx);
         drop(dummy_tx);
@@ -2983,6 +3013,7 @@ async fn run_step_chain(
                 prev_contract,
                 &fwd_step_token_id,
                 &next_in_media,
+                prev_holds,
                 fwd_log_fn.as_ref(),
                 fwd_body_index,
                 fwd_stall_tracker,
@@ -3509,6 +3540,7 @@ async fn forward_frames(
     prev_contract: super::stream_io::ResponseContract,
     prev_step_token_id: &StepToken,
     next_in_media: &str,
+    prev_holds: Option<crate::MediaUrn>,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
     stall_tracker: Option<Arc<PipelineProgressTracker>>,
@@ -3648,12 +3680,16 @@ async fn forward_frames(
                         // What was produced is a value, complete in its tags; the
                         // arg it feeds is a declared type. So it is asked to
                         // SATISFY the type, not to refine it as one type refines
-                        // another.
-                        if !produced_urn.satisfies(&target_arg_urn) {
+                        // another. A producer that passes on or patches what it
+                        // is sent labels its stream from the declared in= it was
+                        // sent under, which says less than what it was really
+                        // sent; what the value is, is what its node holds.
+                        let carried = prev_holds.as_ref().unwrap_or(&produced_urn);
+                        if !carried.satisfies(&target_arg_urn) {
                             return Err(ExecutionError::HostError(format!(
-                                "pipelined forward: cap '{}' output stream URN '{}' does \
-                                 not conform to the downstream declared arg URN '{}'",
-                                prev_cap_urn, produced_urn_str, next_in_media
+                                "pipelined forward: cap '{}' gives '{}', which does not \
+                                 conform to the downstream declared arg URN '{}'",
+                                prev_cap_urn, carried, next_in_media
                             )));
                         }
 
@@ -4615,6 +4651,35 @@ mod tests {
                 steps[which].policy = policy;
                 assert_eq!(chains_of(&steps, &[]), apart, "policy {policy:?} on step {which}");
             }
+        }
+    }
+
+    // TEST8432: a pipelined hop out of a step that patches what it is sent
+    // carries what the step's node holds, not the label its stream was sent
+    // under: a JSON list of records converted to YAML reaches a step that
+    // takes a YAML list of records, where the label alone (the YAML its cap's
+    // out= names) does not. A hop out of a step whose output is given carries
+    // its audited label, and a patch step whose node has no media is refused.
+    #[test]
+    fn test8432_a_patch_hop_carries_what_its_node_holds() {
+        const JSON_TO_YAML: &str = "cap:convert-format;effect=patch;in=\"media:enc=utf8;fmt=json\";json-to-yaml;out=\"media:enc=utf8;!ext;fmt=yaml\"";
+        let takes = crate::MediaUrn::from_string("media:enc=utf8;fmt=yaml;list;record").unwrap();
+        let to_yaml = step("to_yaml", JSON_TO_YAML, Some("parse"));
+        let holds: HashMap<String, String> =
+            [("to_yaml".to_string(), "media:enc=utf8;!ext;fmt=yaml;list;record".to_string())].into();
+
+        let carried = pipelined_holds(&to_yaml, &holds).unwrap().expect("a patch hop carries what its node holds");
+        assert!(carried.satisfies(&takes), "{carried} reaches what takes a YAML list of records");
+        let label = crate::MediaUrn::from_string(&to_yaml.out_media).unwrap();
+        assert!(!label.satisfies(&takes), "the label alone, {label}, says less");
+
+        assert!(pipelined_holds(&step("A", OP_A, Some("in")), &holds).unwrap().is_none());
+
+        match pipelined_holds(&to_yaml, &HashMap::new()) {
+            Err(ExecutionError::HostError(message)) => {
+                assert_eq!(message, format!("step 'to_yaml' (cap '{JSON_TO_YAML}') has no media in its graph"))
+            }
+            other => panic!("expected a refusal, got {other:?}"),
         }
     }
 

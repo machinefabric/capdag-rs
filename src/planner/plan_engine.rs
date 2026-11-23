@@ -45,9 +45,9 @@ use super::live_cap_fab::{
 };
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
-    ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence, PlanApex,
-    PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest,
-    RankPolicy, RefusedRoute, SourceSpec, TargetSpec,
+    ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence,
+    ExcludedCandidate, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome,
+    PlanProfile, PlanRequest, RankPolicy, SourceSpec, TargetSpec,
 };
 
 /// Bound on distinct apex media considered per request (after the location
@@ -69,8 +69,8 @@ const MAX_FOLDS_PER_APEX: usize = 3;
 struct CandidateSink<'a> {
     candidates: Vec<PlanCandidate>,
     seen_notations: HashSet<String>,
-    /// Routes the search found that no machine could hold, with why.
-    refused: Vec<RefusedRoute>,
+    /// Strands the search found that no machine could hold, with why.
+    excluded: Vec<ExcludedCandidate>,
     observer: Option<&'a mut dyn FnMut(&PlanCandidate)>,
 }
 
@@ -79,7 +79,7 @@ impl<'a> CandidateSink<'a> {
         Self {
             candidates: Vec::new(),
             seen_notations: HashSet::new(),
-            refused: Vec::new(),
+            excluded: Vec::new(),
             observer,
         }
     }
@@ -100,9 +100,9 @@ impl<'a> CandidateSink<'a> {
         self.candidates.push(candidate);
     }
 
-    /// Leave a route out because no machine holds it, saying why.
-    fn refuse(&mut self, label: String, reason: String) {
-        self.refused.push(RefusedRoute { label, reason });
+    /// Offer no candidate for a strand no machine holds, naming it and why.
+    fn exclude(&mut self, strand: String, reason: String) {
+        self.excluded.push(ExcludedCandidate { strand, reason });
     }
 
     fn len(&self) -> usize {
@@ -230,8 +230,9 @@ impl Assembler {
     }
 }
 
-/// A route's label: where it goes, and the caps it takes, in order.
-fn route_label(from: &MediaUrn, to: &MediaUrn, strand: &Strand) -> String {
+/// A strand as an excluded candidate names it: where it goes, and the caps it
+/// takes, in order.
+fn strand_description(from: &MediaUrn, to: &MediaUrn, strand: &Strand) -> String {
     let caps: Vec<String> = strand
         .steps
         .iter()
@@ -426,7 +427,7 @@ impl LiveCapFab {
                 } else {
                     self.plan_multi_source(&reduced, &targets, registry, &mut reduced_sink)?;
                 }
-                sink.refused.extend(reduced_sink.refused.drain(..));
+                sink.excluded.extend(reduced_sink.excluded.drain(..));
                 if !reduced_sink.is_empty() {
                     dead_end_sources = dead.iter().map(|s| s.media_urn.clone()).collect();
                     let dead_names = dead_end_sources
@@ -447,16 +448,14 @@ impl LiveCapFab {
             }
         }
 
-        let refused_routes = sink.refused;
+        let excluded = sink.excluded;
         let mut candidates = sink.candidates;
-        if candidates.is_empty() {
-            let refusals: String = refused_routes
-                .iter()
-                .map(|route| format!("; {} was found and refused: {}", route.label, route.reason))
-                .collect();
+        // Strands were found and none could be written: the outcome is those,
+        // each named with why, not "no plan".
+        if candidates.is_empty() && excluded.is_empty() {
             return Err(PlanError::NoPlan {
                 detail: format!(
-                    "no machine connects [{}] to [{}] within depth {}{refusals}",
+                    "no machine connects [{}] to [{}] within depth {}",
                     request
                         .sources
                         .iter()
@@ -483,7 +482,7 @@ impl LiveCapFab {
         Ok(PlanOutcome {
             candidates,
             dead_end_sources,
-            refused_routes,
+            excluded,
         })
     }
 
@@ -542,8 +541,10 @@ impl LiveCapFab {
                 let notation = match strand.to_machine_notation(registry) {
                     Ok(notation) => notation,
                     Err(refusal) => {
-                        out.refuse(route_label(&source.media_urn, &targets[0], strand), refusal.to_string());
-                        continue;
+                        return Err(PlanError::Internal(refusal.to_string())); // REVERT-PROBE
+                        #[allow(unreachable_code)]
+                        { out.exclude(strand_description(&source.media_urn, &targets[0], strand), refusal.to_string());
+                        continue; }
                     }
                 };
                 let cap_steps = strand.cap_step_count as usize;
@@ -1047,7 +1048,7 @@ impl LiveCapFab {
                 let notation = match strand.to_machine_notation(registry) {
                     Ok(notation) => notation,
                     Err(refusal) => {
-                        out.refuse(route_label(&apex.media, target, strand), refusal.to_string());
+                        out.exclude(strand_description(&apex.media, target, strand), refusal.to_string());
                         continue;
                     }
                 };
@@ -1493,7 +1494,7 @@ impl LiveCapFab {
             };
             let mut sub_out = CandidateSink::detached();
             self.collect_candidates(&sub_req, targets, apex, &subset, registry, &mut sub_out)?;
-            out.refused.extend(sub_out.refused.drain(..));
+            out.excluded.extend(sub_out.excluded.drain(..));
             let Some(converged) = sub_out.candidates.into_iter().next() else {
                 continue;
             };
@@ -2932,17 +2933,19 @@ mod tests {
         );
     }
 
-    // TEST8108: a route the search finds that no machine can hold is left out
-    // of the candidates and named with why, and the routes that can be held
-    // are still planned. Here the search's graph holds `any2text` and the
-    // registry the routes are written against does not, so pdf → txt by
-    // any2text cannot be written; pdf → txt by pdf2text can.
+    // TEST8108: a strand the search finds that no machine can hold is not
+    // offered, and is named as excluded with the resolver's reason, while the
+    // strands that can be held are still planned. Here the search's graph holds
+    // `any2text` and the registry the strands are written against does not, so
+    // pdf → txt by any2text cannot be written; pdf → txt by pdf2text can. With
+    // pdf2text gone too, the plan has no candidate and is the excluded strand,
+    // not "no plan".
     #[test]
-    fn test8108_a_route_no_machine_holds_is_refused_by_name_and_the_rest_plan() {
+    fn test8108_a_strand_no_machine_holds_is_excluded_by_name_and_the_rest_plan() {
         let (fab, _) = fabric();
         let any2text = "cap:in=\"media:ext\";textize;out=\"media:enc=utf8;page\"";
         let (caps, _) = fabric_caps();
-        let registry = registry_with(caps.into_iter().filter(|cap| cap.title != "any2text").collect());
+        let registry = registry_with(caps.iter().filter(|cap| cap.title != "any2text").cloned().collect());
         let request = PlanRequest::single(
             SourceSpec::single(media("media:document;ext=pdf")),
             txt(),
@@ -2954,10 +2957,23 @@ mod tests {
             .expect("pdf → txt by pdf2text is still planned");
         assert!(!outcome.candidates.is_empty());
         assert!(outcome.candidates.iter().all(|c| !c.notation.contains("textize")));
-        assert_eq!(outcome.refused_routes.len(), 1, "{:?}", outcome.refused_routes);
-        let refused = &outcome.refused_routes[0];
-        assert!(refused.label.contains(&crate::CapUrn::from_string(any2text).unwrap().to_string()), "{}", refused.label);
-        assert!(refused.reason.contains("textize"), "the reason names the cap: {}", refused.reason);
+        assert_eq!(outcome.excluded.len(), 1, "{:?}", outcome.excluded);
+        let excluded = &outcome.excluded[0];
+        let any2text = crate::CapUrn::from_string(any2text).unwrap().to_string();
+        assert!(excluded.strand.contains(&any2text), "{}", excluded.strand);
+        assert!(excluded.reason.contains("textize"), "the reason names the cap: {}", excluded.reason);
+
+        let (mut caps, bookends) = fabric_caps();
+        caps.retain(|cap| cap.title != "pdf2text");
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+        caps.retain(|cap| cap.title != "any2text");
+        let outcome = fab
+            .plan(&request, &registry_with(caps))
+            .expect("strands were found: the outcome names them, it is not \"no plan\"");
+        assert!(outcome.candidates.is_empty(), "{:?}", outcome.candidates);
+        assert_eq!(outcome.excluded.len(), 1, "{:?}", outcome.excluded);
+        assert!(outcome.excluded[0].strand.contains(&any2text), "{}", outcome.excluded[0].strand);
     }
 
     // TEST1428 (full coverage ⇒ no dead ends): the ordinary pdf+md plan must

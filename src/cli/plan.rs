@@ -149,12 +149,20 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         .plan(&request, registry.as_ref())
         .map_err(|e| CliError::failed("no machine could be planned").context(e.to_string()))?;
     let target_names = targets.iter().map(|t| names::media(&registry, t)).collect::<Vec<_>>().join(", ");
-    for refused in &outcome.refused_routes {
-        say_refused(ctx, refused);
-    }
     if outcome.candidates.is_empty() {
-        return Err(CliError::failed(format!("no machine makes {target_names} of {what}"))
-            .hint(format!("see what it can become: capdag plan {}", args.files.join(" "))));
+        // Strands were found and none could be written: they are named, with
+        // why, rather than reported as no plan.
+        for excluded in &outcome.excluded {
+            say_excluded(ctx, excluded);
+        }
+        let mut error = CliError::failed(format!("no machine makes {target_names} of {what}"));
+        if !outcome.excluded.is_empty() {
+            error = error.context(match outcome.excluded.len() {
+                1 => "a way was found and not offered: it is named above".to_string(),
+                n => format!("{n} ways were found and not offered: each is named above"),
+            });
+        }
+        return Err(error.hint(format!("see what it can become: capdag plan {}", args.files.join(" "))));
     }
     // Reading the bundled cartridges verifies each of them: once per command,
     // not once per machine.
@@ -176,10 +184,17 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         }
         None => None,
     };
+    // The strands not offered are named under the machines that are.
     let Some(chosen) = chosen else {
         print_machines(ctx, &machines, &target_names, &what, args.all, &args.files);
+        for excluded in &outcome.excluded {
+            say_excluded(ctx, excluded);
+        }
         return Ok(Exit::Ok);
     };
+    for excluded in &outcome.excluded {
+        say_excluded(ctx, excluded);
+    }
     let machine = &machines[chosen];
 
     // ── What to do with it ──
@@ -400,15 +415,15 @@ fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &Media
     }
 }
 
-/// A route the planner found and no machine could hold: left out of the list,
-/// said so, and why.
-fn say_refused(ctx: &Ctx, refused: &p::RefusedRoute) {
+/// A strand the planner found and no machine could hold: not offered, said
+/// so, and why.
+fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     if ctx.term.json {
         emit_record(&serde_json::json!({
-            "type": "refused", "route": refused.label, "reason": refused.reason,
+            "type": "excluded", "strand": excluded.strand, "reason": excluded.reason,
         }));
     } else {
-        eprintln!("a route was found and left out: {}: {}", refused.label, refused.reason);
+        eprintln!("not offered: {}: {}", excluded.strand, excluded.reason);
     }
 }
 

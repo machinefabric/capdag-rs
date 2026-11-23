@@ -39,6 +39,7 @@ pub fn steps_to_resolved_graph(
 ) -> Result<ResolvedGraph, ParseOrchestrationError> {
     let invalid = |message: String| ParseOrchestrationError::InvalidGraph { message };
     let mut nodes: HashMap<String, String> = HashMap::new();
+    let mut held: HashMap<String, String> = HashMap::new();
     let mut steps: Vec<ResolvedStep> = Vec::with_capacity(step_ids.len());
 
     // A step's other taken outputs: the `CapOutput` nodes that name it.
@@ -131,10 +132,10 @@ pub fn steps_to_resolved_graph(
         }
 
         let out_media = cap.urn.out_spec().to_string();
-        nodes.insert(step_id.to_string(), out_media.clone());
+        nodes.insert(step_id.to_string(), holds(plan, step_id, registry, &mut held)?);
         let outputs = outputs_of.remove(*step_id).unwrap_or_default();
         for output in &outputs {
-            nodes.insert(output.node.clone(), output.output_media_urn.clone());
+            nodes.insert(output.node.clone(), holds(plan, &output.node, registry, &mut held)?);
         }
         steps.push(ResolvedStep {
             token_id: token_id.clone(),
@@ -154,27 +155,7 @@ pub fn steps_to_resolved_graph(
             if nodes.contains_key(source) {
                 continue;
             }
-            let media = match plan.nodes.get(source).map(|n| &n.node_type) {
-                Some(ExecutionNodeType::InputSlot {
-                    expected_media_urn, ..
-                }) => expected_media_urn.clone(),
-                Some(ExecutionNodeType::Item { media_urn, .. }) => media_urn.clone(),
-                Some(ExecutionNodeType::CapOutput {
-                    output_media_urn, ..
-                }) => output_media_urn.clone(),
-                Some(ExecutionNodeType::Cap { cap_urn, .. }) => registry
-                    .get_cached_cap(cap_urn)
-                    .map_err(|e| ParseOrchestrationError::from_cap_lookup(cap_urn, e))?
-                    .urn
-                    .out_spec()
-                    .to_string(),
-                other => {
-                    return Err(invalid(format!(
-                        "a step reads '{source}', which holds no value ({other:?})"
-                    )));
-                }
-            };
-            nodes.insert(source.clone(), media);
+            nodes.insert(source.clone(), holds(plan, source, registry, &mut held)?);
         }
     }
 
@@ -183,6 +164,86 @@ pub fn steps_to_resolved_graph(
         steps,
         graph_name: Some(plan.name.clone()),
     })
+}
+
+/// What node `id` of `plan` holds: the media URN of its value.
+///
+/// A step whose main output is given holds that output's `out=`. A step that
+/// passes on what it is sent, or changes part of it (`effect=none`,
+/// `effect=patch`), holds what its effect makes of what its main input holds:
+/// a JSON list of records converted to YAML is a YAML list of records. When
+/// nothing in the plan is wired into its main input, it is sent its declared
+/// `in=`, and holds what its effect makes of that, its `out=`. An input slot
+/// holds what it expects, an item its media, an output of a step its own URN,
+/// and a gather its element type.
+///
+/// Resolution gives every step a main input its `in=` takes, so a none or
+/// patch step sent something its `in=` does not take is a broken plan, and is
+/// refused naming the step and both URNs. `held` keeps what was worked out.
+fn holds(
+    plan: &MachinePlan,
+    id: &str,
+    registry: &FabricRegistry,
+    held: &mut HashMap<String, String>,
+) -> Result<String, ParseOrchestrationError> {
+    if let Some(media) = held.get(id) {
+        return Ok(media.clone());
+    }
+    let invalid = |message: String| ParseOrchestrationError::InvalidGraph { message };
+    let media = match plan.nodes.get(id).map(|n| &n.node_type) {
+        Some(ExecutionNodeType::InputSlot {
+            expected_media_urn, ..
+        }) => expected_media_urn.clone(),
+        Some(ExecutionNodeType::Item { media_urn, .. }) => media_urn.clone(),
+        Some(ExecutionNodeType::CapOutput {
+            output_media_urn, ..
+        }) => output_media_urn.clone(),
+        Some(ExecutionNodeType::Collect {
+            output_media_urn, ..
+        }) => output_media_urn.clone(),
+        Some(ExecutionNodeType::Cap { cap_urn, .. }) => {
+            let cap = registry
+                .get_cached_cap(cap_urn)
+                .map_err(|e| ParseOrchestrationError::from_cap_lookup(cap_urn, e))?;
+            let main_input = plan
+                .edges
+                .iter()
+                .find(|edge| edge.to_node == id && matches!(edge.edge_type, EdgeType::Direct));
+            match main_input {
+                Some(edge) if !crate::machine::resolve::main_output_is_given(&cap) => {
+                    let sent = holds(plan, &edge.from_node, registry, held)?;
+                    let sent_urn = crate::MediaUrn::from_string(&sent).map_err(|e| {
+                        invalid(format!("'{}' holds '{sent}', which is not a media URN: {e}", edge.from_node))
+                    })?;
+                    let in_urn = cap.urn.in_media_urn().map_err(|e| {
+                        invalid(format!("step '{id}': cap '{cap_urn}' has an in= that is not a media URN: {e}"))
+                    })?;
+                    if !sent_urn.satisfies(&in_urn) {
+                        return Err(invalid(format!(
+                            "step '{id}' (cap '{cap_urn}') is sent '{sent}' on its main input, \
+                             which its in= '{}' does not take",
+                            cap.urn.in_spec()
+                        )));
+                    }
+                    cap.urn
+                        .apply_to_runtime_input_media(&sent_urn)
+                        .map_err(|e| {
+                            invalid(format!(
+                                "step '{id}' (cap '{cap_urn}'): what it gives for '{sent}' cannot be \
+                                 worked out: {e}"
+                            ))
+                        })?
+                        .to_string()
+                }
+                _ => cap.urn.out_spec().to_string(),
+            }
+        }
+        other => {
+            return Err(invalid(format!("a step reads '{id}', which holds no value ({other:?})")));
+        }
+    };
+    held.insert(id.to_string(), media.clone());
+    Ok(media)
 }
 
 /// Every step of a plan that has no map, as one graph.
@@ -503,6 +564,95 @@ mod tests {
         match plan_to_resolved_graph(&unknown, &registry) {
             Err(ParseOrchestrationError::CapNotFound { cap_urn }) => assert!(cap_urn.contains("mystery")),
             other => panic!("expected CapNotFound, got {other:?}"),
+        }
+    }
+
+    const PARSE_CSV: &str = r#"cap:in="media:enc=utf8;fmt=csv;list;record";out="media:enc=utf8;fmt=json;list;record""#;
+    const JSON_TO_YAML: &str =
+        r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;!ext;fmt=yaml""#;
+    const TIDY: &str = r#"cap:effect=none;in="media:enc=utf8";tidy;out="media:enc=utf8""#;
+    const YAML_TO_CSV: &str = r#"cap:in="media:enc=utf8;fmt=yaml;list;record";out="media:enc=utf8;fmt=csv;list;record""#;
+
+    fn format_registry() -> FabricRegistry {
+        let registry = FabricRegistry::new_for_test();
+        registry.add_caps_to_cache(vec![cap(PARSE_CSV), cap(JSON_TO_YAML), cap(TIDY), cap(YAML_TO_CSV)]);
+        registry
+    }
+
+    /// table → parse → to_yaml → tidy → to_csv: a CSV list of records read as
+    /// JSON, converted to YAML by a patch, passed through, written back as CSV.
+    fn format_plan(table: &str) -> MachinePlan {
+        let mut plan = MachinePlan::new("formats");
+        plan.add_node(MachineNode::input_slot("table", "input", table, InputCardinality::Single));
+        plan.add_node(MachineNode::cap("parse", PARSE_CSV));
+        plan.add_node(MachineNode::cap("to_yaml", JSON_TO_YAML));
+        plan.add_node(MachineNode::cap("tidy", TIDY));
+        plan.add_node(MachineNode::cap("to_csv", YAML_TO_CSV));
+        plan.add_edge(MachinePlanEdge::direct("table", "parse"));
+        plan.add_edge(MachinePlanEdge::direct("parse", "to_yaml"));
+        plan.add_edge(MachinePlanEdge::direct("to_yaml", "tidy"));
+        plan.add_edge(MachinePlanEdge::direct("tidy", "to_csv"));
+        plan.validate().expect("valid");
+        plan
+    }
+
+    fn holds_as(nodes: &HashMap<String, String>, node: &str, expect: &str) {
+        let holds = crate::MediaUrn::from_string(&nodes[node]).unwrap();
+        let expect = crate::MediaUrn::from_string(expect).unwrap();
+        assert!(holds.is_equivalent(&expect), "'{node}' holds {holds}, expected {expect}");
+    }
+
+    // TEST8430: a step that changes part of what it is sent holds what its
+    // effect makes of what its main input holds, and so does one that passes
+    // it on: a JSON list of records converted to YAML is a YAML list of
+    // records, which the next step takes, not just the YAML its cap's out=
+    // names. A step whose output is given holds its out=, and a patch step
+    // nothing is wired into holds what it is then sent under, its out=. A step
+    // outside the graph is given what it holds.
+    #[test]
+    fn test8430_a_patch_steps_node_holds_what_its_effect_makes_of_its_input() {
+        let registry = format_registry();
+        let plan = format_plan("media:enc=utf8;fmt=csv;list;record");
+        let graph = plan_to_resolved_graph(&plan, &registry).expect("converts");
+        holds_as(&graph.nodes, "parse", "media:enc=utf8;fmt=json;list;record");
+        holds_as(&graph.nodes, "to_yaml", "media:enc=utf8;!ext;fmt=yaml;list;record");
+        holds_as(&graph.nodes, "tidy", "media:enc=utf8;!ext;fmt=yaml;list;record");
+        holds_as(&graph.nodes, "to_csv", "media:enc=utf8;fmt=csv;list;record");
+        let takes = crate::MediaUrn::from_string(step(&graph, "to_csv").cap.urn.in_spec()).unwrap();
+        assert!(
+            crate::MediaUrn::from_string(&graph.nodes["tidy"]).unwrap().satisfies(&takes),
+            "what reaches to_csv is what it takes"
+        );
+
+        let last = steps_to_resolved_graph(&plan, &["to_csv"], &registry).expect("converts");
+        holds_as(&last.nodes, "tidy", "media:enc=utf8;!ext;fmt=yaml;list;record");
+
+        let mut alone = MachinePlan::new("alone");
+        alone.add_node(MachineNode::cap("to_yaml", JSON_TO_YAML));
+        let graph = plan_to_resolved_graph(&alone, &registry).expect("converts");
+        holds_as(&graph.nodes, "to_yaml", "media:enc=utf8;!ext;fmt=yaml");
+    }
+
+    // TEST8431: a step that passes on or patches what it is sent, and is sent
+    // something its in= does not take, is refused naming the step, what it is
+    // sent and its in=: resolution never makes such a plan.
+    #[test]
+    fn test8431_a_patch_step_sent_what_its_input_does_not_take_is_refused() {
+        let registry = format_registry();
+        let mut plan = MachinePlan::new("broken");
+        plan.add_node(MachineNode::input_slot("table", "input", "media:enc=utf8;fmt=csv;list;record", InputCardinality::Single));
+        plan.add_node(MachineNode::cap("to_yaml", JSON_TO_YAML));
+        plan.add_edge(MachinePlanEdge::direct("table", "to_yaml"));
+        plan.validate().expect("valid");
+        match plan_to_resolved_graph(&plan, &registry) {
+            Err(ParseOrchestrationError::InvalidGraph { message }) => assert_eq!(
+                message,
+                format!(
+                    "step 'to_yaml' (cap '{JSON_TO_YAML}') is sent 'media:enc=utf8;fmt=csv;list;record' on its \
+                     main input, which its in= 'media:enc=utf8;fmt=json' does not take"
+                )
+            ),
+            other => panic!("expected a refusal, got {other:?}"),
         }
     }
 

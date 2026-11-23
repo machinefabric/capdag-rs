@@ -1177,3 +1177,83 @@ fn test7222_a_patch_output_node_holds_what_the_cap_gives() {
         );
     }
 }
+
+/// JSON to YAML and YAML to JSON as the fabric publishes them: patches that keep
+/// the shape they are given and give content, not a file.
+const JSON_TO_YAML_PATCH: &str =
+    r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;fmt=yaml;!ext""#;
+const YAML_TO_JSON_PATCH: &str =
+    r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=yaml";yaml-to-json;out="media:enc=utf8;fmt=json;!ext""#;
+
+fn urn(text: &str) -> MediaUrn {
+    MediaUrn::from_string(text).unwrap()
+}
+
+// TEST7246: a machine read back from its text types an input of the machine by
+// what the steps after it need, carried back through a patch: JSON to YAML,
+// then a save that takes a YAML list of records, types the input a JSON list of
+// records and the node between them a YAML list of records, content and no
+// file, whether its members are named or not.
+#[test]
+fn test7246_an_input_is_typed_by_what_the_steps_after_a_patch_need() {
+    use crate::machine::test_fixtures::{build_cap, registry_with};
+    let save = r#"cap:in="media:enc=utf8;fmt=yaml;list;record;!ext";out="media:enc=utf8;ext=yaml;fmt=yaml;list;record";save-as-yaml"#;
+    let registry = registry_with(vec![
+        build_cap(JSON_TO_YAML_PATCH, "json to yaml", &["media:enc=utf8;fmt=json"], "media:enc=utf8;fmt=yaml;!ext"),
+        build_cap(save, "save", &["media:enc=utf8;fmt=yaml;list;record;!ext"], "media:enc=utf8;ext=yaml;fmt=yaml;list;record"),
+    ]);
+    let headers = format!("[to_yaml {JSON_TO_YAML_PATCH}][save {save}]");
+    for wirings in [
+        "[(input=n0) -> to_yaml -> (output=n1)][(input=n1) -> save -> (output=n2)]",
+        "[n1 -> save -> n2][n0 -> to_yaml -> n1]",
+    ] {
+        let (machine, names) = parse_machine_with_node_names(&format!("{headers}{wirings}"), &registry)
+            .unwrap_or_else(|e| panic!("{wirings} must read back: {e}"));
+        let strand = &machine.strands()[0];
+        let n0 = strand.node_urn(names[0]["n0"]);
+        let n1 = strand.node_urn(names[0]["n1"]);
+        assert!(n0.is_equivalent(&urn("media:enc=utf8;fmt=json;list;record")), "{wirings}: n0 is {n0}");
+        assert!(n1.is_equivalent(&urn("media:enc=utf8;!ext;fmt=yaml;list;record")), "{wirings}: n1 is {n1}");
+    }
+}
+
+// TEST7247: what an input of the machine must be is carried back from every
+// step its patch's output is bound into, a gather included: YAML converted to
+// JSON and gathered with JSON records that are not lists types the YAML input a
+// YAML record that is not a list, and what the patch gives a JSON record that
+// is not a list, content and no file.
+#[test]
+fn test7247_an_input_is_typed_through_a_patch_by_the_gather_after_it() {
+    use crate::machine::test_fixtures::{build_cap, registry_with};
+    let collect = r#"cap:in="media:enc=utf8;fmt=json;!list;record";collect-json-objects;out="media:enc=utf8;fmt=json;list;record""#;
+    let mut collect_cap = build_cap(
+        collect,
+        "collect",
+        &["media:enc=utf8;fmt=json;!list;record"],
+        "media:enc=utf8;fmt=json;list;record",
+    );
+    collect_cap.args[0].is_sequence = true;
+    let registry = registry_with(vec![
+        build_cap(YAML_TO_JSON_PATCH, "yaml to json", &["media:enc=utf8;fmt=yaml"], "media:enc=utf8;fmt=json;!ext"),
+        collect_cap,
+    ]);
+    let headers = format!("[yaml_to_json {YAML_TO_JSON_PATCH}][collect {collect}]");
+    for wirings in [
+        "[from_yaml -> yaml_to_json -> converted][(converted, already_json) -> collect -> collected]",
+        "[(converted, already_json) -> collect -> collected][from_yaml -> yaml_to_json -> converted]",
+    ] {
+        let (machine, names) = parse_machine_with_node_names(&format!("{headers}{wirings}"), &registry)
+            .unwrap_or_else(|e| panic!("{wirings} must read back: {e}"));
+        let strand = &machine.strands()[0];
+        let from_yaml = strand.node_urn(names[0]["from_yaml"]);
+        let converted = strand.node_urn(names[0]["converted"]);
+        assert!(
+            from_yaml.is_equivalent(&urn("media:enc=utf8;fmt=yaml;!list;record")),
+            "{wirings}: from_yaml is {from_yaml}"
+        );
+        assert!(
+            converted.is_equivalent(&urn("media:enc=utf8;!ext;fmt=json;!list;record")),
+            "{wirings}: converted is {converted}"
+        );
+    }
+}
