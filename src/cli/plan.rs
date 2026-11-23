@@ -149,6 +149,9 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         .plan(&request, registry.as_ref())
         .map_err(|e| CliError::failed("no machine could be planned").context(e.to_string()))?;
     let target_names = targets.iter().map(|t| names::media(&registry, t)).collect::<Vec<_>>().join(", ");
+    for refused in &outcome.refused_routes {
+        say_refused(ctx, refused);
+    }
     if outcome.candidates.is_empty() {
         return Err(CliError::failed(format!("no machine makes {target_names} of {what}"))
             .hint(format!("see what it can become: capdag plan {}", args.files.join(" "))));
@@ -394,6 +397,18 @@ fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &Media
         }));
     } else {
         eprintln!("--to {token}: making {alias}, the one {token} {what} can become");
+    }
+}
+
+/// A route the planner found and no machine could hold: left out of the list,
+/// said so, and why.
+fn say_refused(ctx: &Ctx, refused: &p::RefusedRoute) {
+    if ctx.term.json {
+        emit_record(&serde_json::json!({
+            "type": "refused", "route": refused.label, "reason": refused.reason,
+        }));
+    } else {
+        eprintln!("a route was found and left out: {}: {}", refused.label, refused.reason);
     }
 }
 

@@ -438,6 +438,20 @@ pub struct PlanOutcome {
     /// Sources (media URNs, request order) with no route to ANY requested
     /// target within `max_depth`. Empty ⇒ full coverage.
     pub dead_end_sources: Vec<MediaUrn>,
+    /// Routes the search found that could not be written as a machine, each
+    /// with why. They are left out of the candidates, never silently: a route
+    /// the search finds and no machine can hold is a contradiction a client
+    /// shows. Empty ⇒ every route found is a candidate.
+    pub refused_routes: Vec<RefusedRoute>,
+}
+
+/// A route the search found that could not be written as a machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedRoute {
+    /// The route, as a candidate's label names one, with its steps.
+    pub label: String,
+    /// Why no machine holds it: the resolver's refusal.
+    pub reason: String,
 }
 
 /// The result of target discovery for a source set: the reachable targets

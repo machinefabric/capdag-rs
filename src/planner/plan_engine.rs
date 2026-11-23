@@ -47,7 +47,7 @@ use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence, PlanApex,
     PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest,
-    RankPolicy, SourceSpec, TargetSpec,
+    RankPolicy, RefusedRoute, SourceSpec, TargetSpec,
 };
 
 /// Bound on distinct apex media considered per request (after the location
@@ -69,6 +69,8 @@ const MAX_FOLDS_PER_APEX: usize = 3;
 struct CandidateSink<'a> {
     candidates: Vec<PlanCandidate>,
     seen_notations: HashSet<String>,
+    /// Routes the search found that no machine could hold, with why.
+    refused: Vec<RefusedRoute>,
     observer: Option<&'a mut dyn FnMut(&PlanCandidate)>,
 }
 
@@ -77,6 +79,7 @@ impl<'a> CandidateSink<'a> {
         Self {
             candidates: Vec::new(),
             seen_notations: HashSet::new(),
+            refused: Vec::new(),
             observer,
         }
     }
@@ -95,6 +98,11 @@ impl<'a> CandidateSink<'a> {
             observer(&candidate);
         }
         self.candidates.push(candidate);
+    }
+
+    /// Leave a route out because no machine holds it, saying why.
+    fn refuse(&mut self, label: String, reason: String) {
+        self.refused.push(RefusedRoute { label, reason });
     }
 
     fn len(&self) -> usize {
@@ -220,6 +228,19 @@ impl Assembler {
             Err(e) => Err(PlanError::Internal(format!("candidate assembly failed to resolve: {e}"))),
         }
     }
+}
+
+/// A route's label: where it goes, and the caps it takes, in order.
+fn route_label(from: &MediaUrn, to: &MediaUrn, strand: &Strand) -> String {
+    let caps: Vec<String> = strand
+        .steps
+        .iter()
+        .filter_map(|step| match &step.step_type {
+            StrandStepType::Cap { cap_urn, .. } => Some(cap_urn.to_string()),
+            _ => None,
+        })
+        .collect();
+    format!("{from} → {to} by {}", caps.join(" > "))
 }
 
 /// Canonical notation of a set of resolved strands (one Machine).
@@ -405,6 +426,7 @@ impl LiveCapFab {
                 } else {
                     self.plan_multi_source(&reduced, &targets, registry, &mut reduced_sink)?;
                 }
+                sink.refused.extend(reduced_sink.refused.drain(..));
                 if !reduced_sink.is_empty() {
                     dead_end_sources = dead.iter().map(|s| s.media_urn.clone()).collect();
                     let dead_names = dead_end_sources
@@ -425,11 +447,16 @@ impl LiveCapFab {
             }
         }
 
+        let refused_routes = sink.refused;
         let mut candidates = sink.candidates;
         if candidates.is_empty() {
+            let refusals: String = refused_routes
+                .iter()
+                .map(|route| format!("; {} was found and refused: {}", route.label, route.reason))
+                .collect();
             return Err(PlanError::NoPlan {
                 detail: format!(
-                    "no machine connects [{}] to [{}] within depth {}",
+                    "no machine connects [{}] to [{}] within depth {}{refusals}",
                     request
                         .sources
                         .iter()
@@ -456,6 +483,7 @@ impl LiveCapFab {
         Ok(PlanOutcome {
             candidates,
             dead_end_sources,
+            refused_routes,
         })
     }
 
@@ -511,9 +539,13 @@ impl LiveCapFab {
                 request.max_paths,
             );
             for strand in &strands {
-                let notation = strand
-                    .to_machine_notation(registry)
-                    .map_err(|e| PlanError::Internal(format!("strand serialization: {e}")))?;
+                let notation = match strand.to_machine_notation(registry) {
+                    Ok(notation) => notation,
+                    Err(refusal) => {
+                        out.refuse(route_label(&source.media_urn, &targets[0], strand), refusal.to_string());
+                        continue;
+                    }
+                };
                 let cap_steps = strand.cap_step_count as usize;
                 let folded = is_seq && !strand_final_is_sequence(strand, is_seq);
                 out.push(PlanCandidate {
@@ -1012,9 +1044,13 @@ impl LiveCapFab {
                 })
                 .collect();
             for strand in strands.iter().take(MAX_FOLDS_PER_APEX) {
-                let notation = strand
-                    .to_machine_notation(registry)
-                    .map_err(|e| PlanError::Internal(format!("strand serialization: {e}")))?;
+                let notation = match strand.to_machine_notation(registry) {
+                    Ok(notation) => notation,
+                    Err(refusal) => {
+                        out.refuse(route_label(&apex.media, target, strand), refusal.to_string());
+                        continue;
+                    }
+                };
                 let folded = !strand_final_is_sequence(strand, entry_seq);
                 let cap_steps = strand.cap_step_count as usize;
                 let shape = if folded {
@@ -1457,6 +1493,7 @@ impl LiveCapFab {
             };
             let mut sub_out = CandidateSink::detached();
             self.collect_candidates(&sub_req, targets, apex, &subset, registry, &mut sub_out)?;
+            out.refused.extend(sub_out.refused.drain(..));
             let Some(converged) = sub_out.candidates.into_iter().next() else {
                 continue;
             };
@@ -1843,6 +1880,15 @@ mod tests {
     ///
     /// Bookends: pdf, md, txt (page is an internal type, never a bookend).
     fn fabric() -> (LiveCapFab, crate::cap::registry::FabricRegistry) {
+        let (caps, bookends) = fabric_caps();
+        let registry = registry_with(caps.clone());
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+        (fab, registry)
+    }
+
+    /// The caps of [`fabric`] and its bookends.
+    fn fabric_caps() -> (Vec<crate::Cap>, HashSet<MediaUrn>) {
         let pdf2text = build_cap(
             "cap:in=\"media:document;ext=pdf\";extract;out=\"media:enc=utf8;page\"",
             "pdf2text",
@@ -1872,7 +1918,6 @@ mod tests {
         concat.args[0].is_sequence = true;
 
         let caps = vec![pdf2text, md2text, any2text, concat];
-        let registry = registry_with(caps.clone());
         let bookends: HashSet<MediaUrn> = [
             media("media:document;ext=pdf"),
             media("media:ext=md;plain-text"),
@@ -1880,9 +1925,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let mut fab = LiveCapFab::new();
-        fab.sync_from_caps(&caps, &bookends);
-        (fab, registry)
+        (caps, bookends)
     }
 
     fn txt() -> MediaUrn {
@@ -2887,6 +2930,34 @@ mod tests {
             matches!(err, PlanError::NoPlan { .. }),
             "all-dead must remain NoPlan, got {err:?}"
         );
+    }
+
+    // TEST8108: a route the search finds that no machine can hold is left out
+    // of the candidates and named with why, and the routes that can be held
+    // are still planned. Here the search's graph holds `any2text` and the
+    // registry the routes are written against does not, so pdf → txt by
+    // any2text cannot be written; pdf → txt by pdf2text can.
+    #[test]
+    fn test8108_a_route_no_machine_holds_is_refused_by_name_and_the_rest_plan() {
+        let (fab, _) = fabric();
+        let any2text = "cap:in=\"media:ext\";textize;out=\"media:enc=utf8;page\"";
+        let (caps, _) = fabric_caps();
+        let registry = registry_with(caps.into_iter().filter(|cap| cap.title != "any2text").collect());
+        let request = PlanRequest::single(
+            SourceSpec::single(media("media:document;ext=pdf")),
+            txt(),
+            PlanRequest::DEFAULT_MAX_DEPTH,
+            PlanRequest::DEFAULT_MAX_PATHS,
+        );
+        let outcome = fab
+            .plan(&request, &registry)
+            .expect("pdf → txt by pdf2text is still planned");
+        assert!(!outcome.candidates.is_empty());
+        assert!(outcome.candidates.iter().all(|c| !c.notation.contains("textize")));
+        assert_eq!(outcome.refused_routes.len(), 1, "{:?}", outcome.refused_routes);
+        let refused = &outcome.refused_routes[0];
+        assert!(refused.label.contains(&crate::CapUrn::from_string(any2text).unwrap().to_string()), "{}", refused.label);
+        assert!(refused.reason.contains("textize"), "the reason names the cap: {}", refused.reason);
     }
 
     // TEST1428 (full coverage ⇒ no dead ends): the ordinary pdf+md plan must
