@@ -258,6 +258,12 @@
     "renamed": false
   },
   {
+    "lean_name": "TaggedUrn.Values",
+    "kind": "type",
+    "rust_path": "_root_::tagged_urn::Values",
+    "renamed": false
+  },
+  {
     "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
     "kind": "function",
     "rust_path": "bifaci::credit::gate::acquire",
@@ -588,6 +594,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapDAG.Exec.endsOn",
+    "kind": "function",
+    "rust_path": "exec::ends_on",
+    "renamed": true
+  },
+  {
     "lean_name": "CapDAG.Exec.equivalent",
     "kind": "function",
     "rust_path": "exec::equivalent",
@@ -675,6 +687,12 @@
     "lean_name": "CapDAG.Exec.specificity",
     "kind": "function",
     "rust_path": "exec::specificity",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapDAG.Exec.splits",
+    "kind": "function",
+    "rust_path": "exec::splits",
     "renamed": false
   },
   {
@@ -1956,58 +1974,46 @@
     "renamed": true
   },
   {
-    "lean_name": "TaggedUrn.Constraint.unconstrained",
+    "lean_name": "TaggedUrn.Constraint.written",
     "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::Unconstrained",
+    "rust_path": "_root_::tagged_urn::Constraint::Written",
     "renamed": true
   },
   {
-    "lean_name": "TaggedUrn.Constraint.optionalNot",
-    "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::OptionalNot",
-    "renamed": true
-  },
-  {
-    "lean_name": "TaggedUrn.Constraint.optionalNot.value",
+    "lean_name": "TaggedUrn.Constraint.written.absent",
     "kind": "field",
-    "rust_path": "_root_::tagged_urn::Constraint::OptionalNot.value",
+    "rust_path": "_root_::tagged_urn::Constraint::Written.absent",
     "renamed": false
   },
   {
-    "lean_name": "TaggedUrn.Constraint.present",
-    "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::Present",
-    "renamed": true
-  },
-  {
-    "lean_name": "TaggedUrn.Constraint.presentNot",
-    "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::PresentNot",
-    "renamed": true
-  },
-  {
-    "lean_name": "TaggedUrn.Constraint.presentNot.value",
+    "lean_name": "TaggedUrn.Constraint.written.values",
     "kind": "field",
-    "rust_path": "_root_::tagged_urn::Constraint::PresentNot.value",
+    "rust_path": "_root_::tagged_urn::Constraint::Written.values",
     "renamed": false
   },
   {
-    "lean_name": "TaggedUrn.Constraint.exact",
+    "lean_name": "TaggedUrn.Values.oneOf",
     "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::Exact",
+    "rust_path": "_root_::tagged_urn::Values::OneOf",
     "renamed": true
   },
   {
-    "lean_name": "TaggedUrn.Constraint.exact.value",
+    "lean_name": "TaggedUrn.Values.oneOf.vs",
     "kind": "field",
-    "rust_path": "_root_::tagged_urn::Constraint::Exact.value",
+    "rust_path": "_root_::tagged_urn::Values::OneOf.vs",
     "renamed": false
   },
   {
-    "lean_name": "TaggedUrn.Constraint.absent",
+    "lean_name": "TaggedUrn.Values.noneOf",
     "kind": "constructor",
-    "rust_path": "_root_::tagged_urn::Constraint::Absent",
+    "rust_path": "_root_::tagged_urn::Values::NoneOf",
     "renamed": true
+  },
+  {
+    "lean_name": "TaggedUrn.Values.noneOf.vs",
+    "kind": "field",
+    "rust_path": "_root_::tagged_urn::Values::NoneOf.vs",
+    "renamed": false
   },
   {
     "lean_name": "TaggedUrn.Exec.Wf",

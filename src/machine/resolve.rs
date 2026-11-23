@@ -80,6 +80,7 @@ use super::graph::{
     BindingSource, EdgeAssignmentBinding, EdgeOutput, MachineEdge, MachineStrand, NodeId,
 };
 use super::iteration::{IterationStructure, MemberShape, StepShape};
+use super::parser::narrower_of;
 use super::syntax::StepPolicy;
 
 /// One wiring after the caller has pre-interned its source and
@@ -147,8 +148,10 @@ pub enum ForEachIdentity {
 /// This is the correct interning policy for planner-produced
 /// strands because the planner chains caps by satisfaction:
 /// what cap A gives may say more than cap B's `in_spec`, but
-/// at runtime the same data flows through both. The more-specific URN wins as the canonical
-/// representative of the shared data position.
+/// at runtime the same data flows through both. The narrower URN — the one
+/// inside the other — is the canonical representative of the shared data
+/// position; two URNs neither of which is inside the other are a
+/// `NodeMediaConflict`.
 ///
 /// `ForEach` and `Collect` steps are elided here — they preserve the boundary
 /// position through the cardinality transition. `is_loop` is not carried on the
@@ -203,8 +206,17 @@ pub fn resolve_strand(
                     let source_id = match &input.source {
                         ArgSourceRef::StrandInput => match strand_input_node {
                             Some(id) => {
-                                if step.from_spec.specificity() > nodes[id as usize].specificity() {
-                                    nodes[id as usize] = step.from_spec.clone();
+                                let held = &nodes[id as usize];
+                                match narrower_of(held, &step.from_spec) {
+                                    Some(true) => nodes[id as usize] = step.from_spec.clone(),
+                                    Some(false) => {}
+                                    None => {
+                                        return Err(MachineAbstractionError::NodeMediaConflict {
+                                            node: format!("strand {strand_index} input"),
+                                            first: held.to_string(),
+                                            second: step.from_spec.to_string(),
+                                        })
+                                    }
                                 }
                                 id
                             }
@@ -2490,8 +2502,8 @@ mod tests {
     }
 
     // TEST12836: a strand's steps name where each input comes from. A
-    // strand's own input, taken by two steps, is one node holding the most
-    // specific type either declares for it; a step that names a producer no
+    // strand's own input, taken by two steps, is one node holding the
+    // narrower type either declares for it; a step that names a producer no
     // step of the strand is makes the strand disconnected, and is refused.
     #[test]
     fn test12836_a_strand_input_is_one_node_and_a_missing_producer_is_refused() {
@@ -2522,7 +2534,7 @@ mod tests {
             let anchor = resolved.input_anchor_ids()[0];
             assert!(
                 resolved.node_urn(anchor).is_equivalent(&media("media:enc=utf8;page")),
-                "the most specific type a step declares for it, whichever step comes first"
+                "the narrower type a step declares for it, whichever step comes first"
             );
             for edge in resolved.edges() {
                 assert_eq!(edge.source_nodes().collect::<Vec<_>>(), vec![anchor]);
@@ -2541,6 +2553,56 @@ mod tests {
                 assert_eq!(strand_index, 4)
             }
             other => panic!("expected a disconnected strand, got {:?}", other.map(|_| ())),
+        }
+    }
+
+    // TEST7228: two steps that take the strand's input give it two types; the
+    // node keeps the one inside the other, even where the two score the same
+    // specificity (`ext=jpeg|png|webp` and `ext=jpeg|png`), and two types
+    // neither of which is inside the other are a conflict.
+    #[test]
+    fn test7228_a_strand_input_keeps_the_narrower_of_two_types() {
+        const WIDE: &str = r#"cap:in="media:ext=jpeg|png|webp;image";measure;out="media:numeric;size""#;
+        const NARROW: &str = r#"cap:in="media:ext=jpeg|png;image";thumbnail;out="media:ext=png;image;thumbnail""#;
+        const OTHER: &str = r#"cap:in="media:ext=png|webp;image";sharpen;out="media:ext=png;image;sharp""#;
+        let registry = registry_with(vec![
+            build_cap(WIDE, "measure", &["media:ext=jpeg|png|webp;image"], "media:numeric;size"),
+            build_cap(NARROW, "thumbnail", &["media:ext=jpeg|png;image"], "media:ext=png;image;thumbnail"),
+            build_cap(OTHER, "sharpen", &["media:ext=png|webp;image"], "media:ext=png;image;sharp"),
+        ]);
+        let wide = || cap_step(WIDE, "measure", "media:ext=jpeg|png|webp;image", "media:numeric;size");
+        let narrow = || cap_step(NARROW, "thumbnail", "media:ext=jpeg|png;image", "media:ext=png;image;thumbnail");
+        let other = || cap_step(OTHER, "sharpen", "media:ext=png|webp;image", "media:ext=png;image;sharp");
+        let strand_of = |steps: Vec<StrandStep>| Strand {
+            source_media_urn: steps[0].from_spec.clone(),
+            target_media_urn: steps[steps.len() - 1].to_spec.clone(),
+            total_steps: steps.len() as i32,
+            cap_step_count: steps.len() as i32,
+            description: "fan-out".to_string(),
+            steps,
+        };
+        assert_eq!(
+            media("media:ext=jpeg|png|webp;image").specificity(),
+            media("media:ext=jpeg|png;image").specificity(),
+            "the two types score the same"
+        );
+
+        for steps in [vec![wide(), narrow()], vec![narrow(), wide()]] {
+            let resolved = resolve_strand(&strand_of(steps), &registry, 0).unwrap();
+            let anchor = resolved.input_anchor_ids()[0];
+            assert!(
+                resolved.node_urn(anchor).is_equivalent(&media("media:ext=jpeg|png;image")),
+                "the type inside the other, whichever step comes first"
+            );
+        }
+
+        match resolve_strand(&strand_of(vec![narrow(), other()]), &registry, 2) {
+            Err(MachineAbstractionError::NodeMediaConflict { node, first, second }) => {
+                assert_eq!(node, "strand 2 input");
+                assert_eq!(first, "media:ext=jpeg|png;image");
+                assert_eq!(second, "media:ext=png|webp;image");
+            }
+            other => panic!("expected a node media conflict, got {:?}", other.map(|_| ())),
         }
     }
 

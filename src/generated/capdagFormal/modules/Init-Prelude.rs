@@ -257,6 +257,17 @@ pub(crate) unsafe extern "C" fn l_String_ddecEq(x_1: Obj, x_2: Obj) -> u8 {
     r
 }
 
+// Lean: String.decEq._boxed
+// Compiled from: String.decEq
+// Source: <lean>/Init/Prelude.lean:3563:1
+pub(crate) unsafe extern "C" fn l_String_ddecEq_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_String_ddecEq(x_1, x_2);
+    rt::lean_dec_ref(x_2);
+    rt::lean_dec_ref(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
+}
+
 // Lean: String.ofList
 // Source: <lean>/Init/Prelude.lean:3551:1
 #[inline(always)]

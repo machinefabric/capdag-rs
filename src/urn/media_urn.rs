@@ -496,10 +496,7 @@ impl MediaUrn {
     /// The exact value this media writes for `key` (`key=value`); `None` when
     /// it does not mention the key or constrains it in another form.
     pub fn exact_value(&self, key: &str) -> Option<&str> {
-        match self.0.get_tag(key) {
-            Some(Constraint::Exact { value }) => Some(value.as_str()),
-            _ => None,
-        }
+        self.0.get_tag(key).and_then(Constraint::exact_value)
     }
 
     /// Whether this media writes the exact value `value` for `key`.
@@ -560,11 +557,10 @@ impl MediaUrn {
     /// where branches of different media converge.
     ///
     /// Made by tagged-urn's proved model (`TaggedUrn::least_upper_bound`):
-    /// key by key, the bound allows every state some input allows, and where
-    /// no single form says exactly that, it is the least bound that excludes
-    /// only values the inputs name.
+    /// key by key, the bound allows exactly the states some input allows, and
+    /// a key some input allows every state of is left out.
     ///
-    /// - `[media:document;ext=pdf, media:ext=png;image]` → `media:ext`
+    /// - `[media:document;ext=pdf, media:ext=png;image]` → `media:ext=pdf|png`
     /// - `[media:ext=png, media:ext!=pdf]` → `media:ext!=pdf` (one holds the other)
     /// - `[media:enc=utf8;fmt=json;list, media:enc=utf8;fmt=json]` → `media:enc=utf8;fmt=json`
     /// - no inputs → `media:`
@@ -573,6 +569,39 @@ impl MediaUrn {
         MediaUrn(
             TaggedUrn::least_upper_bound("media", &tagged)
                 .expect("every MediaUrn has the media prefix"),
+        )
+    }
+
+    /// The shapes this media type may have: at every key it writes, absence
+    /// apart from presence, and each value of a finite set apart from the
+    /// others; a key allowing every value but some stays whole. Read complete,
+    /// the parts hold exactly what this type holds.
+    ///
+    /// - `media:enc=utf8;fmt=json;?list` → `media:enc=utf8;fmt=json;!list`, `media:enc=utf8;fmt=json;list`
+    /// - `media:ext=jpeg|png;image` → `media:ext=jpeg;image`, `media:ext=png;image`
+    pub fn splits(&self) -> Vec<MediaUrn> {
+        crate::formal::exec::splits(self.0.formal().clone())
+            .iter()
+            .map(Self::from_formal_media)
+            .collect()
+    }
+
+    /// The bookends a node of this type ends on: for each of its parts
+    /// ([`splits`](Self::splits)), the first of `bookends` that is the same as
+    /// the part read complete; `None` when some part is none of them. A route
+    /// reaching a node that ends on bookends may give a file of any of them.
+    pub fn ends_on(&self, bookends: &[MediaUrn]) -> Option<Vec<MediaUrn>> {
+        let handles: lungo::List<tagged_urn::FormalUrn> =
+            bookends.iter().map(|b| b.0.formal().clone()).collect();
+        crate::formal::exec::ends_on(handles, self.0.formal().clone())
+            .map(|ends| ends.iter().map(Self::from_formal_media).collect())
+    }
+
+    /// A media URN the generated model gave back for media URNs it was handed.
+    fn from_formal_media(formal: &tagged_urn::FormalUrn) -> MediaUrn {
+        MediaUrn(
+            TaggedUrn::from_formal(formal)
+                .expect("the model gives back well-formed URNs for well-formed URNs"),
         )
     }
 
@@ -1490,7 +1519,7 @@ mod debug_tests {
     #[test]
     fn test555_with_tag_and_without_tag() {
         let urn = MediaUrn::from_string("media:string").unwrap();
-        let with_ext = urn.with_tag("ext", tagged_urn::Constraint::Exact { value: "pdf".to_string() }).unwrap();
+        let with_ext = urn.with_tag("ext", tagged_urn::Constraint::exact("pdf")).unwrap();
         assert_eq!(with_ext.extension(), Some("pdf"));
         // Original unchanged
         assert_eq!(urn.extension(), None);
@@ -1577,21 +1606,17 @@ mod debug_tests {
         assert!(lub.is_equivalent(&pdf));
     }
 
-    // TEST853: LUB promotes a shared key with differing values to must-have-any.
-    // Both inputs HAVE an `ext` (pdf vs png), so the join is `media:ext` — the
-    // wildcard denominator that generic caps like `in="media:ext"` accept —
-    // NOT the trivial `media:`. The `image` marker is only on one side → dropped.
+    // TEST853: LUB keeps a shared key with differing values as the set of them.
+    // Both inputs HAVE an `ext` (pdf vs png), so the join is `media:ext=pdf|png`,
+    // which generic caps like `in="media:ext"` accept — NOT the trivial
+    // `media:`. The `image` marker is only on one side → dropped.
     #[test]
-    fn test853_lub_shared_key_promotes_to_wildcard() {
+    fn test853_lub_shared_key_keeps_the_values() {
         let pdf = MediaUrn::from_string("media:document;ext=pdf").unwrap();
         let png = MediaUrn::from_string("media:ext=png;image").unwrap();
         let lub = MediaUrn::least_upper_bound(&[pdf.clone(), png.clone()]);
-        let expected = MediaUrn::from_string("media:ext").unwrap();
-        assert!(
-            lub.is_equivalent(&expected),
-            "LUB of ext=pdf and ext=png;image should be media:ext but got {}",
-            lub.to_string()
-        );
+        assert_eq!(lub.to_string(), "media:ext=pdf|png");
+        assert!(lub.conforms_to(&MediaUrn::from_string("media:ext").unwrap()));
         // Join soundness: every input conforms to the join.
         assert!(pdf.conforms_to(&lub));
         assert!(png.conforms_to(&lub));
@@ -1662,34 +1687,66 @@ mod debug_tests {
     #[test]
     fn test858_lub_three_inputs() {
         // All three are UTF-8 lists (shared `enc=utf8` and `list`) and all
-        // three HAVE a `fmt` (json/csv/ndjson — differing values → "some fmt").
+        // three HAVE a `fmt` (json/csv/ndjson — differing values → one of them).
         // The record marker is on a,b but not c → dropped.
         let a = MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
         let b = MediaUrn::from_string("media:enc=utf8;fmt=csv;list;record").unwrap();
         let c = MediaUrn::from_string("media:enc=utf8;fmt=ndjson;list").unwrap();
         let lub = MediaUrn::least_upper_bound(&[a.clone(), b.clone(), c.clone()]);
-        let expected = MediaUrn::from_string("media:enc=utf8;fmt;list").unwrap();
-        assert!(
-            lub.is_equivalent(&expected),
-            "LUB should be media:enc=utf8;fmt;list but got {}",
-            lub.to_string()
-        );
+        assert_eq!(lub.to_string(), "media:enc=utf8;fmt=csv|json|ndjson;list");
         assert!(a.conforms_to(&lub));
         assert!(b.conforms_to(&lub));
         assert!(c.conforms_to(&lub));
     }
 
-    // TEST859: LUB with valued tags (non-marker) that differ promotes the key
+    // TEST859: LUB with valued tags (non-marker) that differ keeps both values
     #[test]
     fn test859_lub_valued_tags() {
         let v1 = MediaUrn::from_string("media:ext=png;image").unwrap();
         let v2 = MediaUrn::from_string("media:ext=jpeg;image").unwrap();
         let lub = MediaUrn::least_upper_bound(&[v1, v2]);
-        let expected = MediaUrn::from_string("media:ext;image").unwrap();
-        assert!(
-            lub.is_equivalent(&expected),
-            "LUB should promote conflicting ext to must-have-any, got {}",
-            lub.to_string()
+        assert_eq!(lub.to_string(), "media:ext=jpeg|png;image");
+    }
+
+    // TEST7231: a media type splits into the shapes it may have — absence
+    // apart from presence, each value of a set apart — and ends on the
+    // bookends those shapes are, read complete; one shape that is no bookend
+    // ends it on none.
+    #[test]
+    fn test7231_a_media_type_splits_into_its_shapes_and_ends_on_their_bookends() {
+        let urn = |s: &str| MediaUrn::from_string(s).unwrap();
+        let texts = |urns: Vec<MediaUrn>| {
+            let mut t: Vec<String> = urns.iter().map(|u| u.to_string()).collect();
+            t.sort();
+            t
+        };
+        assert_eq!(
+            texts(urn("media:enc=utf8;fmt=json;?list").splits()),
+            ["media:enc=utf8;fmt=json;!list", "media:enc=utf8;fmt=json;list"],
+            "absence apart from presence"
+        );
+        assert_eq!(
+            texts(urn("media:ext=jpeg|png;image").splits()),
+            ["media:ext=jpeg;image", "media:ext=png;image"],
+            "each value of the set apart"
+        );
+
+        let saved = urn("media:enc=utf8;ext=json;fmt=json;?list;?record");
+        let files: Vec<MediaUrn> = [
+            "media:enc=utf8;ext=json;fmt=json",
+            "media:enc=utf8;ext=json;fmt=json;list",
+            "media:enc=utf8;ext=json;fmt=json;record",
+            "media:enc=utf8;ext=json;fmt=json;list;record",
+        ]
+        .iter()
+        .map(|f| urn(f))
+        .collect();
+        let ends = saved.ends_on(&files).expect("every shape is one of the bookends");
+        assert_eq!(texts(ends), texts(files.clone()), "one bookend for each shape");
+        assert_eq!(
+            saved.ends_on(&files[1..]),
+            None,
+            "without a file type for JSON that is neither a list nor a record, one shape is no bookend"
         );
     }
 

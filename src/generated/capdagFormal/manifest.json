@@ -668,6 +668,7 @@
     "TaggedUrn.Sorted",
     "TaggedUrn.Join",
     "TaggedUrn.Patch",
+    "TaggedUrn.Split",
     "TaggedUrn.Exec",
     "TaggedUrn",
     "CapDAG.Cap",
@@ -684,9 +685,10 @@
     "CapDAG.Run.Step",
     "CapDAG.Detect",
     "Lean.Data.Iterators.Producers.PersistentHashMap",
-    "Lean.Elab.Structure"
+    "Lean.Elab.Structure",
+    "Lungo.Attr.Names"
   ],
-  "declarations": 2325,
+  "declarations": 2371,
   "exports": [
     {
       "lean_name": "CapDAG.Bifaci.Credit.Gate.acquire",
@@ -1074,6 +1076,13 @@
       "source": "CapDAG/Exec.lean:29:1"
     },
     {
+      "lean_name": "CapDAG.Exec.endsOn",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::ends_on",
+      "lean_type": "List TaggedUrn.Exec.Wf → TaggedUrn.Exec.Wf → Option (List TaggedUrn.Exec.Wf)",
+      "source": "CapDAG/Exec.lean:502:1"
+    },
+    {
       "lean_name": "CapDAG.Exec.equivalent",
       "module": "CapDAG.Exec",
       "rust_path": "exec::equivalent",
@@ -1162,21 +1171,28 @@
       "module": "CapDAG.Exec",
       "rust_path": "exec::ranking_key",
       "lean_type": "CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Nat × Nat",
-      "source": "CapDAG/Exec.lean:478:1"
+      "source": "CapDAG/Exec.lean:533:1"
     },
     {
       "lean_name": "CapDAG.Exec.select",
       "module": "CapDAG.Exec",
       "rust_path": "exec::select",
       "lean_type": "List CapDAG.Exec.WfCap → CapDAG.Exec.WfCap → Option CapDAG.Exec.WfCap",
-      "source": "CapDAG/Exec.lean:486:1"
+      "source": "CapDAG/Exec.lean:541:1"
     },
     {
       "lean_name": "CapDAG.Exec.specificity",
       "module": "CapDAG.Exec",
       "rust_path": "exec::specificity",
       "lean_type": "CapDAG.Exec.WfCap → Nat",
-      "source": "CapDAG/Exec.lean:473:1"
+      "source": "CapDAG/Exec.lean:528:1"
+    },
+    {
+      "lean_name": "CapDAG.Exec.splits",
+      "module": "CapDAG.Exec",
+      "rust_path": "exec::splits",
+      "lean_type": "TaggedUrn.Exec.Wf → List TaggedUrn.Exec.Wf",
+      "source": "CapDAG/Exec.lean:475:1"
     },
     {
       "lean_name": "CapDAG.Run.Control.admits",
@@ -1232,14 +1248,14 @@
       "module": "TaggedUrn.Exec",
       "rust_path": "_root_::tagged_urn::exec::make",
       "lean_type": "String → List (String × TaggedUrn.Constraint) → Option TaggedUrn.Exec.Wf",
-      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:27:1"
+      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:28:1"
     },
     {
       "lean_name": "TaggedUrn.Exec.parts",
       "module": "TaggedUrn.Exec",
       "rust_path": "_root_::tagged_urn::exec::parts",
       "lean_type": "TaggedUrn.Exec.Wf → String × List (String × TaggedUrn.Constraint)",
-      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:47:1"
+      "source": "<package:tagged_urn_formal>/TaggedUrn/Exec.lean:48:1"
     }
   ]
 }

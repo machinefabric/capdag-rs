@@ -2706,7 +2706,7 @@ pub(crate) unsafe fn l_CapDAG_dmediaVoid_d__closed__0() -> Obj {
 // Source: CapDAG/Cap.lean:40:1
 static C_l_CapDAG_dmediaVoid_d__closed__1: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dmediaVoid_d__closed__1__init() -> Obj {
-    let x_1: Obj = rt::lean_box(3);
+    let x_1: Obj = l_TaggedUrn_dConstraint_dpresent();
     let x_2: Obj = l_CapDAG_dmediaVoid_d__closed__0();
     let x_3: Obj = rt::lean_alloc_ctor(0, 2, 0);
     rt::lean_ctor_set(x_3, 0, x_2);

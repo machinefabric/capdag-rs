@@ -173,7 +173,7 @@ impl InputStructure {
                 } else {
                     // Add the record marker
                     media_urn
-                        .with_tag("record", tagged_urn::Constraint::Present)
+                        .with_tag("record", tagged_urn::Constraint::present())
                         .unwrap_or_else(|e| panic!("Failed to add record marker: {}", e))
                         .to_string()
                 }

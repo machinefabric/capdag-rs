@@ -1296,6 +1296,27 @@ impl FabricRegistry {
         }
     }
 
+    /// Every media URN the pinned manifest publishes a definition for, in no
+    /// particular order. Nothing is fetched: the definitions themselves
+    /// are had with [`get_media_def`](Self::get_media_def).
+    pub fn manifest_media_urns(&self) -> Result<Vec<crate::MediaUrn>, FabricRegistryError> {
+        let manifest = self.manifest.lock().map_err(|e| {
+            FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e))
+        })?;
+        manifest
+            .media
+            .keys()
+            .map(|urn| {
+                crate::MediaUrn::from_string(urn).map_err(|e| {
+                    FabricRegistryError::ParseError(format!(
+                        "the manifest publishes media '{}', which is not a media URN: {}",
+                        urn, e
+                    ))
+                })
+            })
+            .collect()
+    }
+
     /// Every cap the pinned manifest names — the whole capability graph of
     /// the fabric — in URN order.
     ///
@@ -2073,16 +2094,24 @@ impl FabricRegistry {
         Ok(self.get_cached_media_def(urn)?.is_bookend())
     }
 
-    /// Snapshot of every bookend-eligible URN currently in the cache.
-    pub fn bookend_urns(&self) -> std::collections::HashSet<crate::MediaUrn> {
-        let cached = match self.cached_media_defs.lock() {
-            Ok(g) => g,
-            Err(_) => return Default::default(),
-        };
+    /// Snapshot of every bookend-eligible URN currently in the cache. A
+    /// cached definition whose URN does not parse is an error naming it: the
+    /// cache holds definitions by their normalized URN.
+    pub fn bookend_urns(&self) -> Result<std::collections::HashSet<crate::MediaUrn>, FabricRegistryError> {
+        let cached = self.cached_media_defs.lock().map_err(|e| {
+            FabricRegistryError::CacheError(format!("Failed to lock media def cache: {}", e))
+        })?;
         cached
             .values()
             .filter(|spec| spec.is_bookend())
-            .filter_map(|spec| crate::MediaUrn::from_string(&spec.urn).ok())
+            .map(|spec| {
+                crate::MediaUrn::from_string(&spec.urn).map_err(|e| {
+                    FabricRegistryError::ParseError(format!(
+                        "the cached media definition '{}' is not a media URN: {}",
+                        spec.urn, e
+                    ))
+                })
+            })
             .collect()
     }
 

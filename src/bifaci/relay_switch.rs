@@ -4572,7 +4572,10 @@ impl RelaySwitch {
         // URN whose stored spec carries at least one file extension.
         // A media-def cache revision can therefore change both which
         // caps are admissible and which graph nodes are file bookends.
-        let bookend_urns = self.fabric_registry.bookend_urns();
+        let bookend_urns = self
+            .fabric_registry
+            .bookend_urns()
+            .expect("the media def cache holds definitions by their normalized URN");
 
         let mut graph = self.live_cap_fab.write().await;
         let outcome = graph
