@@ -54,7 +54,7 @@ version = "=1.127.0"
 # The chain from baked roots to a signed manifest, charter or binary. The
 # formats and charter rules are MachineFabric's, declared in bifaci::trust.
 [dependencies.mg-srel]
-version = "0.5"
+version = "0.9"
 
 [dependencies.tokio]
 features = ["full"]
@@ -174,4 +174,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.1057.0"
+version = "1.1058.6"
