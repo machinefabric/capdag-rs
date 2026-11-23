@@ -390,8 +390,10 @@ fn resolve_wirings(
     // A node some wiring produces from a declared output holds what that step
     // gives, a complete thing. The main output of an `effect=none` or
     // `effect=patch` cap says how what it gives follows from what it takes, not
-    // what it gives, so a node it produces holds a type, as every node nothing
-    // produces does: one the text or an input anchor wrote.
+    // what it gives, so a node it produces holds what it gives for what it is
+    // sent: a complete thing when what it is sent is one (read below), and
+    // otherwise a type, as every node nothing produces holds: one the text or an
+    // input anchor wrote.
     let mut node_is_sequence = vec![false; nodes.len()];
     let mut node_is_given = vec![false; nodes.len()];
     let mut wiring_outputs: Vec<Vec<EdgeOutput>> = Vec::with_capacity(wirings.len());
@@ -450,6 +452,43 @@ fn resolve_wirings(
         // Canonical order, like the assignment's.
         outputs.sort_by(|a, b| a.output_media_urn.cmp(&b.output_media_urn));
         wiring_outputs.push(outputs);
+    }
+
+    // What an `effect=none` or `effect=patch` step gives a complete thing is a
+    // complete thing: its main output's node holds what the step gives for
+    // what it is sent, so it is given when the node it is sent on its main
+    // input is. Read again until nothing changes, so a chain of such steps is
+    // typed whatever order it is written in.
+    let mut passes_through: Vec<(NodeId, NodeId)> = Vec::new();
+    for wiring in wirings {
+        let cap = cap_definition(registry, &wiring.cap_urn)?;
+        if main_output_is_given(&cap) {
+            continue;
+        }
+        let Some(sent) = main_input_node(wiring, &cap) else {
+            continue;
+        };
+        for (name, node) in &wiring.targets {
+            let main = match name {
+                None => true,
+                Some(name) => cap.main_output().is_some_and(|main| main.name == *name),
+            };
+            if main {
+                passes_through.push((sent, *node));
+            }
+        }
+    }
+    loop {
+        let mut changed = false;
+        for (sent, given) in &passes_through {
+            if node_is_given[*sent as usize] && !node_is_given[*given as usize] {
+                node_is_given[*given as usize] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
     }
 
     // Step 1: per-wiring binding of sources to cap args. Named members bind
@@ -1065,6 +1104,27 @@ pub(crate) fn match_sources_to_args(
 /// what it takes (07 §What a cap gives).
 pub(crate) fn main_output_is_given(cap: &crate::Cap) -> bool {
     !matches!(cap.urn.effect(), CapEffect::None | CapEffect::Patch)
+}
+
+/// The node a wiring sends on its cap's main input, when the wiring says
+/// which: the member named for the main input, or the wiring's one unnamed
+/// member. `None` when the cap takes no input, or when only matching by type
+/// can tell.
+fn main_input_node(wiring: &PreInternedWiring, cap: &crate::Cap) -> Option<NodeId> {
+    let in_spec = MediaUrn::from_string(cap.urn.in_spec()).ok()?;
+    let void = MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID).expect("MEDIA_VOID is a valid MediaUrn");
+    if in_spec.is_equivalent(&void) {
+        return None;
+    }
+    let main = cap.args.iter().find(|arg| arg.is_main_input(&in_spec))?;
+    match wiring.named_sources.iter().find(|(name, _)| *name == main.name) {
+        Some((_, BindingSource::Node(node))) => Some(*node),
+        Some((_, BindingSource::Constant(_))) => None,
+        None => match wiring.source_node_ids.as_slice() {
+            [node] => Some(*node),
+            _ => None,
+        },
+    }
 }
 
 /// Whether `output` is the cap's main output.
@@ -2063,6 +2123,85 @@ mod tests {
             resolve_pre_interned(nodes, &[wiring("tok-3", to_yaml, 0, 1)], &registry, 0),
             Err(MachineAbstractionError::UnmatchedSourceInCapArgs { .. })
         ));
+    }
+
+    /// JSON to YAML as the fabric publishes it: a patch that keeps the shape it
+    /// is given and gives content, not a file.
+    const JSON_TO_YAML: &str = r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;!ext;fmt=yaml""#;
+
+    fn json_to_yaml() -> crate::Cap {
+        build_cap(JSON_TO_YAML, "json to yaml", &["media:enc=utf8;fmt=json"], "media:enc=utf8;!ext;fmt=yaml")
+    }
+
+    // TEST7244: a machine read back from its text types a patch step's nodes by
+    // what the step gives: JSON to YAML then a save that takes a YAML list of
+    // records types the node between them a YAML list of records, content and
+    // no file, and the input of the machine a JSON list of records.
+    #[test]
+    fn test7244_a_patch_steps_nodes_are_typed_by_what_it_gives_when_read_back() {
+        let save = r#"cap:in="media:enc=utf8;fmt=yaml;list;record;!ext";out="media:enc=utf8;ext=yaml;fmt=yaml;list;record";save-as-yaml"#;
+        let registry = registry_with(vec![
+            json_to_yaml(),
+            build_cap(
+                save,
+                "save as yaml list of records",
+                &["media:enc=utf8;fmt=yaml;list;record;!ext"],
+                "media:enc=utf8;ext=yaml;fmt=yaml;list;record",
+            ),
+        ]);
+        let text = format!("[to_yaml {JSON_TO_YAML}][save {save}][json -> to_yaml -> yaml][yaml -> save -> file]");
+        let machine = crate::machine::parse_machine(&text, &registry).expect("the machine reads back");
+        let strand = &machine.strands()[0];
+        let input = strand.input_anchors();
+        assert_eq!(input.len(), 1);
+        assert!(input[0].is_equivalent(&media("media:enc=utf8;fmt=json;list;record")), "the input is {}", input[0]);
+        let to_yaml = strand
+            .edges()
+            .iter()
+            .find(|edge| edge.cap_urn.is_equivalent(&CapUrn::from_string(JSON_TO_YAML).unwrap()))
+            .expect("the patch is a step");
+        let middle = strand.node_urn(to_yaml.outputs[0].node);
+        assert!(
+            middle.is_equivalent(&media("media:enc=utf8;!ext;fmt=yaml;list;record")),
+            "the node between the steps is {middle}"
+        );
+    }
+
+    // TEST7245: what a patch gives a complete thing is a complete thing: a JSON
+    // record a step gives, converted to YAML, is a YAML record and no list, and
+    // feeds a save that takes a record and refuses lists, whether the machine
+    // is read from text or is the strand a plan found.
+    #[test]
+    fn test7245_a_patch_of_a_complete_thing_is_a_complete_thing() {
+        let make = r#"cap:in="media:enc=utf8";make-record;out="media:enc=utf8;fmt=json;record""#;
+        let save = r#"cap:in="media:enc=utf8;fmt=yaml;!list;record;!ext";out="media:enc=utf8;ext=yaml;fmt=yaml;record";save-as-yaml"#;
+        let registry = registry_with(vec![
+            build_cap(make, "make a record", &["media:enc=utf8"], "media:enc=utf8;fmt=json;record"),
+            json_to_yaml(),
+            build_cap(
+                save,
+                "save as yaml record",
+                &["media:enc=utf8;fmt=yaml;!list;record;!ext"],
+                "media:enc=utf8;ext=yaml;fmt=yaml;record",
+            ),
+        ]);
+        let text = format!(
+            "[make {make}][to_yaml {JSON_TO_YAML}][save {save}][text -> make -> json][json -> to_yaml -> yaml][yaml -> save -> file]"
+        );
+        let machine = crate::machine::parse_machine(&text, &registry).expect("the YAML record feeds the save");
+        assert_eq!(machine.strands()[0].edges().len(), 3);
+
+        let yaml_record = "media:enc=utf8;!ext;fmt=yaml;record";
+        let strand = strand_from_steps(
+            vec![
+                cap_step(make, "make a record", "media:enc=utf8", "media:enc=utf8;fmt=json;record"),
+                cap_step(JSON_TO_YAML, "json to yaml", "media:enc=utf8;fmt=json;record", yaml_record),
+                cap_step(save, "save as yaml record", yaml_record, "media:enc=utf8;ext=yaml;fmt=yaml;record"),
+            ],
+            "text to a YAML record file",
+        );
+        let resolved = resolve_strand(&strand, &registry, 0).expect("the planned YAML record feeds the save");
+        assert_eq!(resolved.edges().len(), 3);
     }
 
     // TEST1138: EdgeAssignmentBinding list is sorted by cap_arg_media_urn for canonical form.
