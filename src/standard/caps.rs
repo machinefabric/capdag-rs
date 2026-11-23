@@ -752,14 +752,18 @@ pub fn all_coercion_paths() -> Vec<(&'static str, &'static str)> {
 // Format conversion is transforming data between JSON, YAML, and CSV formats.
 // Each conversion is a cap with a specific input and output media type.
 
-/// Build a format conversion URN for a specific input → output media type pair
-/// and effect. All format conversions carry the `convert-format` marker.
-pub fn format_conversion_urn(in_media: &str, out_media: &str, effect: CapEffect) -> CapUrn {
-    CapUrnBuilder::new()
-        .marker("convert-format")
-        .in_spec(in_media)
-        .out_spec(out_media)
-        .effect(effect)
+/// Build the URN of a format conversion: its published cap's URN. Every format
+/// conversion carries the `convert-format` marker, and the one its path names.
+pub fn format_conversion_urn(path: &FormatConversionPath) -> CapUrn {
+    let builder = CapUrnBuilder::new().marker("convert-format");
+    let builder = match path.marker {
+        Some(marker) => builder.marker(marker),
+        None => builder,
+    };
+    builder
+        .in_spec(path.in_media)
+        .out_spec(path.out_media)
+        .effect(path.effect)
         .build()
         .expect("Failed to build format conversion cap URN")
 }
@@ -772,6 +776,10 @@ pub struct FormatConversionPath {
     /// a list stays a list, a record a record); `Declared` for one whose
     /// output names what it gives.
     pub effect: CapEffect,
+    /// The marker its published cap carries beside `convert-format`, naming the
+    /// conversion (`json-to-yaml`, `yaml-to-json`), or `None` when the cap has
+    /// only `convert-format`.
+    pub marker: Option<&'static str>,
     pub title: &'static str,
     pub description: &'static str,
 }
@@ -789,6 +797,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_JSON_VALUE,
             out_media: MEDIA_YAML_CONTENT,
             effect: CapEffect::Patch,
+            marker: Some("json-to-yaml"),
             title: "Convert JSON to YAML",
             description: "Re-serialize any JSON value as YAML, keeping its shape",
         },
@@ -796,6 +805,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_YAML_VALUE,
             out_media: MEDIA_JSON_CONTENT,
             effect: CapEffect::Patch,
+            marker: Some("yaml-to-json"),
             title: "Convert YAML to JSON",
             description: "Re-serialize any YAML value as JSON, keeping its shape",
         },
@@ -804,6 +814,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_JSON_LIST_RECORD,
             out_media: MEDIA_CSV,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert JSON Array of Objects to CSV",
             description: "Convert a JSON array of objects to CSV format",
         },
@@ -811,6 +822,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_CSV,
             out_media: MEDIA_JSON_LIST_RECORD,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert CSV to JSON Array of Objects",
             description: "Convert CSV data to a JSON array of objects",
         },
@@ -819,6 +831,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_YAML_LIST_RECORD,
             out_media: MEDIA_CSV,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert YAML List of Mappings to CSV",
             description: "Convert a YAML list of mappings to CSV format",
         },
@@ -826,6 +839,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_CSV,
             out_media: MEDIA_YAML_LIST_RECORD,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert CSV to YAML List of Mappings",
             description: "Convert CSV data to a YAML list of mappings",
         },
@@ -834,6 +848,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_STRING_LIST,
             out_media: MEDIA_JSON_LIST,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert Text List to JSON Array",
             description: "Convert a list of text values to a JSON array",
         },
@@ -841,6 +856,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_JSON_LIST,
             out_media: MEDIA_STRING_LIST,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert JSON Array to Text List",
             description: "Convert a JSON array to a list of text values",
         },
@@ -849,6 +865,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_STRING_LIST,
             out_media: MEDIA_YAML_LIST,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert Text List to YAML Sequence",
             description: "Convert a list of text values to a YAML sequence",
         },
@@ -856,6 +873,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_YAML_LIST,
             out_media: MEDIA_STRING_LIST,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert YAML Sequence to Text List",
             description: "Convert a YAML sequence to a list of text values",
         },
@@ -864,6 +882,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_STRING_LIST,
             out_media: MEDIA_CSV,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert Text List to CSV",
             description: "Convert a list of text values to CSV format",
         },
@@ -871,6 +890,7 @@ pub fn all_format_conversion_paths() -> Vec<FormatConversionPath> {
             in_media: MEDIA_CSV,
             out_media: MEDIA_STRING_LIST,
             effect: CapEffect::Declared,
+            marker: None,
             title: "Convert CSV to Text List",
             description: "Convert CSV data to a list of text values",
         },
@@ -1053,11 +1073,9 @@ pub async fn all_coercion_caps(
 /// Get a single format conversion cap from the registry
 pub async fn format_conversion_cap(
     registry: Arc<FabricRegistry>,
-    in_media: &str,
-    out_media: &str,
-    effect: CapEffect,
+    path: &FormatConversionPath,
 ) -> Result<Cap, FabricRegistryError> {
-    let urn = format_conversion_urn(in_media, out_media, effect);
+    let urn = format_conversion_urn(path);
     registry.get_cap(&urn.to_string()).await
 }
 
@@ -1069,7 +1087,7 @@ pub async fn all_format_conversion_caps(
 ) -> Result<Vec<(&'static str, &'static str, Cap)>, FabricRegistryError> {
     let mut caps = Vec::new();
     for path in all_format_conversion_paths() {
-        let cap = format_conversion_cap(registry.clone(), path.in_media, path.out_media, path.effect).await?;
+        let cap = format_conversion_cap(registry.clone(), &path).await?;
         caps.push((path.in_media, path.out_media, cap));
     }
     Ok(caps)
@@ -1309,7 +1327,7 @@ mod tests {
         assert_eq!(paths.len(), 12, "Expected 12 format conversion paths");
 
         for path in &paths {
-            let urn = format_conversion_urn(path.in_media, path.out_media, path.effect);
+            let urn = format_conversion_urn(path);
             assert!(
                 urn.has_marker_tag("convert-format"),
                 "Format conversion URN for {}→{} must have convert-format marker",
@@ -1335,7 +1353,7 @@ mod tests {
     fn test851_format_conversion_urn_specs() {
         use crate::urn::media_urn::MediaUrn;
 
-        let urn = format_conversion_urn(MEDIA_JSON_VALUE, MEDIA_YAML_CONTENT, CapEffect::Patch);
+        let urn = format_conversion_urn(&all_format_conversion_paths()[0]);
         assert_eq!(urn.effect(), CapEffect::Patch);
         let in_urn = MediaUrn::from_string(urn.in_spec()).expect("in_spec should parse");
         let expected_in =
@@ -1370,7 +1388,7 @@ mod tests {
             paths.iter().filter(|path| path.effect == CapEffect::Patch).collect();
         assert_eq!(patches.len(), 2, "one patch each way between JSON and YAML");
 
-        let to_yaml = format_conversion_urn(MEDIA_JSON_VALUE, MEDIA_YAML_CONTENT, CapEffect::Patch);
+        let to_yaml = format_conversion_urn(patches[0]);
         let json_file = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;list;record").unwrap();
         let given = to_yaml.apply_to_runtime_input_media(&json_file).unwrap();
         assert!(
@@ -1378,12 +1396,40 @@ mod tests {
             "a JSON list of records gives YAML content that is a list of records, got {given}"
         );
 
-        let to_json = format_conversion_urn(MEDIA_YAML_VALUE, MEDIA_JSON_CONTENT, CapEffect::Patch);
+        let to_json = format_conversion_urn(patches[1]);
         let back = to_json.apply_to_runtime_input_media(&given).unwrap();
         assert!(
             back.is_equivalent(&MediaUrn::from_string("media:enc=utf8;fmt=json;list;record;!ext").unwrap()),
             "and back again, got {back}"
         );
+    }
+
+    // TEST7243: every format conversion's URN is its published cap's: the JSON↔YAML
+    // patches carry the json-to-yaml and yaml-to-json markers their caps carry, so
+    // a request for either names a cap that the path's URN serves.
+    #[test]
+    fn test7243_format_conversion_urns_are_the_published_caps() {
+        let published = [
+            r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;!ext;fmt=yaml""#,
+            r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=yaml";out="media:enc=utf8;!ext;fmt=json";yaml-to-json"#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=json;list;record";out="media:enc=utf8;fmt=csv;list;record""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=csv;list;record";out="media:enc=utf8;fmt=json;list;record""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=yaml;list;record";out="media:enc=utf8;fmt=csv;list;record""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=csv;list;record";out="media:enc=utf8;fmt=yaml;list;record""#,
+            r#"cap:convert-format;in="media:enc=utf8;list";out="media:enc=utf8;fmt=json;list""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=json;list";out="media:enc=utf8;list""#,
+            r#"cap:convert-format;in="media:enc=utf8;list";out="media:enc=utf8;fmt=yaml;list""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=yaml;list";out="media:enc=utf8;list""#,
+            r#"cap:convert-format;in="media:enc=utf8;list";out="media:enc=utf8;fmt=csv;list;record""#,
+            r#"cap:convert-format;in="media:enc=utf8;fmt=csv;list;record";out="media:enc=utf8;list""#,
+        ];
+        let paths = all_format_conversion_paths();
+        assert_eq!(paths.len(), published.len());
+        for (path, published) in paths.iter().zip(published) {
+            let published = CapUrn::from_string(published).unwrap();
+            let urn = format_conversion_urn(path);
+            assert!(urn.is_equivalent(&published), "{} is not the published {}", urn, published);
+        }
     }
 
     // TEST7221: a coercion to an object gives a JSON object, not any record.
