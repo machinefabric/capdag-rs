@@ -445,13 +445,59 @@ pub struct PlanOutcome {
     pub excluded: Vec<ExcludedCandidate>,
 }
 
-/// A strand the search found that could not be written as a machine.
+/// A strand the search found that could not be written as a machine, said so a
+/// person can read it: its steps by their titles, and where it was refused,
+/// with what the step takes against what it is given, by the titles of those
+/// media. The strand and the resolver's exact text are kept beside them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExcludedCandidate {
     /// The strand: where it goes, and the caps it takes, in order.
     pub strand: String,
-    /// Why no machine holds it: the resolver's refusal.
+    /// The strand's cap steps, in order.
+    pub steps: Vec<ExcludedStep>,
+    /// The step that refused what it was given, when the resolver says which:
+    /// `None` for a refusal that names no step's input.
+    pub refusal: Option<StrandRefusal>,
+    /// Why no machine holds it: the resolver's refusal, as it says it.
     pub reason: String,
+}
+
+/// One cap step of an excluded strand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExcludedStep {
+    pub cap_urn: String,
+    /// The cap's title.
+    pub title: String,
+}
+
+/// Where an excluded strand was refused: the step whose input does not take
+/// what it is given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrandRefusal {
+    pub cap_urn: String,
+    /// The cap's title.
+    pub cap_title: String,
+    /// The arg that refused it, when the resolver names one: `None` when no
+    /// arg of the step takes what it is given.
+    pub arg: Option<RefusingArg>,
+    /// What the step is given, and the title of that media.
+    pub given: TitledMedia,
+}
+
+/// The arg of a step that refused what it was given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusingArg {
+    /// The arg's name in the cap definition.
+    pub name: String,
+    /// What the arg takes, and the title of that media.
+    pub accepts: TitledMedia,
+}
+
+/// A media URN with the title its definition gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitledMedia {
+    pub urn: String,
+    pub title: String,
 }
 
 /// The result of target discovery for a source set: the reachable targets
@@ -504,6 +550,11 @@ pub enum PlanError {
     /// fetched yet. `error` is the registry's account of it — the URL, the
     /// status and the fabric manifest version where a fetch failed.
     DefinitionUnavailable { cap_urn: String, error: String },
+    /// The title of a media type a plan must name, to say why a strand is not
+    /// offered, could not be had from the registry: it holds no definition of
+    /// it, or the definition could not be fetched. `error` is the registry's
+    /// account of it. A title is never made from a URN.
+    MediaTitleUnavailable { media_urn: String, error: String },
     /// An internal invariant was violated (a bug, surfaced not swallowed).
     Internal(String),
 }
@@ -528,6 +579,10 @@ impl std::fmt::Display for PlanError {
             PlanError::DefinitionUnavailable { cap_urn, error } => write!(
                 f,
                 "the definition of cap '{cap_urn}' could not be had from the registry: {error}"
+            ),
+            PlanError::MediaTitleUnavailable { media_urn, error } => write!(
+                f,
+                "the title of media '{media_urn}' could not be had from the registry: {error}"
             ),
             PlanError::Internal(d) => write!(f, "planner internal error: {d}"),
         }

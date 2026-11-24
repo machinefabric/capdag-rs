@@ -416,14 +416,46 @@ fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &Media
 }
 
 /// A strand the planner found and no machine could hold: not offered, said
-/// so, and why.
+/// so by its steps' titles, and why. `-v` adds the strand's URNs and the
+/// resolver's own words.
 fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     if ctx.term.json {
+        let titled = |media: &p::TitledMedia| serde_json::json!({ "urn": media.urn, "title": media.title });
         emit_record(&serde_json::json!({
-            "type": "excluded", "strand": excluded.strand, "reason": excluded.reason,
+            "type": "excluded",
+            "strand": excluded.strand,
+            "steps": excluded.steps.iter().map(|step| serde_json::json!({
+                "cap_urn": step.cap_urn, "title": step.title,
+            })).collect::<Vec<_>>(),
+            "refusal": excluded.refusal.as_ref().map(|refusal| serde_json::json!({
+                "cap_urn": refusal.cap_urn,
+                "cap_title": refusal.cap_title,
+                "arg": refusal.arg.as_ref().map(|arg| serde_json::json!({
+                    "name": arg.name, "accepts": titled(&arg.accepts),
+                })),
+                "given": titled(&refusal.given),
+            })),
+            "reason": excluded.reason,
         }));
-    } else {
-        eprintln!("not offered: {}: {}", excluded.strand, excluded.reason);
+        return;
+    }
+    let steps: Vec<&str> = excluded.steps.iter().map(|step| step.title.as_str()).collect();
+    let why = match &excluded.refusal {
+        Some(p::StrandRefusal { cap_title, arg: Some(arg), given, .. }) => format!(
+            "{cap_title}'s {} takes {}, and is given {}",
+            arg.name, arg.accepts.title, given.title
+        ),
+        Some(p::StrandRefusal { cap_title, arg: None, given, .. }) => {
+            format!("{cap_title} has no input that takes {}", given.title)
+        }
+        None => excluded.reason.clone(),
+    };
+    eprintln!("not offered: {}: {why}", steps.join(" > "));
+    if ctx.term.verbosity >= 1 {
+        eprintln!("  {}", excluded.strand);
+        if excluded.refusal.is_some() {
+            eprintln!("  {}", excluded.reason);
+        }
     }
 }
 

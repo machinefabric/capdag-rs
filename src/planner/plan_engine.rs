@@ -46,8 +46,9 @@ use super::live_cap_fab::{
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence,
-    ExcludedCandidate, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome,
-    PlanProfile, PlanRequest, RankPolicy, SourceSpec, TargetSpec,
+    ExcludedCandidate, ExcludedStep, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode,
+    PlanOutcome, PlanProfile, PlanRequest, RankPolicy, RefusingArg, SourceSpec, StrandRefusal,
+    TargetSpec, TitledMedia,
 };
 
 /// Bound on distinct apex media considered per request (after the location
@@ -101,8 +102,8 @@ impl<'a> CandidateSink<'a> {
     }
 
     /// Offer no candidate for a strand no machine holds, naming it and why.
-    fn exclude(&mut self, strand: String, reason: String) {
-        self.excluded.push(ExcludedCandidate { strand, reason });
+    fn exclude(&mut self, excluded: ExcludedCandidate) {
+        self.excluded.push(excluded);
     }
 
     fn len(&self) -> usize {
@@ -242,6 +243,84 @@ fn strand_description(from: &MediaUrn, to: &MediaUrn, strand: &Strand) -> String
         })
         .collect();
     format!("{from} → {to} by {}", caps.join(" > "))
+}
+
+/// A strand no machine holds, as an excluded candidate says it: its cap steps
+/// by their titles and, where the resolver places the refusal at a step's
+/// input, that step with what it takes against what it is given, by the
+/// titles of those media.
+fn excluded_candidate(
+    from: &MediaUrn,
+    to: &MediaUrn,
+    strand: &Strand,
+    refusal: &MachineAbstractionError,
+    registry: &FabricRegistry,
+) -> Result<ExcludedCandidate, PlanError> {
+    let steps = strand
+        .steps
+        .iter()
+        .filter_map(|step| match &step.step_type {
+            StrandStepType::Cap { cap_urn, title, .. } => Some(ExcludedStep {
+                cap_urn: cap_urn.to_string(),
+                title: title.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    let refused = match refusal {
+        MachineAbstractionError::SourceDoesNotConformToArg { cap_urn, name, accepts, source_urn, .. } => {
+            Some(StrandRefusal {
+                cap_urn: cap_urn.clone(),
+                cap_title: refused_step_title(strand, cap_urn)?,
+                arg: Some(RefusingArg {
+                    name: name.clone(),
+                    accepts: titled_media(registry, accepts)?,
+                }),
+                given: titled_media(registry, source_urn)?,
+            })
+        }
+        MachineAbstractionError::UnmatchedSourceInCapArgs { cap_urn, source_urn, .. } => Some(StrandRefusal {
+            cap_urn: cap_urn.clone(),
+            cap_title: refused_step_title(strand, cap_urn)?,
+            arg: None,
+            given: titled_media(registry, source_urn)?,
+        }),
+        _ => None,
+    };
+    Ok(ExcludedCandidate {
+        strand: strand_description(from, to, strand),
+        steps,
+        refusal: refused,
+        reason: refusal.to_string(),
+    })
+}
+
+/// The title of the strand's step the resolver refused, by the cap it names.
+fn refused_step_title(strand: &Strand, cap_urn: &str) -> Result<String, PlanError> {
+    let refused = CapUrn::from_string(cap_urn).map_err(|e| {
+        PlanError::Internal(format!("the resolver refused a step by cap URN '{cap_urn}', which does not parse: {e}"))
+    })?;
+    strand
+        .steps
+        .iter()
+        .find_map(|step| match &step.step_type {
+            StrandStepType::Cap { cap_urn, title, .. } if cap_urn.is_equivalent(&refused) => Some(title.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| PlanError::Internal(format!("the resolver refused cap '{cap_urn}', which the strand does not take")))
+}
+
+/// A media URN with the title its definition gives it. A title is never made
+/// from the URN: a media type the registry cannot define fails the plan.
+fn titled_media(registry: &FabricRegistry, urn: &str) -> Result<TitledMedia, PlanError> {
+    let definition = registry.get_cached_media_def(urn).map_err(|e| PlanError::MediaTitleUnavailable {
+        media_urn: urn.to_string(),
+        error: e.to_string(),
+    })?;
+    Ok(TitledMedia {
+        urn: urn.to_string(),
+        title: definition.title,
+    })
 }
 
 /// Canonical notation of a set of resolved strands (one Machine).
@@ -541,7 +620,7 @@ impl LiveCapFab {
                 let notation = match strand.to_machine_notation(registry) {
                     Ok(notation) => notation,
                     Err(refusal) => {
-                        out.exclude(strand_description(&source.media_urn, &targets[0], strand), refusal.to_string());
+                        out.exclude(excluded_candidate(&source.media_urn, &targets[0], strand, &refusal, registry)?);
                         continue;
                     }
                 };
@@ -1046,7 +1125,7 @@ impl LiveCapFab {
                 let notation = match strand.to_machine_notation(registry) {
                     Ok(notation) => notation,
                     Err(refusal) => {
-                        out.exclude(strand_description(&apex.media, target, strand), refusal.to_string());
+                        out.exclude(excluded_candidate(&apex.media, target, strand, &refusal, registry)?);
                         continue;
                     }
                 };
@@ -1868,7 +1947,9 @@ fn shared_prefix_len(strands: &[Strand], location: &DivergenceLocation) -> usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::test_fixtures::{build_cap, media, registry_with};
+    use crate::machine::test_fixtures::{
+        build_cap, cap_step, media, registry_with, seed_media_titles, strand_from_steps,
+    };
     use crate::planner::plan_space::{SourceSpec, TargetSpec};
 
     /// The synthetic fabric all region tests share:
@@ -2960,6 +3041,12 @@ mod tests {
         let any2text = crate::CapUrn::from_string(any2text).unwrap().to_string();
         assert!(excluded.strand.contains(&any2text), "{}", excluded.strand);
         assert!(excluded.reason.contains("textize"), "the reason names the cap: {}", excluded.reason);
+        // Its steps by their titles, in order; a cap the registry does not hold
+        // is refused at no step's input, so the refusal names none.
+        let titles: Vec<&str> = excluded.steps.iter().map(|step| step.title.as_str()).collect();
+        assert_eq!(titles, vec!["any2text", "concat"]);
+        assert_eq!(excluded.steps[0].cap_urn, any2text);
+        assert_eq!(excluded.refusal, None);
 
         let (mut caps, bookends) = fabric_caps();
         caps.retain(|cap| cap.title != "pdf2text");
@@ -2972,6 +3059,118 @@ mod tests {
         assert!(outcome.candidates.is_empty(), "{:?}", outcome.candidates);
         assert_eq!(outcome.excluded.len(), 1, "{:?}", outcome.excluded);
         assert!(outcome.excluded[0].strand.contains(&any2text), "{}", outcome.excluded[0].strand);
+    }
+
+    const JSON_RECORD: &str = "media:enc=utf8;fmt=json;record";
+    const JSON_RECORD_NOT_LIST: &str = "media:enc=utf8;fmt=json;record;!list";
+    const YAML_RECORD: &str = "media:enc=utf8;fmt=yaml;record";
+    const TO_YAML: &str = "cap:in=\"media:enc=utf8;fmt=json;record;!list\";to-yaml;out=\"media:enc=utf8;fmt=yaml;record\"";
+
+    /// A JSON record to YAML by a step that takes only a record that is not a
+    /// list, with the titles of the media in `titled` defined. A JSON record
+    /// given to the machine is a type, which may be a list: the strand the
+    /// search finds is refused at that step.
+    fn record_to_yaml(titled: &[&str]) -> (LiveCapFab, crate::cap::registry::FabricRegistry, PlanRequest) {
+        let caps = vec![build_cap(TO_YAML, "JSON to YAML", &[JSON_RECORD_NOT_LIST], YAML_RECORD)];
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &[media(JSON_RECORD), media(YAML_RECORD)].into_iter().collect());
+        let registry = registry_with(caps);
+        seed_media_titles(&registry, titled);
+        let request = PlanRequest::single(
+            SourceSpec::single(media(JSON_RECORD)),
+            media(YAML_RECORD),
+            PlanRequest::DEFAULT_MAX_DEPTH,
+            PlanRequest::DEFAULT_MAX_PATHS,
+        );
+        (fab, registry, request)
+    }
+
+    fn titled(urn: &str) -> TitledMedia {
+        TitledMedia { urn: media(urn).to_string(), title: format!("Title for {urn}") }
+    }
+
+    // TEST13144: a strand refused at a step that takes nothing it is given is
+    // excluded naming that step by its title and what it is given by the title
+    // of that media; no arg refused it, so none is named.
+    #[test]
+    fn test13144_a_strand_refused_at_an_input_names_the_step_and_what_it_is_given() {
+        let (fab, registry, request) = record_to_yaml(&[JSON_RECORD]);
+        let outcome = fab
+            .plan(&request, &registry)
+            .expect("the strand was found: the outcome names it");
+        assert!(outcome.candidates.is_empty(), "{:?}", outcome.candidates);
+        assert_eq!(outcome.excluded.len(), 1, "{:?}", outcome.excluded);
+        let excluded = &outcome.excluded[0];
+        let to_yaml = crate::CapUrn::from_string(TO_YAML).unwrap().to_string();
+        assert_eq!(
+            excluded.steps,
+            vec![ExcludedStep { cap_urn: to_yaml.clone(), title: "JSON to YAML".to_string() }]
+        );
+        assert_eq!(
+            excluded.refusal,
+            Some(StrandRefusal {
+                cap_urn: to_yaml,
+                cap_title: "JSON to YAML".to_string(),
+                arg: None,
+                given: titled(JSON_RECORD),
+            })
+        );
+        assert!(excluded.reason.contains("to-yaml"), "the resolver's own text stays: {}", excluded.reason);
+    }
+
+    // TEST13145: a refusal of a member named into an arg names that arg, what
+    // it takes and what it is given, each media by its title, beside the
+    // resolver's own text.
+    #[test]
+    fn test13145_an_arg_refusal_names_the_arg_what_it_takes_and_what_it_is_given() {
+        let registry = registry_with(vec![build_cap(TO_YAML, "JSON to YAML", &[JSON_RECORD_NOT_LIST], YAML_RECORD)]);
+        seed_media_titles(&registry, &[JSON_RECORD, JSON_RECORD_NOT_LIST]);
+        let wiring = PreInternedWiring {
+            token_id: StepToken::mint(),
+            foreach_identity: ForEachIdentity::MintIfRequired,
+            cap_urn: CapUrn::from_string(TO_YAML).unwrap(),
+            named_sources: vec![("input".to_string(), crate::machine::BindingSource::Node(0))],
+            source_node_ids: Vec::new(),
+            targets: vec![(None, 1)],
+            policy: crate::machine::StepPolicy::default(),
+            included_as: Vec::new(),
+        };
+        let refusal = resolve_pre_interned(vec![media(JSON_RECORD), media(YAML_RECORD)], &[wiring], &registry, 0)
+            .expect_err("a JSON record given to the machine may be a list");
+        assert!(
+            matches!(refusal, MachineAbstractionError::SourceDoesNotConformToArg { .. }),
+            "{refusal:?}"
+        );
+        let strand = strand_from_steps(
+            vec![cap_step(TO_YAML, "JSON to YAML", JSON_RECORD, YAML_RECORD)],
+            "JSON record to YAML",
+        );
+        let excluded = excluded_candidate(&media(JSON_RECORD), &media(YAML_RECORD), &strand, &refusal, &registry)
+            .expect("every media it names has a title");
+        let to_yaml = CapUrn::from_string(TO_YAML).unwrap().to_string();
+        assert_eq!(
+            excluded.refusal,
+            Some(StrandRefusal {
+                cap_urn: to_yaml,
+                cap_title: "JSON to YAML".to_string(),
+                arg: Some(RefusingArg { name: "input".to_string(), accepts: titled(JSON_RECORD_NOT_LIST) }),
+                given: titled(JSON_RECORD),
+            })
+        );
+        assert_eq!(excluded.reason, refusal.to_string());
+    }
+
+    // TEST13146: a media type an excluded strand must name that the registry
+    // does not define fails the plan, naming it: a title is never made up.
+    #[test]
+    fn test13146_an_excluded_strand_naming_an_undefined_media_fails_the_plan() {
+        let (fab, registry, request) = record_to_yaml(&[]);
+        match fab.plan(&request, &registry) {
+            Err(PlanError::MediaTitleUnavailable { media_urn, .. }) => {
+                assert_eq!(media_urn, media(JSON_RECORD).to_string());
+            }
+            other => panic!("the plan must fail on the missing title: {other:?}"),
+        }
     }
 
     // TEST1428 (full coverage ⇒ no dead ends): the ordinary pdf+md plan must
