@@ -74,7 +74,7 @@ pub use plan_builder::{
 pub use plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePolicy,
     ConvergencePresence, ConvergentTargetInfo, ConvergentTargets, DivergenceLocation,
-    DivergencePolicy, DivergencePresence, ExcludedCandidate, ExcludedStep, PlanApex,
+    DivergencePolicy, DivergencePresence, ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex,
     PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest,
     RankPolicy, RefusingArg, SearchDirection, SourceCardinality, SourceSpec, StrandRefusal,
     TargetSpec, TitledMedia,

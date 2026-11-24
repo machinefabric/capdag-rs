@@ -46,7 +46,7 @@ use super::live_cap_fab::{
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence,
-    ExcludedCandidate, ExcludedStep, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode,
+    ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode,
     PlanOutcome, PlanProfile, PlanRequest, RankPolicy, RefusingArg, SourceSpec, StrandRefusal,
     TargetSpec, TitledMedia,
 };
@@ -274,16 +274,16 @@ fn excluded_candidate(
                 cap_title: refused_step_title(strand, cap_urn)?,
                 arg: Some(RefusingArg {
                     name: name.clone(),
-                    accepts: titled_media(registry, accepts)?,
+                    accepts: titled_media(registry, accepts),
                 }),
-                given: titled_media(registry, source_urn)?,
+                given: titled_media(registry, source_urn),
             })
         }
         MachineAbstractionError::UnmatchedSourceInCapArgs { cap_urn, source_urn, .. } => Some(StrandRefusal {
             cap_urn: cap_urn.clone(),
             cap_title: refused_step_title(strand, cap_urn)?,
             arg: None,
-            given: titled_media(registry, source_urn)?,
+            given: titled_media(registry, source_urn),
         }),
         _ => None,
     };
@@ -310,17 +310,17 @@ fn refused_step_title(strand: &Strand, cap_urn: &str) -> Result<String, PlanErro
         .ok_or_else(|| PlanError::Internal(format!("the resolver refused cap '{cap_urn}', which the strand does not take")))
 }
 
-/// A media URN with the title its definition gives it. A title is never made
-/// from the URN: a media type the registry cannot define fails the plan.
-fn titled_media(registry: &FabricRegistry, urn: &str) -> Result<TitledMedia, PlanError> {
-    let definition = registry.get_cached_media_def(urn).map_err(|e| PlanError::MediaTitleUnavailable {
-        media_urn: urn.to_string(),
-        error: e.to_string(),
-    })?;
-    Ok(TitledMedia {
+/// A media URN with the title its definition gives it, or the registry's
+/// account of why it has none: that belongs to the one excluded strand that
+/// names the media, never to the plan, and a title is never made from the URN.
+fn titled_media(registry: &FabricRegistry, urn: &str) -> TitledMedia {
+    TitledMedia {
         urn: urn.to_string(),
-        title: definition.title,
-    })
+        title: match registry.get_cached_media_def(urn) {
+            Ok(definition) => MediaTitle::Defined(definition.title),
+            Err(e) => MediaTitle::Unavailable { error: e.to_string() },
+        },
+    }
 }
 
 /// Canonical notation of a set of resolved strands (one Machine).
@@ -3067,11 +3067,15 @@ mod tests {
     const TO_YAML: &str = "cap:in=\"media:enc=utf8;fmt=json;record;!list\";to-yaml;out=\"media:enc=utf8;fmt=yaml;record\"";
 
     /// A JSON record to YAML by a step that takes only a record that is not a
-    /// list, with the titles of the media in `titled` defined. A JSON record
-    /// given to the machine is a type, which may be a list: the strand the
-    /// search finds is refused at that step.
-    fn record_to_yaml(titled: &[&str]) -> (LiveCapFab, crate::cap::registry::FabricRegistry, PlanRequest) {
-        let caps = vec![build_cap(TO_YAML, "JSON to YAML", &[JSON_RECORD_NOT_LIST], YAML_RECORD)];
+    /// list, beside the caps in `beside`, with the titles of the media in
+    /// `titled` defined. A JSON record given to the machine is a type, which
+    /// may be a list: the strand the search finds by that step is refused at it.
+    fn record_to_yaml(
+        beside: Vec<crate::Cap>,
+        titled: &[&str],
+    ) -> (LiveCapFab, crate::cap::registry::FabricRegistry, PlanRequest) {
+        let mut caps = vec![build_cap(TO_YAML, "JSON to YAML", &[JSON_RECORD_NOT_LIST], YAML_RECORD)];
+        caps.extend(beside);
         let mut fab = LiveCapFab::new();
         fab.sync_from_caps(&caps, &[media(JSON_RECORD), media(YAML_RECORD)].into_iter().collect());
         let registry = registry_with(caps);
@@ -3086,7 +3090,7 @@ mod tests {
     }
 
     fn titled(urn: &str) -> TitledMedia {
-        TitledMedia { urn: media(urn).to_string(), title: format!("Title for {urn}") }
+        TitledMedia { urn: media(urn).to_string(), title: MediaTitle::Defined(format!("Title for {urn}")) }
     }
 
     // TEST13144: a strand refused at a step that takes nothing it is given is
@@ -3094,7 +3098,7 @@ mod tests {
     // of that media; no arg refused it, so none is named.
     #[test]
     fn test13144_a_strand_refused_at_an_input_names_the_step_and_what_it_is_given() {
-        let (fab, registry, request) = record_to_yaml(&[JSON_RECORD]);
+        let (fab, registry, request) = record_to_yaml(Vec::new(), &[JSON_RECORD]);
         let outcome = fab
             .plan(&request, &registry)
             .expect("the strand was found: the outcome names it");
@@ -3160,16 +3164,32 @@ mod tests {
         assert_eq!(excluded.reason, refusal.to_string());
     }
 
-    // TEST13146: a media type an excluded strand must name that the registry
-    // does not define fails the plan, naming it: a title is never made up.
+    // TEST13146: a media type an excluded strand names that the registry does
+    // not define is that strand's to say, never the plan's: its refusal names
+    // the media by URN with the registry's account of the missing title, a
+    // title is never made up, and the plan still offers the other ways.
     #[test]
-    fn test13146_an_excluded_strand_naming_an_undefined_media_fails_the_plan() {
-        let (fab, registry, request) = record_to_yaml(&[]);
-        match fab.plan(&request, &registry) {
-            Err(PlanError::MediaTitleUnavailable { media_urn, .. }) => {
-                assert_eq!(media_urn, media(JSON_RECORD).to_string());
-            }
-            other => panic!("the plan must fail on the missing title: {other:?}"),
+    fn test13146_an_undefined_media_an_excluded_strand_names_stays_with_that_strand() {
+        // A second way, by a step that takes any JSON record, list or not.
+        let flatten = build_cap(
+            "cap:in=\"media:enc=utf8;fmt=json;record\";flatten;out=\"media:enc=utf8;fmt=yaml;record\"",
+            "Flatten JSON",
+            &[JSON_RECORD],
+            YAML_RECORD,
+        );
+        let (fab, registry, request) = record_to_yaml(vec![flatten], &[]);
+        let outcome = fab
+            .plan(&request, &registry)
+            .expect("a title the registry cannot give does not sink the plan");
+        assert_eq!(outcome.candidates.len(), 1, "{:?}", outcome.candidates);
+        assert!(outcome.candidates[0].notation.contains("flatten"), "{}", outcome.candidates[0].notation);
+        assert_eq!(outcome.excluded.len(), 1, "{:?}", outcome.excluded);
+        let refusal = outcome.excluded[0].refusal.as_ref().expect("refused at the step's input");
+        assert_eq!(refusal.cap_title, "JSON to YAML");
+        assert_eq!(refusal.given.urn, media(JSON_RECORD).to_string());
+        match &refusal.given.title {
+            MediaTitle::Unavailable { error } => assert!(!error.is_empty()),
+            other => panic!("no title is made up for an undefined media: {other:?}"),
         }
     }
 

@@ -497,7 +497,18 @@ pub struct RefusingArg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitledMedia {
     pub urn: String,
-    pub title: String,
+    pub title: MediaTitle,
+}
+
+/// A media type's title, or why the registry could not give it. A title is
+/// never made from a URN.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MediaTitle {
+    /// The title the media's definition gives it.
+    Defined(String),
+    /// The registry holds no definition of the media, or could not fetch it:
+    /// `error` is the registry's account of it.
+    Unavailable { error: String },
 }
 
 /// The result of target discovery for a source set: the reachable targets
@@ -550,11 +561,6 @@ pub enum PlanError {
     /// fetched yet. `error` is the registry's account of it — the URL, the
     /// status and the fabric manifest version where a fetch failed.
     DefinitionUnavailable { cap_urn: String, error: String },
-    /// The title of a media type a plan must name, to say why a strand is not
-    /// offered, could not be had from the registry: it holds no definition of
-    /// it, or the definition could not be fetched. `error` is the registry's
-    /// account of it. A title is never made from a URN.
-    MediaTitleUnavailable { media_urn: String, error: String },
     /// An internal invariant was violated (a bug, surfaced not swallowed).
     Internal(String),
 }
@@ -579,10 +585,6 @@ impl std::fmt::Display for PlanError {
             PlanError::DefinitionUnavailable { cap_urn, error } => write!(
                 f,
                 "the definition of cap '{cap_urn}' could not be had from the registry: {error}"
-            ),
-            PlanError::MediaTitleUnavailable { media_urn, error } => write!(
-                f,
-                "the title of media '{media_urn}' could not be had from the registry: {error}"
             ),
             PlanError::Internal(d) => write!(f, "planner internal error: {d}"),
         }

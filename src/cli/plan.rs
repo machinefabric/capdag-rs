@@ -420,7 +420,12 @@ fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &Media
 /// resolver's own words.
 fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     if ctx.term.json {
-        let titled = |media: &p::TitledMedia| serde_json::json!({ "urn": media.urn, "title": media.title });
+        let titled = |media: &p::TitledMedia| match &media.title {
+            p::MediaTitle::Defined(title) => serde_json::json!({ "urn": media.urn, "title": title }),
+            p::MediaTitle::Unavailable { error } => {
+                serde_json::json!({ "urn": media.urn, "title_unavailable": error })
+            }
+        };
         emit_record(&serde_json::json!({
             "type": "excluded",
             "strand": excluded.strand,
@@ -443,10 +448,12 @@ fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     let why = match &excluded.refusal {
         Some(p::StrandRefusal { cap_title, arg: Some(arg), given, .. }) => format!(
             "{cap_title}'s {} takes {}, and is given {}",
-            arg.name, arg.accepts.title, given.title
+            arg.name,
+            media_named(&arg.accepts),
+            media_named(given)
         ),
         Some(p::StrandRefusal { cap_title, arg: None, given, .. }) => {
-            format!("{cap_title} has no input that takes {}", given.title)
+            format!("{cap_title} has no input that takes {}", media_named(given))
         }
         None => excluded.reason.clone(),
     };
@@ -456,6 +463,15 @@ fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
         if excluded.refusal.is_some() {
             eprintln!("  {}", excluded.reason);
         }
+    }
+}
+
+/// A media an excluded way names, by its title; one the registry gives no
+/// title is named by its URN, saying why it has no title.
+fn media_named(media: &p::TitledMedia) -> String {
+    match &media.title {
+        p::MediaTitle::Defined(title) => title.clone(),
+        p::MediaTitle::Unavailable { error } => format!("{} (no title: {error})", media.urn),
     }
 }
 
