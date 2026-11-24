@@ -179,6 +179,16 @@ async fn on_context(machines: &Machines, notation: &str, input_is_sequence: bool
     ctx.add_cartridge_host(cartridges)
         .await
         .expect("add_cartridge_host failed");
+    // What the machine is given is labelled with the type its input states,
+    // as a runtime labels what a run is given.
+    let stated = graph
+        .nodes
+        .get(&input)
+        .unwrap_or_else(|| panic!("the input '{input}' has a type in the graph"));
+    ctx.set_node_label(
+        input.clone(),
+        capdag::MediaUrn::from_string(stated).expect("the input's type is a media URN"),
+    );
     OnContext {
         ctx,
         graph,

@@ -103,7 +103,12 @@ async fn run_opening(
     let activity_timeout_secs = runtime.activity_timeout_secs(&graph).await?;
     let switch = runtime.segment_switch(&graph).await?;
     let mut ctx = ExecutionContext::from_switch(switch).await?;
+    // What the opening cap is sent is the live reference itself.
+    let reference = crate::MediaUrn::from_string(&reference_urn).map_err(|e| {
+        ExecutionError::HostError(format!("live source '{reference_urn}' is no media URN: {e}"))
+    })?;
     ctx.set_node_is_sequence(SOURCE.to_string(), false);
+    ctx.set_node_label(SOURCE.to_string(), reference);
     ctx.set_node_live_reference(SOURCE.to_string(), reference_urn);
     ctx.set_node_data(SOURCE.to_string(), selector_bytes);
 
