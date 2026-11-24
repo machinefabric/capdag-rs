@@ -576,6 +576,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapDAG.Exec.capRequires",
+    "kind": "function",
+    "rust_path": "exec::cap_requires",
+    "renamed": true
+  },
+  {
     "lean_name": "CapDAG.Exec.comparable",
     "kind": "function",
     "rust_path": "exec::comparable",

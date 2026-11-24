@@ -3861,4 +3861,57 @@ mod tests {
             }
         }
     }
+
+    // TEST8433: a strand the planner finds through a patch is written as a
+    // machine that reads back with the types it was planned with: a JSON list
+    // of records file converted to YAML and saved as a YAML list of records
+    // writes notation whose input is a JSON list of records and whose node
+    // between the steps is a YAML list of records, content and no file.
+    #[test]
+    fn test8433_a_strand_through_a_patch_writes_notation_that_reads_back() {
+        use crate::machine::test_fixtures::{build_cap, media, registry_with};
+        let json_to_yaml = r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;fmt=yaml;!ext""#;
+        let save = r#"cap:in="media:enc=utf8;fmt=yaml;list;record;!ext";out="media:enc=utf8;ext=yaml;fmt=yaml;list;record";save-as-yaml"#;
+        let caps = vec![
+            build_cap(json_to_yaml, "json to yaml", &["media:enc=utf8;fmt=json"], "media:enc=utf8;fmt=yaml;!ext"),
+            build_cap(
+                save,
+                "save as yaml list of records",
+                &["media:enc=utf8;fmt=yaml;list;record;!ext"],
+                "media:enc=utf8;ext=yaml;fmt=yaml;list;record",
+            ),
+        ];
+        let source = media("media:enc=utf8;ext=json;fmt=json;list;record");
+        let target = media("media:enc=utf8;ext=yaml;fmt=yaml;list;record");
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &[source.clone(), target.clone()].into_iter().collect());
+        let registry = registry_with(caps);
+
+        let strands = fab.find_paths_to_exact_target(&source, &target, false, 4, 10);
+        let strand = strands
+            .iter()
+            .find(|strand| strand.cap_step_count == 2)
+            .unwrap_or_else(|| panic!("JSON to YAML, then the save, is a route: {strands:?}"));
+        let notation = strand.to_machine_notation(&registry).expect("the strand is written as a machine");
+        let machine = crate::machine::parse_machine(&notation, &registry)
+            .unwrap_or_else(|e| panic!("{notation} must read back: {e}"));
+        let read = &machine.strands()[0];
+        let inputs = read.input_anchors();
+        assert_eq!(inputs.len(), 1, "{notation}");
+        assert!(
+            inputs[0].is_equivalent(&media("media:enc=utf8;fmt=json;list;record")),
+            "{notation}: the input is {}",
+            inputs[0]
+        );
+        let to_yaml = read
+            .edges()
+            .iter()
+            .find(|edge| edge.cap_urn.is_equivalent(&CapUrn::from_string(json_to_yaml).unwrap()))
+            .expect("the patch is a step");
+        let middle = read.node_urn(to_yaml.outputs[0].node);
+        assert!(
+            middle.is_equivalent(&media("media:enc=utf8;!ext;fmt=yaml;list;record")),
+            "{notation}: the node between the steps is {middle}"
+        );
+    }
 }

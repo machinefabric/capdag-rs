@@ -541,10 +541,8 @@ impl LiveCapFab {
                 let notation = match strand.to_machine_notation(registry) {
                     Ok(notation) => notation,
                     Err(refusal) => {
-                        return Err(PlanError::Internal(refusal.to_string())); // REVERT-PROBE
-                        #[allow(unreachable_code)]
-                        { out.exclude(strand_description(&source.media_urn, &targets[0], strand), refusal.to_string());
-                        continue; }
+                        out.exclude(strand_description(&source.media_urn, &targets[0], strand), refusal.to_string());
+                        continue;
                     }
                 };
                 let cap_steps = strand.cap_step_count as usize;
