@@ -74,10 +74,10 @@ pub use plan_builder::{
 pub use plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePolicy,
     ConvergencePresence, ConvergentTargetInfo, ConvergentTargets, DivergenceLocation,
-    DivergencePolicy, DivergencePresence, ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex,
-    PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest,
-    RankPolicy, RefusingArg, SearchDirection, SourceCardinality, SourceSpec, StrandRefusal,
-    TargetSpec, TitledMedia,
+    DimDifference, DimDifferences, DimState, DivergencePolicy, DivergencePresence,
+    ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex, PlanCandidate, PlanCost, PlanError,
+    PlanMode, PlanOutcome, PlanProfile, PlanRequest, RankPolicy, RefusingInput, SearchDirection,
+    SourceCardinality, SourceSpec, StrandRefusal, TargetSpec, TitledMedia,
 };
 pub use viz::{plans_to_dot, plans_to_mermaid, DiagramNames};
 

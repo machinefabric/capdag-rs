@@ -46,9 +46,9 @@ use super::live_cap_fab::{
 use super::plan_space::{
     ConvergenceArity, ConvergenceLocation, ConvergenceMechanism, ConvergencePresence,
     ConvergentTargetInfo, ConvergentTargets, DivergenceLocation, DivergencePresence,
-    ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex, PlanCandidate, PlanCost, PlanError, PlanMode,
-    PlanOutcome, PlanProfile, PlanRequest, RankPolicy, RefusingArg, SourceSpec, StrandRefusal,
-    TargetSpec, TitledMedia,
+    DimDifference, DimDifferences, DimState, ExcludedCandidate, ExcludedStep, MediaTitle, PlanApex,
+    PlanCandidate, PlanCost, PlanError, PlanMode, PlanOutcome, PlanProfile, PlanRequest, RankPolicy,
+    RefusingInput, SourceSpec, StrandRefusal, TargetSpec, TitledMedia,
 };
 
 /// Bound on distinct apex media considered per request (after the location
@@ -272,19 +272,23 @@ fn excluded_candidate(
             Some(StrandRefusal {
                 cap_urn: cap_urn.clone(),
                 cap_title: refused_step_title(strand, cap_urn)?,
-                arg: Some(RefusingArg {
-                    name: name.clone(),
-                    accepts: titled_media(registry, accepts),
-                }),
+                input: Some(refusing_input(registry, name, accepts, source_urn)?),
                 given: titled_media(registry, source_urn),
             })
         }
-        MachineAbstractionError::UnmatchedSourceInCapArgs { cap_urn, source_urn, .. } => Some(StrandRefusal {
-            cap_urn: cap_urn.clone(),
-            cap_title: refused_step_title(strand, cap_urn)?,
-            arg: None,
-            given: titled_media(registry, source_urn),
-        }),
+        MachineAbstractionError::UnmatchedSourceInCapArgs { cap_urn, source_urn, .. } => {
+            // A strand feeds a step through its main input.
+            let input = match main_input(registry, cap_urn)? {
+                Some((name, accepts)) => Some(refusing_input(registry, &name, &accepts, source_urn)?),
+                None => None,
+            };
+            Some(StrandRefusal {
+                cap_urn: cap_urn.clone(),
+                cap_title: refused_step_title(strand, cap_urn)?,
+                input,
+                given: titled_media(registry, source_urn),
+            })
+        }
         _ => None,
     };
     Ok(ExcludedCandidate {
@@ -308,6 +312,108 @@ fn refused_step_title(strand: &Strand, cap_urn: &str) -> Result<String, PlanErro
             _ => None,
         })
         .ok_or_else(|| PlanError::Internal(format!("the resolver refused cap '{cap_urn}', which the strand does not take")))
+}
+
+/// The main input of the refused step's cap, by its name and what it takes:
+/// `None` when the cap takes no input (`in=media:void`). The resolver read
+/// the definition to refuse the step, so one the registry cannot give, or
+/// that declares no arg for its `in=`, is a broken invariant.
+fn main_input(registry: &FabricRegistry, cap_urn: &str) -> Result<Option<(String, String)>, PlanError> {
+    let cap = registry.get_cached_cap(cap_urn).map_err(|e| {
+        PlanError::Internal(format!("the resolver refused cap '{cap_urn}', whose definition is not at hand: {e}"))
+    })?;
+    let in_spec = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
+        PlanError::Internal(format!("cap '{cap_urn}' takes '{}', which does not parse: {e}", cap.urn.in_spec()))
+    })?;
+    let void = MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID).expect("MEDIA_VOID is a valid MediaUrn");
+    if in_spec.is_equivalent(&void) {
+        return Ok(None);
+    }
+    let main = cap.args.iter().find(|arg| arg.is_main_input(&in_spec)).ok_or_else(|| {
+        PlanError::Internal(format!("cap '{cap_urn}' declares no arg for the input it takes"))
+    })?;
+    // Canonical, as the resolver writes the media it names.
+    let accepts = MediaUrn::from_string(main.accepted_urn()).map_err(|e| {
+        PlanError::Internal(format!("cap '{cap_urn}' arg '{}' takes '{}', which does not parse: {e}", main.name, main.accepted_urn()))
+    })?;
+    Ok(Some((main.name.clone(), accepts.to_string())))
+}
+
+/// The input of a refused step, named `name`, taking `accepts`, against what
+/// it is given.
+fn refusing_input(
+    registry: &FabricRegistry,
+    name: &str,
+    accepts: &str,
+    given: &str,
+) -> Result<RefusingInput, PlanError> {
+    Ok(RefusingInput {
+        name: name.to_string(),
+        accepts: titled_media(registry, accepts),
+        differences: dim_differences(registry, accepts, given)?,
+    })
+}
+
+/// How what an input takes differs from what it is given, by the dims the
+/// fabric publishes: every tag key the two write differently is said by the
+/// dim that publishes it, or listed as unworded. Dims the registry cannot give
+/// are this strand's to say, never the plan's.
+fn dim_differences(registry: &FabricRegistry, takes: &str, given: &str) -> Result<DimDifferences, PlanError> {
+    let parse = |urn: &str| {
+        MediaUrn::from_string(urn)
+            .map_err(|e| PlanError::Internal(format!("the resolver named media '{urn}', which does not parse: {e}")))
+    };
+    let (takes, given) = (parse(takes)?, parse(given)?);
+    let keys: std::collections::BTreeSet<&String> =
+        takes.inner().tags().keys().chain(given.inner().tags().keys()).collect();
+    let mut dims = Vec::new();
+    let mut unworded = Vec::new();
+    for key in keys {
+        let (takes_tag, given_tag) = (takes.get_tag(key), given.get_tag(key));
+        if takes_tag == given_tag {
+            continue;
+        }
+        let dim = match registry.dim_publishing_tag(key) {
+            Ok(Some(dim)) => dim,
+            Ok(None) => {
+                unworded.push(key.clone());
+                continue;
+            }
+            Err(e) => return Ok(DimDifferences::Unavailable { error: e.to_string() }),
+        };
+        match (dim_state(&dim, key, takes_tag), dim_state(&dim, key, given_tag)) {
+            (Some(takes_state), Some(given_state)) if takes_state == given_state => {}
+            (Some(takes_state), Some(given_state)) => dims.push(DimDifference {
+                dim: dim.name.clone(),
+                dim_title: dim.title.clone(),
+                takes: takes_state,
+                given: given_state,
+            }),
+            _ => unworded.push(key.clone()),
+        }
+    }
+    Ok(DimDifferences::Said { dims, unworded })
+}
+
+/// What a media's tag for `key` says of `dim`, which publishes the key:
+/// `None` for a form no [`DimState`] is, or a value the dim does not publish.
+fn dim_state(dim: &crate::StoredDim, key: &str, tag: Option<&tagged_urn::Constraint>) -> Option<DimState> {
+    use tagged_urn::Constraint;
+    let published = |value: &str| {
+        dim.values
+            .iter()
+            .find(|v| v.tags.iter().any(|t| t.key == key && t.value == value))
+            .map(|v| DimState::Value { value: v.name.clone(), value_title: v.title.clone() })
+    };
+    match tag {
+        None => Some(DimState::Open),
+        Some(c) if *c == Constraint::unconstrained() => Some(DimState::Open),
+        Some(c) if *c == Constraint::absent() => Some(DimState::None),
+        // A marker key is its own value (`*`); any other key, there with no
+        // value written, is some value of the dim.
+        Some(c) if *c == Constraint::present() => published("*").or(Some(DimState::Any)),
+        Some(c) => c.exact_value().and_then(published),
+    }
 }
 
 /// A media URN with the title its definition gives it, or the registry's
@@ -1948,7 +2054,7 @@ fn shared_prefix_len(strands: &[Strand], location: &DivergenceLocation) -> usize
 mod tests {
     use super::*;
     use crate::machine::test_fixtures::{
-        build_cap, cap_step, media, registry_with, seed_media_titles, strand_from_steps,
+        build_cap, cap_step, media, registry_with, seed_dim, seed_media_titles, strand_from_steps,
     };
     use crate::planner::plan_space::{SourceSpec, TargetSpec};
 
@@ -3090,15 +3196,31 @@ mod tests {
     }
 
     fn titled(urn: &str) -> TitledMedia {
-        TitledMedia { urn: media(urn).to_string(), title: MediaTitle::Defined(format!("Title for {urn}")) }
+        titled_by(urn, urn)
     }
 
-    // TEST13144: a strand refused at a step that takes nothing it is given is
-    // excluded naming that step by its title and what it is given by the title
-    // of that media; no arg refused it, so none is named.
+    /// `urn` with the title of the published definition `defined` it resolves to.
+    fn titled_by(urn: &str, defined: &str) -> TitledMedia {
+        TitledMedia { urn: media(urn).to_string(), title: MediaTitle::Defined(format!("Title for {defined}")) }
+    }
+
+    fn seed_list_marker(registry: &crate::cap::registry::FabricRegistry) {
+        seed_dim(registry, "list-marker", "List Marker", &[("list", "List", "list", "*")]);
+    }
+
+    fn seed_data_format(registry: &crate::cap::registry::FabricRegistry) {
+        seed_dim(registry, "data-format", "Data Format", &[("json", "JSON", "fmt", "json"), ("yaml", "YAML", "fmt", "yaml")]);
+    }
+
+    // TEST13144: a strand refused at the main input of a step is excluded
+    // naming that step and input by their titles and names, and how what the
+    // input takes differs from what it is given by the published dims, in the
+    // planner's own words for what a media says of a dim: the step takes a JSON
+    // record that is no list, and is given one that does not say.
     #[test]
-    fn test13144_a_strand_refused_at_an_input_names_the_step_and_what_it_is_given() {
+    fn test13144_a_strand_refused_at_an_input_says_how_by_the_published_dims() {
         let (fab, registry, request) = record_to_yaml(Vec::new(), &[JSON_RECORD]);
+        seed_list_marker(&registry);
         let outcome = fab
             .plan(&request, &registry)
             .expect("the strand was found: the outcome names it");
@@ -3115,49 +3237,135 @@ mod tests {
             Some(StrandRefusal {
                 cap_urn: to_yaml,
                 cap_title: "JSON to YAML".to_string(),
-                arg: None,
+                input: Some(RefusingInput {
+                    name: "input".to_string(),
+                    // `!list` refines the published JSON record: its title.
+                    accepts: titled_by(JSON_RECORD_NOT_LIST, JSON_RECORD),
+                    differences: DimDifferences::Said {
+                        dims: vec![DimDifference {
+                            dim: "list-marker".to_string(),
+                            dim_title: "List Marker".to_string(),
+                            takes: DimState::None,
+                            given: DimState::Open,
+                        }],
+                        unworded: Vec::new(),
+                    },
+                }),
                 given: titled(JSON_RECORD),
             })
         );
         assert!(excluded.reason.contains("to-yaml"), "the resolver's own text stays: {}", excluded.reason);
     }
 
+    // TEST13148: a tag the two media write differently that no published dim
+    // carries is listed as unworded, for the URNs to say: the dims never guess
+    // at it.
+    #[test]
+    fn test13148_a_difference_no_dim_publishes_is_unworded() {
+        let (fab, registry, request) = record_to_yaml(Vec::new(), &[JSON_RECORD]);
+        let outcome = fab.plan(&request, &registry).expect("the strand was found");
+        let input = outcome.excluded[0].refusal.as_ref().and_then(|r| r.input.as_ref()).expect("refused at its main input");
+        assert_eq!(
+            input.differences,
+            DimDifferences::Said { dims: Vec::new(), unworded: vec!["list".to_string()] }
+        );
+    }
+
+    // TEST13149: dims the registry cannot give are the excluded strand's to
+    // say, with the registry's account of it, never the plan's: the plan still
+    // offers its other ways.
+    #[test]
+    fn test13149_dims_the_registry_cannot_give_stay_with_the_excluded_strand() {
+        let flatten = build_cap(
+            "cap:in=\"media:enc=utf8;fmt=json;record\";flatten;out=\"media:enc=utf8;fmt=yaml;record\"",
+            "Flatten JSON",
+            &[JSON_RECORD],
+            YAML_RECORD,
+        );
+        let (fab, registry, request) = record_to_yaml(vec![flatten], &[JSON_RECORD]);
+        seed_list_marker(&registry);
+        registry.pin_dim_for_test("file-type", 1);
+        let outcome = fab
+            .plan(&request, &registry)
+            .expect("dims the registry cannot give do not sink the plan");
+        assert_eq!(outcome.candidates.len(), 1, "{:?}", outcome.candidates);
+        let input = outcome.excluded[0].refusal.as_ref().and_then(|r| r.input.as_ref()).expect("refused at its main input");
+        match &input.differences {
+            DimDifferences::Unavailable { error } => assert!(error.contains("file-type"), "{error}"),
+            other => panic!("the dims could not be had, and say so: {other:?}"),
+        }
+    }
+
+    // TEST13150: a step refused at no named arg that takes no input has no
+    // input to compare, and the refusal says so by naming none.
+    #[test]
+    fn test13150_a_refused_step_with_no_main_input_names_no_input() {
+        let generate = "cap:in=\"media:void\";generate;out=\"media:enc=utf8;fmt=json;record\"";
+        let registry = registry_with(vec![build_cap(generate, "Generate", &[], JSON_RECORD)]);
+        seed_media_titles(&registry, &[JSON_RECORD]);
+        let refusal = MachineAbstractionError::UnmatchedSourceInCapArgs {
+            strand_index: 0,
+            cap_urn: CapUrn::from_string(generate).unwrap().to_string(),
+            source_urn: media(JSON_RECORD).to_string(),
+        };
+        let strand = strand_from_steps(vec![cap_step(generate, "Generate", JSON_RECORD, JSON_RECORD)], "generate");
+        let excluded = excluded_candidate(&media(JSON_RECORD), &media(JSON_RECORD), &strand, &refusal, &registry)
+            .expect("the refused cap is a step of the strand");
+        let refused = excluded.refusal.expect("refused at a step");
+        assert_eq!(refused.input, None);
+        assert_eq!(refused.given, titled(JSON_RECORD));
+    }
+
     // TEST13145: a refusal of a member named into an arg names that arg, what
-    // it takes and what it is given, each media by its title, beside the
-    // resolver's own text.
+    // it takes and what it is given, each media by its title, and how they
+    // differ by the published dims, beside the resolver's own text.
     #[test]
     fn test13145_an_arg_refusal_names_the_arg_what_it_takes_and_what_it_is_given() {
-        let registry = registry_with(vec![build_cap(TO_YAML, "JSON to YAML", &[JSON_RECORD_NOT_LIST], YAML_RECORD)]);
-        seed_media_titles(&registry, &[JSON_RECORD, JSON_RECORD_NOT_LIST]);
+        let to_json = "cap:in=\"media:enc=utf8;fmt=yaml;record\";to-json;out=\"media:enc=utf8;fmt=json;record\"";
+        let registry = registry_with(vec![build_cap(to_json, "YAML to JSON", &[YAML_RECORD], JSON_RECORD)]);
+        seed_media_titles(&registry, &[JSON_RECORD, YAML_RECORD]);
+        seed_data_format(&registry);
+        // A JSON record named into the step's YAML input.
         let wiring = PreInternedWiring {
             token_id: StepToken::mint(),
             foreach_identity: ForEachIdentity::MintIfRequired,
-            cap_urn: CapUrn::from_string(TO_YAML).unwrap(),
+            cap_urn: CapUrn::from_string(to_json).unwrap(),
             named_sources: vec![("input".to_string(), crate::machine::BindingSource::Node(0))],
             source_node_ids: Vec::new(),
             targets: vec![(None, 1)],
             policy: crate::machine::StepPolicy::default(),
             included_as: Vec::new(),
         };
-        let refusal = resolve_pre_interned(vec![media(JSON_RECORD), media(YAML_RECORD)], &[wiring], &registry, 0)
-            .expect_err("a JSON record given to the machine may be a list");
+        let refusal = resolve_pre_interned(vec![media(JSON_RECORD), media(JSON_RECORD)], &[wiring], &registry, 0)
+            .expect_err("a JSON record is no YAML record");
         assert!(
             matches!(refusal, MachineAbstractionError::SourceDoesNotConformToArg { .. }),
             "{refusal:?}"
         );
         let strand = strand_from_steps(
-            vec![cap_step(TO_YAML, "JSON to YAML", JSON_RECORD, YAML_RECORD)],
-            "JSON record to YAML",
+            vec![cap_step(to_json, "YAML to JSON", JSON_RECORD, JSON_RECORD)],
+            "JSON record through YAML to JSON",
         );
-        let excluded = excluded_candidate(&media(JSON_RECORD), &media(YAML_RECORD), &strand, &refusal, &registry)
-            .expect("every media it names has a title");
-        let to_yaml = CapUrn::from_string(TO_YAML).unwrap().to_string();
+        let excluded = excluded_candidate(&media(JSON_RECORD), &media(JSON_RECORD), &strand, &refusal, &registry)
+            .expect("the refused cap is a step of the strand");
         assert_eq!(
             excluded.refusal,
             Some(StrandRefusal {
-                cap_urn: to_yaml,
-                cap_title: "JSON to YAML".to_string(),
-                arg: Some(RefusingArg { name: "input".to_string(), accepts: titled(JSON_RECORD_NOT_LIST) }),
+                cap_urn: CapUrn::from_string(to_json).unwrap().to_string(),
+                cap_title: "YAML to JSON".to_string(),
+                input: Some(RefusingInput {
+                    name: "input".to_string(),
+                    accepts: titled(YAML_RECORD),
+                    differences: DimDifferences::Said {
+                        dims: vec![DimDifference {
+                            dim: "data-format".to_string(),
+                            dim_title: "Data Format".to_string(),
+                            takes: DimState::Value { value: "yaml".to_string(), value_title: "YAML".to_string() },
+                            given: DimState::Value { value: "json".to_string(), value_title: "JSON".to_string() },
+                        }],
+                        unworded: Vec::new(),
+                    },
+                }),
                 given: titled(JSON_RECORD),
             })
         );

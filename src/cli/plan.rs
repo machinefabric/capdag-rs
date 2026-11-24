@@ -435,8 +435,21 @@ fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
             "refusal": excluded.refusal.as_ref().map(|refusal| serde_json::json!({
                 "cap_urn": refusal.cap_urn,
                 "cap_title": refusal.cap_title,
-                "arg": refusal.arg.as_ref().map(|arg| serde_json::json!({
-                    "name": arg.name, "accepts": titled(&arg.accepts),
+                "input": refusal.input.as_ref().map(|input| serde_json::json!({
+                    "name": input.name,
+                    "accepts": titled(&input.accepts),
+                    "differences": match &input.differences {
+                        p::DimDifferences::Said { dims, unworded } => serde_json::json!({
+                            "dims": dims.iter().map(|d| serde_json::json!({
+                                "dim": d.dim,
+                                "dim_title": d.dim_title,
+                                "takes": dim_state_json(&d.takes),
+                                "given": dim_state_json(&d.given),
+                            })).collect::<Vec<_>>(),
+                            "unworded": unworded,
+                        }),
+                        p::DimDifferences::Unavailable { error } => serde_json::json!({ "unavailable": error }),
+                    },
                 })),
                 "given": titled(&refusal.given),
             })),
@@ -446,15 +459,7 @@ fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     }
     let steps: Vec<&str> = excluded.steps.iter().map(|step| step.title.as_str()).collect();
     let why = match &excluded.refusal {
-        Some(p::StrandRefusal { cap_title, arg: Some(arg), given, .. }) => format!(
-            "{cap_title}'s {} takes {}, and is given {}",
-            arg.name,
-            media_named(&arg.accepts),
-            media_named(given)
-        ),
-        Some(p::StrandRefusal { cap_title, arg: None, given, .. }) => {
-            format!("{cap_title} has no input that takes {}", media_named(given))
-        }
+        Some(refusal) => refusal_words(refusal),
         None => excluded.reason.clone(),
     };
     eprintln!("not offered: {}: {why}", steps.join(" > "));
@@ -463,6 +468,68 @@ fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
         if excluded.refusal.is_some() {
             eprintln!("  {}", excluded.reason);
         }
+    }
+}
+
+/// Where a step refused what it was given, said by titles: what its input
+/// takes against what it is given, each with the published dims they differ
+/// in. A difference the dims cannot say leaves only the URNs to say it.
+fn refusal_words(refusal: &p::StrandRefusal) -> String {
+    let cap = &refusal.cap_title;
+    let Some(input) = &refusal.input else {
+        return format!("{cap} takes no input; it is given {}", media_named(&refusal.given));
+    };
+    match &input.differences {
+        p::DimDifferences::Said { unworded, .. } if !unworded.is_empty() => format!(
+            "{cap}'s {} takes {}; it is given {}",
+            input.name, input.accepts.urn, refusal.given.urn
+        ),
+        p::DimDifferences::Said { dims, .. } => {
+            let said = |side: fn(&p::DimDifference) -> &p::DimState| {
+                if dims.is_empty() {
+                    return String::new();
+                }
+                let each: Vec<String> =
+                    dims.iter().map(|d| format!("{}: {}", d.dim_title, dim_state_words(side(d)))).collect();
+                format!(" ({})", each.join(", "))
+            };
+            format!(
+                "{cap}'s {} takes {}{}; it is given {}{}",
+                input.name,
+                media_named(&input.accepts),
+                said(|d| &d.takes),
+                media_named(&refusal.given),
+                said(|d| &d.given)
+            )
+        }
+        p::DimDifferences::Unavailable { error } => format!(
+            "{cap}'s {} takes {}; it is given {} (the dims could not be had: {error})",
+            input.name,
+            media_named(&input.accepts),
+            media_named(&refusal.given)
+        ),
+    }
+}
+
+/// What a media says of a dim, in the planner's words; a value by its
+/// published title.
+fn dim_state_words(state: &p::DimState) -> &str {
+    match state {
+        p::DimState::Value { value_title, .. } => value_title,
+        p::DimState::Any => "any",
+        p::DimState::None => "none",
+        p::DimState::Open => "not said",
+    }
+}
+
+fn dim_state_json(state: &p::DimState) -> serde_json::Value {
+    match state {
+        p::DimState::Value { value, value_title } => {
+            serde_json::json!({ "state": "value", "value": value, "value_title": value_title })
+        }
+        p::DimState::Any => serde_json::json!({ "state": "any" }),
+        p::DimState::None => serde_json::json!({ "state": "none" }),
+        p::DimState::Open => serde_json::json!({ "state": "open" }),
     }
 }
 
@@ -644,5 +711,51 @@ mod tests {
 
         let named = match_target(&registry, &reachable, embedding, "1 pdf").await.unwrap();
         assert!(named.named, "the embedding vector's own URN names it");
+    }
+
+    fn titled(urn: &str, title: &str) -> p::TitledMedia {
+        p::TitledMedia { urn: urn.to_string(), title: p::MediaTitle::Defined(title.to_string()) }
+    }
+
+    // TEST13151: a refusal is said by titles and the planner's words for what
+    // each side says of the dims they differ in: a step taking a JSON record
+    // that is no list, given one that does not say, reads "List Marker: none"
+    // against "List Marker: not said". A difference no dim can say leaves the
+    // URNs to say it, and a step with no input says that.
+    #[test]
+    fn test13151_a_refusal_reads_by_titles_and_the_dims_it_differs_in() {
+        let given = titled("media:enc=utf8;fmt=json;record", "JSON Record");
+        let input = |differences| p::RefusingInput {
+            name: "input".to_string(),
+            accepts: titled("media:enc=utf8;fmt=json;!list;record", "JSON Record"),
+            differences,
+        };
+        let refusal = |input| p::StrandRefusal {
+            cap_urn: "cap:to-yaml".to_string(),
+            cap_title: "JSON to YAML".to_string(),
+            input,
+            given: given.clone(),
+        };
+        let list = p::DimDifference {
+            dim: "list-marker".to_string(),
+            dim_title: "List Marker".to_string(),
+            takes: p::DimState::None,
+            given: p::DimState::Open,
+        };
+        assert_eq!(
+            refusal_words(&refusal(Some(input(p::DimDifferences::Said { dims: vec![list], unworded: Vec::new() })))),
+            "JSON to YAML's input takes JSON Record (List Marker: none); it is given JSON Record (List Marker: not said)"
+        );
+        assert_eq!(
+            refusal_words(&refusal(Some(input(p::DimDifferences::Said {
+                dims: Vec::new(),
+                unworded: vec!["list".to_string()],
+            })))),
+            "JSON to YAML's input takes media:enc=utf8;fmt=json;!list;record; it is given media:enc=utf8;fmt=json;record"
+        );
+        assert_eq!(
+            refusal_words(&refusal(None)),
+            "JSON to YAML takes no input; it is given JSON Record"
+        );
     }
 }

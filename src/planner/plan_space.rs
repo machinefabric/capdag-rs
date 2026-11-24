@@ -477,20 +477,69 @@ pub struct StrandRefusal {
     pub cap_urn: String,
     /// The cap's title.
     pub cap_title: String,
-    /// The arg that refused it, when the resolver names one: `None` when no
-    /// arg of the step takes what it is given.
-    pub arg: Option<RefusingArg>,
+    /// The input that refused it: the arg the resolver names, or else the
+    /// step's main input, the one a strand feeds. `None` when the resolver
+    /// names no arg and the step has no main input.
+    pub input: Option<RefusingInput>,
     /// What the step is given, and the title of that media.
     pub given: TitledMedia,
 }
 
-/// The arg of a step that refused what it was given.
+/// The input of a step that refused what it was given.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RefusingArg {
+pub struct RefusingInput {
     /// The arg's name in the cap definition.
     pub name: String,
     /// What the arg takes, and the title of that media.
     pub accepts: TitledMedia,
+    /// How what the arg takes differs from what the step is given, by the
+    /// dims the fabric publishes.
+    pub differences: DimDifferences,
+}
+
+/// How two media differ, dim by dim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DimDifferences {
+    Said {
+        /// Each published dim the two media say differently, in tag key
+        /// order.
+        dims: Vec<DimDifference>,
+        /// The tag keys the two media write differently that the dims cannot
+        /// say: no published dim carries the key, or a side writes it in a
+        /// form none of [`DimState`] is. Where there is one, only the URNs
+        /// say the difference.
+        unworded: Vec<String>,
+    },
+    /// The dims could not be had from the registry: `error` is its account
+    /// of it. It belongs to this excluded strand alone.
+    Unavailable { error: String },
+}
+
+/// One published dim two media say differently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DimDifference {
+    /// The dim's name.
+    pub dim: String,
+    /// The dim's published title.
+    pub dim_title: String,
+    /// What the arg takes of it.
+    pub takes: DimState,
+    /// What the step is given of it.
+    pub given: DimState,
+}
+
+/// What a media says of one dim. The planner words these states itself, the
+/// same way wherever they are shown; only a value's title is the fabric's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DimState {
+    /// One of the dim's published values, with its published title.
+    Value { value: String, value_title: String },
+    /// Some value of the dim, whichever.
+    Any,
+    /// No value of the dim.
+    None,
+    /// Not said: a value of the dim or none.
+    Open,
 }
 
 /// A media URN with the title its definition gives it.

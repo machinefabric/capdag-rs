@@ -275,14 +275,16 @@ fn normalize_media_urn(urn: &str) -> Result<String, FabricRegistryError> {
 }
 
 /// Distinguishes domain on the background-fetch queue. Pairs URN with
-/// defver so the consumer always hits the right R2 path. Alias keys carry
-/// the (normalized) alias name instead of a URN. Dims are never queued: they
-/// are fetched with the definitions that name them, or by `get_dim`.
+/// defver so the consumer always hits the right R2 path. Alias and dim keys
+/// carry the (normalized) name instead of a URN. A dim is queued only by a
+/// synchronous lookup of it (`get_dim_synchronously`); the dims a definition names
+/// are fetched with it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FetchKey {
     Cap { urn: String, defver: u32 },
     Media { urn: String, defver: u32 },
     Alias { name: String, defver: u32 },
+    Dim { name: String, defver: u32 },
 }
 
 /// A versioned registry snapshot (`fabric/manifest.schema.json`): every cap
@@ -1201,6 +1203,7 @@ impl FabricRegistry {
         }
         let defver = self.dim_defver(name)?;
         fetch_one_dim(
+            &self.fetch_failures,
             &self.client,
             &self.cache_dir,
             &self.cached_dims,
@@ -1224,6 +1227,72 @@ impl FabricRegistry {
             .and_then(|m| m.get(name).cloned())
     }
 
+    /// Synchronous dim lookup that warms the cache: the dim, or why it is not
+    /// at hand, as `get_cached_cap` says.
+    pub fn get_dim_synchronously(&self, name: &str) -> Result<StoredDim, FabricRegistryError> {
+        if !is_dim_name(name) {
+            return Err(FabricRegistryError::ValidationError(format!(
+                "'{}' is not a dim name",
+                name
+            )));
+        }
+        if let Some(dim) = self.get_cached_dim(name) {
+            return Ok(dim);
+        }
+        let defver = self.dim_defver(name)?;
+        let key = FetchKey::Dim {
+            name: name.to_string(),
+            defver,
+        };
+        let (url, _) = dim_url_and_cache_path(&self.cache_dir, &self.locations, name, defver);
+        self.fetch_synchronously(key, url, format!("dim '{name}' (defver {defver})"), || {
+            fetch_one_dim(
+                &self.fetch_failures,
+                &self.client,
+                &self.cache_dir,
+                &self.cached_dims,
+                &self.offline_flag,
+                &self.locations,
+                &self.cache_revision_tx,
+                self.manifest_version,
+                name,
+                defver,
+            )
+        })
+    }
+
+    /// The dim whose values contribute a tag with key `key`, or `None` when no
+    /// dim of the pinned manifest publishes one. Every dim the manifest names
+    /// is read for it, through `get_dim_synchronously`: one that cannot be had is the
+    /// answer's error, and so are two dims publishing the same key, since the
+    /// key then belongs to neither.
+    pub fn dim_publishing_tag(&self, key: &str) -> Result<Option<StoredDim>, FabricRegistryError> {
+        let mut names: Vec<String> = self
+            .manifest
+            .lock()
+            .map_err(|e| FabricRegistryError::CacheError(format!("Failed to lock manifest: {}", e)))?
+            .dims
+            .keys()
+            .cloned()
+            .collect();
+        names.sort();
+        let mut publishing: Option<StoredDim> = None;
+        for name in names {
+            let dim = self.get_dim_synchronously(&name)?;
+            if !dim.values.iter().any(|value| value.tags.iter().any(|tag| tag.key == key)) {
+                continue;
+            }
+            if let Some(first) = &publishing {
+                return Err(FabricRegistryError::ValidationError(format!(
+                    "tag key '{}' is published by dims '{}' and '{}' of manifest v{}",
+                    key, first.name, dim.name, self.manifest_version
+                )));
+            }
+            publishing = Some(dim);
+        }
+        Ok(publishing)
+    }
+
     /// Look up a dim name's pinned defver under this registry's manifest
     /// without fetching the body.
     pub fn dim_defver_for(&self, name: &str) -> Result<u32, FabricRegistryError> {
@@ -1236,6 +1305,17 @@ impl FabricRegistry {
     pub(crate) fn pin_media_def_for_test(&self, urn: &str, defver: u32) {
         let normalized = normalize_media_urn(urn).expect("a test media URN parses");
         self.manifest.lock().unwrap().media.insert(normalized, defver);
+        // The manifest is no longer the file it was read from.
+        if let Ok(mut file) = self.manifest_file.lock() {
+            *file = None;
+        }
+    }
+
+    /// Test-only: name a dim in the pinned manifest at `defver` without
+    /// caching it, so a lookup of it goes to the registry.
+    #[cfg(test)]
+    pub(crate) fn pin_dim_for_test(&self, name: &str, defver: u32) {
+        self.manifest.lock().unwrap().dims.insert(name.to_string(), defver);
         // The manifest is no longer the file it was read from.
         if let Ok(mut file) = self.manifest_file.lock() {
             *file = None;
@@ -3056,13 +3136,50 @@ fn dim_url_and_cache_path(
     )
 }
 
+/// Fetch a single dim body at its pinned defver, as `fetch_dim_from_registry`
+/// does, keeping what the fetch came to in `fetch_failures`: a dim the
+/// registry has said it does not hold is answered from there
+/// ([`held_absence`]).
+#[allow(clippy::too_many_arguments)]
+async fn fetch_one_dim(
+    fetch_failures: &FetchFailures,
+    client: &reqwest::Client,
+    cache_dir: &Path,
+    cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
+    offline_flag: &Arc<AtomicBool>,
+    locations: &FabricLocations,
+    cache_revision_tx: &watch::Sender<u64>,
+    manifest_version: u32,
+    name: &str,
+    defver: u32,
+) -> Result<StoredDim, FabricRegistryError> {
+    let key = FetchKey::Dim { name: name.to_string(), defver };
+    if let Some(absent) = held_absence(fetch_failures, &key) {
+        return Err(absent);
+    }
+    let result = fetch_dim_from_registry(
+        client,
+        cache_dir,
+        cached_dims,
+        offline_flag,
+        locations,
+        cache_revision_tx,
+        manifest_version,
+        name,
+        defver,
+    )
+    .await;
+    note_fetch(fetch_failures, key, &result);
+    result
+}
+
 /// Fetch a single dim body at its pinned defver, check it, and cache it in
 /// memory and on disk. The fetched body's `name` and `version` must match
 /// what was requested — a registry that serves another object is a hard
 /// error, never silently accepted — and the body must hold
 /// ([`StoredDim::validate`]).
 #[allow(clippy::too_many_arguments)]
-async fn fetch_one_dim(
+async fn fetch_dim_from_registry(
     client: &reqwest::Client,
     cache_dir: &Path,
     cached_dims: &Arc<Mutex<HashMap<String, StoredDim>>>,
@@ -3201,7 +3318,7 @@ async fn ensure_dims_cached(
                 })?;
                 // The dim's own failure, as it is (see the media footprint
                 // in `fetch_one_cap_atomic`).
-                fetch_one_dim(
+                fetch_dim_from_registry(
                     client,
                     cache_dir,
                     cached_dims,
@@ -3920,6 +4037,44 @@ async fn run_fetch_consumer(
                                 target: "capdag::fabric::registry::fetch_consumer",
                                 name = %normalized_name, defver = %defver, error = %e,
                                 "Background alias fetch failed; name dropped from queue (no retry)."
+                            );
+                        }
+                    }
+                }
+            }
+            FetchKey::Dim { name, defver } => {
+                let already_cached = cached_dims
+                    .lock()
+                    .ok()
+                    .map(|m| m.contains_key(name))
+                    .unwrap_or(false);
+                if !already_cached {
+                    let result = fetch_one_dim(
+                        &fetch_failures,
+                        &client,
+                        &cache_dir,
+                        &cached_dims,
+                        &offline_flag,
+                        &locations,
+                        &cache_revision_tx,
+                        manifest_version,
+                        name,
+                        *defver,
+                    )
+                    .await;
+                    match result {
+                        Ok(_) => {
+                            tracing::debug!(
+                                target: "capdag::fabric::registry::fetch_consumer",
+                                name = %name, defver = %defver,
+                                "Background-fetched dim; cache is now warm."
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "capdag::fabric::registry::fetch_consumer",
+                                name = %name, defver = %defver, error = %e,
+                                "Background dim fetch failed; name dropped from queue (no retry)."
                             );
                         }
                     }
@@ -5772,6 +5927,35 @@ mod dim_tests {
         );
         let err = ensure(vec![DimRef::new("language", "en"), DimRef::new("language", "en")]).await.unwrap_err();
         assert!(matches!(&err, FabricRegistryError::ValidationError(m) if m.contains("named more than once")), "{err}");
+    }
+
+    // TEST13147: the dim that publishes a tag key is found among every dim the
+    // pinned manifest names, by the keys its values' tags carry; a key no dim
+    // publishes has none, a key two dims publish belongs to neither and says
+    // so, and a dim the manifest names that cannot be had is the lookup's
+    // error, not a dim passed over.
+    #[test]
+    fn test13147_the_dim_publishing_a_tag_key_is_found_among_the_manifests_dims() {
+        let registry = FabricRegistry::new_for_test();
+        registry.insert_cached_dim_for_test(dim("language", 1, &["en", "fr"]));
+        registry.insert_cached_dim_for_test(dim("tone", 1, &["formal"]));
+        let found = registry.dim_publishing_tag("language").expect("every dim is at hand");
+        assert_eq!(found.map(|d| d.name), Some("language".to_string()));
+        assert_eq!(registry.dim_publishing_tag("list").expect("every dim is at hand"), None);
+
+        let mut twice = dim("register", 1, &["formal"]);
+        twice.values[0].tags[0].key = "tone".to_string();
+        registry.insert_cached_dim_for_test(twice);
+        let err = registry.dim_publishing_tag("tone").unwrap_err();
+        assert!(
+            matches!(&err, FabricRegistryError::ValidationError(m) if m.contains("'register'") && m.contains("'tone'")),
+            "{err}"
+        );
+
+        registry.pin_dim_for_test("file-type", 1);
+        assert!(registry.get_cached_dim("file-type").is_none());
+        let err = registry.dim_publishing_tag("language").unwrap_err();
+        assert!(err.to_string().contains("file-type"), "the dim that could not be had is named: {err}");
     }
 }
 

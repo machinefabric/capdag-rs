@@ -114,6 +114,33 @@ pub(crate) fn seed_media_titles(registry: &FabricRegistry, urns: &[&str]) {
     }
 }
 
+/// Seed the supplied registry with a dim named `name`, titled `title`, whose
+/// values are `(value name, value title, tag key, tag value)`; a marker value's
+/// tag value is `*`.
+pub(crate) fn seed_dim(registry: &FabricRegistry, name: &str, title: &str, values: &[(&str, &str, &str, &str)]) {
+    use crate::{DimTag, StoredDim, StoredDimValue};
+    registry.insert_cached_dim_for_test(StoredDim {
+        name: name.to_string(),
+        version: 1,
+        title: title.to_string(),
+        documentation: format!("## {title}"),
+        values: values
+            .iter()
+            .map(|(value, value_title, key, tag_value)| StoredDimValue {
+                name: value.to_string(),
+                title: value_title.to_string(),
+                tags: vec![DimTag {
+                    key: key.to_string(),
+                    value: tag_value.to_string(),
+                }],
+                documentation: None,
+                media_type: None,
+                extensions: Vec::new(),
+            })
+            .collect(),
+    });
+}
+
 /// Convenience: parse a media URN string. Panics on parse
 /// failure with the failing literal in the message.
 pub(crate) fn media(urn: &str) -> MediaUrn {
