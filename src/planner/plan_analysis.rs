@@ -19,6 +19,11 @@ pub fn derive_output_media_urn(plan: &MachinePlan, output_node_id: &str) -> Plan
     Ok(resolve_node_output_media(plan, output_node_id, &mut BTreeMap::new())?.to_string())
 }
 
+/// The media URN any node of a plan holds in a run, as the plan types it.
+pub fn derive_node_media_urn(plan: &MachinePlan, node_id: &str) -> PlannerResult<MediaUrn> {
+    resolve_node_output_media(plan, node_id, &mut BTreeMap::new())
+}
+
 /// The media URN a step's main input holds in a run: what is wired into it, or
 /// its declared `in=` when nothing is (a source, or a main input bound to a
 /// constant).

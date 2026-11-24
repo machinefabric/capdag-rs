@@ -1432,6 +1432,68 @@ pub struct OutputStream {
     /// names (frame key 21). `None` for the main output's stream and for an
     /// argument of a peer call.
     output: Option<String>,
+    /// What the handler may state of what this stream gave ([`label`](Self::label)).
+    label_rule: LabelRule,
+    /// The label the handler stated, which the STREAM_START carries in place
+    /// of the default `media_urn`.
+    stated: Mutex<Option<String>>,
+}
+
+/// What a handler may state of what an output stream gave (13.2): the rule
+/// [`OutputStream::label`] holds a stated label to. The runtime opens every
+/// response stream with a default label; a handler may narrow it, inside what
+/// the output declares, before the stream starts.
+#[derive(Debug, Clone)]
+pub(crate) enum LabelRule {
+    /// The stream's type is fixed by its input: the main output of an
+    /// `effect=none` or `effect=patch` cap, an output that carries the input,
+    /// and a stream that is no response (a peer call's argument). It takes no
+    /// stated label.
+    Fixed,
+    /// The main output of a declared cap: a stated label is inside the
+    /// declared `out=` read complete, as the proved model's audit decides
+    /// ([`CapUrn::declared_output_holds`]).
+    Declared(CapUrn),
+    /// An output other than the main one: a stated label is inside its media
+    /// URN ([`MediaUrn::satisfies`]).
+    Within(MediaUrn),
+}
+
+impl LabelRule {
+    /// The rule for the main output of `cap`.
+    pub(crate) fn for_main_output(cap: &CapUrn) -> Self {
+        match cap.effect() {
+            crate::urn::cap_urn::CapEffect::Declared => Self::Declared(cap.clone()),
+            crate::urn::cap_urn::CapEffect::None | crate::urn::cap_urn::CapEffect::Patch => Self::Fixed,
+            // `?effect` says nothing of what the cap gives, so there is
+            // nothing a statement could be inside: no response is labelled
+            // for it at all ([`derive_response_media`] refuses it).
+            crate::urn::cap_urn::CapEffect::Any => Self::Fixed,
+        }
+    }
+
+    /// Whether `stated` may label a stream whose default label is `default`;
+    /// when it may not, the reason, naming both.
+    pub(crate) fn check(&self, default: &str, stated: &MediaUrn) -> Result<(), String> {
+        let refused = |why: String| {
+            Err(format!("the stream labelled '{default}' cannot be labelled '{stated}': {why}"))
+        };
+        match self {
+            Self::Fixed => refused("this output's type is fixed by its input".to_string()),
+            Self::Declared(cap) => match cap.declared_output_holds(stated) {
+                Ok(true) => Ok(()),
+                Ok(false) => refused(format!("it is not inside the declared output '{}'", cap.out_spec())),
+                Err(e) => refused(e.to_string()),
+            },
+            Self::Within(output) => {
+                if stated.satisfies(output) {
+                    Ok(())
+                } else {
+                    refused(format!("it is not inside the output '{output}'"))
+                }
+            }
+        }
+    }
 }
 
 /// A handler's terminal status override, carried in END terminal metadata.
@@ -1499,6 +1561,8 @@ impl OutputStream {
             credit_router: None,
             coalesce: Arc::new(Mutex::new(CoalesceBuf::default())),
             output: None,
+            label_rule: LabelRule::Fixed,
+            stated: Mutex::new(None),
         }
     }
 
@@ -1507,6 +1571,42 @@ impl OutputStream {
     pub(crate) fn naming_output(mut self, output: impl Into<String>) -> Self {
         self.output = Some(output.into());
         self
+    }
+
+    /// Hold what the handler states of this stream to `rule`.
+    pub(crate) fn with_label_rule(mut self, rule: LabelRule) -> Self {
+        self.label_rule = rule;
+        self
+    }
+
+    /// State what this stream gives, more exactly than its default label: for
+    /// example what detection reads back from the file a save wrote. The
+    /// STREAM_START carries it in place of the default, and the engine audits
+    /// it and carries it on as the value's type (13.2).
+    ///
+    /// Refused (`RuntimeError::Handler`, naming the default label and `media`)
+    /// once the stream has started; for an output whose type is fixed by its
+    /// input (the main output of an `effect=none` or `effect=patch` cap, an
+    /// output that carries the input); for the main output of a declared cap,
+    /// unless `media` is inside the declared `out=` read complete; and for
+    /// another output, unless `media` is inside its media URN. A sequence
+    /// output carries one label for the whole stream: the least type holding
+    /// every item ([`MediaUrn::least_upper_bound`]).
+    pub fn label(&self, media: &MediaUrn) -> Result<(), RuntimeError> {
+        // Held while the label is checked and kept, so a concurrent start
+        // either sees it or this call sees the stream started.
+        let mode = self.stream_mode.lock().unwrap();
+        if mode.is_some() {
+            return Err(RuntimeError::Handler(format!(
+                "the stream labelled '{}' cannot be labelled '{}': the label is stated before the stream starts",
+                self.media_urn, media
+            )));
+        }
+        self.label_rule
+            .check(&self.media_urn, media)
+            .map_err(RuntimeError::Handler)?;
+        *self.stated.lock().unwrap() = Some(media.to_string());
+        Ok(())
     }
 
     /// The output this stream names: `None` for the main output's stream.
@@ -1519,21 +1619,28 @@ impl OutputStream {
         self.stream_mode.lock().unwrap().is_some()
     }
 
-    /// The STREAM_START this stream opens with: its data's type, the output
-    /// it is when it is not the main one, and no length promise when `unbounded`.
+    /// The STREAM_START this stream opens with: its data's type (the label the
+    /// handler stated, else the default), the output it is when it is not the
+    /// main one, and no length promise when `unbounded`.
     fn start_frame(&self, is_sequence: bool, unbounded: bool, meta: Option<StreamMeta>) -> Frame {
+        let media_urn = self
+            .stated
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| self.media_urn.clone());
         let mut frame = if unbounded {
             Frame::stream_start_unbounded(
                 self.request_id.clone(),
                 self.stream_id.clone(),
-                self.media_urn.clone(),
+                media_urn,
                 Some(is_sequence),
             )
         } else {
             Frame::stream_start(
                 self.request_id.clone(),
                 self.stream_id.clone(),
-                self.media_urn.clone(),
+                media_urn,
                 Some(is_sequence),
             )
         };
@@ -2672,11 +2779,14 @@ pub struct ResponseOutputs {
 impl ResponseOutputs {
     /// The outputs of `cap_urn` as `manifest` defines it.
     ///
-    /// `open` builds one stream from the media label its STREAM_START carries.
-    /// The main output carries the label the cap URN's effect derives
-    /// ([`derive_response_media`]) and names no output; another output carries
-    /// its own media URN, or the cap's declared input when it
-    /// `carries = "input"`, and names itself. A cap served
+    /// `open` builds one stream from the default label its STREAM_START
+    /// carries. The main output's default is the label the cap URN's effect
+    /// derives ([`derive_response_media`]) and its stream names no output;
+    /// another output's is its own media URN, or the cap's declared input when
+    /// it `carries = "input"`, and its stream names itself. Each stream holds
+    /// what its handler states of it to its [`LabelRule`]: the main output of
+    /// a declared cap, inside the declared `out=`; another output, inside its
+    /// URN; an output whose type its input fixes, nothing. A cap served
     /// without a definition in the manifest (a built-in the cartridge did not
     /// advertise) answers on the one output its URN states.
     pub(crate) fn for_cap(
@@ -2707,7 +2817,8 @@ impl ResponseOutputs {
             // progress and logs, and is never opened on the handler's behalf.
             required: !out_is_void && !declared_main.map_or(false, |o| o.optional),
             is_sequence: declared_main.map_or(false, |o| o.is_sequence),
-            stream: open(derive_response_media(cap_urn)?),
+            stream: open(derive_response_media(cap_urn)?)
+                .with_label_rule(LabelRule::for_main_output(&cap)),
         };
 
         let mut others = Vec::new();
@@ -2715,15 +2826,20 @@ impl ResponseOutputs {
             if declared_main.map_or(false, |main| std::ptr::eq(main, output)) {
                 continue;
             }
-            let label = match output.carries {
-                Some(crate::cap::definition::OutputCarries::Input) => cap.in_spec().to_string(),
-                None => output.media_urn.clone(),
+            let urn = parse(&output.media_urn)?;
+            let (label, rule) = match output.carries {
+                Some(crate::cap::definition::OutputCarries::Input) => {
+                    (cap.in_spec().to_string(), LabelRule::Fixed)
+                }
+                None => (output.media_urn.clone(), LabelRule::Within(urn.clone())),
             };
             others.push(ResponseOutput {
-                urn: parse(&output.media_urn)?,
+                urn,
                 required: !output.optional,
                 is_sequence: output.is_sequence,
-                stream: open(label).naming_output(output.media_urn.clone()),
+                stream: open(label)
+                    .naming_output(output.media_urn.clone())
+                    .with_label_rule(rule),
             });
         }
         Ok(Self {
@@ -5237,7 +5353,7 @@ pub(crate) fn write_gated<W: std::io::Write>(
 
 /// Spawn a handler task for an incoming request.
 ///
-/// The media URN a cap's response STREAM_START must carry, derived from the
+/// The default label of a cap's main response STREAM_START, derived from the
 /// cap's declared effect over its declared main input — the label every
 /// engine-fed input stream carries (spec 13.2):
 ///
@@ -5247,10 +5363,10 @@ pub(crate) fn write_gated<W: std::io::Write>(
 ///
 /// This is `CapUrn::apply_to_runtime_input_media` over the declared input —
 /// the SAME inference the engine's effect audit checks emissions against
-/// (`CapUrn::is_conformant_runtime_output`), so a runtime-labeled response
-/// is conformant by construction. Every runtime that labels a response must
-/// go through this function; a hand-picked label is how a cap lies about
-/// its effect.
+/// (`CapUrn::is_conformant_runtime_output`), so a response the handler does
+/// not label is conformant by construction. A handler narrows it only by its
+/// own statement, inside the declared output ([`OutputStream::label`]), and
+/// the engine audits what it states.
 pub fn derive_response_media(cap_urn: &str) -> Result<String, RuntimeError> {
     let cap = crate::CapUrn::from_string(cap_urn).map_err(|e| {
         RuntimeError::Handler(format!(
@@ -5373,10 +5489,11 @@ fn spawn_handler(
             }),
         );
         // One stream per output the cap declares, each naming its output.
-        // The main output's label is DERIVED from the cap's declared effect —
-        // not chosen by the op — so an honest lib-runtime cartridge satisfies
-        // the engine's effect audit by construction. An underivable label is a
-        // broken cap declaration: fail the request, never fall back.
+        // The main output's default label is DERIVED from the cap's declared
+        // effect, and the op narrows it only by stating a label inside the
+        // declared output, so a lib-runtime cartridge's response keeps the
+        // engine's effect audit. An underivable label is a broken cap
+        // declaration: fail the request, never fall back.
         let outputs = ResponseOutputs::for_cap(&cap_urn, manifest_for_outputs.as_ref(), |label| {
             OutputStream::new(
                 Arc::clone(&sender),
@@ -13512,6 +13629,80 @@ mod tests {
             }
             other => panic!("expected UnknownOutput, got {:?}", other.map(|_| ())),
         }
+    }
+
+    /// The message a refused label carries.
+    fn refused_label(result: Result<(), RuntimeError>) -> String {
+        match result {
+            Err(RuntimeError::Handler(message)) => message,
+            other => panic!("expected the label to be refused, got {other:?}"),
+        }
+    }
+
+    // TEST7273: a handler may state what an output gave, inside what the
+    // output declares, before its stream starts. A declared cap's main output
+    // takes a label inside its declared out=, read complete, and its
+    // STREAM_START carries it; another output takes one inside its own URN.
+    // A label outside the output, one stated after the stream started, one on
+    // the main output of an effect=none cap and one on an output that carries
+    // the input are each refused, naming the stream's default label and the
+    // label stated.
+    #[tokio::test]
+    async fn test7273_a_handler_states_what_an_output_gave_inside_what_it_declares() {
+        let declared_out = MediaUrn::from_string("media:enc=utf8;fmt=json;?list;?record").unwrap();
+        let save = format!(r#"cap:in="media:enc=utf8;fmt=json;!ext";save;out="{declared_out}""#);
+        let list_of_records = MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
+        let yaml = MediaUrn::from_string("media:enc=utf8;fmt=yaml").unwrap();
+
+        // Inside the declared output: the stream opens with the stated label.
+        let (outputs, frames) = recorded_outputs(&save, None);
+        outputs.main().label(&list_of_records).unwrap();
+        outputs.main().start(false, None).unwrap();
+        assert_eq!(starts(&frames)[0].1, list_of_records.to_string());
+        // Once the stream has started, its label is said.
+        let after = refused_label(outputs.main().label(&list_of_records));
+        assert!(after.contains("before the stream starts"), "{after}");
+        assert!(after.contains(&list_of_records.to_string()), "{after}");
+
+        // Unstated, the stream opens with its default: the declared output.
+        let (outputs, frames) = recorded_outputs(&save, None);
+        outputs.main().start(false, None).unwrap();
+        assert_eq!(starts(&frames)[0].1, declared_out.to_string());
+
+        // Outside the declared output: refused, naming both, and nothing sent.
+        let (outputs, frames) = recorded_outputs(&save, None);
+        let outside = refused_label(outputs.main().label(&yaml));
+        assert!(outside.contains(&yaml.to_string()) && outside.contains(&declared_out.to_string()), "{outside}");
+        // A tag the declared output does not say, read complete, is outside it.
+        let more = MediaUrn::from_string("media:enc=utf8;fmt=json;record;table").unwrap();
+        refused_label(outputs.main().label(&more));
+        outputs.main().start(false, None).unwrap();
+        assert_eq!(starts(&frames)[0].1, declared_out.to_string(), "a refused label is not kept");
+
+        // The main output of an effect=none cap is what it was sent.
+        let tidy = r#"cap:effect=none;in="media:enc=utf8;fmt=json";tidy;out="media:enc=utf8;fmt=json""#;
+        let (outputs, _) = recorded_outputs(tidy, None);
+        let fixed = refused_label(outputs.main().label(&list_of_records));
+        assert!(fixed.contains("fixed by its input"), "{fixed}");
+        assert!(fixed.contains(&list_of_records.to_string()) && fixed.contains("media:enc=utf8;fmt=json"), "{fixed}");
+
+        // Another output: inside its own URN it is stated, an output that
+        // carries the input takes none.
+        let cap = regress_cap();
+        let manifest = create_test_manifest("Regress", "1.0.0", "Test", vec![cap.clone()]);
+        let (outputs, frames) = recorded_outputs(&cap.urn_string(), Some(&manifest));
+        let short_note = MediaUrn::from_string("media:enc=utf8;note;short").unwrap();
+        let note = outputs.stream_for(NOTE).unwrap();
+        note.label(&short_note).unwrap();
+        note.start(false, None).unwrap();
+        let sent = starts(&frames);
+        assert_eq!(sent[0].0.as_deref(), Some(NOTE));
+        assert_eq!(sent[0].1, short_note.to_string());
+        let outside_note = refused_label(outputs.stream_for(RESIDUALS).unwrap().label(&short_note));
+        assert!(outside_note.contains(RESIDUALS) && outside_note.contains(&short_note.to_string()), "{outside_note}");
+        let series = MediaUrn::from_string(SERIES).unwrap();
+        let carried = refused_label(outputs.stream_for(REJECTED).unwrap().label(&series));
+        assert!(carried.contains("fixed by its input"), "{carried}");
     }
 
     /// An op that writes two residual rows and nothing else, or fails.

@@ -1661,6 +1661,10 @@ pub struct ExecutionContext {
     /// a temp file (L16 — never unbounded memory) and downstream chain heads
     /// feed from the file (`send_file_stream`). node id → spool path.
     node_spool: HashMap<String, std::path::PathBuf>,
+    /// What each node's value is (13.2 §Response media labeling): the label
+    /// the run was given it with, or the audited label of what the step that
+    /// produced it gave. The next step's effect is applied to it.
+    node_label: HashMap<String, crate::MediaUrn>,
     /// Cached max chunk size from the relay.
     max_chunk: usize,
     /// Cleanup handles for masters added via add_cartridge_host.
@@ -1710,6 +1714,7 @@ impl ExecutionContext {
             node_meta: HashMap::new(),
             node_is_sequence: HashMap::new(),
             node_spool: HashMap::new(),
+            node_label: HashMap::new(),
             max_chunk,
             cleanup_handles: Vec::new(),
         })
@@ -1734,6 +1739,7 @@ impl ExecutionContext {
             node_meta: HashMap::new(),
             node_is_sequence: HashMap::new(),
             node_spool: HashMap::new(),
+            node_label: HashMap::new(),
             max_chunk,
             cleanup_handles: Vec::new(),
         })
@@ -2028,6 +2034,16 @@ impl ExecutionContext {
         &self.node_spool
     }
 
+    /// Record what a node's value is: its label (13.2 §Response media labeling).
+    pub fn set_node_label(&mut self, node: String, label: crate::MediaUrn) {
+        self.node_label.insert(node, label);
+    }
+
+    /// Get the full node → label map.
+    pub fn node_label(&self) -> &HashMap<String, crate::MediaUrn> {
+        &self.node_label
+    }
+
     /// Set stream metadata for a node (provenance context for ForEach propagation).
     pub fn set_node_meta(&mut self, node: String, meta: crate::StreamMeta) {
         self.node_meta.insert(node, meta);
@@ -2174,6 +2190,7 @@ pub async fn run_dag_on_context(
         HashMap::new();
     let mut terminal_meta: HashMap<String, TerminalMeta> = HashMap::new();
     let mut absent: HashSet<String> = HashSet::new();
+    let mut node_label: HashMap<String, crate::MediaUrn> = ctx.node_label().clone();
 
     if steps.is_empty() {
         return Ok(DagOutput {
@@ -2182,6 +2199,7 @@ pub async fn run_dag_on_context(
             writer_results,
             terminal_meta,
             node_spool: HashMap::new(),
+            node_label,
             absent,
         });
     }
@@ -2321,9 +2339,8 @@ pub async fn run_dag_on_context(
         // refuses a legitimate machine. Terminals keep the strict contract:
         // unbounded without a persisted sink is refused.
         let mut slots: Vec<SinkSlot> = Vec::with_capacity(1 + last.outputs.len());
-        let slot = |node: &str, media_urn: &str, declared: usize| SinkSlot {
+        let slot = |node: &str, declared: usize| SinkSlot {
             node: node.to_string(),
-            media_urn: media_urn.to_string(),
             declared,
             writer: match writer_factory {
                 Some(f) if persist_sinks.contains(node) => Some(f(node, body_coordinate.clone())),
@@ -2342,7 +2359,7 @@ pub async fn run_dag_on_context(
             },
         };
         if let Some(main) = last_contract.outputs().iter().position(|o| o.main) {
-            slots.push(slot(&last.node, &last.out_media, main));
+            slots.push(slot(&last.node, main));
         }
         for output in &last.outputs {
             let urn = crate::MediaUrn::from_string(&output.output_media_urn).map_err(|e| {
@@ -2362,7 +2379,7 @@ pub async fn run_dag_on_context(
                         last.node, output.output_media_urn, last.cap_urn
                     ))
                 })?;
-            slots.push(slot(&output.node, &output.output_media_urn, declared));
+            slots.push(slot(&output.node, declared));
         }
 
         let (progress_base, progress_span) = chain_ranges[ci];
@@ -2372,7 +2389,6 @@ pub async fn run_dag_on_context(
         let chain_result = run_step_chain(
             ctx,
             &chain_steps,
-            &graph.nodes,
             &chain_contracts,
             cap_arguments,
             progress_fn,
@@ -2412,7 +2428,6 @@ pub async fn run_dag_on_context(
         for (slot, result) in slots.into_iter().zip(results) {
             let SinkSlot {
                 node,
-                media_urn,
                 writer,
                 spool,
                 ..
@@ -2423,10 +2438,21 @@ pub async fn run_dag_on_context(
                 absent.insert(node);
                 continue;
             }
+            // What the value is: the audited label of what the step gave.
+            let label = result.label.clone().ok_or_else(|| {
+                ExecutionError::HostError(format!(
+                    "node '{node}' was produced without the label of what it holds"
+                ))
+            })?;
+            let media_urn = label.to_string();
             let has_writer = writer.is_some();
             if let Some(w) = writer {
-                writer_results.entry(node.clone()).or_default().push(w.finish());
+                let mut written = w.finish();
+                written.media_urn = media_urn.clone();
+                writer_results.entry(node.clone()).or_default().push(written);
             }
+            ctx.set_node_label(node.clone(), label.clone());
+            node_label.insert(node.clone(), label);
 
             let spool_engaged = spool.as_ref().is_some_and(|s| s.engaged());
             if spool_engaged {
@@ -2531,6 +2557,7 @@ pub async fn run_dag_on_context(
         writer_results,
         terminal_meta,
         node_spool,
+        node_label,
         absent,
     })
 }
@@ -2540,8 +2567,6 @@ pub async fn run_dag_on_context(
 struct SinkSlot {
     /// The node the value is stored at.
     node: String,
-    /// The output's media URN in the cap's definition.
-    media_urn: String,
     /// Its index among the outputs the cap declares.
     declared: usize,
     /// Streams it to disk, when its node is a persisted plan terminal.
@@ -2559,6 +2584,8 @@ struct SinkResult {
     meta: TerminalMeta,
     /// False only for an optional output that did not fire.
     fired: bool,
+    /// What the value is; `None` for an output that did not fire.
+    label: Option<crate::MediaUrn>,
 }
 
 /// Output of running a resolved graph on a context: every materialised node's
@@ -2579,6 +2606,9 @@ pub struct DagOutput {
     /// owns the files (a ForEach region driver streams items from them) and
     /// removes them when the plan completes.
     pub node_spool: HashMap<String, std::path::PathBuf>,
+    /// Node id → what its value is (13.2 §Response media labeling): the label
+    /// it was given with, or the audited label of what its step gave.
+    pub node_label: HashMap<String, crate::MediaUrn>,
     /// The nodes of outputs that may not fire and did not. A node here is in
     /// none of the maps above: it is absent, which is not empty.
     pub absent: HashSet<String>,
@@ -2730,25 +2760,49 @@ async fn send_upstream_credit(
 /// label cannot say it: for a step that passes on or patches what it is sent
 /// (`effect=none`, `effect=patch`), what its node holds in `holds`. `None` for
 /// a step whose main output is given: its audited label is what it gives.
-fn pipelined_holds(
+/// The label of what `step` is sent on its main input, from the labels of the
+/// nodes it reads: its node's label, or for a gather the least type holding
+/// every member's. A step whose main input nothing is wired into, and a gather
+/// of no members, is fed nothing that says more than its declared `in=`.
+fn main_input_label(
     step: &ResolvedStep,
-    holds: &HashMap<String, String>,
-) -> Result<Option<crate::MediaUrn>, ExecutionError> {
-    if crate::machine::resolve::main_output_is_given(&step.cap) {
-        return Ok(None);
-    }
-    let media = holds.get(&step.node).ok_or_else(|| {
+    labels: &HashMap<String, crate::MediaUrn>,
+) -> Result<crate::MediaUrn, ExecutionError> {
+    let declared_in = step.cap.urn.in_media_urn().map_err(|e| {
         ExecutionError::HostError(format!(
-            "step '{}' (cap '{}') has no media in its graph",
+            "step '{}': cap '{}' declares an input that is not a media URN: {e}",
             step.node, step.cap_urn
         ))
     })?;
-    crate::MediaUrn::from_string(media).map(Some).map_err(|e| {
-        ExecutionError::HostError(format!(
-            "step '{}' holds '{media}', which is not a media URN: {e}",
-            step.node
-        ))
-    })
+    let mut main = None;
+    for input in &step.inputs {
+        let stream = crate::MediaUrn::from_string(&input.stream_urn).map_err(|e| {
+            ExecutionError::HostError(format!(
+                "step '{}' is sent a stream under '{}', which is not a media URN: {e}",
+                step.node, input.stream_urn
+            ))
+        })?;
+        if stream.is_equivalent(&declared_in) {
+            main = Some(&input.source);
+            break;
+        }
+    }
+    let label_of = |node: &String| {
+        labels.get(node).cloned().ok_or_else(|| {
+            ExecutionError::HostError(format!(
+                "step '{}' reads '{node}', whose value has no label",
+                step.node
+            ))
+        })
+    };
+    match main {
+        None => Ok(declared_in),
+        Some(StepSource::Node(node)) => label_of(node),
+        Some(StepSource::Gather(nodes)) if nodes.is_empty() => Ok(declared_in),
+        Some(StepSource::Gather(nodes)) => Ok(crate::MediaUrn::least_upper_bound(
+            &nodes.iter().map(label_of).collect::<Result<Vec<_>, _>>()?,
+        )),
+    }
 }
 
 /// Execute ONE pipelined chain of steps as a live pipeline: the head's inputs
@@ -2756,14 +2810,17 @@ fn pipelined_holds(
 /// one stream per input — none for a step nothing is wired into),
 /// intermediate hops stream cap-to-cap through [`forward_frames`] with
 /// per-hop credit, and every kept output of the last step is collected into
-/// its sink in `slots`. Returns one [`SinkResult`] per slot. Progress is
-/// scaled into `[progress_base, progress_base + progress_span]`. `holds` is
-/// what each node of the graph holds ([`ResolvedGraph::nodes`]).
+/// its sink in `slots`. Returns one [`SinkResult`] per slot, with the label of
+/// what it holds. Progress is scaled into
+/// `[progress_base, progress_base + progress_span]`.
+///
+/// Labels follow the values (13.2 §Response media labeling): the head is fed
+/// the labels `ctx` holds, and each hop, once its producer's stream has
+/// started, hands the label of what it forwards to the hop after it.
 #[allow(clippy::too_many_arguments)]
 async fn run_step_chain(
     ctx: &ExecutionContext,
     chain: &[&ResolvedStep],
-    holds: &HashMap<String, String>,
     contracts: &[super::stream_io::ResponseContract],
     cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
     progress_fn: Option<&CapProgressFn>,
@@ -2789,6 +2846,23 @@ async fn run_step_chain(
     let switch = ctx.switch().clone();
     let max_chunk = ctx.max_chunk();
     let initial_credit = switch.limits().await.initial_credit;
+
+    // ── Labels: what each step is fed on its main input ──
+    // The head's is what the nodes it reads hold; each later step's is said
+    // by the hop that feeds it, once its producer's stream has started.
+    let head_label = main_input_label(chain[0], ctx.node_label())
+        .map_err(|e| e.at_step(&chain[0].token_id))?;
+    let mut input_labels: Vec<super::stream_io::InputLabel> =
+        vec![super::stream_io::InputLabel::Known(head_label)];
+    let mut label_senders: Vec<tokio::sync::oneshot::Sender<crate::MediaUrn>> =
+        Vec::with_capacity(n - 1);
+    for _ in 1..n {
+        let (said, coming) = tokio::sync::oneshot::channel();
+        label_senders.push(said);
+        input_labels.push(super::stream_io::InputLabel::Coming(coming));
+    }
+    let mut input_labels = input_labels.into_iter();
+    let mut label_senders = label_senders.into_iter();
 
     // ── Step 1: Set up all cap invocations ──
     // Each execute_cap sends REQ and returns (rid, response_rx). Each invocation
@@ -2963,7 +3037,12 @@ async fn run_step_chain(
             }
         };
 
-        let prev_holds = pipelined_holds(chain[i], holds)?;
+        let prev_input = input_labels
+            .next()
+            .expect("every step of the chain has the label of its main input");
+        let forwarded_label = label_senders
+            .next()
+            .expect("every hop says the label of what it forwards");
 
         let (dummy_tx, dummy_rx) = mpsc::unbounded_channel();
         let taken_rx = std::mem::replace(&mut invocations[i].1, dummy_rx);
@@ -3013,7 +3092,8 @@ async fn run_step_chain(
                 prev_contract,
                 &fwd_step_token_id,
                 &next_in_media,
-                prev_holds,
+                prev_input,
+                forwarded_label,
                 fwd_log_fn.as_ref(),
                 fwd_body_index,
                 fwd_stall_tracker,
@@ -3041,6 +3121,9 @@ async fn run_step_chain(
     drop(dummy_tx2);
 
     let last_step_token_id = chain[last_idx].token_id.clone();
+    let mut last_input = input_labels
+        .next()
+        .expect("the last step has the label of its main input");
     let last_pfn: Option<CapProgressFn> = progress_fn.map(|parent| {
         let base = step_base(last_idx);
         let weight = step_weight;
@@ -3122,6 +3205,7 @@ async fn run_step_chain(
         &mut sinks,
         activity_timeout_secs,
         Some(&terminal_plumbing),
+        &mut last_input,
     );
     let map_collect_err = |e: super::stream_io::StreamIoError| match e {
         // The terminal cap failure keeps its declared identity
@@ -3325,6 +3409,7 @@ async fn run_step_chain(
             is_sequence: output.is_sequence.unwrap_or(false),
             meta: output.meta,
             fired: output.fired,
+            label: output.label,
         });
     }
     Ok(results)
@@ -3516,9 +3601,11 @@ async fn send_step_input(
 /// request/stream ids for wire fidelity. STREAM_START is relabeled from the
 /// producer's output URN to `next_in_media` — the downstream edge's declared
 /// input arg URN — because the consumer demuxes args by URN equivalence
-/// (spec 13.2); the plan proved the producer's output conforms, and that
-/// conformance is re-asserted here (a non-conforming stream is a wiring bug,
-/// failed hard). Credit flows both ways per hop (L10/L14):
+/// (spec 13.2). The value keeps its own label: what the producer's audited
+/// emission says, or what its effect makes of `prev_input` (the label of
+/// what the producer was fed). That label must satisfy `next_in_media` (a
+/// value that does not is a wiring bug, failed hard), and it is handed to the
+/// next hop through `forwarded_label`. Credit flows both ways per hop (L10/L14):
 /// forwarded chunks acquire from the downstream cap's window; consumed upstream
 /// chunks are granted back. On the upstream END, the next group's extra-arg
 /// streams are sent, then END. LOG frames drive progress/log callbacks. Activity
@@ -3540,7 +3627,8 @@ async fn forward_frames(
     prev_contract: super::stream_io::ResponseContract,
     prev_step_token_id: &StepToken,
     next_in_media: &str,
-    prev_holds: Option<crate::MediaUrn>,
+    mut prev_input: super::stream_io::InputLabel,
+    forwarded_label: tokio::sync::oneshot::Sender<crate::MediaUrn>,
     log_fn: Option<&PipelineLogFn>,
     body_index: Option<usize>,
     stall_tracker: Option<Arc<PipelineProgressTracker>>,
@@ -3576,6 +3664,8 @@ async fn forward_frames(
         HashMap::new();
     let mut timer = super::stream_io::ActivityTimer::new(activity_timeout_secs);
     let mut activity_warning_logged = false;
+    // Said once, when the producer's main stream starts.
+    let mut forwarded_label = Some(forwarded_label);
 
     loop {
         let frame = tokio::time::timeout(Duration::from_millis(500), prev_rx.recv()).await;
@@ -3595,9 +3685,8 @@ async fn forward_frames(
                         // stream must name a declared output and carry what
                         // that output carries, in its declared shape, before
                         // anything else touches it.
-                        let is_main = effect_audit
-                            .audit_frame(&frame)
-                            .map(|output| output.main)
+                        let output = effect_audit
+                            .audit_stream_start(&frame)
                             .map_err(|e| match e {
                                 super::stream_io::StreamIoError::EffectContract {
                                     cap_urn,
@@ -3634,7 +3723,7 @@ async fn forward_frames(
                                     other
                                 )),
                             })?;
-                        if !is_main {
+                        if !effect_audit.contract().outputs()[output].main {
                             consumed_only.insert(
                                 prev_sid,
                                 crate::bifaci::credit::CreditWindow::new(initial_credit),
@@ -3658,41 +3747,42 @@ async fn forward_frames(
                             ),
                         );
 
-                        // Then relabel to the downstream edge's declared arg
-                        // URN: the consumer matches input streams by arg-URN
-                        // equivalence (spec 13.2), and the producer's audited
-                        // output URN is a refinement the plan already proved
-                        // conforms. Re-assert that conformance — a violation
-                        // is a wiring/type bug that must surface here, not as
-                        // a missing-arg error inside the cartridge. The
-                        // comparison itself failing is equally hard: an
-                        // unanswerable conformance question is an engine
-                        // inconsistency, never a pass.
-                        let produced_urn_str = frame.media_urn.as_deref().unwrap_or_default();
-                        let produced_urn =
-                            crate::MediaUrn::from_string(produced_urn_str).map_err(|e| {
-                                ExecutionError::HostError(format!(
-                                    "pipelined forward: cap '{}' emitted a stream with \
-                                     invalid media URN '{}': {}",
-                                    prev_cap_urn, produced_urn_str, e
-                                ))
-                            })?;
-                        // What was produced is a value, complete in its tags; the
-                        // arg it feeds is a declared type. So it is asked to
+                        // What the value is: the producer's audited emission,
+                        // or what its effect makes of what it was fed — a
+                        // producer that passes on or patches what it is sent
+                        // labels its stream from the declared in= it was sent
+                        // under, which says less than what it was really sent.
+                        let fed = prev_input.resolve().await.map_err(|e| {
+                            ExecutionError::HostError(format!("pipelined forward: {}", e))
+                        })?;
+                        let label = effect_audit.value_label(output, &frame, &fed).map_err(|e| {
+                            ExecutionError::HostError(format!("pipelined forward: {}", e))
+                        })?;
+                        // A value is complete in its tags; the arg it feeds is a
+                        // declared type. So the value's label is asked to
                         // SATISFY the type, not to refine it as one type refines
-                        // another. A producer that passes on or patches what it
-                        // is sent labels its stream from the declared in= it was
-                        // sent under, which says less than what it was really
-                        // sent; what the value is, is what its node holds.
-                        let carried = prev_holds.as_ref().unwrap_or(&produced_urn);
-                        if !carried.satisfies(&target_arg_urn) {
+                        // another. A violation is a wiring/type bug that must
+                        // surface here, not as a missing-arg error inside the
+                        // cartridge.
+                        if !label.satisfies(&target_arg_urn) {
                             return Err(ExecutionError::HostError(format!(
                                 "pipelined forward: cap '{}' gives '{}', which does not \
                                  conform to the downstream declared arg URN '{}'",
-                                prev_cap_urn, carried, next_in_media
+                                prev_cap_urn, label, next_in_media
                             )));
                         }
+                        // The next step is fed this value: its label is what
+                        // the next hop applies that step's effect to. That hop
+                        // may already have failed and gone, which its own error
+                        // reports.
+                        if let Some(said) = forwarded_label.take() {
+                            let _ = said.send(label);
+                        }
 
+                        // Then relabel the wire to the downstream edge's
+                        // declared arg URN: the consumer matches input streams
+                        // by arg-URN equivalence (spec 13.2). The relabel
+                        // changes only the label the consumer demuxes by.
                         let mut new_frame = frame.clone();
                         new_frame.id = next_rid.clone();
                         new_frame.routing_id = None;
@@ -4655,32 +4745,55 @@ mod tests {
     }
 
     // TEST8432: a pipelined hop out of a step that patches what it is sent
-    // carries what the step's node holds, not the label its stream was sent
-    // under: a JSON list of records converted to YAML reaches a step that
-    // takes a YAML list of records, where the label alone (the YAML its cap's
-    // out= names) does not. A hop out of a step whose output is given carries
-    // its audited label, and a patch step whose node has no media is refused.
+    // carries what the patch makes of what the step was fed, not the label its
+    // stream was sent under: a JSON list of records converted to YAML reaches a
+    // step that takes a YAML list of records, where the wire label alone (the
+    // YAML its cap's out= names) does not. A hop out of a declared step
+    // carries its audited emission. What a step is fed is the label of the
+    // node it reads, and a node without one is refused.
     #[test]
-    fn test8432_a_patch_hop_carries_what_its_node_holds() {
+    fn test8432_a_patch_hop_carries_what_the_patch_makes_of_its_input() {
+        use crate::bifaci::frame::{Frame, MessageId};
         const JSON_TO_YAML: &str = "cap:convert-format;effect=patch;in=\"media:enc=utf8;fmt=json\";json-to-yaml;out=\"media:enc=utf8;!ext;fmt=yaml\"";
-        let takes = crate::MediaUrn::from_string("media:enc=utf8;fmt=yaml;list;record").unwrap();
+        let media = |urn: &str| crate::MediaUrn::from_string(urn).unwrap();
+        let takes = media("media:enc=utf8;fmt=yaml;list;record");
         let to_yaml = step("to_yaml", JSON_TO_YAML, Some("parse"));
-        let holds: HashMap<String, String> =
-            [("to_yaml".to_string(), "media:enc=utf8;!ext;fmt=yaml;list;record".to_string())].into();
+        let labels: HashMap<String, crate::MediaUrn> =
+            [("parse".to_string(), media("media:enc=utf8;fmt=json;list;record"))].into();
+        let fed = main_input_label(&to_yaml, &labels).unwrap();
+        assert_eq!(fed, labels["parse"], "a step is fed what the node it reads holds");
 
-        let carried = pipelined_holds(&to_yaml, &holds).unwrap().expect("a patch hop carries what its node holds");
+        // The stream as the cartridge labels it: the patch over its declared in=.
+        let wire = crate::bifaci::cartridge_runtime::derive_response_media(JSON_TO_YAML).unwrap();
+        let start = |media_urn: &str| {
+            Frame::stream_start(MessageId::Uint(1), "s".to_string(), media_urn.to_string(), Some(false))
+        };
+        let contract = super::super::stream_io::ResponseContract::of(&to_yaml.cap).unwrap();
+        let mut audit = super::super::stream_io::ResponseAudit::new(JSON_TO_YAML, contract).unwrap();
+        let output = audit.audit_stream_start(&start(&wire)).unwrap();
+        let carried = audit.value_label(output, &start(&wire), &fed).unwrap();
         assert!(carried.satisfies(&takes), "{carried} reaches what takes a YAML list of records");
-        let label = crate::MediaUrn::from_string(&to_yaml.out_media).unwrap();
-        assert!(!label.satisfies(&takes), "the label alone, {label}, says less");
+        assert!(!media(&wire).satisfies(&takes), "the wire label alone, {wire}, says less");
 
-        assert!(pipelined_holds(&step("A", OP_A, Some("in")), &holds).unwrap().is_none());
+        // A declared step's value is what it emitted, whatever it was fed.
+        let a = step("A", OP_A, Some("in"));
+        let mut audit = super::super::stream_io::ResponseAudit::new(
+            OP_A,
+            super::super::stream_io::ResponseContract::of(&a.cap).unwrap(),
+        )
+        .unwrap();
+        let output = audit.audit_stream_start(&start("media:enc=utf8")).unwrap();
+        let fed_a = media("media:document;ext=pdf;scanned");
+        assert_eq!(audit.value_label(output, &start("media:enc=utf8"), &fed_a).unwrap(), media("media:enc=utf8"));
 
-        match pipelined_holds(&to_yaml, &HashMap::new()) {
+        match main_input_label(&to_yaml, &HashMap::new()) {
             Err(ExecutionError::HostError(message)) => {
-                assert_eq!(message, format!("step 'to_yaml' (cap '{JSON_TO_YAML}') has no media in its graph"))
+                assert_eq!(message, "step 'to_yaml' reads 'parse', whose value has no label")
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
+        // A step nothing is wired into is fed nothing that says more than its in=.
+        assert_eq!(main_input_label(&step("B", OP_B, None), &HashMap::new()).unwrap(), media("media:ext=md;plain-text"));
     }
 
     // TEST12759: steps are ordered so that a step follows every step that

@@ -101,7 +101,7 @@ impl FrameHandler for Caller {
                 Err(e) => format!("stream:{e}"),
             },
         };
-        output.emit_response(TEXT, reply.as_bytes());
+        output.emit_response(None,reply.as_bytes());
     }
 }
 
@@ -145,7 +145,7 @@ impl FrameHandler for CancellingCaller {
             Some(PeerResponseItem::Log(frame)) => format!("unexpected:log {:?}", frame.frame_type),
             None => "unexpected:the response ended with nothing".to_string(),
         };
-        output.emit_response(TEXT, reply.as_bytes());
+        output.emit_response(None,reply.as_bytes());
     }
 }
 
@@ -168,7 +168,7 @@ impl FrameHandler for Upper {
     ) {
         let argument = read_argument(&mut input).await;
         self.served.fetch_add(1, Ordering::SeqCst);
-        output.emit_response(TEXT, String::from_utf8_lossy(&argument).to_uppercase().as_bytes());
+        output.emit_response(None,String::from_utf8_lossy(&argument).to_uppercase().as_bytes());
     }
 }
 

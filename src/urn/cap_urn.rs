@@ -911,6 +911,31 @@ impl CapUrn {
         ))
     }
 
+    /// Is `stated`, what a handler says this `effect=declared` cap gave, inside
+    /// the declared `out=` read complete? The proved model's audit
+    /// (`CapDAG.Exec.audit`, which is `Cap.audits`): a declared cap gives its
+    /// output whatever it is sent, so the answer does not depend on the input.
+    ///
+    /// Errors for any other effect: what an `effect=none` or `effect=patch` cap
+    /// gives is fixed by what it is sent, and `?effect` says nothing of it.
+    pub fn declared_output_holds(&self, stated: &MediaUrn) -> Result<bool, CapUrnError> {
+        if self.effect() != CapEffect::Declared {
+            return Err(CapUrnError::InvalidEffectApplication(format!(
+                "'{}' has effect={}: what it gives is fixed by its input, not stated",
+                self,
+                self.effect().as_str()
+            )));
+        }
+        let declared_in = self.in_media_urn().map_err(|e| {
+            CapUrnError::InvalidInSpec(format!("Stored in_urn failed to parse: {}", e))
+        })?;
+        Ok(crate::formal::exec::audit(
+            self.formal.clone(),
+            declared_in.inner().formal().clone(),
+            stated.inner().formal().clone(),
+        ))
+    }
+
     /// Calculate specificity score for cap matching.
     ///
     /// More specific caps have higher scores and are preferred. The

@@ -247,7 +247,9 @@ impl ResponseContract {
 /// so that label is the runtime input the cap actually saw and the only
 /// basis its emission can honestly be derived from. The decision itself is
 /// `CapUrn::is_conformant_runtime_output` — the ONE effect-conformance
-/// predicate — never re-derived here.
+/// predicate — never re-derived here. What the value the stream carries is —
+/// its label, which the engine keeps — is asked of the audit separately
+/// ([`value_label`](Self::value_label)), from what the cap was really fed.
 pub struct ResponseAudit {
     cap_urn_str: String,
     cap: crate::CapUrn,
@@ -441,6 +443,49 @@ impl ResponseAudit {
             }
         }
         Ok(())
+    }
+
+    /// What the value a stream carries is: its label, which the engine keeps
+    /// and applies the next step's effect to (13.2 §Response media labeling).
+    /// Asked once [`audit_stream_start`](Self::audit_stream_start) has accepted
+    /// `frame` as the stream of output `index`; `runtime_input` is the label of
+    /// what the step was fed on its main input.
+    ///
+    /// - The main output of a declared cap, and any output that does not
+    ///   carry the input: the audited emission.
+    /// - The main output of an `effect=none` or `effect=patch` cap: what the
+    ///   effect makes of `runtime_input`
+    ///   ([`CapUrn::apply_to_runtime_input_media`](crate::CapUrn::apply_to_runtime_input_media)).
+    /// - An output that carries the input: `runtime_input`.
+    pub fn value_label(
+        &self,
+        index: usize,
+        frame: &crate::bifaci::frame::Frame,
+        runtime_input: &crate::MediaUrn,
+    ) -> Result<crate::MediaUrn, StreamIoError> {
+        let output = self.contract.outputs.get(index).ok_or_else(|| {
+            StreamIoError::Protocol(format!(
+                "value label: cap '{}' declares no output #{}",
+                self.cap_urn_str, index
+            ))
+        })?;
+        if output.carries_input {
+            return Ok(runtime_input.clone());
+        }
+        let follows_input = output.main
+            && matches!(
+                self.cap.effect(),
+                crate::urn::cap_urn::CapEffect::None | crate::urn::cap_urn::CapEffect::Patch
+            );
+        if !follows_input {
+            return self.emitted_media(frame.media_urn.as_deref());
+        }
+        self.cap.apply_to_runtime_input_media(runtime_input).map_err(|e| {
+            StreamIoError::Protocol(format!(
+                "value label: what cap '{}' gives for '{}' cannot be known: {}",
+                self.cap_urn_str, runtime_input, e
+            ))
+        })
     }
 
     /// The media URN a STREAM_START carries, parsed. An unlabeled or
@@ -1633,13 +1678,19 @@ pub struct TerminalOutput {
     effect_audit: ResponseAudit,
     /// The response's frames in order, by the proved model (12.4).
     flow: crate::bifaci::request_state::ReceivedFlow,
+    /// The label of what the cap was fed on its main input.
+    runtime_input: crate::MediaUrn,
+    /// What the main output's value is, once its stream has started.
+    label: Option<crate::MediaUrn>,
 }
 
 impl TerminalOutput {
     /// Fails when the cap URN (or its declared `in=`) does not parse — the
     /// effect audit is built here and every terminal emission is audited
     /// against it, so an unauditable cap must fail at construction, not be
-    /// consumed unaudited.
+    /// consumed unaudited. `runtime_input` is the label of what the cap was
+    /// fed on its main input.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rx: mpsc::UnboundedReceiver<Frame>,
         cap_urn: &str,
@@ -1648,9 +1699,12 @@ impl TerminalOutput {
         progress_fn: Option<CapProgressFn>,
         log_fn: Option<PipelineLogFn>,
         credit: Option<CreditPlumbing>,
+        runtime_input: crate::MediaUrn,
     ) -> Result<Self, StreamIoError> {
         let effect_audit = ResponseAudit::new(cap_urn, contract)?;
         Ok(Self {
+            runtime_input,
+            label: None,
             rx,
             cap_urn: cap_urn.to_string(),
             step_token_id: step_token_id.clone(),
@@ -1676,6 +1730,12 @@ impl TerminalOutput {
     /// Whether the producer used sequence mode (known after STREAM_START).
     pub fn is_sequence(&self) -> Option<bool> {
         self.is_sequence
+    }
+
+    /// What the main output's value is ([`ResponseAudit::value_label`]),
+    /// known once its STREAM_START has been seen.
+    pub fn label(&self) -> Option<&crate::MediaUrn> {
+        self.label.as_ref()
     }
 
     /// Yield the next data item, or None once the request's END arrived.
@@ -1728,8 +1788,8 @@ impl TerminalOutput {
                     // Effect audit at receipt: the emission must satisfy the
                     // cap's declared effect contract before any of its items
                     // are yielded.
-                    let is_main = match self.effect_audit.audit_frame(&frame) {
-                        Ok(output) => output.main,
+                    let index = match self.effect_audit.audit_stream_start(&frame) {
+                        Ok(index) => index,
                         Err(e) => {
                             self.ended = true;
                             return Some(Err(e));
@@ -1737,8 +1797,15 @@ impl TerminalOutput {
                     };
                     // The terminal output is the cap's main output; the
                     // stream of another output is consumed and not yielded.
-                    if !is_main {
+                    if !self.effect_audit.contract().outputs()[index].main {
                         continue;
+                    }
+                    match self.effect_audit.value_label(index, &frame, &self.runtime_input) {
+                        Ok(label) => self.label = Some(label),
+                        Err(e) => {
+                            self.ended = true;
+                            return Some(Err(e));
+                        }
                     }
                     if let Some(seq) = frame.is_sequence {
                         self.is_sequence = Some(seq);
@@ -1956,6 +2023,35 @@ pub struct CollectedOutput {
     /// The cap opened a stream for this output. False only for an optional
     /// output that did not fire: it is absent, which is not empty.
     pub fired: bool,
+    /// What the value is ([`ResponseAudit::value_label`]); `None` for an
+    /// output that did not fire.
+    pub label: Option<crate::MediaUrn>,
+}
+
+/// The label of what a step is fed on its main input: known when the step is
+/// sent a held value, still to come when the hop before it is live and has
+/// not yet seen its producer's stream start.
+pub enum InputLabel {
+    Known(crate::MediaUrn),
+    Coming(tokio::sync::oneshot::Receiver<crate::MediaUrn>),
+}
+
+impl InputLabel {
+    /// The label, waiting for it when it is still to come. Fails when the hop
+    /// that was to say it ended without a stream for the step's main input.
+    pub async fn resolve(&mut self) -> Result<crate::MediaUrn, StreamIoError> {
+        let label = match self {
+            InputLabel::Known(label) => return Ok(label.clone()),
+            InputLabel::Coming(coming) => coming.await.map_err(|_| {
+                StreamIoError::Protocol(
+                    "the step's main input ended without a stream, so what it was fed has no label"
+                        .to_string(),
+                )
+            })?,
+        };
+        *self = InputLabel::Known(label.clone());
+        Ok(label)
+    }
 }
 
 /// Collect the response of a cap, output by output, decoding frames as they
@@ -1968,7 +2064,10 @@ pub struct CollectedOutput {
 /// declared output nothing takes is audited, consumed (its producer is
 /// credited for it) and dropped.
 ///
-/// Returns one [`CollectedOutput`] per sink, in the order of `sinks`.
+/// Returns one [`CollectedOutput`] per sink, in the order of `sinks`, each
+/// with the label of what it holds: `runtime_input` is the label of what the
+/// cap was fed on its main input, which an output whose type follows its input
+/// takes its label from ([`ResponseAudit::value_label`]).
 ///
 /// # Error semantics
 /// - `END` with non-zero or absent `exit_code` → `StreamIoError::Terminal`.
@@ -1992,6 +2091,7 @@ pub async fn collect_response(
     sinks: &mut [OutputSink<'_>],
     activity_timeout_secs: u64,
     credit: Option<&CreditPlumbing>,
+    runtime_input: &mut InputLabel,
 ) -> Result<Vec<CollectedOutput>, StreamIoError> {
     // Every stream is audited against the output it is at receipt — before a
     // byte of it is collected or persisted.
@@ -2340,8 +2440,14 @@ pub async fn collect_response(
                                 }
                             }
                         }
+                        let label = effect_audit.value_label(
+                            output,
+                            &frame,
+                            &runtime_input.resolve().await?,
+                        )?;
                         let slot = &mut collected[index];
                         slot.fired = true;
+                        slot.label = Some(label);
                         if let Some(seq) = frame.is_sequence {
                             slot.is_sequence = Some(seq);
                         }
@@ -2449,11 +2555,11 @@ pub async fn collect_response(
 }
 
 /// Collect a cap's MAIN output and drop every other: [`collect_response`]
-/// with one sink.
+/// with one sink, the cap having been fed `runtime_input` on its main input.
 ///
-/// Returns `(response_bytes, is_sequence, terminal_meta)`. When a writer is
-/// provided — or the spool was engaged — `response_bytes` is empty: the data
-/// is where the writer put it. A cap that declares no output yields nothing.
+/// When a writer is provided — or the spool was engaged — the collected
+/// `bytes` are empty: the data is where the writer put it. A cap that declares
+/// no output yields nothing.
 #[allow(clippy::too_many_arguments)]
 pub async fn collect_terminal_output<'w>(
     rx: mpsc::UnboundedReceiver<Frame>,
@@ -2468,7 +2574,8 @@ pub async fn collect_terminal_output<'w>(
     spool: Option<&'w mut dyn IncrementalWriter>,
     activity_timeout_secs: u64,
     credit: Option<&CreditPlumbing>,
-) -> Result<(Vec<u8>, Option<bool>, TerminalMeta), StreamIoError> {
+    runtime_input: &crate::MediaUrn,
+) -> Result<CollectedOutput, StreamIoError> {
     let mut sinks: Vec<OutputSink<'w>> = contract
         .outputs()
         .iter()
@@ -2492,12 +2599,10 @@ pub async fn collect_terminal_output<'w>(
         &mut sinks,
         activity_timeout_secs,
         credit,
+        &mut InputLabel::Known(runtime_input.clone()),
     )
     .await?;
-    Ok(match collected.pop() {
-        Some(main) => (main.bytes, main.is_sequence, main.meta),
-        None => (Vec::new(), None, TerminalMeta::default()),
-    })
+    Ok(collected.pop().unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -2885,10 +2990,17 @@ mod tests {
             None,
             5,
             Some(&plumbing),
+            &declared_in(&regress_urn()),
         )
-        .await;
+        .await
+        .map(|main| (main.bytes, main.is_sequence, main.meta));
         let grants = grants.lock().unwrap().clone();
         (result, grants)
+    }
+
+    /// The declared main input of `cap_urn`: what a cap fed its own `in=` was fed.
+    fn declared_in(cap_urn: &str) -> crate::MediaUrn {
+        crate::CapUrn::from_string(cap_urn).unwrap().in_media_urn().unwrap()
     }
 
     // TEST12725: what is collected of a response is the cap's main output. The
@@ -3030,6 +3142,7 @@ mod tests {
             sinks,
             5,
             None,
+            &mut InputLabel::Known(declared_in(&regress_urn())),
         )
         .await
     }
@@ -3179,6 +3292,7 @@ mod tests {
             &mut sinks,
             1,
             None,
+            &mut InputLabel::Known(declared_in(TEXT_CAP)),
         )
         .await
         .expect("a silent cap is waited out, not failed");
@@ -3259,6 +3373,7 @@ mod tests {
                 &mut out_sinks,
                 5,
                 None,
+                &mut InputLabel::Known(declared_in(&regress_urn())),
             )
             .await;
             let spooled = recording.lock().unwrap().payloads.clone();
@@ -3316,6 +3431,7 @@ mod tests {
                 None,
                 None,
                 None,
+                declared_in(&regress_urn()),
             )
             .unwrap()
         };
@@ -3387,6 +3503,7 @@ mod tests {
             None,
             5,
             None,
+            &declared_in("cap:echo;effect=none"),
         )
         .await
         .expect_err("a nonconformant emission must fail the collect");
@@ -3434,6 +3551,7 @@ mod tests {
                 None,
                 5,
                 None,
+                &declared_in("cap:echo;effect=none"),
             )
             .await;
             match result {
@@ -3491,6 +3609,7 @@ mod tests {
                 None,
                 5,
                 None,
+                &declared_in("cap:echo;effect=none"),
             )
             .await
             }
@@ -3554,7 +3673,7 @@ mod tests {
         drop(tx);
 
         let mut terminal =
-            TerminalOutput::new(rx, "cap:echo;effect=none", contract("cap:echo;effect=none", SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
+            TerminalOutput::new(rx, "cap:echo;effect=none", contract("cap:echo;effect=none", SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None, declared_in("cap:echo;effect=none"))
                 .expect("cap:echo;effect=none builds a valid effect audit");
         let first = terminal
             .next_item()
@@ -3599,6 +3718,7 @@ mod tests {
             None,
             5,
             None,
+            &declared_in(TEXT_CAP),
         )
         .await
         .expect_err("an unbounded terminal must not be buffered");
@@ -3717,7 +3837,7 @@ mod tests {
         drop(tx);
 
         let mut spool = super::SpoolWriter::new(dir.path().join("mid.spool"));
-        let (bytes, is_seq, _meta) = collect_terminal_output(
+        let collected = collect_terminal_output(
             rx,
             None,
             TEXT_RECORD_CAP,
@@ -3730,12 +3850,13 @@ mod tests {
             Some(&mut spool as &mut dyn IncrementalWriter),
             5,
             None,
+            &declared_in(TEXT_RECORD_CAP),
         )
         .await
         .expect("the spool absorbs the unbounded intermediate");
         assert!(spool.engaged(), "STREAM_START-unbounded engages the spool");
-        assert!(bytes.is_empty(), "nothing buffers in memory");
-        assert_eq!(is_seq, Some(true));
+        assert!(collected.bytes.is_empty(), "nothing buffers in memory");
+        assert_eq!(collected.is_sequence, Some(true));
         let on_disk = std::fs::read(spool.path()).unwrap();
         assert_eq!(on_disk, item, "the item streamed to disk verbatim");
     }
@@ -3754,7 +3875,7 @@ mod tests {
         drop(tx);
 
         let cap = capture();
-        let (bytes, _seq, _meta) = collect_terminal_output(
+        let collected = collect_terminal_output(
             rx,
             Some(&cap.progress_fn),
             TEXT_CAP,
@@ -3767,10 +3888,11 @@ mod tests {
             None,
             5,
             None,
+            &declared_in(TEXT_CAP),
         )
         .await
         .expect("clean END must succeed");
-        assert_eq!(bytes, b"payload");
+        assert_eq!(collected.bytes, b"payload");
 
         let events = cap.progress.lock().unwrap().clone();
         assert_eq!(events.len(), 2, "streamed 0.5 + terminal 1.0");
@@ -3814,6 +3936,7 @@ mod tests {
             None,
             5,
             None,
+            &declared_in(TEXT_CAP),
         )
         .await
         .unwrap();
@@ -3860,6 +3983,7 @@ mod tests {
             None,
             5,
             None,
+            &declared_in(TEXT_CAP),
         )
         .await
         .expect("drain must not fail the request");
@@ -3898,7 +4022,7 @@ mod tests {
     async fn test7071_terminal_output_yields_before_stream_end() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, STREAMING_SEQUENCE_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, STREAMING_SEQUENCE_CONTRACT), &"step_test".parse().unwrap(), None, None, None, declared_in(TEXT_CAP))
             .expect("the text cap builds a valid effect audit");
 
         // Announce an unbounded stream and one item — nothing has ended.
@@ -3939,7 +4063,7 @@ mod tests {
     async fn test7077_per_item_meta_incremental() {
         let rid = MessageId::new_uuid();
         let (tx, rx) = mpsc::unbounded_channel();
-        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None)
+        let mut terminal = TerminalOutput::new(rx, TEXT_CAP, contract(TEXT_CAP, SCALAR_CONTRACT), &"step_test".parse().unwrap(), None, None, None, declared_in(TEXT_CAP))
             .expect("the text cap builds a valid effect audit");
 
         tx.send(stream_start(&rid)).unwrap();

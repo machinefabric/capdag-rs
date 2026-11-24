@@ -60,7 +60,7 @@ use crate::orchestrator::run_control::RunControl;
 use crate::orchestrator::stream_io::{PipelineLogRecord, PipelineProgressTracker};
 use crate::orchestrator::types::{ResolvedGraph, ResolvedStep, StepSource};
 use crate::planner::plan::MapRun;
-use crate::planner::plan_analysis::derive_output_media_urn;
+use crate::planner::plan_analysis::{derive_node_media_urn, derive_output_media_urn};
 use crate::planner::{ExecutionNodeType, MachinePlan, StepToken};
 use crate::{
     BodyOutcome, CapProgressFn, CapStepProgressFn, ExecutionError, PipelineLogFn, StreamMeta,
@@ -474,6 +474,9 @@ pub trait EngineRuntime: Send + Sync {
     /// optional protocol trace, and drive `run_dag_on_context`. Backends customise only
     /// via the hooks above — they do not override this.
     ///
+    /// - `initial_labels`: what each input is (13.2 §Response media labeling),
+    ///   one for every node of `initial_inputs`; the head's effect is applied
+    ///   to it.
     /// - `body_coordinate`: the run of a map's body this segment is part of.
     /// - `persist_sinks`: the nodes whose value is a plan terminal. A persisting
     ///   runtime writes each to disk (one writer per sink) and returns its
@@ -488,6 +491,7 @@ pub trait EngineRuntime: Send + Sync {
         graph: &ResolvedGraph,
         initial_inputs: HashMap<String, PlanInput>,
         initial_is_sequence: HashMap<String, bool>,
+        initial_labels: HashMap<String, crate::MediaUrn>,
         cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
         progress_fn: Option<&CapProgressFn>,
         step_progress_fn: Option<&CapStepProgressFn>,
@@ -523,6 +527,19 @@ pub trait EngineRuntime: Send + Sync {
             return Err(ExecutionError::HostError(format!(
                 "run_segment: initial_is_sequence has stale flags for node(s) {extra:?}"
             )));
+        }
+        // Likewise every input carries its label, and nothing else does.
+        let label_keys: HashSet<&str> = initial_labels.keys().map(|s| s.as_str()).collect();
+        let unlabelled: Vec<&str> = input_keys.difference(&label_keys).copied().collect();
+        let stray: Vec<&str> = label_keys.difference(&input_keys).copied().collect();
+        if !unlabelled.is_empty() || !stray.is_empty() {
+            return Err(ExecutionError::HostError(format!(
+                "run_segment: initial_labels has no label for input node(s) {unlabelled:?} \
+                 and labels for node(s) {stray:?} that are no input"
+            )));
+        }
+        for (node, label) in initial_labels {
+            ctx.set_node_label(node, label);
         }
         for (node, input) in initial_inputs {
             let is_seq = *initial_is_sequence
@@ -632,7 +649,9 @@ pub trait EngineRuntime: Send + Sync {
 // What a node holds in a run
 // =============================================================================
 
-/// What a node holds in a run.
+/// What a node holds in a run. Every value carries its label: what it is
+/// (13.2 §Response media labeling) — the type its input slot states for what
+/// the run was given, the audited label of what a step gave.
 #[derive(Debug, Clone)]
 enum Held {
     /// Decoded items in memory: exactly one for a single value, any number
@@ -640,23 +659,27 @@ enum Held {
     Memory {
         items: Arc<Vec<Vec<u8>>>,
         is_sequence: bool,
+        label: crate::MediaUrn,
     },
     /// An ended unbounded stream on disk, in the `node_data` byte form.
     Spooled {
         path: std::path::PathBuf,
         is_sequence: bool,
+        label: crate::MediaUrn,
     },
     /// A live reference the run was given at an input of the machine.
     Live {
         reference_urn: String,
         selector: Vec<u8>,
         is_sequence: bool,
+        label: crate::MediaUrn,
     },
     /// A plan terminal the runtime persisted: its data is where the writers
     /// put it. Nothing reads it but the run's result.
     Persisted {
         writers: Vec<WriterResult>,
         is_sequence: bool,
+        label: crate::MediaUrn,
     },
     /// Not produced (15.2 §Absent values and skipped steps). Not empty.
     Absent,
@@ -666,17 +689,29 @@ enum Held {
 type Values = HashMap<String, Held>;
 
 impl Held {
-    fn memory(items: Vec<Vec<u8>>, is_sequence: bool) -> Self {
+    fn memory(items: Vec<Vec<u8>>, is_sequence: bool, label: crate::MediaUrn) -> Self {
         Held::Memory {
             items: Arc::new(items),
             is_sequence,
+            label,
         }
     }
 
-    /// What a segment is given of this value, with its cardinality.
-    fn as_plan_input(&self, node: &str) -> Result<(PlanInput, bool), ExecutionError> {
+    /// What the value is; `None` for an absent one.
+    fn label(&self) -> Option<&crate::MediaUrn> {
         match self {
-            Held::Memory { items, is_sequence } => {
+            Held::Memory { label, .. }
+            | Held::Spooled { label, .. }
+            | Held::Live { label, .. }
+            | Held::Persisted { label, .. } => Some(label),
+            Held::Absent => None,
+        }
+    }
+
+    /// What a segment is given of this value, with its cardinality and label.
+    fn as_plan_input(&self, node: &str) -> Result<(PlanInput, bool, crate::MediaUrn), ExecutionError> {
+        match self {
+            Held::Memory { items, is_sequence, label } => {
                 let bytes = if *is_sequence {
                     crate::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(items)
                         .map_err(|e| {
@@ -695,21 +730,23 @@ impl Held {
                         }
                     }
                 };
-                Ok((PlanInput::Bytes(bytes), *is_sequence))
+                Ok((PlanInput::Bytes(bytes), *is_sequence, label.clone()))
             }
-            Held::Spooled { path, is_sequence } => {
-                Ok((PlanInput::Spool { path: path.clone() }, *is_sequence))
+            Held::Spooled { path, is_sequence, label } => {
+                Ok((PlanInput::Spool { path: path.clone() }, *is_sequence, label.clone()))
             }
             Held::Live {
                 reference_urn,
                 selector,
                 is_sequence,
+                label,
             } => Ok((
                 PlanInput::LiveReference {
                     reference_urn: reference_urn.clone(),
                     selector: selector.clone(),
                 },
                 *is_sequence,
+                label.clone(),
             )),
             Held::Persisted { .. } => Err(ExecutionError::HostError(format!(
                 "node '{node}' is a plan terminal persisted by the runtime; a step cannot read it"
@@ -721,8 +758,14 @@ impl Held {
     }
 }
 
-/// What a plan was given at one of its inputs, as a value of the run.
-fn held_from_input(node: &str, input: PlanInput, is_sequence: bool) -> Result<Held, ExecutionError> {
+/// What a plan was given at one of its inputs, as a value of the run labelled
+/// `label`: the type its input slot states.
+fn held_from_input(
+    node: &str,
+    input: PlanInput,
+    is_sequence: bool,
+    label: crate::MediaUrn,
+) -> Result<Held, ExecutionError> {
     Ok(match input {
         PlanInput::Bytes(bytes) if is_sequence => Held::memory(
             crate::orchestrator::stream_io::decode_terminal_output(&bytes, Some(true)).map_err(
@@ -734,9 +777,10 @@ fn held_from_input(node: &str, input: PlanInput, is_sequence: bool) -> Result<He
                 },
             )?,
             true,
+            label,
         ),
-        PlanInput::Bytes(bytes) => Held::memory(vec![bytes], false),
-        PlanInput::Spool { path } => Held::Spooled { path, is_sequence },
+        PlanInput::Bytes(bytes) => Held::memory(vec![bytes], false, label),
+        PlanInput::Spool { path } => Held::Spooled { path, is_sequence, label },
         PlanInput::LiveReference {
             reference_urn,
             selector,
@@ -744,6 +788,7 @@ fn held_from_input(node: &str, input: PlanInput, is_sequence: bool) -> Result<He
             reference_urn,
             selector,
             is_sequence,
+            label,
         },
     })
 }
@@ -1171,7 +1216,23 @@ pub async fn execute_plan(
         let is_sequence = *initial_is_sequence.get(*slot).ok_or_else(|| {
             ExecutionError::HostError(format!("initial input '{slot}' has no sequence flag"))
         })?;
-        given.insert((*slot).clone(), held_from_input(slot, input, is_sequence)?);
+        // What the run is given at a slot is what the slot states it is given.
+        let label = match &plan.nodes[*slot].node_type {
+            ExecutionNodeType::InputSlot { expected_media_urn, .. } => {
+                crate::MediaUrn::from_string(expected_media_urn).map_err(|e| {
+                    ExecutionError::HostError(format!(
+                        "input '{slot}' states it is given '{expected_media_urn}', which is not a \
+                         media URN: {e}"
+                    ))
+                })?
+            }
+            _ => {
+                return Err(ExecutionError::HostError(format!(
+                    "input '{slot}' is no input slot of the plan"
+                )))
+            }
+        };
+        given.insert((*slot).clone(), held_from_input(slot, input, is_sequence, label)?);
     }
     if !initial_inputs.is_empty() || initial_is_sequence.len() != slots.len() {
         let mut stray: Vec<&String> = initial_inputs
@@ -1238,6 +1299,26 @@ pub async fn execute_plan(
                 "terminal '{out_id}' is of '{source}', which produced no value"
             ))
         })?;
+        // A produced terminal holds what its value is: its label, which must
+        // lie inside the plan's type for it.
+        let media_urn = match held.label() {
+            None => media_urn,
+            Some(label) => {
+                let plan_media = crate::MediaUrn::from_string(&media_urn).map_err(|e| {
+                    ExecutionError::HostError(format!(
+                        "terminal '{out_id}': the plan's type for it, '{media_urn}', is not a \
+                         media URN: {e}"
+                    ))
+                })?;
+                if !label.satisfies(&plan_media) {
+                    return Err(ExecutionError::HostError(format!(
+                        "terminal '{out_id}' holds '{label}', which is not inside the plan's \
+                         '{media_urn}'"
+                    )));
+                }
+                label.to_string()
+            }
+        };
         terminals.push(match held {
             Held::Absent => PlanTerminal::NotProduced {
                 output_node_id: out_id.clone(),
@@ -1246,6 +1327,7 @@ pub async fn execute_plan(
             Held::Persisted {
                 writers,
                 is_sequence,
+                ..
             } => {
                 for writer in writers {
                     saved_paths.extend(writer.saved_paths.iter().cloned());
@@ -1259,7 +1341,7 @@ pub async fn execute_plan(
                     writer_results: writers.clone(),
                 })
             }
-            Held::Memory { items, is_sequence } => PlanTerminal::Produced(ProducedTerminal {
+            Held::Memory { items, is_sequence, .. } => PlanTerminal::Produced(ProducedTerminal {
                 output_node_id: out_id.clone(),
                 items: items
                     .iter()
@@ -1612,6 +1694,7 @@ impl Run {
         // What the head is sent.
         let mut initial_inputs: HashMap<String, PlanInput> = HashMap::new();
         let mut initial_is_sequence: HashMap<String, bool> = HashMap::new();
+        let mut initial_labels: HashMap<String, crate::MediaUrn> = HashMap::new();
         for node in head.source_nodes() {
             if initial_inputs.contains_key(node) {
                 continue;
@@ -1622,9 +1705,10 @@ impl Run {
                     head.node
                 ))
             })?;
-            let (input, is_sequence) = held.as_plan_input(node)?;
+            let (input, is_sequence, label) = held.as_plan_input(node)?;
             initial_inputs.insert(node.clone(), input);
             initial_is_sequence.insert(node.clone(), is_sequence);
+            initial_labels.insert(node.clone(), label);
         }
         let graph = ResolvedGraph {
             nodes: units.graph.nodes.clone(),
@@ -1673,6 +1757,7 @@ impl Run {
                     &graph,
                     initial_inputs.clone(),
                     initial_is_sequence.clone(),
+                    initial_labels.clone(),
                     &cap_arguments,
                     segment_progress.as_ref(),
                     step_progress,
@@ -1767,6 +1852,7 @@ impl Run {
             node_is_sequence,
             mut writer_results,
             mut node_spool,
+            mut node_label,
             absent,
             ..
         } = segment;
@@ -1805,15 +1891,23 @@ impl Run {
                 continue;
             }
             let is_sequence = node_is_sequence.get(node).copied();
+            let produced_without_label = || {
+                ExecutionError::HostError(format!(
+                    "node '{node}' completed without the label of what it holds"
+                ))
+                .at_step(&last.token_id)
+            };
             let held = if let Some(writers) = writer_results.remove(node) {
                 Held::Persisted {
                     writers,
                     is_sequence: is_sequence.unwrap_or(false),
+                    label: node_label.remove(node).ok_or_else(produced_without_label)?,
                 }
             } else if let Some(path) = node_spool.remove(node) {
                 Held::Spooled {
                     path,
                     is_sequence: is_sequence.unwrap_or(false),
+                    label: node_label.remove(node).ok_or_else(produced_without_label)?,
                 }
             } else if let Some(items) = node_data.remove(node) {
                 let is_sequence = is_sequence.ok_or_else(|| {
@@ -1821,7 +1915,8 @@ impl Run {
                         "node '{node}' completed without recording its cardinality"
                     ))
                 })?;
-                Held::memory(items, is_sequence)
+                let label = node_label.remove(node).ok_or_else(produced_without_label)?;
+                Held::memory(items, is_sequence, label)
             } else {
                 // A step that declares no main output produces nothing there,
                 // and nothing reads it.
@@ -1867,6 +1962,8 @@ impl Run {
         // nothing to run: every step inside it is skipped, and everything it
         // would have produced is absent.
         let mut item_sources: Vec<RegionItemSource> = Vec::with_capacity(sources.len());
+        // What each source's items are: the label of the sequence they are of.
+        let mut item_labels: Vec<crate::MediaUrn> = Vec::with_capacity(sources.len());
         for source in &sources {
             let held = inputs.get(&source.node).ok_or_else(|| {
                 at_step(ExecutionError::HostError(format!(
@@ -1874,6 +1971,9 @@ impl Run {
                     source.node
                 )))
             })?;
+            if let Some(label) = held.label() {
+                item_labels.push(label.clone());
+            }
             let not_a_sequence = || {
                 at_step(ExecutionError::HostError(format!(
                     "map '{map}' iterates '{}', which holds a single value in this run — the \
@@ -2257,7 +2357,10 @@ impl Run {
                     let given: Values = sources
                         .iter()
                         .zip(items)
-                        .map(|(source, item)| (source.item.clone(), Held::memory(vec![item.bytes], false)))
+                        .zip(&item_labels)
+                        .map(|((source, item), label)| {
+                            (source.item.clone(), Held::memory(vec![item.bytes], false, label.clone()))
+                        })
                         .collect();
                     let env = Env {
                         shared: shared.clone(),
@@ -2367,13 +2470,16 @@ impl Run {
         for node in &exports {
             let mut items: Vec<Vec<u8>> = Vec::new();
             let mut writers: Vec<WriterResult> = Vec::new();
+            let mut labels: Vec<crate::MediaUrn> = Vec::new();
             for values in run_values.iter().flatten() {
                 match values.get(node) {
-                    Some(Held::Memory { items: run_items, .. }) => {
+                    Some(Held::Memory { items: run_items, label, .. }) => {
                         items.extend(run_items.iter().cloned());
+                        labels.push(label.clone());
                     }
-                    Some(Held::Persisted { writers: run_writers, .. }) => {
+                    Some(Held::Persisted { writers: run_writers, label, .. }) => {
                         writers.extend(run_writers.iter().cloned());
+                        labels.push(label.clone());
                     }
                     Some(Held::Absent) | None => {}
                     Some(Held::Spooled { .. }) | Some(Held::Live { .. }) => {
@@ -2385,14 +2491,27 @@ impl Run {
                     }
                 }
             }
+            // One label for the whole sequence: the least type holding what
+            // every run gave. When no run gave anything, nothing says more of
+            // it than the plan's type for the node.
+            let label = if labels.is_empty() {
+                derive_node_media_urn(&self.plan, node).map_err(|e| {
+                    at_step(ExecutionError::HostError(format!(
+                        "'{node}', which map '{map}' collects, has no type in the plan: {e}"
+                    )))
+                })?
+            } else {
+                crate::MediaUrn::least_upper_bound(&labels)
+            };
             collected.insert(
                 node.clone(),
                 if writers.is_empty() {
-                    Held::memory(items, true)
+                    Held::memory(items, true, label)
                 } else {
                     Held::Persisted {
                         writers,
                         is_sequence: true,
+                        label,
                     }
                 },
             );

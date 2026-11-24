@@ -425,6 +425,7 @@ impl EngineRuntime for Scripted {
         graph: &ResolvedGraph,
         initial_inputs: HashMap<String, PlanInput>,
         initial_is_sequence: HashMap<String, bool>,
+        initial_labels: HashMap<String, crate::MediaUrn>,
         cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
         progress_fn: Option<&CapProgressFn>,
         _step_progress_fn: Option<&CapStepProgressFn>,
@@ -434,6 +435,11 @@ impl EngineRuntime for Scripted {
         persist_sinks: &HashSet<String>,
         cancel: &RunCancel,
     ) -> Result<SegmentOutput, ExecutionError> {
+        assert_eq!(
+            initial_labels.keys().collect::<HashSet<_>>(),
+            initial_inputs.keys().collect::<HashSet<_>>(),
+            "every input of a segment is given with its label"
+        );
         self.segments
             .lock()
             .unwrap()
@@ -583,20 +589,25 @@ impl EngineRuntime for Scripted {
             writer_results: HashMap::new(),
             terminal_meta: HashMap::new(),
             node_spool: HashMap::new(),
+            node_label: HashMap::new(),
             absent: HashSet::new(),
         };
         let last = graph.steps.last().expect("a segment has a step");
         for node in last.produced_nodes() {
+            // A scripted step gives what the plan types its node as.
+            let label = || crate::MediaUrn::from_string(&graph.nodes[node]).expect("a node's type is a media URN");
             match held.remove(node) {
                 None => {}
                 Some(Value::Absent) => {
                     out.absent.insert(node.clone());
                 }
                 Some(Value::Spooled(path)) => {
+                    out.node_label.insert(node.clone(), label());
                     out.node_is_sequence.insert(node.clone(), true);
                     out.node_spool.insert(node.clone(), path);
                 }
                 Some(Value::Items(items, is_sequence)) => {
+                    out.node_label.insert(node.clone(), label());
                     out.node_is_sequence.insert(node.clone(), is_sequence);
                     if self.persist && persist_sinks.contains(node) {
                         out.writer_results.insert(
@@ -1951,6 +1962,7 @@ async fn test1460_a_node_recorded_on_disk_and_in_memory_is_refused() {
             graph: &ResolvedGraph,
             initial_inputs: HashMap<String, PlanInput>,
             initial_is_sequence: HashMap<String, bool>,
+            initial_labels: HashMap<String, crate::MediaUrn>,
             cap_arguments: &HashMap<String, Vec<(String, Vec<u8>)>>,
             progress_fn: Option<&CapProgressFn>,
             step_progress_fn: Option<&CapStepProgressFn>,
@@ -1966,6 +1978,7 @@ async fn test1460_a_node_recorded_on_disk_and_in_memory_is_refused() {
                     graph,
                     initial_inputs,
                     initial_is_sequence,
+                    initial_labels,
                     cap_arguments,
                     progress_fn,
                     step_progress_fn,
@@ -2072,4 +2085,231 @@ async fn test12874_persisted_map_files_are_in_item_order_whatever_finishes_first
         .flat_map(|writer| writer.saved_paths.clone())
         .collect();
     assert_eq!(saved, texts(&["saved:ONE", "saved:TWO", "saved:THREE"]));
+}
+
+// ---------------------------------------------------------------------------
+// Labels: a run on in-process handlers
+// ---------------------------------------------------------------------------
+
+/// JSON of any shape: a declared output that says neither list nor record.
+const ANY_JSON: &str = "media:enc=utf8;fmt=json;?list;?record";
+/// Gives JSON of a shape it says when it knows it.
+const SHAPE: &str = r#"cap:in="media:enc=utf8;fmt=json";shape;out="media:enc=utf8;fmt=json;?list;?record""#;
+/// Passes on what it is given.
+const PASS: &str = r#"cap:effect=none;in="media:enc=utf8;fmt=json;?list;?record";pass;out="media:enc=utf8;fmt=json;?list;?record""#;
+
+/// A cap of the label tests, with its main input read from stdin.
+fn json_cap(urn: &str, op: &str) -> Cap {
+    let cap_urn = CapUrn::from_string(urn).unwrap();
+    let (input, out) = (cap_urn.in_spec().to_string(), cap_urn.out_spec().to_string());
+    let mut cap = Cap::new(cap_urn, op.to_string(), vec![op.to_string()]);
+    cap.args.push(CapArg::new(input.clone(), "input", true, vec![ArgSource::Stdin { stdin: input }]));
+    cap.outputs = vec![CapOutput::new(out, "output", "out".to_string())];
+    cap
+}
+
+/// Answers `[{"a":1}]` on the shape cap. It states `label`, or — given `lie` —
+/// opens its stream with `lie` whatever its cap declares, as a cartridge that
+/// does not hold its labels to its cap would.
+#[derive(Debug)]
+struct Shape {
+    label: Option<crate::MediaUrn>,
+    lie: Option<&'static str>,
+}
+
+#[async_trait]
+impl crate::bifaci::in_process_host::FrameHandler for Shape {
+    async fn handle_request(
+        &self,
+        _cap_urn: &str,
+        mut input: tokio::sync::mpsc::UnboundedReceiver<crate::Frame>,
+        output: crate::bifaci::in_process_host::ResponseWriter,
+        _peer: Arc<dyn crate::PeerInvoker>,
+        _network: crate::bifaci::policy::NetworkAccess,
+    ) {
+        use crate::bifaci::frame::{Frame, MessageId};
+        if let Err(e) = crate::bifaci::in_process_host::accumulate_input(&mut input).await {
+            return output.emit_error("ACCUMULATE_ERROR", &e);
+        }
+        let data = br#"[{"a":1}]"#;
+        match self.lie {
+            None => output.emit_response(self.label.as_ref(), data),
+            Some(lie) => {
+                let mut payload = Vec::new();
+                ciborium::into_writer(&ciborium::Value::Bytes(data.to_vec()), &mut payload).unwrap();
+                let checksum = Frame::compute_checksum(&payload);
+                output.send(Frame::stream_start(MessageId::Uint(0), "result".to_string(), lie.to_string(), Some(false)));
+                output.send(Frame::chunk(MessageId::Uint(0), "result".to_string(), 0, payload, 0, checksum));
+                output.send(Frame::stream_end(MessageId::Uint(0), "result".to_string(), 1));
+                output.send(Frame::end_ok(MessageId::Uint(0), None));
+            }
+        }
+    }
+}
+
+/// Passes on what it is given, stating no label.
+#[derive(Debug)]
+struct Pass;
+
+#[async_trait]
+impl crate::bifaci::in_process_host::FrameHandler for Pass {
+    async fn handle_request(
+        &self,
+        _cap_urn: &str,
+        mut input: tokio::sync::mpsc::UnboundedReceiver<crate::Frame>,
+        output: crate::bifaci::in_process_host::ResponseWriter,
+        _peer: Arc<dyn crate::PeerInvoker>,
+        _network: crate::bifaci::policy::NetworkAccess,
+    ) {
+        match crate::bifaci::in_process_host::accumulate_input(&mut input).await {
+            Ok((args, meta)) => {
+                let data: Vec<u8> = args.iter().flat_map(|a| a.value.clone()).collect();
+                output.emit_response_with_meta(None, &data, meta);
+            }
+            Err(e) => output.emit_error("ACCUMULATE_ERROR", &e),
+        }
+    }
+}
+
+/// A runtime whose one switch hosts the shape and pass handlers in process.
+struct InProcess {
+    registry: Arc<FabricRegistry>,
+    switch: Arc<crate::bifaci::relay_switch::RelaySwitch>,
+}
+
+impl InProcess {
+    async fn new(shape: Shape) -> Arc<Self> {
+        use crate::bifaci::io::{FrameReader, FrameWriter};
+        use crate::bifaci::local_socket::UnixStream;
+        use tokio::io::{BufReader, BufWriter};
+        let registry = FabricRegistry::new_for_test();
+        registry.add_caps_to_cache(vec![json_cap(SHAPE, "shape"), json_cap(PASS, "pass")]);
+        let registry = Arc::new(registry);
+        let host = crate::bifaci::in_process_host::InProcessCartridgeHost::new(
+            crate::bifaci::in_process_host::InProcessHostIdentity::for_test("labels"),
+            vec![
+                ("shape".to_string(), vec![json_cap(SHAPE, "shape")], Arc::new(shape) as _),
+                ("pass".to_string(), vec![json_cap(PASS, "pass")], Arc::new(Pass) as _),
+            ],
+        );
+        let (host_sock, slave_local_sock) = UnixStream::pair().unwrap();
+        let (slave_sock, switch_sock) = UnixStream::pair().unwrap();
+        let (host_read, host_write) = host_sock.into_split();
+        tokio::spawn(async move { host.run(host_read, host_write).await });
+        let (slave_local_read, slave_local_write) = slave_local_sock.into_split();
+        let slave = crate::bifaci::relay::RelaySlave::new(slave_local_read, slave_local_write);
+        let (slave_read, slave_write) = slave_sock.into_split();
+        tokio::spawn(async move {
+            let reader = FrameReader::new(BufReader::new(slave_read));
+            let writer = FrameWriter::new(BufWriter::new(slave_write));
+            slave.run(reader, writer, None).await
+        });
+        let switch = Arc::new(
+            crate::bifaci::relay_switch::RelaySwitch::new(
+                vec![("labels".to_string(), switch_sock)],
+                registry.clone(),
+                crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full),
+            )
+            .await
+            .unwrap(),
+        );
+        switch.start_background_pump();
+        Arc::new(Self { registry, switch })
+    }
+}
+
+#[async_trait]
+impl EngineRuntime for InProcess {
+    async fn segment_switch(
+        &self,
+        _graph: &ResolvedGraph,
+    ) -> Result<Arc<crate::bifaci::relay_switch::RelaySwitch>, ExecutionError> {
+        Ok(self.switch.clone())
+    }
+
+    async fn activity_timeout_secs(&self, _graph: &ResolvedGraph) -> Result<u64, ExecutionError> {
+        Ok(30)
+    }
+
+    fn fabric_registry(&self) -> Arc<FabricRegistry> {
+        self.registry.clone()
+    }
+
+    async fn map_failure_policy(&self) -> Result<MapFailurePolicy, ExecutionError> {
+        Ok(MapFailurePolicy::Fail)
+    }
+}
+
+/// Run `[doc -> shape -> s][s -> pass -> out]` on `runtime`, given a JSON list
+/// of records it is told only is JSON.
+async fn run_shape_then_pass(runtime: Arc<InProcess>) -> (Result<PipelineResult, ExecutionError>, String) {
+    let notation = format!("[shape {SHAPE}][pass {PASS}][doc -> shape -> s][s -> pass -> out]");
+    let (machine, names) = parse_machine_with_node_names_async(&notation, &runtime.registry).await.unwrap();
+    let strand = &machine.strands()[0];
+    let names: HashMap<String, NodeId> = names[0].clone();
+    let doc = names["doc"];
+    let inputs: HashMap<NodeId, crate::planner::AnchorInput> = [(
+        doc,
+        crate::planner::AnchorInput {
+            cardinality: InputCardinality::Single,
+            media: strand.node_urn(doc).clone(),
+        },
+    )]
+    .into();
+    let plan = MachinePlanBuilder::new(runtime.registry.clone())
+        .build_plan_from_machine_strand_for_run("labels", strand, &inputs)
+        .await
+        .unwrap();
+    let ledger = Arc::new(RunArgumentLedger::new(&plan, HashMap::new()).expect("ledger"));
+    let result = execute_plan(
+        &plan,
+        runtime as Arc<dyn EngineRuntime>,
+        [(format!("input_slot_{doc}"), PlanInput::Bytes(br#"[{"a":1}]"#.to_vec()))].into(),
+        [(format!("input_slot_{doc}"), false)].into(),
+        ledger,
+        RunCallbacks::default(),
+        Arc::new(RunControl::new()),
+    )
+    .await;
+    (result, format!("output_{}", names["out"]))
+}
+
+// TEST8434: what a step states it gave is carried on as the value's type, to
+// the next step and to the run's result. A declared step whose output is JSON
+// of any shape states it gave a JSON list of records; the effect=none step
+// after it passes that on, so the run's terminal holds a JSON list of records
+// — where the plan, from the declarations alone, can say only "JSON of any
+// shape". A step that opens its stream with a label outside its declared
+// output fails the run as an effect-contract violation.
+#[tokio::test]
+async fn test8434_a_stated_label_is_carried_to_the_runs_result() {
+    let list_of_records = crate::MediaUrn::from_string("media:enc=utf8;fmt=json;list;record").unwrap();
+    let runtime = InProcess::new(Shape { label: Some(list_of_records.clone()), lie: None }).await;
+    let (result, out) = run_shape_then_pass(runtime).await;
+    let result = result.expect("the run completes");
+    let terminal = result.terminal(&out).and_then(|t| t.produced()).expect("the output is produced");
+    let held = crate::MediaUrn::from_string(&terminal.media_urn).unwrap();
+    assert!(held.is_equivalent(&list_of_records), "the terminal holds {held}");
+    assert_eq!(terminal.items[0].data, br#"[{"a":1}]"#);
+    let plan_type = crate::MediaUrn::from_string(ANY_JSON).unwrap();
+    assert!(!plan_type.is_equivalent(&held), "the plan alone says less: {plan_type}");
+
+    // Stating nothing, the step gives what it declares, and so does the run.
+    let runtime = InProcess::new(Shape { label: None, lie: None }).await;
+    let (result, out) = run_shape_then_pass(runtime).await;
+    let result = result.expect("the run completes");
+    let terminal = result.terminal(&out).and_then(|t| t.produced()).unwrap();
+    assert!(crate::MediaUrn::from_string(&terminal.media_urn).unwrap().is_equivalent(&plan_type));
+
+    // A label outside the declared output is a lie the run does not carry.
+    let runtime = InProcess::new(Shape { label: None, lie: Some("media:enc=utf8;fmt=yaml") }).await;
+    match run_shape_then_pass(runtime).await.0 {
+        Err(ExecutionError::StepFailed { source, .. }) => match *source {
+            ExecutionError::EffectContractViolation { actual, .. } => {
+                assert_eq!(actual, "media:enc=utf8;fmt=yaml")
+            }
+            other => panic!("expected an effect-contract violation, got {other:?}"),
+        },
+        other => panic!("expected the run to fail, got {other:?}"),
+    }
 }

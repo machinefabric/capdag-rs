@@ -7093,7 +7093,7 @@ mod tests {
                 match accumulate_input(&mut input).await {
                     Ok((args, meta)) => {
                         let data: Vec<u8> = args.iter().flat_map(|a| a.value.clone()).collect();
-                        output.emit_response_with_meta("media:text", &data, meta);
+                        output.emit_response_with_meta(None, &data, meta);
                     }
                     Err(e) => output.emit_error("ACCUMULATE_ERROR", &e),
                 }
@@ -7273,7 +7273,7 @@ mod tests {
                         break;
                     }
                 }
-                output.emit_response("media:", self.0.as_bytes());
+                output.emit_response(None, self.0.as_bytes());
             }
         }
 
@@ -7784,7 +7784,7 @@ mod tests {
                         break;
                     }
                 }
-                output.emit_response("media:", self.0.as_bytes());
+                output.emit_response(None, self.0.as_bytes());
             }
         }
 

@@ -30,7 +30,7 @@ use crate::bifaci::relay_switch::{InstalledCartridgeRecord, RelayNotifyCapabilit
 use crate::cap::caller::CapArgumentValue;
 use crate::cap::definition::Cap;
 use crate::standard::caps::{identity_urn, CAP_IDENTITY};
-use crate::CapUrn;
+use crate::{CapUrn, MediaUrn};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -90,11 +90,17 @@ pub trait FrameHandler: Send + Sync + std::fmt::Debug {
 ///
 /// All frames sent via ResponseWriter get the correct request_id and routing_id
 /// for relay routing. Seq is left at 0 — the wire writer's SeqAssigner handles it.
+///
+/// A response is labelled as a cartridge runtime labels it (13.2): by default
+/// with what the served cap's effect derives, and with a label the handler
+/// states only when it is inside the cap's declared output.
 pub struct ResponseWriter {
     request_id: MessageId,
     routing_id: Option<MessageId>,
     tx: mpsc::UnboundedSender<Frame>,
     max_chunk: usize,
+    /// The cap the request is served with.
+    cap: CapUrn,
 }
 
 impl ResponseWriter {
@@ -103,12 +109,30 @@ impl ResponseWriter {
         routing_id: Option<MessageId>,
         tx: mpsc::UnboundedSender<Frame>,
         max_chunk: usize,
+        cap: CapUrn,
     ) -> Self {
         Self {
             request_id,
             routing_id,
             tx,
             max_chunk,
+            cap,
+        }
+    }
+
+    /// The label a response opens with: the default the served cap's effect
+    /// derives, or `label` when the cap lets a handler state it. `Err` is why
+    /// it may not, naming both labels.
+    fn response_label(&self, label: Option<&MediaUrn>) -> Result<String, String> {
+        let default = crate::bifaci::cartridge_runtime::derive_response_media(&self.cap.to_string())
+            .map_err(|e| e.to_string())?;
+        match label {
+            None => Ok(default),
+            Some(stated) => {
+                crate::bifaci::cartridge_runtime::LabelRule::for_main_output(&self.cap)
+                    .check(&default, stated)?;
+                Ok(stated.to_string())
+            }
         }
     }
 
@@ -126,18 +150,28 @@ impl ResponseWriter {
     }
 
     /// Send a complete data response with metadata on STREAM_START.
+    ///
+    /// `label` is what the handler states the data is; `None` sends the label
+    /// the served cap's effect derives. A label the cap does not let the
+    /// handler state (outside a declared cap's `out=`, or any label for an
+    /// `effect=none` or `effect=patch` cap) sends ERR `HANDLER_ERROR` naming
+    /// both labels, in place of the response.
     pub fn emit_response_with_meta(
         &self,
-        media_urn: &str,
+        label: Option<&MediaUrn>,
         data: &[u8],
         meta: Option<crate::StreamMeta>,
     ) {
+        let media_urn = match self.response_label(label) {
+            Ok(media_urn) => media_urn,
+            Err(refused) => return self.emit_error("HANDLER_ERROR", &refused),
+        };
         let stream_id = "result".to_string();
 
         let mut start = Frame::stream_start(
             MessageId::Uint(0),
             stream_id.clone(),
-            media_urn.to_string(),
+            media_urn,
             Some(false),
         );
         start.meta = meta;
@@ -188,8 +222,9 @@ impl ResponseWriter {
     }
 
     /// Send a complete data response: STREAM_START + CBOR-encoded CHUNK(s) + STREAM_END + END.
-    pub fn emit_response(&self, media_urn: &str, data: &[u8]) {
-        self.emit_response_with_meta(media_urn, data, None);
+    /// `label` as [`emit_response_with_meta`](Self::emit_response_with_meta).
+    pub fn emit_response(&self, label: Option<&MediaUrn>, data: &[u8]) {
+        self.emit_response_with_meta(label, data, None);
     }
 
     /// Send a list response: STREAM_START + one CHUNK per item + STREAM_END + END.
@@ -202,8 +237,11 @@ impl ResponseWriter {
     /// This differs from `emit_response`, which wraps each chunk in `Bytes()`.
     /// `emit_list_response` is for list-typed cap outputs where the executor's
     /// list path expects a CBOR sequence without transport wrapping.
-    pub fn emit_list_response(&self, media_urn: &str, items: &[ciborium::Value]) {
-        self.emit_list_response_with_metas(media_urn, items, &[]);
+    ///
+    /// `label` as [`emit_response_with_meta`](Self::emit_response_with_meta):
+    /// one label for the whole sequence, the least type holding every item.
+    pub fn emit_list_response(&self, label: Option<&MediaUrn>, items: &[ciborium::Value]) {
+        self.emit_list_response_with_metas(label, items, &[]);
     }
 
     /// Emit a sequence response with optional per-item metadata.
@@ -211,16 +249,20 @@ impl ResponseWriter {
     /// If `item_metas` is shorter than `items`, remaining items get no meta.
     pub fn emit_list_response_with_metas(
         &self,
-        media_urn: &str,
+        label: Option<&MediaUrn>,
         items: &[ciborium::Value],
         item_metas: &[Option<crate::StreamMeta>],
     ) {
+        let media_urn = match self.response_label(label) {
+            Ok(media_urn) => media_urn,
+            Err(refused) => return self.emit_error("HANDLER_ERROR", &refused),
+        };
         let stream_id = "result".to_string();
 
         self.send(Frame::stream_start(
             MessageId::Uint(0),
             stream_id.clone(),
-            media_urn.to_string(),
+            media_urn,
             Some(true),
         ));
 
@@ -933,13 +975,13 @@ impl InProcessCartridgeHost {
                         continue;
                     }
 
-                    let (handler, registered_cap): (Arc<dyn FrameHandler>, String) = if is_identity
+                    let (handler, served): (Arc<dyn FrameHandler>, CapUrn) = if is_identity
                     {
-                        (Arc::clone(&identity_handler), CAP_IDENTITY.to_string())
+                        (Arc::clone(&identity_handler), identity_urn())
                     } else {
                         match Self::find_handler_for_cap(&registered_caps, &owners, &parsed_cap) {
                             Some((idx, registered)) => {
-                                (Arc::clone(&handlers[idx].handler), registered.to_string())
+                                (Arc::clone(&handlers[idx].handler), registered)
                             }
                             None => {
                                 // No registered handler for a dispatched cap
@@ -971,8 +1013,18 @@ impl InProcessCartridgeHost {
                     });
 
                     // Spawn handler task
-                    let output =
-                        ResponseWriter::new(rid.clone(), xid.clone(), write_tx.clone(), max_chunk);
+                    let registered_cap = if is_identity {
+                        CAP_IDENTITY.to_string()
+                    } else {
+                        served.to_string()
+                    };
+                    let output = ResponseWriter::new(
+                        rid.clone(),
+                        xid.clone(),
+                        write_tx.clone(),
+                        max_chunk,
+                        served,
+                    );
                     let cap_urn_owned = cap_urn.clone();
                     let handler_rid = rid.clone();
                     serving
@@ -1240,7 +1292,7 @@ mod tests {
             match accumulate_input(&mut input).await {
                 Ok((args, meta)) => {
                     let data: Vec<u8> = args.iter().flat_map(|a| a.value.clone()).collect();
-                    output.emit_response_with_meta("media:", &data, meta);
+                    output.emit_response_with_meta(None, &data, meta);
                 }
                 Err(e) => {
                     output.emit_error("ACCUMULATE_ERROR", &e);
@@ -1273,7 +1325,7 @@ mod tests {
                     break;
                 }
             }
-            output.emit_response("media:", b"an answer");
+            output.emit_response(None, b"an answer");
             self.answered.notify_one();
         }
     }
@@ -1605,6 +1657,109 @@ mod tests {
         drop(writer);
         drop(reader);
         host_task.await.unwrap().unwrap();
+    }
+
+    /// Answers every request with an empty JSON list, labelled as it is told.
+    #[derive(Debug)]
+    struct LabellingHandler(Option<MediaUrn>);
+
+    #[async_trait]
+    impl FrameHandler for LabellingHandler {
+        async fn handle_request(
+            &self,
+            _cap_urn: &str,
+            mut input: mpsc::UnboundedReceiver<Frame>,
+            output: ResponseWriter,
+            _peer: Arc<dyn PeerInvoker>,
+            _network: crate::bifaci::policy::NetworkAccess,
+        ) {
+            match accumulate_input(&mut input).await {
+                Ok(_) => output.emit_response(self.0.as_ref(), b"[]"),
+                Err(e) => output.emit_error("ACCUMULATE_ERROR", &e),
+            }
+        }
+    }
+
+    // TEST7274: a handler in the in-process host labels its response as a
+    // cartridge runtime's handler does. Stating no label sends the label the
+    // served cap's effect derives; a label inside a declared cap's out= is
+    // sent as stated; a label outside it, or any label for an effect=none
+    // cap, sends ERR HANDLER_ERROR naming both labels, and no response stream.
+    #[tokio::test]
+    async fn test7274_in_process_handler_states_its_label_inside_the_cap() {
+        let save = r#"cap:in="media:enc=utf8;fmt=json;!ext";save;out="media:enc=utf8;fmt=json;?list;?record""#;
+        let tidy = r#"cap:effect=none;in="media:enc=utf8;fmt=json";tidy;out="media:enc=utf8;fmt=json""#;
+        let media = |urn: &str| MediaUrn::from_string(urn).unwrap();
+        let declared_out = media("media:enc=utf8;fmt=json;?list;?record").to_string();
+        let list_of_records = media("media:enc=utf8;fmt=json;list;record");
+        let yaml = media("media:enc=utf8;fmt=yaml");
+
+        // The frames the host sends for one request to `cap_urn`, served by a
+        // handler that states `label`, up to its terminal.
+        async fn answer(cap_urn: &str, label: Option<MediaUrn>) -> Vec<Frame> {
+            let handlers = vec![(
+                "labelling".to_string(),
+                vec![make_test_cap(cap_urn)],
+                Arc::new(LabellingHandler(label)) as Arc<dyn FrameHandler>,
+            )];
+            let host = InProcessCartridgeHost::new(InProcessHostIdentity::for_test("in-process-test"), handlers);
+            let (host_sock, test_sock) = UnixStream::pair().unwrap();
+            let (host_read, host_write) = host_sock.into_split();
+            let (test_read, test_write) = test_sock.into_split();
+            let host_task = tokio::spawn(async move { host.run(host_read, host_write).await });
+            let mut reader = FrameReader::new(BufReader::new(test_read));
+            let mut writer = FrameWriter::new(BufWriter::new(test_write));
+            writer.write(&Frame::policy(&crate::bifaci::policy::HostPolicy::new(crate::bifaci::policy::NetworkPolicy::Full))).await.unwrap();
+            assert_eq!(reader.read().await.unwrap().unwrap().frame_type, FrameType::RelayNotify);
+
+            let rid = MessageId::new_uuid();
+            let mut req = Frame::req(rid.clone(), cap_urn, vec![], "application/cbor");
+            req.routing_id = Some(MessageId::Uint(1));
+            writer.write(&req).await.unwrap();
+            writer.write(&Frame::stream_start(rid.clone(), "arg0".into(), "media:enc=utf8;fmt=json".into(), None)).await.unwrap();
+            let payload = cbor_bytes_payload(b"[]");
+            let checksum = Frame::compute_checksum(&payload);
+            writer.write(&Frame::chunk(rid.clone(), "arg0".into(), 0, payload, 0, checksum)).await.unwrap();
+            writer.write(&Frame::stream_end(rid.clone(), "arg0".into(), 1)).await.unwrap();
+            writer.write(&Frame::end(rid.clone(), None)).await.unwrap();
+
+            let mut frames = Vec::new();
+            loop {
+                let frame = reader.read().await.unwrap().unwrap();
+                let terminal = matches!(frame.frame_type, FrameType::End | FrameType::Err);
+                frames.push(frame);
+                if terminal {
+                    break;
+                }
+            }
+            drop(writer);
+            drop(reader);
+            host_task.await.unwrap().unwrap();
+            frames
+        }
+        let label_of = |frames: &[Frame]| {
+            assert_eq!(frames.last().unwrap().frame_type, FrameType::End, "{frames:?}");
+            frames
+                .iter()
+                .find(|f| f.frame_type == FrameType::StreamStart)
+                .and_then(|f| f.media_urn.clone())
+                .expect("the response opens a stream")
+        };
+        let refusal = |frames: &[Frame]| {
+            assert_eq!(frames.len(), 1, "the refusal is the request's only frame: {frames:?}");
+            assert_eq!(frames[0].frame_type, FrameType::Err);
+            assert_eq!(frames[0].error_code(), Some("HANDLER_ERROR"));
+            frames[0].error_message().unwrap().to_string()
+        };
+
+        assert_eq!(label_of(&answer(save, None).await), declared_out, "no label: the derived one");
+        assert_eq!(label_of(&answer(save, Some(list_of_records.clone())).await), list_of_records.to_string());
+
+        let outside = refusal(&answer(save, Some(yaml.clone())).await);
+        assert!(outside.contains(&yaml.to_string()) && outside.contains(&declared_out), "{outside}");
+        let fixed = refusal(&answer(tidy, Some(list_of_records.clone())).await);
+        assert!(fixed.contains("fixed by its input") && fixed.contains(&list_of_records.to_string()), "{fixed}");
+        assert_eq!(label_of(&answer(tidy, None).await), media("media:enc=utf8;fmt=json").to_string());
     }
 
     // TEST1961: the in-process host answers a Cancel in the cancel's OWN
@@ -2109,7 +2264,7 @@ mod tests {
                         break;
                     }
                 }
-                output.emit_response("media:text", self.0.as_bytes());
+                output.emit_response(None, self.0.as_bytes());
             }
         }
 
