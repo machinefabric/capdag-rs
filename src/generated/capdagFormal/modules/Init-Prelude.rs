@@ -342,6 +342,14 @@ pub(crate) unsafe extern "C" fn l_UInt32_dtoNat(x_1: u32) -> Obj {
     r
 }
 
+// Lean: USize.decEq
+// Source: <lean>/Init/Prelude.lean:2818:1
+#[inline(always)]
+pub(crate) unsafe extern "C" fn l_USize_ddecEq(x_1: usize, x_2: usize) -> u8 {
+    let r: u8 = rt::intrinsics::lean_usize_dec_eq(x_1, x_2);
+    r
+}
+
 // Lean: USize.ofNatLT
 // Source: <lean>/Init/Prelude.lean:2807:1
 #[inline(always)]

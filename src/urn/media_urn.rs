@@ -597,6 +597,11 @@ impl MediaUrn {
             .map(|ends| ends.iter().map(Self::from_formal_media).collect())
     }
 
+    /// The handle the generated model takes for this media URN.
+    pub(crate) fn formal(&self) -> &tagged_urn::FormalUrn {
+        self.0.formal()
+    }
+
     /// A media URN the generated model gave back for media URNs it was handed.
     fn from_formal_media(formal: &tagged_urn::FormalUrn) -> MediaUrn {
         MediaUrn(

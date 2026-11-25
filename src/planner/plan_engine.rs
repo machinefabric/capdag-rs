@@ -673,6 +673,7 @@ impl LiveCapFab {
 
     /// Whether `source` can reach ANY of `targets` (scalar or sequence state)
     /// within `max_depth` — the routability test behind dead-end partitioning.
+    /// A media reaches a target when it is inside it, as a route does.
     fn source_reaches_any_target(
         &self,
         source: &SourceSpec,
@@ -681,7 +682,7 @@ impl LiveCapFab {
     ) -> bool {
         if targets
             .iter()
-            .any(|t| source.media_urn.is_equivalent(t))
+            .any(|t| source.media_urn.satisfies(t))
         {
             return true;
         }
@@ -693,7 +694,7 @@ impl LiveCapFab {
         reach.iter().any(|((media, _), _)| {
             targets
                 .iter()
-                .any(|t| media.is_equivalent(t))
+                .any(|t| media.satisfies(t))
         })
     }
 
@@ -1103,7 +1104,7 @@ impl LiveCapFab {
             ConvergenceLocation::AtDepth(k) => a.depth == k,
             ConvergenceLocation::AtTarget => targets
                 .iter()
-                .any(|t| a.media.is_equivalent(t)),
+                .any(|t| a.media.satisfies(t)),
             ConvergenceLocation::Earliest
             | ConvergenceLocation::Latest
             | ConvergenceLocation::Auto => true,
@@ -1292,10 +1293,10 @@ impl LiveCapFab {
         // Best leg per source (paths are canonically sorted; take the first).
         let mut legs: Vec<Option<Strand>> = Vec::with_capacity(sources.len());
         for s in sources {
-            if s.media_urn.is_equivalent(&apex.media)
+            if s.media_urn.satisfies(&apex.media)
                 && !s.cardinality.is_sequence()
             {
-                legs.push(None); // already AT the apex — a zero-cap leg
+                legs.push(None); // already inside the apex — a zero-cap leg
                 continue;
             }
             let mut paths = self.find_paths_to_exact_target(
@@ -1477,7 +1478,7 @@ impl LiveCapFab {
             let mut ok = true;
             for (s, (_a_idx, media)) in sources.iter().zip(assignments.iter()) {
                 let entry = asm.add_node(s.media_urn.clone());
-                if s.media_urn.is_equivalent(media) {
+                if s.media_urn.satisfies(media) {
                     leg_exits.push(entry);
                     continue;
                 }
@@ -1511,7 +1512,7 @@ impl LiveCapFab {
             let mut tail_steps = 0usize;
             let mut reached: Vec<MediaUrn> = Vec::new();
             for target in targets {
-                if merge_out.is_equivalent(target) {
+                if merge_out.satisfies(target) {
                     reached.push(target.clone());
                     continue;
                 }

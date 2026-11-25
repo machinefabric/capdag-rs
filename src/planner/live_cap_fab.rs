@@ -10,20 +10,25 @@
 //! 1. **Typed URNs**: Store MediaUrn and CapUrn directly, not strings.
 //!    This avoids reparsing and provides order-theoretic methods.
 //!
-//! 2. **Exact matching**: For target matching, use `is_equivalent()` not `conforms_to()`.
-//!    This ensures "media:X" does NOT match paths ending in "media:X;list". A node
-//!    that may have several shapes (`…;fmt=json;?list;?record`) ends on the
-//!    bookends its shapes are, read complete (`MediaUrn::ends_on`), and a route
-//!    reaching it reaches each of them.
+//! 2. **A target is a search**: a target is read open, so a route reaches it
+//!    when what the route gives, read complete, is inside it (`satisfies()`):
+//!    `media:enc=utf8;ext=json;fmt=json` is reached by every route giving a JSON
+//!    file, a record or a list among them, and a route whose node may also be
+//!    something outside the target (`…;fmt=json;?list;?record` for a JSON record
+//!    file) does not reach it. Reachable targets are bookends: a node that may
+//!    have several shapes ends on the bookends its shapes are, read complete
+//!    (`MediaUrn::ends_on`), and offers each of them.
 //!
 //! 3. **Satisfaction for traversal**: a node, read complete, satisfies the next cap's
 //!    input (`satisfies()`): a node is what a step gave or a file's detected type,
 //!    and what it does not mention, it does not have.
 //!
-//! 4. **Deterministic ordering**: paths are sorted by cap step count (fewest
-//!    first; ForEach and Collect do not count), then the sum of their steps'
-//!    specificity (highest first), then their steps compared structurally in
-//!    turn (`compare_paths`).
+//! 4. **Deterministic ordering**: the routes to a target are in the proved
+//!    model's order (`in_route_order`): nearest to the target first, as
+//!    dispatch ranks caps, then by cap step count (fewest first; ForEach and
+//!    Collect do not count), then the sum of their steps' specificity (highest
+//!    first), then their steps compared structurally in turn
+//!    (`compare_paths`).
 //!
 //! 5. **Cardinality is not topology**: whether a value is a sequence is the
 //!    `is_sequence` flag of the output that made it, never a tag of its URN.
@@ -500,7 +505,8 @@ pub struct Strand {
     pub steps: Vec<StrandStep>,
     /// Source media URN
     pub source_media_urn: MediaUrn,
-    /// Target media URN
+    /// What the path gives: the media its last node holds. A path found for a
+    /// target gives something inside it, not always the target itself.
     pub target_media_urn: MediaUrn,
     /// Total number of steps (including cardinality transitions)
     pub total_steps: i32,
@@ -614,10 +620,12 @@ impl LiveCapFab {
         self.bookend_nodes.get(node).map(Vec::as_slice).unwrap_or(&[])
     }
 
-    /// Whether a route reaching `node` reaches `target`: the node is the
-    /// target, or ends on bookends one of which is.
-    fn reaches(&self, node: &MediaUrn, target: &MediaUrn) -> bool {
-        node.is_equivalent(target) || self.ends_on(node).iter().any(|b| b.is_equivalent(target))
+    /// Whether a route reaching `node` reaches `target`: what the node holds,
+    /// read complete, is inside the target, read open. A node that may also
+    /// be something outside the target (`…;?list;?record` for a JSON record
+    /// target) does not reach it: a possibility is no guarantee.
+    fn reaches(node: &MediaUrn, target: &MediaUrn) -> bool {
+        node.satisfies(target)
     }
 
     /// Rebuild the graph from a list of capabilities.
@@ -1110,7 +1118,8 @@ impl LiveCapFab {
     /// [`get_outgoing_edges`](Self::get_outgoing_edges) gives — at run time,
     /// so the outputs `effect=none` and `effect=patch` give, which are not
     /// stored edge endpoints, are found too — and the distances backward over
-    /// those same steps from the states that are the target. A state missing
+    /// those same steps from the states that reach the target
+    /// ([`reaches`](Self::reaches)). A state missing
     /// from the map cannot reach the target; one at distance `d` cannot reach
     /// it in fewer than `d` steps.
     pub(crate) fn distances_to_exact_target(
@@ -1146,12 +1155,12 @@ impl LiveCapFab {
             }
         }
 
-        // The states that are the target: its media, reached by a step, not
-        // waiting on a ForEach's cap.
+        // The states that reach the target: media inside it, reached by a
+        // step, not waiting on a ForEach's cap.
         let mut distances: HashMap<SearchState, usize> = HashMap::new();
         let mut backward: VecDeque<SearchState> = VecDeque::new();
         for state in &reached_by_a_step {
-            if !state.2 && self.reaches(&state.0, target) {
+            if !state.2 && Self::reaches(&state.0, target) {
                 distances.insert(state.clone(), 0);
                 backward.push_back(state.clone());
             }
@@ -1354,7 +1363,7 @@ impl LiveCapFab {
     }
 
     // =========================================================================
-    // PATH FINDING (DFS with exact target matching)
+    // PATH FINDING (DFS to the routes inside a target)
     // =========================================================================
 
     /// Find all paths from source to a specific target media URN.
@@ -1368,11 +1377,15 @@ impl LiveCapFab {
     /// the specific transformation chain. Not suitable for discovery (use BFS
     /// `get_reachable_targets` instead — it's O(V+E) vs combinatorial).
     ///
-    /// **Critical**: Uses `is_equivalent()` for target matching, NOT `conforms_to()`.
-    /// `is_sequence` is the initial cardinality state (from input context).
+    /// The target is read open, so this is a search over what routes give: a
+    /// route ends where its node, read complete, is inside the target
+    /// ([`reaches`](Self::reaches)), and each found names what it gives as its
+    /// `target_media_urn`. `is_sequence` is the initial cardinality state
+    /// (from input context).
     ///
-    /// Returns paths in `compare_paths` order: fewest cap steps first, then
-    /// highest total specificity, then structural step order.
+    /// Returns the routes in [`in_route_order`](Self::in_route_order): the
+    /// nearest to the target first, then fewer cap steps, then the higher
+    /// total specificity, then structural step order.
     pub fn find_paths_to_exact_target(
         &self,
         source: &MediaUrn,
@@ -1449,17 +1462,15 @@ impl LiveCapFab {
             }
         }
 
-        // Sort paths deterministically
-        all_paths.sort_by(|a, b| Self::compare_paths(a, b));
-
-        all_paths
+        Self::in_route_order(target, all_paths)
     }
 
     /// Find paths with streaming progress reporting.
     ///
     /// Same IDDFS algorithm as `find_paths_to_exact_target`, but calls `on_event`
     /// for each progress update and each path found so the UI can show results
-    /// incrementally. Returns the final sorted list of paths.
+    /// incrementally. Returns the routes in
+    /// [`in_route_order`](Self::in_route_order).
     pub fn find_paths_streaming<F>(
         &self,
         source: &MediaUrn,
@@ -1560,7 +1571,7 @@ impl LiveCapFab {
             }
         }
 
-        all_paths.sort_by(|a, b| Self::compare_paths(a, b));
+        let all_paths = Self::in_route_order(target, all_paths);
 
         on_event(PathFindingEvent::Complete {
             total_paths: all_paths.len(),
@@ -1607,14 +1618,14 @@ impl LiveCapFab {
             return;
         }
 
-        // Check if we've reached the EXACT target: the node is it, or ends on
-        // bookends one of which is (`reaches`). Skip this check at the starting node (empty path) — when source==target,
+        // Check if we've reached the target: the node is inside it (`reaches`).
+        // Skip this check at the starting node (empty path) — when source==target,
         // we still want to explore edges to find round-trip transformation paths.
         let pending_foreach = matches!(
             current_path.last().map(|step| &step.step_type),
             Some(StrandStepType::ForEach { .. })
         );
-        if !current_path.is_empty() && self.reaches(current, target) {
+        if !current_path.is_empty() && Self::reaches(current, target) {
             if current_path.len() == depth_limit {
                 let cap_step_count = current_path.iter().filter(|s| s.is_cap()).count() as i32;
 
@@ -1629,7 +1640,8 @@ impl LiveCapFab {
                     let path = Strand {
                         steps: current_path.clone(),
                         source_media_urn: source.clone(),
-                        target_media_urn: target.clone(),
+                        // What the route gives, inside the target asked for.
+                        target_media_urn: current.clone(),
                         total_steps: current_path.len() as i32,
                         cap_step_count,
                         description,
@@ -1655,7 +1667,7 @@ impl LiveCapFab {
         // as visited. This allows the DFS to return to the target through different
         // intermediate paths. Cycle prevention is handled by depth_limit.
         let is_roundtrip = source.is_equivalent(target);
-        if !(is_roundtrip && self.reaches(current, target)) {
+        if !(is_roundtrip && Self::reaches(current, target)) {
             visited.insert(visit_key.clone());
         }
 
@@ -1776,6 +1788,33 @@ impl LiveCapFab {
         path.steps
             .iter()
             .any(|step| step.title().to_lowercase().contains(&needle))
+    }
+
+    /// The routes to `target` in the order the proved model gives
+    /// (`routes_in_order`): the nearest to what was asked first, measured as
+    /// dispatch ranks caps (exactly as specific, then the nearest more
+    /// specific, then the nearest less specific), then fewer cap steps, then
+    /// the higher total specificity. Routes equal in all three keep
+    /// [`compare_paths`](Self::compare_paths)' structural order, which they
+    /// are handed to the model in.
+    fn in_route_order(target: &MediaUrn, mut routes: Vec<Strand>) -> Vec<Strand> {
+        routes.sort_by(Self::compare_paths);
+        let given: lungo::List<(lungo::List<crate::formal::exec::WfCap>, tagged_urn::FormalUrn)> = routes
+            .iter()
+            .map(|route| {
+                let caps: lungo::List<crate::formal::exec::WfCap> =
+                    route.steps.iter().filter_map(|step| step.cap_urn()).map(|cap| cap.formal().clone()).collect();
+                (caps, route.target_media_urn.formal().clone())
+            })
+            .collect();
+        let mut slots: Vec<Option<Strand>> = routes.into_iter().map(Some).collect();
+        crate::formal::exec::routes_in_order(target.formal().clone(), given)
+            .iter()
+            .map(|index| {
+                let index = index.to_u64().expect("a route's index fits in u64") as usize;
+                slots[index].take().expect("the model gives each route's index once")
+            })
+            .collect()
     }
 
     /// Compare two paths for deterministic ordering.
@@ -2077,9 +2116,9 @@ mod tests {
         assert!(graph.distances_to_exact_target(&finish, &start, false, 8).is_none());
     }
 
-    // TEST1151: Exact target lookup prefers the direct singular or list-producing path over longer alternatives.
+    // TEST1151: A target is reached by every route giving something inside it, the nearest first: a singular result is reached by the singular route and then the list route, a list result only by the list route.
     #[test]
-    fn test1151_exact_vs_conformance_matching() {
+    fn test1151_a_target_is_reached_by_every_route_inside_it() {
         // First verify our assumption about is_equivalent
         let singular = MediaUrn::from_string("media:analysis-result").unwrap();
         let list = MediaUrn::from_string("media:analysis-result;list").unwrap();
@@ -2116,43 +2155,20 @@ mod tests {
 
         let source = MediaUrn::from_string("media:document;ext=pdf").unwrap();
 
-        // Query for EXACT target: singular result
-        // Two valid paths exist:
-        // 1. Direct: pdf → result (via analyze) — 1 cap step, 1 total step
-        // 2. Indirect: pdf → result;list (via analyze_multi) → ForEach → result — 1 cap step, 2 total steps
-        // Both are valid. Path 1 ranks first (fewer total steps at same cap count).
+        // The singular target, read open, holds the list as well: both
+        // routes reach it, the one giving exactly what was asked first.
         let target_singular = MediaUrn::from_string("media:analysis-result").unwrap();
         let paths_singular =
             graph.find_paths_to_exact_target(&source, &target_singular, false, 5, 10);
+        let titles: Vec<String> = paths_singular.iter().map(|p| p.steps[0].title()).collect();
+        assert_eq!(titles, ["Analyze PDF", "Analyze PDF Multi"], "the nearest route first");
 
-        assert!(
-            paths_singular.len() >= 1,
-            "singular query should find at least 1 path"
-        );
-        assert_eq!(
-            paths_singular[0].steps[0].title(),
-            "Analyze PDF",
-            "First path should be the direct cap (fewer total steps)"
-        );
-
-        // Query for EXACT target: result;list (plural)
-        // Two valid paths exist:
-        // 1. Direct: pdf → result;list (via analyze_multi) — 1 cap step
-        // 2. Indirect: pdf → result (via analyze) + Collect → result;list — 1 cap step + Collect
-        // Both are valid. The direct path is shorter (fewer total steps).
+        // The list target does not hold a result that is no list: only the
+        // list route reaches it.
         let target_plural = MediaUrn::from_string("media:analysis-result;list").unwrap();
         let paths_plural = graph.find_paths_to_exact_target(&source, &target_plural, false, 5, 10);
-
-        assert!(
-            paths_plural.len() >= 1,
-            "list query should find at least 1 path"
-        );
-        // The shortest path (fewest cap steps, then fewest total steps) should be the direct one
-        assert_eq!(
-            paths_plural[0].steps[0].title(),
-            "Analyze PDF Multi",
-            "First path should be the direct cap (fewer total steps)"
-        );
+        let titles: Vec<String> = paths_plural.iter().map(|p| p.steps[0].title()).collect();
+        assert_eq!(titles, ["Analyze PDF Multi"], "only the route giving a list");
     }
 
     // TEST1152: Path finding returns the expected two-cap chain through an intermediate media type.
@@ -3627,9 +3643,10 @@ mod tests {
     // TEST7229: a node that may have several shapes ends on the bookends its
     // shapes are, read complete. A save that gives JSON which may or may not
     // be a list and may or may not be a record ends on the four JSON file
-    // types: each is a target of a route through it, and a search for one of
-    // them finds the route. A node one of whose shapes is no file type ends on
-    // none, and no search ends at it.
+    // types, each a target of a route through it; a search for the JSON file
+    // type, which holds all four, finds the route, and one for the JSON record
+    // file does not, since the save may give a list or a value. A node one of
+    // whose shapes is no file type ends on none.
     #[test]
     fn test7229_a_node_of_several_shapes_ends_on_each_bookend_it_may_be() {
         const SAVED: &str = "media:enc=utf8;ext=json;fmt=json;?list;?record";
@@ -3662,10 +3679,15 @@ mod tests {
         targets.sort();
         assert_eq!(targets, files, "every file type the save may give is a target");
 
-        let paths = graph.find_paths_to_exact_target(&source, &record_file, false, 3, 10);
+        // The save may give any JSON, so it reaches the JSON file type, which
+        // holds all four, and gives what it may be; it does not reach the
+        // JSON record file, since it may give a list or a value.
+        let json_file = urn(FILES[0]);
+        let paths = graph.find_paths_to_exact_target(&source, &json_file, false, 3, 10);
         assert_eq!(paths.len(), 1, "the route through the save");
         assert_eq!(paths[0].cap_step_count, 1);
-        assert!(paths[0].target_media_urn.is_equivalent(&record_file));
+        assert!(paths[0].target_media_urn.is_equivalent(&urn(SAVED)));
+        assert!(graph.find_paths_to_exact_target(&source, &record_file, false, 3, 10).is_empty());
 
         // Without a file type for JSON that is neither a list nor a record,
         // one of the save's shapes is no file: the node ends on nothing.
@@ -3673,7 +3695,115 @@ mod tests {
         assert!(!graph.is_bookend(&urn(SAVED)));
         assert!(graph.ends_on(&urn(SAVED)).is_empty());
         assert!(graph.get_reachable_targets(&source, false, 3).is_empty());
-        assert!(graph.find_paths_to_exact_target(&source, &record_file, false, 3, 10).is_empty());
+    }
+
+    /// The graph a YAML record is planned to a JSON file in
+    /// (`test_fixtures::json_saves`).
+    fn json_saves_graph() -> LiveCapFab {
+        let (caps, bookends) = crate::machine::test_fixtures::json_saves();
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+        fab
+    }
+
+    /// The title of a route's last step.
+    fn last_title(strand: &Strand) -> String {
+        strand.steps.last().expect("a route has steps").title()
+    }
+
+    // TEST7275: A target is a search over what routes give: from a YAML record, every route whose output is inside the JSON file type reaches it, listed nearest to what was asked first, each with what it gives
+    #[test]
+    fn test7275_routes_to_a_target_are_every_route_inside_it_nearest_first() {
+        use crate::machine::test_fixtures::media;
+        let fab = json_saves_graph();
+        let source = media("media:enc=utf8;ext=yaml;fmt=yaml;record");
+        let target = media("media:enc=utf8;ext=json;fmt=json");
+
+        let routes = fab.find_paths_to_exact_target(&source, &target, false, 4, 50);
+        let titles: Vec<String> = routes.iter().map(last_title).collect();
+        let at = |title: &str| {
+            titles
+                .iter()
+                .position(|t| t == title)
+                .unwrap_or_else(|| panic!("a route ends with {title}: {titles:?}"))
+        };
+        let generic = at("Save as JSON");
+        let record = at("Save as JSON Record");
+        let list_of_records = at("Save as JSON List of Records");
+        assert!(
+            generic < record && record < list_of_records,
+            "the generic save (as specific as the target), then the record save, then the list-of-records save: {titles:?}"
+        );
+        for route in &routes {
+            let gives = &route.steps.last().unwrap().to_spec;
+            assert!(gives.satisfies(&target), "{gives} is inside {target}");
+            assert!(
+                route.target_media_urn.is_equivalent(gives),
+                "the route names what it gives, {gives}, not {}",
+                route.target_media_urn
+            );
+        }
+    }
+
+    // TEST7276: A route whose output may fall outside the target does not reach it: none from a YAML record reaches a JSON file that is neither a list nor a record, and the generic save does not reach a JSON record file, which the record save does
+    #[test]
+    fn test7276_a_route_that_may_give_more_than_was_asked_does_not_reach_it() {
+        use crate::machine::test_fixtures::media;
+        let fab = json_saves_graph();
+        let source = media("media:enc=utf8;ext=yaml;fmt=yaml;record");
+
+        let plain = media("media:enc=utf8;ext=json;fmt=json;!list;!record");
+        let routes = fab.find_paths_to_exact_target(&source, &plain, false, 4, 50);
+        assert!(
+            routes.is_empty(),
+            "no save of a YAML record's content gives JSON that is surely neither a list nor a record: {:?}",
+            routes.iter().map(last_title).collect::<Vec<_>>()
+        );
+
+        let record_file = media("media:enc=utf8;ext=json;fmt=json;record");
+        let titles: Vec<String> = fab
+            .find_paths_to_exact_target(&source, &record_file, false, 4, 50)
+            .iter()
+            .map(last_title)
+            .collect();
+        assert!(titles.iter().any(|t| t == "Save as JSON Record"), "{titles:?}");
+        assert!(
+            !titles.iter().any(|t| t == "Save as JSON"),
+            "the generic save may write a list or a value, so it does not reach a JSON record file: {titles:?}"
+        );
+    }
+
+    // TEST7277: A patch cap's edge gives what it was sent with its change, not its declared output: JSON to YAML sent a JSON list of records file gives a YAML list of records, no file, which the save of a YAML list of records takes
+    #[test]
+    fn test7277_a_patch_edge_gives_what_it_was_sent_with_its_change() {
+        use crate::machine::test_fixtures::{build_cap, media};
+        let caps = vec![
+            build_cap(
+                r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=json";json-to-yaml;out="media:enc=utf8;fmt=yaml;!ext""#,
+                "Convert JSON to YAML",
+                &["media:enc=utf8;fmt=json"],
+                "media:enc=utf8;fmt=yaml;!ext",
+            ),
+            build_cap(
+                r#"cap:in="media:enc=utf8;fmt=yaml;list;record;!ext";out="media:enc=utf8;ext=yaml;fmt=yaml;list;record";save-as-yaml"#,
+                "Save as YAML List of Records",
+                &["media:enc=utf8;fmt=yaml;list;record;!ext"],
+                "media:enc=utf8;ext=yaml;fmt=yaml;list;record",
+            ),
+        ];
+        let source = media("media:enc=utf8;ext=json;fmt=json;list;record");
+        let target = media("media:enc=utf8;ext=yaml;fmt=yaml;list;record");
+        let mut fab = LiveCapFab::new();
+        fab.sync_from_caps(&caps, &[source.clone(), target.clone()].into_iter().collect());
+
+        let routes = fab.find_paths_to_exact_target(&source, &target, false, 4, 10);
+        assert_eq!(routes.len(), 1, "JSON to YAML, then the save: {routes:?}");
+        assert_eq!(routes[0].cap_step_count, 2);
+        let converted = &routes[0].steps[0].to_spec;
+        assert!(
+            converted.is_equivalent(&media("media:enc=utf8;!ext;fmt=yaml;list;record")),
+            "the patch gives a YAML list of records, no file, not {converted}"
+        );
     }
 
     // TEST1293: IDDFS round-trip does not produce paths with 0 cap steps.

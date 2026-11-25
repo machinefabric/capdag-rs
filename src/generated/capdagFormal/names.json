@@ -684,6 +684,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapDAG.Exec.routesInOrder",
+    "kind": "function",
+    "rust_path": "exec::routes_in_order",
+    "renamed": true
+  },
+  {
     "lean_name": "CapDAG.Exec.select",
     "kind": "function",
     "rust_path": "exec::select",

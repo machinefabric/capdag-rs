@@ -32,3 +32,11 @@ pub(crate) unsafe extern "C" fn l_USize_dofNat(x_1: Obj) -> usize {
     r
 }
 
+// Lean: USize.sub
+// Source: <lean>/Init/Data/UInt/BasicAux.lean:384:1
+#[inline(always)]
+pub(crate) unsafe extern "C" fn l_USize_dsub(x_1: usize, x_2: usize) -> usize {
+    let r: usize = rt::intrinsics::lean_usize_sub(x_1, x_2);
+    r
+}
+

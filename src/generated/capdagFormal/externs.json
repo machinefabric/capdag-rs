@@ -48,6 +48,14 @@
     "source": "<lean>/Init/Prelude.lean:3217:3"
   },
   {
+    "declaration": "Array.ugetBorrowed",
+    "key": "lean_array_uget_borrowed",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_array_uget_borrowed",
+    "lean_type": "{α : Type u} → (xs : Array α) → (i : USize) → i.toNat < xs.size → α",
+    "source": "<lean>/Init/Data/Array/Basic.lean:177:1"
+  },
+  {
     "declaration": "ByteArray.get!",
     "key": "lean_byte_array_get",
     "resolution": "runtime",
@@ -448,6 +456,14 @@
     "source": "<lean>/Init/Data/UInt/BasicAux.lean:317:1"
   },
   {
+    "declaration": "USize.decEq",
+    "key": "lean_usize_dec_eq",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_usize_dec_eq",
+    "lean_type": "(a b : USize) → Decidable (a = b)",
+    "source": "<lean>/Init/Prelude.lean:2818:1"
+  },
+  {
     "declaration": "USize.ofNat",
     "key": "lean_usize_of_nat",
     "resolution": "runtime",
@@ -470,6 +486,14 @@
     "implementation": "lungo::__runtime::intrinsics::lean_string_of_usize",
     "lean_type": "USize → String",
     "source": "<lean>/Init/Data/Repr.lean:220:1"
+  },
+  {
+    "declaration": "USize.sub",
+    "key": "lean_usize_sub",
+    "resolution": "runtime",
+    "implementation": "lungo::__runtime::intrinsics::lean_usize_sub",
+    "lean_type": "USize → USize → USize",
+    "source": "<lean>/Init/Data/UInt/BasicAux.lean:384:1"
   },
   {
     "declaration": "panicCore",

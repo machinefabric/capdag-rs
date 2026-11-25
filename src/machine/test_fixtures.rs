@@ -148,6 +148,62 @@ pub(crate) fn media(urn: &str) -> MediaUrn {
         .unwrap_or_else(|e| panic!("test fixture: invalid media URN {urn}: {e}"))
 }
 
+/// The fabric's JSON saves of a YAML record's content, by their cap URNs:
+/// the generic save, which may give any JSON; the value save, which a record
+/// does not reach; the record save; and the list-of-records save.
+pub(crate) const SAVE_AS_JSON: &str =
+    r#"cap:in="media:enc=utf8;fmt=json;!ext";out="media:enc=utf8;ext=json;fmt=json;?list;?record";save-as-json"#;
+pub(crate) const SAVE_AS_JSON_VALUE: &str =
+    r#"cap:in="media:enc=utf8;fmt=json;!list;!record;!ext";out="media:enc=utf8;ext=json;fmt=json";save-as-json"#;
+pub(crate) const SAVE_AS_JSON_RECORD: &str =
+    r#"cap:in="media:enc=utf8;fmt=json;!list;record;!ext";out="media:enc=utf8;ext=json;fmt=json;record";save-as-json"#;
+pub(crate) const SAVE_AS_JSON_LIST_OF_RECORDS: &str =
+    r#"cap:in="media:enc=utf8;fmt=json;list;record;!ext";out="media:enc=utf8;ext=json;fmt=json;list;record";save-as-json"#;
+
+/// The caps a YAML record is planned to a JSON file with, as the fabric
+/// declares them: YAML to JSON (a patch, keeping the record), the merge of
+/// YAML mappings into a JSON array (taking a sequence), and the four JSON
+/// saves; with the file types they read and write, the bookends.
+pub(crate) fn json_saves() -> (Vec<Cap>, std::collections::HashSet<MediaUrn>) {
+    let save = |urn: &str, title: &str| {
+        let parsed = cap(urn);
+        let input = parsed.in_spec().to_string();
+        let output = parsed.out_spec().to_string();
+        build_cap(urn, title, &[input.as_str()], &output)
+    };
+    let mut merge = build_cap(
+        r#"cap:collect-yaml-mappings-to-json-array;in="media:enc=utf8;fmt=yaml;!list;record";out="media:enc=utf8;fmt=json;list;record""#,
+        "Merge YAML Mappings into JSON Array",
+        &["media:enc=utf8;fmt=yaml;!list;record"],
+        "media:enc=utf8;fmt=json;list;record",
+    );
+    merge.args[0].is_sequence = true;
+    let caps = vec![
+        build_cap(
+            r#"cap:convert-format;effect=patch;in="media:enc=utf8;fmt=yaml";out="media:enc=utf8;fmt=json;!ext";yaml-to-json"#,
+            "Convert YAML to JSON",
+            &["media:enc=utf8;fmt=yaml"],
+            "media:enc=utf8;fmt=json;!ext",
+        ),
+        merge,
+        save(SAVE_AS_JSON, "Save as JSON"),
+        save(SAVE_AS_JSON_VALUE, "Save as JSON Value"),
+        save(SAVE_AS_JSON_RECORD, "Save as JSON Record"),
+        save(SAVE_AS_JSON_LIST_OF_RECORDS, "Save as JSON List of Records"),
+    ];
+    let bookends = [
+        "media:enc=utf8;ext=yaml;fmt=yaml;record",
+        "media:enc=utf8;ext=json;fmt=json",
+        "media:enc=utf8;ext=json;fmt=json;list",
+        "media:enc=utf8;ext=json;fmt=json;record",
+        "media:enc=utf8;ext=json;fmt=json;list;record",
+    ]
+    .into_iter()
+    .map(media)
+    .collect();
+    (caps, bookends)
+}
+
 /// Convenience: parse a cap URN string.
 pub(crate) fn cap(urn: &str) -> CapUrn {
     CapUrn::from_string(urn).unwrap_or_else(|e| panic!("test fixture: invalid cap URN {urn}: {e}"))

@@ -2,7 +2,8 @@
 //! machines that make it.
 //!
 //! Without `--to` it says what the files can become. With one it lists the
-//! machines that make it — each in alias form, numbered from 1, with its step
+//! machines that make it — every machine whose result is inside it, the
+//! nearest to it first — each in alias form, numbered from 1, with its step
 //! count and whether a step needs a model — and `--pick <n>` chooses one to
 //! `--save` or `--run`. On a terminal, a target or machine not given is chosen
 //! from a list, and so is what to do with the machine.
@@ -124,14 +125,12 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let wants_machine = args.save.is_some() || args.run || args.pick.is_some();
 
     // ── The target ──
+    // A `--to` is searched as it is given: every route whose output is inside
+    // it reaches it, listed nearest to it first.
     let targets: Vec<MediaUrn> = if !args.to.is_empty() {
         let mut out = Vec::new();
         for token in &args.to {
-            let target = match_target(&registry, &discovered.targets, token, &what).await?;
-            if !target.named {
-                say_matched(ctx, &registry, token, &target.media, &what);
-            }
-            out.push(target.media);
+            out.push(target_media(&registry, token).await?);
         }
         out
     } else if ctx.term.interactive || wants_machine {
@@ -359,60 +358,6 @@ pub async fn target_media(registry: &FabricRegistry, token: &str) -> CliResult<M
             .context(e.to_string())
             .hint("give a media alias such as txt or png, an extension, or a media URN")
     })
-}
-
-/// The reachable target a `--to` means, and whether it named that target
-/// itself (`named`) or a kind of which that target is the one reachable.
-struct Matched {
-    media: MediaUrn,
-    named: bool,
-}
-
-/// The reachable target a `--to` means: the one it names, or the one reachable
-/// target of the kind it names. Several of that kind is a choice to make.
-async fn match_target(
-    registry: &FabricRegistry,
-    reachable: &[p::ConvergentTargetInfo],
-    token: &str,
-    what: &str,
-) -> CliResult<Matched> {
-    let wanted = target_media(registry, token).await?;
-    if let Some(exact) = reachable.iter().find(|t| t.media_def.is_equivalent(&wanted)) {
-        return Ok(Matched { media: exact.media_def.clone(), named: true });
-    }
-    let fitting: Vec<&p::ConvergentTargetInfo> = reachable
-        .iter()
-        .filter(|t| t.media_def.conforms_to(&wanted))
-        .collect();
-    match fitting.as_slice() {
-        [one] => Ok(Matched { media: one.media_def.clone(), named: false }),
-        [] => Err(CliError::failed(format!("{what} cannot become {token}"))
-            .context(format!(
-                "it can become: {}",
-                reachable.iter().take(8).map(|t| names::media(registry, &t.media_def)).collect::<Vec<_>>().join(", ")
-            ))
-            .hint("see everything it can become: capdag plan <files>")),
-        several => {
-            let mut error = CliError::usage(format!("--to {token} could mean {} different things", several.len()));
-            for t in several.iter().take(8) {
-                error = error.context(format!("--to {}  {}", names::media(registry, &t.media_def), t.display_name));
-            }
-            Err(error.hint("say which with one of the --to values above"))
-        }
-    }
-}
-
-/// Say which target a `--to` of a kind was taken as: the one target of that
-/// kind the files can become, which the `--to` did not name itself.
-fn say_matched(ctx: &Ctx, registry: &FabricRegistry, token: &str, target: &MediaUrn, what: &str) {
-    let alias = names::media(registry, target);
-    if ctx.term.json {
-        emit_record(&serde_json::json!({
-            "type": "to", "given": token, "alias": alias, "urn": target.to_string(),
-        }));
-    } else {
-        eprintln!("--to {token}: making {alias}, the one {token} {what} can become");
-    }
 }
 
 /// A strand the planner found and no machine could hold: not offered, said
@@ -685,32 +630,68 @@ fn print_machines(ctx: &Ctx, machines: &[Planned], target: &str, what: &str, all
 mod tests {
     use super::*;
 
-    fn target(urn: &str) -> p::ConvergentTargetInfo {
-        p::ConvergentTargetInfo {
-            media_def: MediaUrn::from_string(urn).unwrap(),
-            display_name: urn.to_string(),
-            min_total_steps: 1,
-            apex: None,
-            convergent: false,
-        }
+    /// `capdag plan`'s arguments, as the command line gives them.
+    #[derive(clap::Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: Args,
     }
 
-    // TEST8211: a --to is told apart by whether it named the target the files
-    // can become or a kind of which that target is the one reachable: JSON
-    // names no reachable target of a PDF, and the embedding vector is the one
-    // JSON it can become, which plan then says it is making
+    // TEST8211: plan --to lists the machines of every route whose result is
+    // inside the --to, nearest to it first and then with fewer steps: a YAML
+    // record --to media:ext=json, which several JSON file types fit, is
+    // searched as it is given; the two-step machine giving exactly
+    // media:ext=json comes before the one-step machines giving JSON of any
+    // shape and then a JSON record
     #[tokio::test]
-    async fn test8211_a_to_of_a_kind_is_known_from_one_that_names_its_target() {
-        let registry = FabricRegistry::new_for_test();
-        let embedding = "media:embedding-vector;enc=utf8;fmt=json;record";
-        let reachable = [target(embedding), target("media:ext=png;image")];
+    async fn test8211_a_to_lists_every_route_inside_it_nearest_first() {
+        use crate::machine::test_fixtures::{build_cap, cap, media, registry_with};
+        use clap::Parser;
 
-        let of_a_kind = match_target(&registry, &reachable, "media:enc=utf8;fmt=json", "1 pdf").await.unwrap();
-        assert_eq!(of_a_kind.media, MediaUrn::from_string(embedding).unwrap());
-        assert!(!of_a_kind.named, "JSON is a kind the embedding vector is one of, not the target itself");
+        const TO_ANY_JSON: &str =
+            r#"cap:in="media:enc=utf8;fmt=yaml;record";out="media:enc=utf8;ext=json;fmt=json;?list;?record";to-json"#;
+        const TO_JSON_RECORD: &str =
+            r#"cap:in="media:enc=utf8;fmt=yaml;record";out="media:enc=utf8;ext=json;fmt=json;record";to-json"#;
+        const READ: &str = r#"cap:in="media:enc=utf8;fmt=yaml;record";out="media:enc=utf8;fmt=json;record";read-yaml"#;
+        const WRITE: &str = r#"cap:in="media:enc=utf8;fmt=json;record";out="media:ext=json";write-json"#;
+        let caps: Vec<_> = [TO_ANY_JSON, TO_JSON_RECORD, READ, WRITE]
+            .into_iter()
+            .map(|text| {
+                let parsed = cap(text);
+                build_cap(text, text, &[parsed.in_spec()], parsed.out_spec())
+            })
+            .collect();
+        let source = media("media:enc=utf8;ext=yaml;fmt=yaml;record");
+        let bookends = [
+            source.clone(),
+            media("media:enc=utf8;ext=json;fmt=json;?list;?record"),
+            media("media:enc=utf8;ext=json;fmt=json;record"),
+            media("media:ext=json"),
+        ]
+        .into_iter()
+        .collect();
+        let mut fab = p::LiveCapFab::new();
+        fab.sync_from_caps(&caps, &bookends);
+        let registry = registry_with(caps);
+        let args = Command::try_parse_from(["plan", "rec.yaml", "--to", "media:ext=json"]).unwrap().args;
+        let target = target_media(&registry, &args.to[0]).await.unwrap();
+        assert!(target.is_equivalent(&media("media:ext=json")), "the --to is the media it gives");
 
-        let named = match_target(&registry, &reachable, embedding, "1 pdf").await.unwrap();
-        assert!(named.named, "the embedding vector's own URN names it");
+        let outcome = fab
+            .plan(&request(&args, vec![p::SourceSpec::single(source)], vec![target]).unwrap(), &registry)
+            .unwrap();
+        assert!(outcome.excluded.is_empty(), "every route found is offered: {:?}", outcome.excluded);
+        let last_caps: Vec<&str> = outcome
+            .candidates
+            .iter()
+            .map(|candidate| {
+                *[TO_ANY_JSON, TO_JSON_RECORD, WRITE]
+                    .iter()
+                    .find(|last| candidate.notation.contains(&cap(last).to_string()))
+                    .unwrap_or_else(|| panic!("each machine ends on a JSON file: {}", candidate.notation))
+            })
+            .collect();
+        assert_eq!(last_caps, [WRITE, TO_ANY_JSON, TO_JSON_RECORD], "the nearest first, then fewer steps");
     }
 
     fn titled(urn: &str, title: &str) -> p::TitledMedia {
