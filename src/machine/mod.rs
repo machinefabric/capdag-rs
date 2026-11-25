@@ -38,8 +38,8 @@ pub mod resolve;
 pub mod serializer;
 pub mod syntax;
 
-#[cfg(test)]
-pub(crate) mod test_fixtures;
+#[cfg(any(test, feature = "test-fixtures"))]
+pub mod test_fixtures;
 #[cfg(test)]
 mod notation_tests;
 #[cfg(test)]

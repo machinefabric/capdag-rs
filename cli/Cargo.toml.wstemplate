@@ -1,0 +1,30 @@
+[package]
+authors = ["https://github.com/machinefabric"]
+description = "The capdag command: find capabilities, run them on files, and plan and run machines of them"
+edition = "2021"
+license = "MIT"
+name = "capdag-cli"
+version = "{{ project.version }}"
+
+[[bin]]
+name = "capdag"
+path = "src/main.rs"
+
+[dependencies]
+# A capture-capable host: it resolves the device references of the machines
+# it runs.
+capdag = { path = "..", features = ["capture"] }
+capdag-tuikit = { path = "../tuikit" }
+async-trait = "0.1"
+dirs = "5.0"
+mg-srel = "0.9"
+tokio = { version = "1.0", features = ["full"] }
+
+[dev-dependencies]
+libc = "0.2"
+regex = "1.0"
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
+tempfile = "3.10"
+uuid = { version = "1.0", features = ["v4"] }
+# The terminal the golden test reads a screen from, as a person sees it.
+vt100 = "0.15"

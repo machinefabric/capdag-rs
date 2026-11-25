@@ -4258,7 +4258,7 @@ pub struct HostableCartridge {
 /// The bundle's proof is established HERE, once, from the roots this build bakes: a
 /// build that trusts no roots can host no bundled cartridge, and every refusal names
 /// the same reason rather than each cartridge discovering it separately.
-pub(crate) async fn discover_bundled_cartridges(
+pub async fn discover_bundled_cartridges(
     bundled_cartridges_dir: &std::path::Path,
     channel: crate::bifaci::cartridge_repo::CartridgeChannel,
     registry_url: Option<&str>,

@@ -3,8 +3,9 @@
 //! Provides helpers for building `Cap` definitions, `Strand`s, and
 //! a populated `FabricRegistry` so test code in `resolve.rs`,
 //! `parser.rs`, `serializer.rs`, and `graph.rs` doesn't have to
-//! repeat the boilerplate. Every helper here is registered as
-//! `pub(crate)` and only compiled under `#[cfg(test)]`.
+//! repeat the boilerplate. Compiled for the library's own tests, and,
+//! with the `test-fixtures` feature, for the tests of the crates built on it
+//! (the capdag command's terminal interface).
 
 use std::collections::HashMap;
 
@@ -20,7 +21,7 @@ use crate::urn::media_urn::MediaUrn;
 /// the same. Use `build_cap_with_slot_stdin_pairs` when you
 /// need to test the case where they differ (e.g. file-path
 /// auto-conversion).
-pub(crate) fn build_cap(
+pub fn build_cap(
     cap_urn_str: &str,
     title: &str,
     arg_media_urns: &[&str],
@@ -37,7 +38,7 @@ pub(crate) fn build_cap(
 /// — this is the regression-test path for caps like
 /// `disbind-pdf` where the slot is `media:enc=utf8;file-path`
 /// but the stdin source delivers `media:document;ext=pdf`.
-pub(crate) fn build_cap_with_slot_stdin_pairs(
+pub fn build_cap_with_slot_stdin_pairs(
     cap_urn_str: &str,
     title: &str,
     args: &[(&str, &str)],
@@ -84,7 +85,7 @@ pub(crate) fn build_cap_with_slot_stdin_pairs(
 }
 
 /// Build a unified `FabricRegistry` pre-populated with the supplied caps.
-pub(crate) fn registry_with(caps: Vec<Cap>) -> FabricRegistry {
+pub fn registry_with(caps: Vec<Cap>) -> FabricRegistry {
     let registry = FabricRegistry::new_for_test();
     registry.add_caps_to_cache(caps);
     registry
@@ -94,7 +95,7 @@ pub(crate) fn registry_with(caps: Vec<Cap>) -> FabricRegistry {
 /// URN string. Each spec gets a synthetic title of the form
 /// `"Title for <urn>"` — enough to let the render-payload serializer
 /// find a cached entry without depending on the online registry.
-pub(crate) fn seed_media_titles(registry: &FabricRegistry, urns: &[&str]) {
+pub fn seed_media_titles(registry: &FabricRegistry, urns: &[&str]) {
     use crate::StoredMediaDef;
     for urn in urns {
         registry.insert_cached_media_def_for_test(StoredMediaDef {
@@ -117,7 +118,7 @@ pub(crate) fn seed_media_titles(registry: &FabricRegistry, urns: &[&str]) {
 /// Seed the supplied registry with a dim named `name`, titled `title`, whose
 /// values are `(value name, value title, tag key, tag value)`; a marker value's
 /// tag value is `*`.
-pub(crate) fn seed_dim(registry: &FabricRegistry, name: &str, title: &str, values: &[(&str, &str, &str, &str)]) {
+pub fn seed_dim(registry: &FabricRegistry, name: &str, title: &str, values: &[(&str, &str, &str, &str)]) {
     use crate::{DimTag, StoredDim, StoredDimValue};
     registry.insert_cached_dim_for_test(StoredDim {
         name: name.to_string(),
@@ -143,7 +144,7 @@ pub(crate) fn seed_dim(registry: &FabricRegistry, name: &str, title: &str, value
 
 /// Convenience: parse a media URN string. Panics on parse
 /// failure with the failing literal in the message.
-pub(crate) fn media(urn: &str) -> MediaUrn {
+pub fn media(urn: &str) -> MediaUrn {
     MediaUrn::from_string(urn)
         .unwrap_or_else(|e| panic!("test fixture: invalid media URN {urn}: {e}"))
 }
@@ -164,7 +165,7 @@ pub(crate) const SAVE_AS_JSON_LIST_OF_RECORDS: &str =
 /// declares them: YAML to JSON (a patch, keeping the record), the merge of
 /// YAML mappings into a JSON array (taking a sequence), and the four JSON
 /// saves; with the file types they read and write, the bookends.
-pub(crate) fn json_saves() -> (Vec<Cap>, std::collections::HashSet<MediaUrn>) {
+pub fn json_saves() -> (Vec<Cap>, std::collections::HashSet<MediaUrn>) {
     let save = |urn: &str, title: &str| {
         let parsed = cap(urn);
         let input = parsed.in_spec().to_string();
@@ -205,7 +206,7 @@ pub(crate) fn json_saves() -> (Vec<Cap>, std::collections::HashSet<MediaUrn>) {
 }
 
 /// Convenience: parse a cap URN string.
-pub(crate) fn cap(urn: &str) -> CapUrn {
+pub fn cap(urn: &str) -> CapUrn {
     CapUrn::from_string(urn).unwrap_or_else(|e| panic!("test fixture: invalid cap URN {urn}: {e}"))
 }
 
@@ -213,7 +214,7 @@ pub(crate) fn cap(urn: &str) -> CapUrn {
 /// data URN at this step's input and output positions; in the
 /// new regime they should match the cap's declared in/out
 /// patterns (or a more-specific URN that conforms).
-pub(crate) fn cap_step(cap_urn_str: &str, title: &str, from: &str, to: &str) -> StrandStep {
+pub fn cap_step(cap_urn_str: &str, title: &str, from: &str, to: &str) -> StrandStep {
     StrandStep::new(
         StrandStepType::Cap {
             cap_urn: cap(cap_urn_str),
@@ -240,7 +241,7 @@ pub(crate) fn cap_step(cap_urn_str: &str, title: &str, from: &str, to: &str) -> 
 /// Under the explicit-inputs model a chained fixture must name its predecessor rather
 /// than rely on position, so fixtures that build linear strands wrap their step vec in
 /// this before constructing the `Strand`.
-pub(crate) fn chain_cap_steps(mut steps: Vec<StrandStep>) -> Vec<StrandStep> {
+pub fn chain_cap_steps(mut steps: Vec<StrandStep>) -> Vec<StrandStep> {
     let mut prev_cap_token: Option<StepToken> = None;
     for step in &mut steps {
         let token = step.token_id.clone();
@@ -257,7 +258,7 @@ pub(crate) fn chain_cap_steps(mut steps: Vec<StrandStep>) -> Vec<StrandStep> {
 }
 
 /// Build a `ForEach` strand step.
-pub(crate) fn for_each_step(media_urn: &str) -> StrandStep {
+pub fn for_each_step(media_urn: &str) -> StrandStep {
     StrandStep::new(
         StrandStepType::ForEach {
             media_def: media(media_urn),
@@ -268,7 +269,7 @@ pub(crate) fn for_each_step(media_urn: &str) -> StrandStep {
 }
 
 /// Build a `Collect` strand step.
-pub(crate) fn collect_step(media_urn: &str) -> StrandStep {
+pub fn collect_step(media_urn: &str) -> StrandStep {
     StrandStep::new(
         StrandStepType::Collect {
             media_def: media(media_urn),
@@ -281,7 +282,7 @@ pub(crate) fn collect_step(media_urn: &str) -> StrandStep {
 /// Wrap a list of steps into a `Strand`. Source/target specs
 /// are taken from the first step's `from_spec` and the last
 /// step's `to_spec`.
-pub(crate) fn strand_from_steps(steps: Vec<StrandStep>, description: &str) -> Strand {
+pub fn strand_from_steps(steps: Vec<StrandStep>, description: &str) -> Strand {
     // Fixtures list steps positionally; under the explicit-inputs model each cap names
     // its producer, so wire them into the linear chain these fixtures intend (a
     // straight pipeline: each cap's main input is the previous cap's output).

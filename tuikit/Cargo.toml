@@ -1,0 +1,32 @@
+[package]
+authors = ["https://github.com/machinefabric"]
+description = "The capdag command's terminal interface: its surfaces, flags and command flows, run against a host"
+edition = "2021"
+license = "MIT"
+name = "capdag-tuikit"
+version = "1.1073.116"
+
+[dependencies]
+# The library the commands work with: its own types, notation, planning and
+# registry, compiled once and kept while the interface is worked on.
+capdag = { path = ".." }
+async-trait = "0.1"
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+crossterm = { version = "0.29", features = ["event-stream"] }
+futures-util = "0.3"
+glob = "0.3"
+libc = "0.2"
+ratatui = "0.30"
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
+strsim = "0.11"
+thiserror = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+unicode-segmentation = "1"
+unicode-width = "0.2"
+
+[dev-dependencies]
+# The library's own test builders, for the commands' unit tests.
+capdag = { path = "..", features = ["test-fixtures"] }
+# What the end-to-end tests share with the library's (../tests/support).
+tempfile = "3.10"
+uuid = { version = "1.0", features = ["v4"] }

@@ -29,8 +29,43 @@ pub fn against_this_capdag(cartridge_dir: &Path) -> Vec<String> {
     };
     vec![
         "--config".to_string(),
-        format!("patch.'{source}'.capdag.path='{}'", env!("CARGO_MANIFEST_DIR")),
+        format!("patch.'{source}'.capdag.path='{}'", capdag_dir().display()),
     ]
+}
+
+/// The directory of the `capdag` package under test: cargo's own answer,
+/// asked of the workspace the test was built in, whose root package it is.
+/// The library's tests and the terminal interface's and command's — crates
+/// of the same workspace — all share this support.
+pub fn capdag_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let output = std::process::Command::new("cargo")
+            .args(["metadata", "--format-version", "1", "--no-deps"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("Failed to run cargo metadata for the workspace under test");
+        assert!(
+            output.status.success(),
+            "cargo metadata failed in {}: {}",
+            env!("CARGO_MANIFEST_DIR"),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON");
+        let manifest = metadata["packages"]
+            .as_array()
+            .expect("cargo metadata lists the workspace's packages")
+            .iter()
+            .find(|package| package["name"] == "capdag")
+            .and_then(|package| package["manifest_path"].as_str())
+            .expect("the workspace under test holds the capdag package");
+        PathBuf::from(manifest)
+            .parent()
+            .expect("a manifest is in a directory")
+            .to_path_buf()
+    })
+    .clone()
 }
 
 /// Resolve the cartridge's `capdag` to this crate before it is built: `cargo
@@ -102,13 +137,12 @@ fn capdag_git_source(manifest: &str) -> Option<String> {
 
 /// The testcartridge source directory.
 ///
-/// The crate sits at `machinefabric/capdag/capdag-rs`, so the workspace holding
-/// `mfab-tests` is two levels up. Missing is a hard error here rather than an
-/// opaque spawn failure later: `Command::current_dir` on an absent directory
-/// reports only `NotFound`, which reads as a missing `cargo`.
+/// The library sits at `machinefabric/capdag/capdag-rs`, so the workspace
+/// holding `mfab-tests` is two levels up. Missing is a hard error here rather
+/// than an opaque spawn failure later: `Command::current_dir` on an absent
+/// directory reports only `NotFound`, which reads as a missing `cargo`.
 pub fn testcartridge_dir() -> PathBuf {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let dir = PathBuf::from(&manifest_dir)
+    let dir = capdag_dir()
         .parent()
         .expect("capdag-rs has a parent (the capdag superrepo)")
         .parent()

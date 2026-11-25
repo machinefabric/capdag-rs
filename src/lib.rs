@@ -53,12 +53,6 @@ pub mod media;
 pub mod model_storage;
 pub mod net_retry;
 pub mod orchestrator;
-// The `capdag` command and its terminal interface — only the binary builds
-// them.
-#[cfg(feature = "cli")]
-pub mod cli;
-#[cfg(feature = "cli")]
-pub mod tui;
 pub mod pages;
 pub mod planner;
 pub mod self_update;
