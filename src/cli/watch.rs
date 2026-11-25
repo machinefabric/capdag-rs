@@ -86,6 +86,24 @@ pub enum WatchError {
     Refused { name: String, state: StepState, report: model::StepReport },
 }
 
+/// What one signal changed in a run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Changed {
+    /// The row it changed, by index.
+    pub row: Option<usize>,
+    /// The log line it added, by index in the run's logs: each is said once,
+    /// on the signal that added it.
+    pub log: Option<usize>,
+}
+
+impl Changed {
+    pub const NOTHING: Changed = Changed { row: None, log: None };
+
+    pub fn row(index: usize) -> Changed {
+        Changed { row: Some(index), log: None }
+    }
+}
+
 /// Every run a command started.
 #[derive(Debug, Default)]
 pub struct Watch {
@@ -120,8 +138,9 @@ impl Watch {
         );
     }
 
-    /// Fold one signal in. Returns the index of the row it changed, if any.
-    pub fn apply(&mut self, event: &RunEvent) -> Result<Option<usize>, WatchError> {
+    /// Fold one signal in. Returns what it changed: a row, and the log line
+    /// it added.
+    pub fn apply(&mut self, event: &RunEvent) -> Result<Changed, WatchError> {
         let verbosity = self.verbosity;
         let run = self.runs.get_mut(&event.key).ok_or(WatchError::UnknownRun {
             run: event.key.run,
@@ -129,7 +148,7 @@ impl Watch {
         })?;
         let now = Instant::now();
         match &event.signal {
-            RunSignal::Progress { .. } => Ok(None),
+            RunSignal::Progress { .. } => Ok(Changed::NOTHING),
             RunSignal::StepProgress { token_id, progress, .. } => {
                 let index = run.row(token_id)?;
                 let row = &mut run.rows[index];
@@ -137,13 +156,13 @@ impl Watch {
                 row.state = report(row, model::StepReport::Progress { complete })?;
                 row.progress = row.progress.max(progress.clamp(0.0, 1.0));
                 row.changed = now;
-                Ok(Some(index))
+                Ok(Changed::row(index))
             }
             RunSignal::StepReport(step) => {
                 let Ok(index) = run.row(step.step_token_id.as_str()) else {
                     // A step inside a map's body: its report is its map's
                     // item's, and the body outcome says how the item ended.
-                    return Ok(None);
+                    return Ok(Changed::NOTHING);
                 };
                 let row = &mut run.rows[index];
                 let report_of = match &step.outcome {
@@ -155,12 +174,12 @@ impl Watch {
                     row.state = report(row, report_of)?;
                     row.changed = now;
                 }
-                Ok(Some(index))
+                Ok(Changed::row(index))
             }
             RunSignal::ForEachItems { map_token, items } => {
                 let Ok(index) = run.row(map_token) else {
                     // A map inside another map's body: shown as its outer map's items.
-                    return Ok(None);
+                    return Ok(Changed::NOTHING);
                 };
                 let row = &mut run.rows[index];
                 if let Some(map) = &mut row.map {
@@ -173,7 +192,7 @@ impl Watch {
                     row.state = report(row, model::StepReport::Progress { complete: false })?;
                 }
                 row.changed = now;
-                Ok(Some(index))
+                Ok(Changed::row(index))
             }
             RunSignal::BodyOutcomes(outcomes) => {
                 let mut changed = None;
@@ -191,7 +210,7 @@ impl Watch {
                         changed = Some(index);
                     }
                 }
-                Ok(changed)
+                Ok(Changed { row: changed, log: None })
             }
             RunSignal::Log(record) => {
                 let level_rank = match record.level.as_str() {
@@ -200,7 +219,7 @@ impl Watch {
                     _ => 2,
                 };
                 if level_rank > verbosity {
-                    return Ok(None);
+                    return Ok(Changed::NOTHING);
                 }
                 let index = record
                     .step_token_id
@@ -216,7 +235,7 @@ impl Watch {
                     level: record.level.clone(),
                     message: record.message.clone(),
                 });
-                Ok(index)
+                Ok(Changed { row: index, log: Some(run.logs.len() - 1) })
             }
         }
     }
@@ -356,4 +375,58 @@ fn rows_of(
         }
     }
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // TEST22280: a log line is said on the signal that adds it and on no other:
+    // the signals after it change nothing it says, so a failure's message is
+    // said once however many signals follow it.
+    #[test]
+    fn test22280_a_log_line_is_said_once() {
+        let registry = FabricRegistry::new_for_test();
+        let key = RunKey { run: 0, strand: 0 };
+        let mut watch = Watch::new(0);
+        let strand = StrandPlan { strand: 0, plan: MachinePlan::new("m"), node_names: HashMap::new() };
+        watch.add_run(key, "in.txt".into(), &strand, &registry);
+        let log = |message: &str| RunEvent {
+            key,
+            signal: RunSignal::Log(crate::PipelineLogRecord {
+                step_token_id: None,
+                cap_urn: None,
+                level: "error".into(),
+                attribution_class: crate::failure::AttributionClass::Input,
+                message: message.into(),
+                meta: None,
+                body_index: None,
+                arg_urn: None,
+            }),
+        };
+        let progress = RunEvent {
+            key,
+            signal: RunSignal::Progress { progress: 0.5, cap_urn: String::new(), message: String::new() },
+        };
+        let changes: Vec<Changed> = [log("one"), progress.clone(), progress.clone(), log("two"), progress]
+            .iter()
+            .map(|event| watch.apply(event).expect("the signal folds in"))
+            .collect();
+        assert_eq!(
+            changes,
+            [
+                Changed { row: None, log: Some(0) },
+                Changed::NOTHING,
+                Changed::NOTHING,
+                Changed { row: None, log: Some(1) },
+                Changed::NOTHING,
+            ]
+        );
+        let said: Vec<&str> = watch.runs[&key].logs.iter().map(|log| log.message.as_str()).collect();
+        assert_eq!(said, ["one", "two"]);
+        // Quiet (-q) shows no log line: one adds nothing to say.
+        let mut quiet = Watch::new(-1);
+        quiet.add_run(key, "in.txt".into(), &strand, &registry);
+        assert_eq!(quiet.apply(&log("not shown")).unwrap(), Changed::NOTHING);
+    }
 }

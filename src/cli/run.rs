@@ -996,7 +996,7 @@ async fn execute(
                 biased;
                 Some(event) = events.recv() => {
                     match watch.apply(&event) {
-                        Ok(row) => shower.changed(&watch, event.key, row),
+                        Ok(changed) => shower.changed(&watch, event.key, changed),
                         Err(e) => failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string())),
                     }
                 }
@@ -1024,8 +1024,8 @@ async fn execute(
                 Some((key, joined)) = joining.next() => {
                     // Everything the strand said reaches the watch before its end.
                     while let Ok(event) = events.try_recv() {
-                        if let Ok(row) = watch.apply(&event) {
-                            shower.changed(&watch, event.key, row);
+                        if let Ok(changed) = watch.apply(&event) {
+                            shower.changed(&watch, event.key, changed);
                         }
                     }
                     let (outcome, outputs) = match joined {

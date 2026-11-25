@@ -27,7 +27,7 @@ use ratatui::{Terminal, TerminalOptions, Viewport};
 use super::error::{CliError, CliResult};
 use super::inline::InlineBackend;
 use super::term::{emit_record, Style, Term};
-use super::watch::{MapItems, RunWatch, StepState, Watch};
+use super::watch::{Changed, MapItems, RunWatch, StepState, Watch};
 use crate::orchestrator::observe::RunKey;
 use crate::orchestrator::run_control::{RunOutcome, RunPhase};
 
@@ -90,24 +90,22 @@ impl Shower {
         matches!(self, Shower::Live(_))
     }
 
-    /// A row of a run changed.
-    pub fn changed(&mut self, watch: &Watch, key: RunKey, row: Option<usize>) {
+    /// A signal changed a run: a row, and the log line it added.
+    pub fn changed(&mut self, watch: &Watch, key: RunKey, changed: Changed) {
         let Some(run) = watch.runs.get(&key) else { return };
         match self {
             Shower::Live(_) | Shower::Quiet => {}
-            Shower::Plain(lines) => lines.changed(watch, run, row),
+            Shower::Plain(lines) => lines.changed(watch, run, changed),
             Shower::Json => {
-                if let Some(index) = row {
+                if let Some(index) = changed.row {
                     emit_record(&row_record(run, index));
                 }
-                if let Some(log) = run.logs.last() {
-                    if row.is_none() || log.step.as_deref() == row.map(|i| run.rows[i].name.as_str()) {
-                        emit_record(&serde_json::json!({
-                            "type": "log",
-                            "run": key.run, "strand": key.strand,
-                            "step": log.step, "level": log.level, "message": log.message,
-                        }));
-                    }
+                if let Some(log) = changed.log.map(|index| &run.logs[index]) {
+                    emit_record(&serde_json::json!({
+                        "type": "log",
+                        "run": key.run, "strand": key.strand,
+                        "step": log.step, "level": log.level, "message": log.message,
+                    }));
                 }
             }
         }
@@ -283,9 +281,12 @@ impl PlainLines {
         }
     }
 
-    fn changed(&mut self, _watch: &Watch, run: &RunWatch, row: Option<usize>) {
-        let Some(index) = row else {
-            if let Some(log) = run.logs.last() {
+    /// A line for a row whose state changed, or that has gone on a second;
+    /// a line for each log line of no row (the machine's, a map body's step's)
+    /// as it comes — a row's own is shown on its row.
+    fn changed(&mut self, _watch: &Watch, run: &RunWatch, changed: Changed) {
+        let Some(index) = changed.row else {
+            if let Some(log) = changed.log.map(|index| &run.logs[index]) {
                 eprintln!("  {}: {}", log.level, log.message);
             }
             return;
