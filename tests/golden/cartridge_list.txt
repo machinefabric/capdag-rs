@@ -1,0 +1,5 @@
+$ capdag cartridge list
+exit: 0
+--- stdout ---
+No cartridges are bundled or installed. A run installs the ones it needs.
+--- stderr ---

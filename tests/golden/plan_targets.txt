@@ -1,0 +1,10 @@
+$ capdag plan in.txt
+exit: 0
+--- stdout ---
+1 txt can become:
+  dag-joined;enc=utf8  dag-joined;enc=utf8 · each · 1 step
+  dag-shout;enc=utf8   dag-shout;enc=utf8 · each · 1 step
+  dag-word;enc=utf8    dag-word;enc=utf8 · each · 1 step
+--- stderr ---
+
+Find machines that make one: capdag plan in.txt --to dag-joined;enc=utf8

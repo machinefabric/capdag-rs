@@ -1,0 +1,19 @@
+$ capdag graph loud.machine --format mermaid
+exit: 0
+--- stdout ---
+flowchart LR
+  subgraph p0 ["machine_strand_0"]
+    «<token><br/>shout» --> «loud»
+    «<token><br/>shout»["<token><br/>shout"]
+    «<token><br/>words» --> «foreach_1<br/>ForEach»
+    «<token><br/>words»["<token><br/>words"]
+    «doc<br/>enc=utf8<br/>Single» --> «<token><br/>words»
+    «doc<br/>enc=utf8<br/>Single»(["doc<br/>enc=utf8<br/>Single"])
+    «foreach_1<br/>ForEach» ==>|"each"| «foreach_1_item_0<br/>item<br/>dag-word;enc=utf8»
+    «foreach_1<br/>ForEach»{{"foreach_1<br/>ForEach"}}
+    «foreach_1_item_0<br/>item<br/>dag-word;enc=utf8» --> «<token><br/>shout»
+    «foreach_1_item_0<br/>item<br/>dag-word;enc=utf8»("foreach_1_item_0<br/>item<br/>dag-word;enc=utf8")
+    «loud»((("loud")))
+  end
+
+--- stderr ---

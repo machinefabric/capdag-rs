@@ -1,0 +1,38 @@
+$ capdag edit say.machine
+exit: 0
+--- stdout ---
+--- screen: the machine ---
+ capdag edit ▸ say.machine                                                       resolves · 2 steps
+╭────────────────────────╮      ╭────────────╮      ╭────────────────────────╮      ╭────────────╮
+│ ◇ Test DAG (test-dag-… ├─────▸│ ≡ s        ├─────▸│ ◇ Test DAG (test-dag-… ├─────▸│ ≡ w        │
+╰────────────────────────╯      ╰────────────╯      ╰────────────────────────╯      ╰────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 2 steps
+ Inputs: none
+ Outputs: w
+
+ Focus a node or a step to inspect it.
+
+
+
+
+
+
+
+ a add · A new step · d delete · r replace · i insert · s/o rewire · u/U undo · ^S save · x run · …
+--- screen: at the end ---
+Saved say.machine

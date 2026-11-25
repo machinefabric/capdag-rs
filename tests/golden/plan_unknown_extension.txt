@@ -1,0 +1,6 @@
+$ capdag plan in.unknown
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 'in.unknown' does not exist
+hint: check the path; inputs are files, directories or globs

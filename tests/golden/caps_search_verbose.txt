@@ -1,0 +1,8 @@
+$ capdag -v caps words
+exit: 0
+--- stdout ---
+words  Test DAG (test-dag-words) (enc=utf8 → dag-word;enc=utf8)
+       cap:in="media:enc=utf8";out="media:dag-word;enc=utf8";test-dag-words
+--- stderr ---
+
+1 capability. More about one: capdag info <alias>

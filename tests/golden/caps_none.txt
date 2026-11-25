@@ -1,0 +1,7 @@
+$ capdag caps nothingmatches
+exit: 1
+--- stdout ---
+--- stderr ---
+error: no capability matches
+  looked for: nothingmatches
+hint: fewer words find more; `capdag caps` lists every capability

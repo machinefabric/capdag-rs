@@ -1,0 +1,7 @@
+$ capdag caps shout
+exit: 0
+--- stdout ---
+shout  Test DAG (test-dag-shout) (enc=utf8 → dag-shout;enc=utf8)
+--- stderr ---
+
+1 capability. More about one: capdag info <alias>

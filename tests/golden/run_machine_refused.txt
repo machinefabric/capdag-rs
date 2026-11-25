@@ -1,0 +1,10 @@
+$ capdag run refuses-one.machine brave.txt --dev-bin <cartridge>
+exit: 1
+--- stdout ---
+--- stderr ---
+[1/1] shout  waiting
+✗ brave.txt  1 step · <time> · failed
+  shout failed
+error: shout refused its input
+  'brave' is not shouted
+hint: see what shout takes: capdag info shout

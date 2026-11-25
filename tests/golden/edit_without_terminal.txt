@@ -1,0 +1,6 @@
+$ capdag edit loud.machine
+exit: 2
+--- stdout ---
+--- stderr ---
+error: capdag edit needs a terminal
+hint: edit loud.machine in any editor, then: capdag check loud.machine

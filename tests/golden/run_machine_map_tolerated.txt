@@ -1,0 +1,10 @@
+$ capdag run tolerates.machine in.txt --progress none --dev-bin <cartridge>
+exit: 3
+--- stdout ---
+<work>/in.loud.0.txt
+<work>/in.loud.1.txt
+--- stderr ---
+failed, and tolerated: shout (item 2) [input/SHOUT_REFUSED] — 'brave' is not shouted
+✓ in.txt  2 steps · 3 items · <time> · tolerated
+  → <work>/in.loud.0.txt
+  → <work>/in.loud.1.txt

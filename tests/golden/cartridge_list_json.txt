@@ -1,0 +1,4 @@
+$ capdag --json cartridge list
+exit: 0
+--- stdout ---
+--- stderr ---

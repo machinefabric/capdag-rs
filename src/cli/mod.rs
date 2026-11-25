@@ -190,7 +190,14 @@ pub enum SelfCommand {
 
 /// Run the command line given, and return the process's exit status.
 pub async fn main() -> i32 {
-    let argv: Vec<String> = std::env::args().collect();
+    run_command_line(std::env::args().collect(), None).await
+}
+
+/// Run `argv` as the command line, and return the process's exit status.
+/// With `registry`, every command resolves against it, in place of the fabric
+/// the flags, the environment and the build name: what a test of the commands
+/// drives them against.
+pub async fn run_command_line(argv: Vec<String>, registry: Option<std::sync::Arc<crate::FabricRegistry>>) -> i32 {
     let argv = run::separate_cap_tokens(Cli::command(), argv);
     let matches = match Cli::command().try_get_matches_from(&argv) {
         Ok(matches) => matches,
@@ -211,7 +218,10 @@ pub async fn main() -> i32 {
     let json = term.json;
     let outcome = match one_fabric(&cli.global.fabric).and_then(ctx::bind_fabric) {
         Ok(()) => {
-            let ctx = Ctx::new(term, cli.global.offline);
+            let ctx = match registry {
+                Some(registry) => Ctx::on_registry(term, cli.global.offline, registry),
+                None => Ctx::new(term, cli.global.offline),
+            };
             dispatch(&ctx, cli.command).await
         }
         Err(error) => Err(error),

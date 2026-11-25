@@ -1,0 +1,67 @@
+$ capdag --help
+exit: 0
+--- stdout ---
+Find capabilities, run them on files, and plan and run machines of them
+
+Usage: capdag [OPTIONS] <COMMAND>
+
+Commands:
+  caps       List and search capabilities [alias: search]
+  info       Show a capability or a media type: what it takes, gives and needs
+  run        Run a capability or a machine on files
+  plan       Find machines that turn files into a target, and save or run one
+  check      Check a machine file without running it
+  graph      Draw a machine: as text, Mermaid or Graphviz
+  view       Look at a machine in the terminal: its graph, steps and arguments
+  edit       Edit a machine in the terminal, checking every change against the fabric
+  cartridge  The cartridges that provide capabilities: list, install, remove
+  model      The models capabilities run: list, search, download, remove
+  cache      The local copy of the fabric: refresh or clear it
+  dev        Develop cartridges: start a project, install it for local runs
+  self       This capdag itself
+  help       Show help for a command
+
+Options:
+      --fabric <URL>
+          Resolve caps, media and aliases against this fabric instead of the built-in one (env:
+          CDG_FABRIC_REGISTRY_URL)
+
+      --offline
+          Use the network for nothing: what is not cached or bundled is an error that names it
+
+      --json
+          Print JSON Lines on stdout — one record per line — instead of text for a person
+
+      --no-input
+          Never ask: a choice not given by a flag is an error naming the flag
+
+      --color <WHEN>
+          When to colour the output
+
+          Possible values:
+          - auto:   Colour a terminal, and nothing else; `NO_COLOR` turns it off
+          - always
+          - never
+
+          [default: auto]
+
+  -v, --verbose...
+          Say more: -v adds the cartridges' info logs and URNs, -vv their debug logs
+
+  -q, --quiet
+          Say only what failed
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Start here:
+  capdag caps pdf                                   find capabilities that take or give PDF
+  capdag run disbind-pdf report.pdf -o pages        run one on a file
+  capdag plan report.pdf --to txt                   find machines that make text of it
+  capdag run pages.machine report.pdf               run a machine
+
+`capdag help <command>` shows a command's help with examples.
+--- stderr ---

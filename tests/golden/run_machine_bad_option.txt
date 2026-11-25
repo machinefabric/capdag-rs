@@ -1,0 +1,6 @@
+$ capdag run loud.machine in.txt --shout --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: a machine run has no option '--shout'
+hint: a machine's steps are configured in the machine; see `capdag run --help` for run's own flags

@@ -1,0 +1,7 @@
+$ capdag shout in.txt
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 'shout' is a capability, not a command
+  shout — Test DAG (test-dag-shout)
+hint: run it with: capdag run shout in.txt

@@ -1,0 +1,6 @@
+$ capdag --json plan in.txt --to 'media:dag-shout;enc=utf8' --pick 1
+exit: 0
+--- stdout ---
+{"alias":"txt","file":"in.txt","type":"input","urn":"media:enc=utf8;ext=txt"}
+{"canonical":"[edge_0 cap:in=\"media:enc=utf8\";out=\"media:dag-shout;enc=utf8\";test-dag-shout][(input=n0) -> edge_0 -> (output=n1)]","downloads":true,"model":false,"notation":"[(input=value) -> shout -> (output=value_2)]","pick":1,"steps":1,"type":"machine"}
+--- stderr ---

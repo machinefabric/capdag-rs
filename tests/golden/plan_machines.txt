@@ -1,0 +1,54 @@
+$ capdag plan in.txt --to 'media:dag-shout;enc=utf8'
+exit: 0
+--- stdout ---
+32 machines make dag-shout;enc=utf8 of 1 txt:
+
+  1. 1 step · needs a cartridge download
+     [(input=value) -> shout -> (output=value_2)]
+
+  2. 2 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> shout -> (output=value_3)]
+
+  3. 2 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> shout -> (output=value_3)]
+
+  4. 2 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> shout -> (output=value_3)]
+
+  5. 2 steps · needs a cartridge download
+     [(input=value) -> words -> (output=value_2)]
+     [(input=value_2) -> shout -> (output=value_3)]
+
+  6. 3 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+  7. 3 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+  8. 3 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+  9. 3 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 10. 3 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ … and 22 more: --all lists them
+--- stderr ---
+
+Save one: capdag plan in.txt --to <type> --pick <n> --save <file>
+Run one:  capdag plan in.txt --to <type> --pick <n> --run

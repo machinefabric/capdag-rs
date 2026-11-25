@@ -1,0 +1,6 @@
+$ capdag plan in.txt --to 'media:dag-shout;enc=utf8' --pick 99
+exit: 2
+--- stdout ---
+--- stderr ---
+error: --pick 99: there are 32 machines, numbered from 1
+hint: choose one of 1 to 32

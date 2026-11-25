@@ -1,0 +1,7 @@
+$ capdag --fabric ftp://a.example caps
+exit: 2
+--- stdout ---
+--- stderr ---
+error: --fabric 'ftp://a.example' is not an http(s) URL
+  a fabric is an origin
+hint: for example: --fabric https://fabric-staging.capdag.com

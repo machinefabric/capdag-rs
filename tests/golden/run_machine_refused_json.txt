@@ -1,0 +1,12 @@
+$ capdag --json run refuses-one.machine brave.txt --dev-bin <cartridge>
+exit: 1
+--- stdout ---
+{"index":0,"items":null,"progress":0.0,"run":0,"state":"waiting","step":"shout","strand":0,"token":"<token>","type":"step"}
+{"level":"error","message":"'brave' is not shouted","run":0,"step":"shout","strand":0,"type":"log"}
+{"label":"brave.txt","outcome":"failed","outputs":[],"run":0,"seconds":"<time>","strand":0,"type":"run_finished"}
+{"exit":1,"outcome":"failed","type":"finished"}
+{"context":["'brave' is not shouted"],"exit":1,"hint":"see what shout takes: capdag info shout","problem":"shout refused its input","type":"error"}
+--- stderr ---
+error: shout refused its input
+  'brave' is not shouted
+hint: see what shout takes: capdag info shout

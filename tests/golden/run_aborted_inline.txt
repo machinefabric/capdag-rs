@@ -1,0 +1,8 @@
+$ capdag run slow.machine in.txt --dev-bin <cartridge>
+exit: 130
+--- stdout ---
+--- screen: at the end ---
+Stopping: nothing new starts; what started finishes and is written. Ctrl-C again aborts.
+Aborting: the cartridges are cancelled and have <time> to end. Ctrl-C again ends them now.
+✗ in.txt  1 step · <time> · aborted
+  shout not run

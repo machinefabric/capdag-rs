@@ -1,0 +1,50 @@
+$ capdag plan in.txt
+exit: 0
+--- stdout ---
+[(input=value) -> join -> (output=value_2)]
+--- screen: what to make ---
+Choose what to make:   3/3
+› dag-joined;enc=utf8  dag-joined;enc=utf8 · each · 1 step
+  dag-shout;enc=utf8   dag-shout;enc=utf8 · each · 1 step
+  dag-word;enc=utf8    dag-word;enc=utf8 · each · 1 step
+type to filter · ↑↓ move · Enter choose · Esc cancel
+--- screen: the machine ---
+
+
+
+
+Choose the machine:   32/32
+› [(input=value) -> join -> (output=value_2)]  1 step · needs a cartridge download
+  [(input=value) -> flaky -> (output=value_2)] [(input=value_2) -> join -> (output=value_3)]  2 step
+  [(left=value) -> pair -> (output=value_2)] [(input=value_2) -> join -> (output=value_3)]  2 steps
+  [(input=value) -> shout -> (output=value_2)] [(input=value_2) -> join -> (output=value_3)]  2 step
+  [(input=value) -> words -> (output=value_2)] [(input=value_2) -> join -> (output=value_3)]  2 step
+  [(input=value) -> flaky -> (output=value_2)] [(left=value_2) -> pair -> (output=value_3)] [(input=
+  [(input=value) -> flaky -> (output=value_2)] [(input=value_2) -> shout -> (output=value_3)] [(inpu
+  [(input=value) -> flaky -> (output=value_2)] [(input=value_2) -> words -> (output=value_3)] [(inpu
+  [(left=value) -> pair -> (output=value_2)] [(input=value_2) -> flaky -> (output=value_3)] [(input=
+  [(left=value) -> pair -> (output=value_2)] [(input=value_2) -> shout -> (output=value_3)] [(input=
+type to filter · ↑↓ move · Enter choose · Esc cancel
+--- screen: what to do with it ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Choose what to do with it:   3/3
+› run    run it on in.txt
+  save   save it as in-to-dag-joined-enc-utf8.machine
+  print  print it, and do nothing else
+type to filter · ↑↓ move · Enter choose · Esc cancel
+--- screen: at the end ---
+

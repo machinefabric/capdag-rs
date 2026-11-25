@@ -1,0 +1,6 @@
+$ capdag run absent.machine in.txt
+exit: 2
+--- stdout ---
+--- stderr ---
+error: the machine file 'absent.machine' does not exist
+hint: check the path; `capdag plan <files> --to <type> --save <file>` writes one

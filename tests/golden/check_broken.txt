@@ -1,0 +1,12 @@
+$ capdag check broken.machine
+exit: 1
+--- stdout ---
+--- stderr ---
+error: broken.machine is not a machine that can run
+  parse error:  --> 2:18
+    |
+  2 | [doc -> words -> w
+    |                  ^---
+    |
+    = expected target_group
+hint: `capdag check` on a machine that works shows the form; the notation is in the CapDAG docs, §Machine notation

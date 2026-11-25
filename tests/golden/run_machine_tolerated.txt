@@ -1,0 +1,10 @@
+$ capdag run tolerates-one.machine brave.txt --dev-bin <cartridge>
+exit: 3
+--- stdout ---
+--- stderr ---
+[1/1] shout  waiting
+[1/1] shout  failed (tolerated)
+not produced: loud (dag-shout;enc=utf8) — the branch that makes it did not fire
+failed, and tolerated: shout [input/SHOUT_REFUSED] — 'brave' is not shouted
+✓ brave.txt  1 step · <time> · tolerated
+  shout failed (tolerated)

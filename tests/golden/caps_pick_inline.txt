@@ -1,0 +1,17 @@
+$ capdag caps --pick dag
+exit: 0
+--- stdout ---
+join
+--- screen: the picker ---
+Choose a capability:   8/8
+› flaky                Test DAG (test-dag-flaky) · enc=utf8 → dag-flaky;enc=utf8
+  join                 Test DAG (test-dag-join) · enc=utf8 → dag-joined;enc=utf8
+  pair                 Test DAG (test-dag-pair) · enc=utf8 → dag-pair;enc=utf8
+  say                  Test DAG (test-dag-say) · void → dag-said;enc=utf8
+  shout                Test DAG (test-dag-shout) · enc=utf8 → dag-shout;enc=utf8
+  test-random-numbers  Test DAG (test-random-numbers) · random-number → random-number
+  test-random-parity   Test DAG (test-random-parity) · random-number → enc=utf8;random-parity
+  words                Test DAG (test-dag-words) · enc=utf8 → dag-word;enc=utf8
+type to filter · ↑↓ move · Enter choose · Esc cancel
+--- screen: at the end ---
+

@@ -1,0 +1,8 @@
+$ capdag --json plan in.txt
+exit: 0
+--- stdout ---
+{"alias":"txt","file":"in.txt","type":"input","urn":"media:enc=utf8;ext=txt"}
+{"alias":"dag-joined;enc=utf8","detail":"dag-joined;enc=utf8 · each · 1 step","type":"target","urn":"media:dag-joined;enc=utf8"}
+{"alias":"dag-shout;enc=utf8","detail":"dag-shout;enc=utf8 · each · 1 step","type":"target","urn":"media:dag-shout;enc=utf8"}
+{"alias":"dag-word;enc=utf8","detail":"dag-word;enc=utf8 · each · 1 step","type":"target","urn":"media:dag-word;enc=utf8"}
+--- stderr ---

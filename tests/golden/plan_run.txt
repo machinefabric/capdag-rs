@@ -1,0 +1,7 @@
+$ capdag plan in.txt --to 'media:dag-shout;enc=utf8' --pick 1 --run --dev-bin <cartridge>
+exit: 0
+--- stdout ---
+HELLO BRAVE WORLD
+--- stderr ---
+[1/1] shout  done
+✓ in.txt  1 step · <time>

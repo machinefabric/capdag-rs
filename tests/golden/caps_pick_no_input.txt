@@ -1,0 +1,14 @@
+$ capdag --no-input caps --pick dag
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 8 capabilities match, and --pick has no terminal to choose on
+  flaky  Test DAG (test-dag-flaky)
+  join  Test DAG (test-dag-join)
+  pair  Test DAG (test-dag-pair)
+  say  Test DAG (test-dag-say)
+  shout  Test DAG (test-dag-shout)
+  test-random-numbers  Test DAG (test-random-numbers)
+  test-random-parity  Test DAG (test-random-parity)
+  words  Test DAG (test-dag-words)
+hint: add words to the query until one matches, or leave out --pick to list them

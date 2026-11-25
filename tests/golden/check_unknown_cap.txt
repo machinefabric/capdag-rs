@@ -1,0 +1,7 @@
+$ capdag check unknown.machine
+exit: 1
+--- stdout ---
+--- stderr ---
+error: unknown.machine is not a machine that can run
+  wiring references undefined alias 'nosuch' (not a local header and not a registered cap alias)
+hint: find the capability you meant with: capdag caps nosuch

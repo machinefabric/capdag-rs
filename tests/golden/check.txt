@@ -1,0 +1,12 @@
+$ capdag check loud.machine
+exit: 0
+--- stdout ---
+✓ loud.machine
+  inputs:  doc (enc=utf8)
+  outputs: loud (dag-shout;enc=utf8)
+
+  [(input=value) -> words -> (output=value_2)]
+  [(input=value_2) -> shout -> (output=value_3)]
+
+Run it: capdag run loud.machine <doc>
+--- stderr ---

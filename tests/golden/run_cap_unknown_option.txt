@@ -1,0 +1,7 @@
+$ capdag run shout in.txt --loudness 9 --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 'shout' was given an option it does not have
+  cap cap:in="media:enc=utf8";out="media:dag-shout;enc=utf8";test-dag-shout has no arg with CLI flag '--loudness'. Known flags: [--fail-on, --delay-ms]; any arg can also be addressed as --arg <media-urn>=<value>. Valid media URNs: [media:dag-fail-on;enc=utf8, media:dag-delay-ms;numeric]
+hint: its options: capdag run shout --help

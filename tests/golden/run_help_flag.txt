@@ -1,0 +1,100 @@
+$ capdag run --help
+exit: 0
+--- stdout ---
+Run a capability or a machine on files
+
+Usage: capdag run [OPTIONS] <CAP|MACHINE> [-- <INPUTS>...]
+
+Arguments:
+  <CAP|MACHINE>
+          A capability, by its alias or URN, or a machine file
+
+  [INPUTS]...
+          Files, directories or globs to run on; for a cap, also its own options
+
+Options:
+      --fabric <URL>
+          Resolve caps, media and aliases against this fabric instead of the built-in one (env:
+          CDG_FABRIC_REGISTRY_URL)
+
+  -o, --output <DIR>
+          Write results into this directory (default: the working directory)
+
+      --force
+          Overwrite result files that exist
+
+      --offline
+          Use the network for nothing: what is not cached or bundled is an error that names it
+
+      --input <NAME=VALUE>
+          A machine's input by its name in the notation; `@<path>` reads a file (repeatable)
+
+      --json
+          Print JSON Lines on stdout — one record per line — instead of text for a person
+
+      --arg <NAME=VALUE>
+          A cap's option by its name or media URN; `@<path>` reads a file (repeatable)
+
+      --no-input
+          Never ask: a choice not given by a flag is an error naming the flag
+
+      --color <WHEN>
+          When to colour the output
+
+          Possible values:
+          - auto:   Colour a terminal, and nothing else; `NO_COLOR` turns it off
+          - always
+          - never
+
+          [default: auto]
+
+      --to <TYPE>
+          For a generic cap such as convert-image: the type to make
+
+      --selector <JSON>
+          For a live source: what to capture, as JSON (`{"duration_ms":5000}`)
+
+  -v, --verbose...
+          Say more: -v adds the cartridges' info logs and URNs, -vv their debug logs
+
+      --progress <HOW>
+          How the run is shown while it goes
+
+          Possible values:
+          - auto:  The live view on a terminal, lines otherwise
+          - live:  The live view
+          - plain: A line per change
+          - none:  Only the summary
+
+          [default: auto]
+
+  -q, --quiet
+          Say only what failed
+
+      --trace <FILE>
+          Write each segment's protocol trace to this file (JSON Lines)
+
+      --dev-bin <PATH>
+          Use this cartridge binary, or every binary in this directory (repeatable)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Examples:
+  capdag run csv2json people.csv                       one cap; the result on stdout
+  cat report.pdf | capdag run disbind-pdf -o pages     piped input; pages written to pages/
+  capdag run disbind-pdf report.pdf --index-range 1-5  the cap's own options, as it declares them
+  capdag run pages.machine report.pdf -o out           a machine
+  capdag run pages.machine --input doc=@report.pdf     an input by its name in the machine
+
+A single result goes to stdout; several results are written as files, whose
+paths are listed on stdout. Progress, logs and errors go to stderr.
+
+Ctrl-C stops the run: nothing new starts, what started finishes and is written.
+Ctrl-C again aborts it.
+
+`capdag run <cap> --help` shows that cap's own options.
+--- stderr ---

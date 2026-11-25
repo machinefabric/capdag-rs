@@ -1,0 +1,104 @@
+$ capdag view loud.machine
+exit: 0
+--- stdout ---
+--- screen: the machine ---
+ capdag view ▸ loud.machine                                                      resolves · 2 steps
+   ╭──────────────────╮      ╭───────────────────────────────╮      ╭───────────────────╮
+   │ ≡ doc            ├─────▸│ ◇ Test DAG (test-dag-words)   ├─────▸│ ≡ w               ├──╮
+   │ enc=utf8 · Input │      │ words                         │      │ dag-word;enc=utf8 │  │
+   ╰──────────────────╯      ╰───────────────────────────────╯      ╰───────────────────╯  │
+                                                                                           │
+ ╭─────────────────────────────────────────────────────────────────────────────────────────╯
+ │
+ │ ╭───────────────────────────────╮      ╭─────────────────────────────╮
+ ╰▸│ ◇ Test DAG (test-dag-shout)   ├─────▸│ ≡ loud                      │
+   │ shout                         │      │ dag-shout;enc=utf8 · Output │
+   ╰───────────────────────────────╯      ╰─────────────────────────────╯
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 2 steps
+ Inputs: doc
+ Outputs: loud
+
+ Focus a node or a step to inspect it.
+
+
+
+
+
+
+
+ ←↑↓→ move · . , sources · e source · +/- detail · f fit · : commands · ? keys · q quit
+--- screen: a node focused ---
+ capdag view ▸ loud.machine                                                      resolves · 2 steps
+   ╭──────────────────╮      ╭───────────────────────────────╮      ╭───────────────────╮
+   │ ≡ doc            ├─────▸│ ◇ Test DAG (test-dag-words)   ├─────▸│ ≡ w               ├──╮
+   │ enc=utf8 · Input │      │ words                         │      │ dag-word;enc=utf8 │  │
+   ╰──────────────────╯      ╰───────────────────────────────╯      ╰───────────────────╯  │
+                                                                                           │
+ ╭─────────────────────────────────────────────────────────────────────────────────────────╯
+ │
+ │ ╭───────────────────────────────╮      ╭─────────────────────────────╮
+ ╰▸│ ◇ Test DAG (test-dag-shout)   ├─────▸│ ≡ loud                      │
+   │ shout                         │      │ dag-shout;enc=utf8 · Output │
+   ╰───────────────────────────────╯      ╰─────────────────────────────╯
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ doc
+ enc=utf8
+ media:enc=utf8
+
+ An input of the machine
+ Read by words
+
+
+
+
+
+
+ ←↑↓→ move · . , sources · e source · +/- detail · f fit · : commands · ? keys · q quit
+--- screen: the next one focused ---
+ capdag view ▸ loud.machine                                                      resolves · 2 steps
+   ╭──────────────────╮      ╭───────────────────────────────╮      ╭───────────────────╮
+   │ ≡ doc            ├─────▸│ ◇ Test DAG (test-dag-words)   ├─────▸│ ≡ w               ├──╮
+   │ enc=utf8 · Input │      │ words                         │      │ dag-word;enc=utf8 │  │
+   ╰──────────────────╯      ╰───────────────────────────────╯      ╰───────────────────╯  │
+                                                                                           │
+ ╭─────────────────────────────────────────────────────────────────────────────────────────╯
+ │
+ │ ╭───────────────────────────────╮      ╭─────────────────────────────╮
+ ╰▸│ ◇ Test DAG (test-dag-shout)   ├─────▸│ ≡ loud                      │
+   │ shout                         │      │ dag-shout;enc=utf8 · Output │
+   ╰───────────────────────────────╯      ╰─────────────────────────────╯
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Test DAG (test-dag-shout)
+ shout
+ cap:in="media:enc=utf8";out="media:dag-shout;enc=utf8";test-dag-shout
+
+ Sources
+ › w
+
+ Outputs
+   loud
+
+
+
+ ←↑↓→ move · . , sources · e source · +/- detail · f fit · : commands · ? keys · q quit
+--- screen: at the end ---
+

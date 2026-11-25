@@ -1,0 +1,6 @@
+$ capdag --offline cartridge install nosuch
+exit: 2
+--- stdout ---
+--- stderr ---
+error: the cartridge registry is not read offline
+hint: drop --offline

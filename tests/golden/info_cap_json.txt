@@ -1,0 +1,5 @@
+$ capdag --json info shout
+exit: 0
+--- stdout ---
+{"alias":"shout","bundled":[],"installed":[],"type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-shout;enc=utf8\";test-dag-shout","definition":{"urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-shout;enc=utf8\";test-dag-shout","version":1,"title":"Test DAG (test-dag-shout)","aliases":["test-dag-shout"],"cap_description":"The text in capitals","args":[{"media_urn":"media:enc=utf8","name":"input","required":true,"is_sequence":false,"streaming":false,"sources":[{"stdin":"media:enc=utf8"}],"arg_description":"The text"},{"media_urn":"media:dag-fail-on;enc=utf8","name":"fail-on","required":false,"is_sequence":false,"streaming":false,"sources":[{"cli_flag":"--fail-on"}],"arg_description":"A text to refuse"},{"media_urn":"media:dag-delay-ms;numeric","name":"delay-ms","required":false,"is_sequence":false,"streaming":false,"sources":[{"cli_flag":"--delay-ms"}],"arg_description":"How long to take, in milliseconds"}],"outputs":[{"media_urn":"media:dag-shout;enc=utf8","name":"output","output_description":"The text in capitals","optional":false,"is_sequence":false,"streaming":false}]}}
+--- stderr ---

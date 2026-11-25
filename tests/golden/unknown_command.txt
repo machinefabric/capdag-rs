@@ -1,0 +1,6 @@
+$ capdag cpas
+exit: 2
+--- stdout ---
+--- stderr ---
+error: there is no command `cpas`
+hint: did you mean `capdag caps`?

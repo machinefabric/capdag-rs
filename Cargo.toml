@@ -151,11 +151,18 @@ name = "tui_session"
 # Drives the terminal interface end to end on the test cartridge.
 required-features = ["cli"]
 
+[[test]]
+name = "cli_golden"
+# Records every command of the CLI in each of its modes.
+required-features = ["cli"]
+
 [dev-dependencies]
 # Signing the self-update tests' fixture releases.
 ed25519-dalek = "2"
 serial_test = "3.0"
 tempfile = "3.10"
+# The terminal the CLI's golden test reads a screen from, as a person sees it.
+vt100 = "0.15"
 # A clock the tests move themselves: what a request waits out during an outage
 # is checked to the millisecond, without sleeping through it.
 tokio = { version = "1.0", features = ["test-util"] }
@@ -174,4 +181,4 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.1070.0"
+version = "1.1071.7"

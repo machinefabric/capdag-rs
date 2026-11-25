@@ -1,0 +1,6 @@
+$ capdag info nosuch
+exit: 2
+--- stdout ---
+--- stderr ---
+error: there is no capability or media type named 'nosuch'
+hint: find capabilities with: capdag caps nosuch

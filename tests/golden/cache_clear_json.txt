@@ -1,0 +1,7 @@
+$ capdag --json cache clear
+exit: 1
+--- stdout ---
+{"context":["Charter: cannot reach https://fabric.golden.invalid/charter.json: error sending request for url (https://fabric.golden.invalid/charter.json?cb=<time>)"],"exit":1,"hint":null,"problem":"the fabric cache of https://fabric.golden.invalid could not be cleared","type":"error"}
+--- stderr ---
+error: the fabric cache of https://fabric.golden.invalid could not be cleared
+  Charter: cannot reach https://fabric.golden.invalid/charter.json: error sending request for url (https://fabric.golden.invalid/charter.json?cb=<time>)

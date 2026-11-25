@@ -1,0 +1,7 @@
+$ capdag --json run upper.machine in.txt --dev-bin <cartridge>
+exit: 0
+--- stdout ---
+{"index":0,"items":null,"progress":1.0,"run":0,"state":"done","step":"shout","strand":0,"token":"<token>","type":"step"}
+{"label":"in.txt","outcome":"completed","outputs":["<work>/in.loud.txt"],"run":0,"seconds":"<time>","strand":0,"type":"run_finished"}
+{"exit":0,"outcome":"completed","type":"finished"}
+--- stderr ---

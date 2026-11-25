@@ -1,0 +1,10 @@
+$ capdag run slow.machine in.txt other.txt --dev-bin <cartridge>
+exit: 130
+--- stdout ---
+<work>/in.loud.txt
+--- screen: at the end ---
+Stopping: nothing new starts; what started finishes and is written. Ctrl-C again aborts.
+■ in.txt  1 step · <time> · stopped
+  → <work>/in.loud.txt
+
+1 not started: other.txt

@@ -51,6 +51,17 @@ impl Ctx {
         }
     }
 
+    /// A context whose commands resolve against `registry`, opened already.
+    /// `--offline` holds it as it holds an opened fabric.
+    pub fn on_registry(term: Term, offline: bool, registry: Arc<FabricRegistry>) -> Self {
+        registry.set_offline(offline);
+        Self {
+            term,
+            offline,
+            registry: OnceCell::new_with(Some(registry)),
+        }
+    }
+
     /// The fabric registry, built on first use.
     pub async fn registry(&self) -> CliResult<Arc<FabricRegistry>> {
         self.registry

@@ -1,0 +1,34 @@
+$ capdag caps
+exit: 0
+--- stdout ---
+flaky                  Test DAG (test-dag-flaky) (enc=utf8 → dag-flaky;enc=utf8)
+join                   Test DAG (test-dag-join) (enc=utf8 → dag-joined;enc=utf8)
+pair                   Test DAG (test-dag-pair) (enc=utf8 → dag-pair;enc=utf8)
+say                    Test DAG (test-dag-say) (void → dag-said;enc=utf8)
+shout                  Test DAG (test-dag-shout) (enc=utf8 → dag-shout;enc=utf8)
+test-combine           Test Combine (Two-Input Convergence) (enc=utf8;node2 → combined;enc=utf8)
+test-echo-items        Test Echo Items (Bidirectional Streaming Over A Sequence) (chunk-stream;enc=utf8 → echoed-items;enc=utf8)
+test-echo-stream       Test Echo Stream (Bidirectional Streaming) (chunk-stream;enc=utf8 → echoed-stream;enc=utf8)
+test-edge1             Test Edge 1 (Prepend Transform) (enc=utf8;node1 → enc=utf8;node2)
+test-edge10            Test Edge 10 (Unwrap+Lowercase Transform) (enc=utf8;node8 → enc=utf8;node1)
+test-edge2             Test Edge 2 (Append Transform) (enc=utf8;node2 → enc=utf8;node3)
+test-edge3             Test Edge 3 (Folder Fan-Out) (enc=utf8;node1 → enc=utf8;node4)
+test-edge4             Test Edge 4 (Fan-In Collect) (enc=utf8;node4 → enc=utf8;node5)
+test-edge5             Test Edge 5 (Multi-Input Merge) (enc=utf8;node2 → enc=utf8;node5)
+test-edge6             Test Edge 6 (Single to List) (enc=utf8;node1 → enc=utf8;node4)
+test-edge7             Test Edge 7 (Uppercase Transform) (enc=utf8;node3 → enc=utf8;node6)
+test-edge8             Test Edge 8 (Reverse Transform) (enc=utf8;node6 → enc=utf8;node7)
+test-edge9             Test Edge 9 (Wrap Transform) (enc=utf8;node7 → enc=utf8;node8)
+test-large             Test Large Payload (void → media:)
+test-memory-hog        Test Memory Hog (void → enc=utf8)
+test-peer              Test Peer Invoker (enc=utf8;node1 → enc=utf8;node5)
+test-random-numbers    Test DAG (test-random-numbers) (random-number → random-number)
+test-random-parity     Test DAG (test-random-parity) (random-number → enc=utf8;random-parity)
+test-slow-consume      Test Slow Consume (Input-Direction Credit) (chunk-stream;enc=utf8 → consume-report;enc=utf8)
+test-split             Test Split (Several Outputs) (enc=utf8;node1 → enc=utf8;node2)
+test-stream-n-chunks   Test Stream N Chunks (Credited Producer) (count-spec;enc=utf8 → chunk-stream;enc=utf8)
+test-unbounded-ticker  Test Unbounded Ticker (Unbounded Output Stream) (count-spec;enc=utf8 → enc=utf8;tick-stream)
+words                  Test DAG (test-dag-words) (enc=utf8 → dag-word;enc=utf8)
+--- stderr ---
+
+28 capabilities. More about one: capdag info <alias>

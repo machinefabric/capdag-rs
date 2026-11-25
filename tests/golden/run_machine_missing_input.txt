@@ -1,0 +1,6 @@
+$ capdag run loud.machine --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: the machine's input doc (enc=utf8) was given nothing
+hint: give a path it takes, or --input <name>=<value> (`@<path>` reads a file)

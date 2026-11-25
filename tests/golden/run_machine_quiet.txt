@@ -1,0 +1,11 @@
+$ capdag -q run loud.machine in.txt --dev-bin <cartridge>
+exit: 0
+--- stdout ---
+<work>/in.loud.0.txt
+<work>/in.loud.1.txt
+<work>/in.loud.2.txt
+--- stderr ---
+✓ in.txt  2 steps · 3 items · <time>
+  → <work>/in.loud.0.txt
+  → <work>/in.loud.1.txt
+  → <work>/in.loud.2.txt

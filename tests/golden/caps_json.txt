@@ -1,0 +1,32 @@
+$ capdag --json caps
+exit: 0
+--- stdout ---
+{"alias":"flaky","gives":"dag-flaky;enc=utf8","takes":"enc=utf8","title":"Test DAG (test-dag-flaky)","type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-flaky;enc=utf8\";test-dag-flaky"}
+{"alias":"join","gives":"dag-joined;enc=utf8","takes":"enc=utf8","title":"Test DAG (test-dag-join)","type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-joined;enc=utf8\";test-dag-join"}
+{"alias":"pair","gives":"dag-pair;enc=utf8","takes":"enc=utf8","title":"Test DAG (test-dag-pair)","type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-pair;enc=utf8\";test-dag-pair"}
+{"alias":"say","gives":"dag-said;enc=utf8","takes":"void","title":"Test DAG (test-dag-say)","type":"cap","urn":"cap:in=media:void;out=\"media:dag-said;enc=utf8\";test-dag-say"}
+{"alias":"shout","gives":"dag-shout;enc=utf8","takes":"enc=utf8","title":"Test DAG (test-dag-shout)","type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-shout;enc=utf8\";test-dag-shout"}
+{"alias":"test-combine","gives":"combined;enc=utf8","takes":"enc=utf8;node2","title":"Test Combine (Two-Input Convergence)","type":"cap","urn":"cap:in=\"media:enc=utf8;node2\";out=\"media:combined;enc=utf8\";test-combine"}
+{"alias":"test-echo-items","gives":"echoed-items;enc=utf8","takes":"chunk-stream;enc=utf8","title":"Test Echo Items (Bidirectional Streaming Over A Sequence)","type":"cap","urn":"cap:in=\"media:chunk-stream;enc=utf8\";out=\"media:echoed-items;enc=utf8\";test-echo-items"}
+{"alias":"test-echo-stream","gives":"echoed-stream;enc=utf8","takes":"chunk-stream;enc=utf8","title":"Test Echo Stream (Bidirectional Streaming)","type":"cap","urn":"cap:in=\"media:chunk-stream;enc=utf8\";out=\"media:echoed-stream;enc=utf8\";test-echo-stream"}
+{"alias":"test-edge1","gives":"enc=utf8;node2","takes":"enc=utf8;node1","title":"Test Edge 1 (Prepend Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node1\";out=\"media:enc=utf8;node2\";test-edge1"}
+{"alias":"test-edge10","gives":"enc=utf8;node1","takes":"enc=utf8;node8","title":"Test Edge 10 (Unwrap+Lowercase Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node8\";out=\"media:enc=utf8;node1\";test-edge10"}
+{"alias":"test-edge2","gives":"enc=utf8;node3","takes":"enc=utf8;node2","title":"Test Edge 2 (Append Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node2\";out=\"media:enc=utf8;node3\";test-edge2"}
+{"alias":"test-edge3","gives":"enc=utf8;node4","takes":"enc=utf8;node1","title":"Test Edge 3 (Folder Fan-Out)","type":"cap","urn":"cap:in=\"media:enc=utf8;node1\";out=\"media:enc=utf8;node4\";test-edge3"}
+{"alias":"test-edge4","gives":"enc=utf8;node5","takes":"enc=utf8;node4","title":"Test Edge 4 (Fan-In Collect)","type":"cap","urn":"cap:in=\"media:enc=utf8;node4\";out=\"media:enc=utf8;node5\";test-edge4"}
+{"alias":"test-edge5","gives":"enc=utf8;node5","takes":"enc=utf8;node2","title":"Test Edge 5 (Multi-Input Merge)","type":"cap","urn":"cap:in=\"media:enc=utf8;node2\";in2=\"media:enc=utf8;node3\";out=\"media:enc=utf8;node5\";test-edge5"}
+{"alias":"test-edge6","gives":"enc=utf8;node4","takes":"enc=utf8;node1","title":"Test Edge 6 (Single to List)","type":"cap","urn":"cap:in=\"media:enc=utf8;node1\";out=\"media:enc=utf8;node4\";test-edge6"}
+{"alias":"test-edge7","gives":"enc=utf8;node6","takes":"enc=utf8;node3","title":"Test Edge 7 (Uppercase Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node3\";out=\"media:enc=utf8;node6\";test-edge7"}
+{"alias":"test-edge8","gives":"enc=utf8;node7","takes":"enc=utf8;node6","title":"Test Edge 8 (Reverse Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node6\";out=\"media:enc=utf8;node7\";test-edge8"}
+{"alias":"test-edge9","gives":"enc=utf8;node8","takes":"enc=utf8;node7","title":"Test Edge 9 (Wrap Transform)","type":"cap","urn":"cap:in=\"media:enc=utf8;node7\";out=\"media:enc=utf8;node8\";test-edge9"}
+{"alias":"test-large","gives":"media:","takes":"void","title":"Test Large Payload","type":"cap","urn":"cap:in=media:void;test-large"}
+{"alias":"test-memory-hog","gives":"enc=utf8","takes":"void","title":"Test Memory Hog","type":"cap","urn":"cap:in=media:void;out=\"media:enc=utf8\";test-memory-hog"}
+{"alias":"test-peer","gives":"enc=utf8;node5","takes":"enc=utf8;node1","title":"Test Peer Invoker","type":"cap","urn":"cap:in=\"media:enc=utf8;node1\";out=\"media:enc=utf8;node5\";test-peer"}
+{"alias":"test-random-numbers","gives":"random-number","takes":"random-number","title":"Test DAG (test-random-numbers)","type":"cap","urn":"cap:in=media:random-number;out=media:random-number;test-random-numbers"}
+{"alias":"test-random-parity","gives":"enc=utf8;random-parity","takes":"random-number","title":"Test DAG (test-random-parity)","type":"cap","urn":"cap:in=media:random-number;out=\"media:enc=utf8;random-parity\";test-random-parity"}
+{"alias":"test-slow-consume","gives":"consume-report;enc=utf8","takes":"chunk-stream;enc=utf8","title":"Test Slow Consume (Input-Direction Credit)","type":"cap","urn":"cap:in=\"media:chunk-stream;enc=utf8\";out=\"media:consume-report;enc=utf8\";test-slow-consume"}
+{"alias":"test-split","gives":"enc=utf8;node2","takes":"enc=utf8;node1","title":"Test Split (Several Outputs)","type":"cap","urn":"cap:in=\"media:enc=utf8;node1\";out=\"media:enc=utf8;node2\";test-split"}
+{"alias":"test-stream-n-chunks","gives":"chunk-stream;enc=utf8","takes":"count-spec;enc=utf8","title":"Test Stream N Chunks (Credited Producer)","type":"cap","urn":"cap:in=\"media:count-spec;enc=utf8\";out=\"media:chunk-stream;enc=utf8\";test-stream-n-chunks"}
+{"alias":"test-unbounded-ticker","gives":"enc=utf8;tick-stream","takes":"count-spec;enc=utf8","title":"Test Unbounded Ticker (Unbounded Output Stream)","type":"cap","urn":"cap:in=\"media:count-spec;enc=utf8\";out=\"media:enc=utf8;tick-stream\";test-unbounded-ticker"}
+{"alias":"words","gives":"dag-word;enc=utf8","takes":"enc=utf8","title":"Test DAG (test-dag-words)","type":"cap","urn":"cap:in=\"media:enc=utf8\";out=\"media:dag-word;enc=utf8\";test-dag-words"}
+--- stderr ---

@@ -1,0 +1,6 @@
+$ capdag run shuot in.txt
+exit: 2
+--- stdout ---
+--- stderr ---
+error: there is no capability or machine file named 'shuot'
+hint: find capabilities with: capdag caps shuot

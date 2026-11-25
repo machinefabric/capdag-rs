@@ -1,0 +1,11 @@
+$ capdag info txt
+exit: 0
+--- stdout ---
+txt — Text file
+media:enc=utf8;ext=txt
+Files: .txt
+
+Taken by 6 capabilities: identity, flaky, join, pair, shout, words
+
+What a file of it can become: capdag plan <file>
+--- stderr ---

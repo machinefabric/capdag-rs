@@ -1,0 +1,22 @@
+$ capdag graph loud.machine --format dot
+exit: 0
+--- stdout ---
+digraph {
+  rankdir=LR;
+  subgraph cluster_0 {
+    label="machine_strand_0";
+    "«<token>\nshout»" -> "«loud»";
+    "«<token>\nshout»" [label="<token>\nshout", shape=box];
+    "«<token>\nwords»" -> "«foreach_1\nForEach»";
+    "«<token>\nwords»" [label="<token>\nwords", shape=box];
+    "«doc\nenc=utf8\nSingle»" -> "«<token>\nwords»";
+    "«doc\nenc=utf8\nSingle»" [label="doc\nenc=utf8\nSingle", shape=ellipse];
+    "«each»" -> "«<token>\nshout»";
+    "«each»" [label="foreach_1_item_0\nitem\ndag-word;enc=utf8", shape=oval];
+    "«foreach_1\nForEach»" -> "«each»" [label="each", style=bold];
+    "«foreach_1\nForEach»" [label="foreach_1\nForEach", shape=hexagon];
+    "«loud»" [label="loud", shape=doublecircle];
+  }
+}
+
+--- stderr ---

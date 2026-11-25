@@ -1,0 +1,10 @@
+$ capdag run shout in.txt --fail-on 'hello brave world\n' --dev-bin <cartridge>
+exit: 1
+--- stdout ---
+--- stderr ---
+[1/1] shout  waiting
+✗ in.txt  1 step · <time> · failed
+  shout failed
+error: shout refused its input
+  'hello brave world ' is not shouted
+hint: see what shout takes: capdag info shout
