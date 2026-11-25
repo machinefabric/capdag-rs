@@ -73,7 +73,7 @@ pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
             println!("{hash}");
             Ok(Exit::Ok)
         }
-        Command::BundleManifest { root, environment } => bundle_manifest(&root, &environment).await,
+        Command::BundleManifest { root, environment } => bundle_manifest(ctx, &root, &environment).await,
         Command::BundleRehash { root, environment } => bundle_rehash(&root, &environment),
     }
 }
@@ -107,12 +107,14 @@ fn new(ctx: &Ctx, path: &std::path::Path, lang: &str) -> CliResult<Exit> {
 }
 
 async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
-    let entry = crate::dev::project_entry(dir).map_err(|e| {
+    let entry = ctx.host.dev_project_entry(dir).map_err(|e| {
         CliError::failed(format!("{} is not a cartridge project that is built", dir.display()))
             .context(e.to_string())
             .hint("build it first, as `capdag dev new` said; then run this again")
     })?;
-    let manifest = crate::dev::read_entry_manifest(&entry)
+    let manifest = ctx
+        .host
+        .dev_entry_manifest(&entry)
         .map_err(|e| CliError::failed("the cartridge's manifest could not be read").context(e.to_string()))?;
     // A dev cartridge may declare caps the fabric does not know, but none of
     // its aliases may mean another cap upstream.
@@ -124,8 +126,10 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
                 .map_err(|e| CliError::failed("the cartridge's caps conflict with the fabric").context(e.to_string()))?;
         }
     }
-    let version_dir = crate::dev::stage_dev_cartridge(dir, &manifest, &ctx::user_cartridge_dir()?, crate::FABRIC_MANIFEST_VERSION)
-        .map_err(|e| CliError::failed("the cartridge could not be installed").context(e.to_string()))?;
+    let version_dir = ctx
+        .host
+        .install_dev_cartridge(dir, &manifest)
+        .map_err(|e| ctx::host_failure("the cartridge could not be installed", e))?;
     let alias = manifest
         .cap_groups
         .iter()
@@ -157,12 +161,12 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
 /// cartridges for their platform: one signed into the macOS app sandbox traps
 /// when anything but its app starts it. After the last step that rewrites a
 /// byte, `bundle-rehash` takes the hashes again, and that is what is signed.
-async fn bundle_manifest(root: &std::path::Path, environment: &str) -> CliResult<Exit> {
+async fn bundle_manifest(ctx: &Ctx, root: &std::path::Path, environment: &str) -> CliResult<Exit> {
     let mut asked = std::collections::BTreeMap::new();
     for (key, dir) in staged_dirs(root)? {
         let record = cartridge_record(&dir)?;
         let entry = record.resolve_entry_point(&dir);
-        let cap_groups = crate::probe_cartridge_cap_groups(&entry).await.map_err(|e| {
+        let cap_groups = ctx.host.probe_cap_groups(&entry).await.map_err(|e| {
             CliError::failed(format!("{} {} could not be asked for its caps", record.name, record.version))
                 .context(e.to_string())
                 .hint("the manifest is recorded before the cartridges are signed for their platform; a cartridge signed into the macOS app sandbox cannot be started outside its app")

@@ -176,7 +176,8 @@ fn run_child_if_asked() {
         .expect("a runtime for the command")
         .block_on(async move {
             let registry = golden_registry(&cartridge);
-            capdag::cli::run_command_line(argv, Some(registry)).await
+            let host = capdag::cli::engine::EngineHost::on_registry(registry);
+            capdag::cli::run_command_line(argv, Arc::new(host)).await
         });
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();

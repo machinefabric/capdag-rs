@@ -14,8 +14,10 @@ pub mod check;
 pub mod choose;
 pub mod ctx;
 pub mod dev;
+pub mod engine;
 pub mod error;
 pub mod graph;
+pub mod host;
 pub mod info;
 pub mod inline;
 pub mod inputs;
@@ -32,6 +34,7 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use self::ctx::Ctx;
 use self::error::{CliError, CliResult, Exit};
+use self::host::Host;
 use self::term::{ColorChoice, Term};
 
 /// Find capabilities, run them on files, and plan and run machines of them.
@@ -188,16 +191,15 @@ pub enum SelfCommand {
     Update,
 }
 
-/// Run the command line given, and return the process's exit status.
+/// Run the command line given on the engine, and return the process's exit
+/// status.
 pub async fn main() -> i32 {
-    run_command_line(std::env::args().collect(), None).await
+    run_command_line(std::env::args().collect(), std::sync::Arc::new(engine::EngineHost::new())).await
 }
 
-/// Run `argv` as the command line, and return the process's exit status.
-/// With `registry`, every command resolves against it, in place of the fabric
-/// the flags, the environment and the build name: what a test of the commands
-/// drives them against.
-pub async fn run_command_line(argv: Vec<String>, registry: Option<std::sync::Arc<crate::FabricRegistry>>) -> i32 {
+/// Run `argv` as the command line on `host`, and return the process's exit
+/// status.
+pub async fn run_command_line(argv: Vec<String>, host: std::sync::Arc<dyn Host>) -> i32 {
     let argv = run::separate_cap_tokens(Cli::command(), argv);
     let matches = match Cli::command().try_get_matches_from(&argv) {
         Ok(matches) => matches,
@@ -216,12 +218,9 @@ pub async fn run_command_line(argv: Vec<String>, registry: Option<std::sync::Arc
     );
     let style = term.style;
     let json = term.json;
-    let outcome = match one_fabric(&cli.global.fabric).and_then(ctx::bind_fabric) {
+    let outcome = match one_fabric(&cli.global.fabric).and_then(|flag| ctx::bind_fabric(host.as_ref(), flag)) {
         Ok(()) => {
-            let ctx = match registry {
-                Some(registry) => Ctx::on_registry(term, cli.global.offline, registry),
-                None => Ctx::new(term, cli.global.offline),
-            };
+            let ctx = Ctx::new(term, cli.global.offline, host);
             dispatch(&ctx, cli.command).await
         }
         Err(error) => Err(error),
@@ -371,13 +370,13 @@ fn shell_words(words: &[String]) -> String {
 async fn cache(ctx: &Ctx, command: CacheCommand) -> CliResult<Exit> {
     // Cleared without opening a registry on it: a cache holding a corrupt
     // entry is one a registry refuses to open, and clearing is what that
-    // refusal says to do. The folder is the one every other command reads: the
-    // fabric this process is bound to, at the manifest version it is built for.
-    let config = crate::RegistryConfig::default();
-    let dir = crate::FabricRegistry::clear_cache_of(&config, crate::FABRIC_MANIFEST_VERSION)
+    // refusal says to do.
+    let dir = ctx
+        .host
+        .clear_fabric_cache()
         .await
         .map_err(|e| {
-            CliError::failed(format!("the fabric cache of {} could not be cleared", config.anchor))
+            CliError::failed(format!("the fabric cache of {} could not be cleared", ctx.host.fabric_anchor()))
                 .context(e.to_string())
         })?
         .display()
@@ -411,7 +410,9 @@ async fn self_update(ctx: &Ctx) -> CliResult<Exit> {
     if ctx.offline {
         return Err(CliError::usage("capdag cannot update itself offline").hint("drop --offline"));
     }
-    let updated = crate::self_update::update(ctx::VERSION)
+    let updated = ctx
+        .host
+        .self_update(ctx::VERSION)
         .await
         .map_err(|e| CliError::failed("capdag was not updated").context(e.to_string()))?;
     if ctx.term.json {

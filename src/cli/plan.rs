@@ -88,7 +88,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     // Files of one type are one sequence; each type is its own source. The
     // cartridges started to tell what the files are stop when they are told:
     // a plan run with `--run` starts its own.
-    let inspection = Inspection::new(super::run::inspection_runtime(ctx, &registry)?, registry.clone());
+    let inspection = Inspection::new(ctx, super::run::inspection_runtime(ctx, &registry)?, registry.clone());
     let mut groups: Vec<(MediaUrn, usize)> = Vec::new();
     for file in &files {
         let media = inputs::detect(file, &inspection).await?;
@@ -165,7 +165,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     }
     // Reading the bundled cartridges verifies each of them: once per command,
     // not once per machine.
-    let bundled = super::cartridge::bundled_caps().await?;
+    let bundled = super::cartridge::bundled_caps(ctx).await?;
     let mut machines = Vec::with_capacity(outcome.candidates.len());
     for candidate in &outcome.candidates {
         machines.push(describe(&registry, &bundled, candidate).await?);

@@ -1,33 +1,14 @@
-//! What every command works with: the fabric it resolves against, where
-//! cartridges live, what this build is bound to, and what is attached.
+//! What every command works with: the host it runs on, the fabric it resolves
+//! against, and what is attached.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::OnceCell;
 
 use super::error::{CliError, CliResult};
+use super::host::{Host, HostError};
 use super::term::Term;
-use crate::bifaci::cartridge_repo::CartridgeChannel;
-use crate::fabric::registry::{FabricRegistry, FabricRegistryError, FetchCause, RegistryConfig};
-
-/// Distribution channel of this build. `MFR_CARTRIDGE_CHANNEL` is set by the
-/// workspace build for every cargo invocation: a release build orchestrates
-/// release cartridges only, a nightly build nightly ones — channels never
-/// cross.
-pub const BUILD_CHANNEL: CartridgeChannel =
-    CartridgeChannel::from_build_env(env!("MFR_CARTRIDGE_CHANNEL"));
-
-/// The cartridge registry this build is bound to, baked as the engine's is:
-/// `None` for a dev build (dev and bundled cartridges only).
-pub const BAKED_REGISTRY_URL: Option<&str> =
-    crate::registry_url_from_build_env(option_env!("MFR_CARTRIDGE_REGISTRY_URL"));
-
-/// The anchor of the fabric this build resolves caps, media and aliases
-/// against, baked from the selected environment. The cartridge and fabric
-/// registries move together (build.rs refuses a product build that bakes one
-/// without the other).
-pub const BAKED_FABRIC_REGISTRY_URL: Option<&str> = option_env!("CDG_FABRIC_REGISTRY_URL");
+use crate::fabric::registry::{FabricRegistry, FabricRegistryError, FetchCause};
 
 /// This release's version (capdag/version.txt), baked by build.rs: what the OS
 /// packages and Homebrew's test assert, not the crate's version.
@@ -39,30 +20,22 @@ pub struct Ctx {
     /// `--offline`: nothing is fetched; what is not cached or bundled is an
     /// error naming it.
     pub offline: bool,
+    /// The engine the command runs on.
+    pub host: Arc<dyn Host>,
     registry: OnceCell<Arc<FabricRegistry>>,
 }
 
 impl Ctx {
-    pub fn new(term: Term, offline: bool) -> Self {
+    pub fn new(term: Term, offline: bool, host: Arc<dyn Host>) -> Self {
         Self {
             term,
             offline,
+            host,
             registry: OnceCell::new(),
         }
     }
 
-    /// A context whose commands resolve against `registry`, opened already.
-    /// `--offline` holds it as it holds an opened fabric.
-    pub fn on_registry(term: Term, offline: bool, registry: Arc<FabricRegistry>) -> Self {
-        registry.set_offline(offline);
-        Self {
-            term,
-            offline,
-            registry: OnceCell::new_with(Some(registry)),
-        }
-    }
-
-    /// The fabric registry, built on first use.
+    /// The fabric registry, opened on first use.
     pub async fn registry(&self) -> CliResult<Arc<FabricRegistry>> {
         self.registry
             .get_or_try_init(|| async { self.open_registry(false).await })
@@ -80,21 +53,11 @@ impl Ctx {
         self.open_registry(true).await
     }
 
-    async fn open_registry(&self, bypass_cache: bool) -> CliResult<Arc<FabricRegistry>> {
-        let config = RegistryConfig::default().with_bypass_cache(bypass_cache);
-        let anchor = config.anchor.clone();
-        let registry = FabricRegistry::with_config(config)
+    async fn open_registry(&self, afresh: bool) -> CliResult<Arc<FabricRegistry>> {
+        self.host
+            .open_fabric(self.offline, afresh)
             .await
-            .map_err(|e| fabric_unreachable(&anchor, &e, self.offline))?;
-        registry.set_offline(self.offline);
-        // Machine notation resolves aliases synchronously, from memory: warm
-        // them from the pinned manifest. A no-op once they are cached. Caps
-        // are not warmed here: a command that needs every cap of the fabric
-        // asks for them (`fabric_caps`), and the others fetch what they use.
-        if !self.offline {
-            registry.prefetch_manifest_aliases().await;
-        }
-        Ok(Arc::new(registry))
+            .map_err(|e| fabric_unreachable(&self.host.fabric_anchor(), &e, self.offline))
     }
 
     /// Every cap of the fabric (`FabricRegistry::manifest_caps`): those not
@@ -201,87 +164,28 @@ fn fabric_unreachable(anchor: &str, error: &FabricRegistryError, offline: bool) 
     }
 }
 
-/// The per-user cartridge install root, `~/.capdag/cartridges`, in the
-/// `{registry_slug}/{channel}/{name}/{version}/` tree every host uses.
-pub fn user_cartridge_dir() -> CliResult<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| CliError::failed("there is no home directory to keep cartridges in"))?;
-    Ok(home.join(".capdag").join("cartridges"))
-}
-
-/// The cartridges shipped beside this binary, in a packaged build; `None` for a
-/// bare `cargo run`. The executable is canonicalized so a launcher symlink on
-/// PATH (`/usr/bin/capdag`, Homebrew's `bin/capdag`) finds the tree beside the
-/// real binary.
-pub fn bundled_cartridges_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| bundled_cartridges_dir_for_exe(&exe))
-}
-
-/// The `bundled-cartridges/` tree beside a launcher path, following symlinks.
-pub fn bundled_cartridges_dir_for_exe(exe: &std::path::Path) -> Option<PathBuf> {
-    std::fs::canonicalize(exe)
-        .ok()
-        .and_then(|real| real.parent().map(|dir| dir.join("bundled-cartridges")))
-        .filter(|dir| dir.is_dir())
+/// What the host could not do, said as what the command was doing (`what`)
+/// and why.
+pub fn host_failure(what: impl Into<String>, error: HostError) -> CliError {
+    match error {
+        HostError::NoHome => CliError::failed(error.to_string()),
+        HostError::File { path, done, detail } => {
+            CliError::failed(format!("{} could not be {done}", path.display())).context(detail)
+        }
+        HostError::Engine(detail) => CliError::failed(what).context(detail),
+    }
 }
 
 /// Point this process at a fabric: `--fabric` first, then the environment,
-/// then the baked anchor. The registry reads one value from one place, the
-/// environment, so the choice is written there before any registry is made.
-pub fn bind_fabric(flag: Option<&str>) -> CliResult<()> {
+/// then the one the host is bound to. A fabric is an origin.
+pub fn bind_fabric(host: &dyn Host, flag: Option<&str>) -> CliResult<()> {
     if let Some(url) = flag {
         if !(url.starts_with("http://") || url.starts_with("https://")) {
             return Err(CliError::usage(format!("--fabric '{url}' is not an http(s) URL"))
                 .context("a fabric is an origin")
                 .hint("for example: --fabric https://fabric-staging.capdag.com"));
         }
-        std::env::set_var("CDG_FABRIC_REGISTRY_URL", url);
-    } else if std::env::var_os("CDG_FABRIC_REGISTRY_URL").is_none() {
-        if let Some(url) = BAKED_FABRIC_REGISTRY_URL {
-            std::env::set_var("CDG_FABRIC_REGISTRY_URL", url);
-        }
     }
+    host.bind_fabric(flag);
     Ok(())
-}
-
-#[cfg(test)]
-mod packaging_tests {
-    //! What the OS packages (deb, rpm, Homebrew) depend on.
-    use super::bundled_cartridges_dir_for_exe;
-    use std::fs;
-
-    /// TEST1902: a launcher symlink — `/usr/bin/capdag` → `/opt/capdag/capdag`,
-    /// Homebrew's `bin/capdag` → `libexec/capdag` — finds the real bundle's
-    /// `bundled-cartridges/`, not one beside the symlink.
-    #[cfg(unix)]
-    #[test]
-    fn test1902_cartridges_resolve_through_launcher_symlink() {
-        use std::os::unix::fs::symlink;
-        let tmp = tempfile::tempdir().unwrap();
-        let real = tmp.path().join("opt/capdag");
-        fs::create_dir_all(real.join("bundled-cartridges")).unwrap();
-        fs::write(real.join("capdag"), b"binary").unwrap();
-        let bindir = tmp.path().join("usr/bin");
-        fs::create_dir_all(&bindir).unwrap();
-        let link = bindir.join("capdag");
-        symlink(real.join("capdag"), &link).unwrap();
-
-        let got = bundled_cartridges_dir_for_exe(&link)
-            .expect("bundled-cartridges/ must resolve through the launcher symlink");
-        assert_eq!(
-            fs::canonicalize(&got).unwrap(),
-            fs::canonicalize(real.join("bundled-cartridges")).unwrap(),
-        );
-    }
-
-    /// TEST1903: no `bundled-cartridges/` beside the binary is `None`: a bare
-    /// cargo build, whose discovery skips the bundle.
-    #[test]
-    fn test1903_no_bundled_cartridges_dir_when_absent() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join("capdag"), b"binary").unwrap();
-        assert!(bundled_cartridges_dir_for_exe(&tmp.path().join("capdag")).is_none());
-    }
 }

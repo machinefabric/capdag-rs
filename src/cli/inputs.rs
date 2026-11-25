@@ -103,7 +103,7 @@ pub fn pair<'a>(flag: &str, given: &'a str) -> CliResult<(&'a str, &'a str)> {
 /// cartridges that inspect it ([`Inspection`]). A file the fabric cannot
 /// identify is an error naming it, never the bare `media:`, which would plan
 /// into a dead end or merge files of different types.
-pub async fn detect(file: &Path, inspection: &Inspection) -> CliResult<MediaUrn> {
+pub async fn detect(file: &Path, inspection: &Inspection<'_>) -> CliResult<MediaUrn> {
     let found = inspection.detect(file).await?;
     MediaUrn::from_string(found.primary()).map_err(|e| {
         CliError::failed(format!("'{}' was detected as an invalid media type", file.display()))

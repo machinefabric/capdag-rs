@@ -18,23 +18,21 @@ use async_trait::async_trait;
 use tokio::sync::OnceCell;
 
 use super::cartridge;
-use super::ctx;
+use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult};
+use super::host::RunHost;
 use crate::cartridge_discovery::DiscoveredCartridge;
 use crate::fabric::registry::FabricRegistry;
-use crate::input_resolver::{
-    AdapterSource, CartridgeAdapterInvoker, InputResolverError, MediaAdapterRegistry,
-    RelaySwitchAdapterInvoker,
-};
-use crate::orchestrator::cli_runtime::CliRuntime;
+use crate::input_resolver::{AdapterSource, CartridgeAdapterInvoker, InputResolverError, MediaAdapterRegistry};
 use crate::orchestrator::executor::HostableCartridge;
 use crate::MediaUrn;
 
 /// The file inspection of one command: the cartridges that inspect files,
-/// known on the first file the command detects, and the runtime they are
+/// known on the first file the command detects, and the run host they are
 /// started on.
-pub struct Inspection {
-    runtime: Arc<CliRuntime>,
+pub struct Inspection<'a> {
+    ctx: &'a Ctx,
+    runs: Arc<dyn RunHost>,
     registry: Arc<FabricRegistry>,
     known: OnceCell<Inspectors>,
 }
@@ -52,16 +50,16 @@ struct Inspectors {
     adapters: MediaAdapterRegistry,
     cartridges: HashMap<String, HostableCartridge>,
     refused: Vec<Refused>,
-    runtime: Arc<CliRuntime>,
+    runs: Arc<dyn RunHost>,
     /// Why asking a cartridge failed, by cartridge: a cartridge that cannot be
     /// asked claims nothing, and the file's detection then fails; this is what
     /// it says why.
     failures: Mutex<Vec<String>>,
 }
 
-impl Inspection {
-    pub fn new(runtime: Arc<CliRuntime>, registry: Arc<FabricRegistry>) -> Self {
-        Self { runtime, registry, known: OnceCell::new() }
+impl<'a> Inspection<'a> {
+    pub fn new(ctx: &'a Ctx, runs: Arc<dyn RunHost>, registry: Arc<FabricRegistry>) -> Self {
+        Self { ctx, runs, registry, known: OnceCell::new() }
     }
 
     /// The media `file` is: [`crate::detect_file_media`] with the inspecting
@@ -87,24 +85,14 @@ impl Inspection {
     /// clients refuse it.
     async fn discover(&self) -> CliResult<Inspectors> {
         let mut found: Vec<(String, HostableCartridge)> = Vec::new();
-        if let Some(dir) = ctx::bundled_cartridges_dir() {
-            let bundled = crate::orchestrator::executor::discover_bundled_cartridges(
-                &dir,
-                ctx::BUILD_CHANNEL,
-                ctx::BAKED_REGISTRY_URL,
-                crate::FABRIC_MANIFEST_VERSION,
-            )
-            .await
-            .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
-            for hostable in bundled {
-                let (id, _, _) = hostable
-                    .identity
-                    .clone()
-                    .expect("bundled discovery names every cartridge it returns");
-                found.push((id, hostable));
-            }
+        for hostable in cartridge::bundled(self.ctx).await? {
+            let (id, _, _) = hostable
+                .identity
+                .clone()
+                .expect("bundled discovery names every cartridge it returns");
+            found.push((id, hostable));
         }
-        for discovered in cartridge::installed().await? {
+        for discovered in cartridge::installed(self.ctx).await? {
             // A cartridge discovery refuses is never run, so it inspects nothing;
             // `capdag cartridge list` says why it was refused.
             if let DiscoveredCartridge::Directory { entry_point, id, cap_groups, .. } = discovered {
@@ -138,7 +126,7 @@ impl Inspection {
                 cartridges.insert(id, hostable);
             }
         }
-        Ok(Inspectors { adapters, cartridges, refused, runtime: self.runtime.clone(), failures: Mutex::new(Vec::new()) })
+        Ok(Inspectors { adapters, cartridges, refused, runs: self.runs.clone(), failures: Mutex::new(Vec::new()) })
     }
 }
 
@@ -205,9 +193,8 @@ impl CartridgeAdapterInvoker for Inspectors {
                 .push(format!("the cartridge '{cartridge_id}' could not inspect it: {reason}"));
             InputResolverError::InspectionFailed { path: file_path.to_path_buf(), reason }
         };
-        let switch = self.runtime.host_inspector(cartridge_id, hostable).await.map_err(|e| failed(e.to_string()))?;
-        RelaySwitchAdapterInvoker::new(switch)
-            .invoke_adapter_selection(cartridge_id, file_path)
+        self.runs
+            .inspect(cartridge_id, hostable, file_path)
             .await
             .map_err(|e| failed(e.to_string()))
     }

@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
+use super::host::{RunHost, RunSetup};
 use super::inputs;
 use super::inspect::Inspection;
 use super::live::{Key, ProgressChoice, Shower};
@@ -31,10 +32,8 @@ use crate::orchestrator::cli_cap::{
     classify_cap_token, map_invocation, render_cap_interface, synthesize_single_cap_notation,
     CapToken, InterfaceNames, SINGLE_CAP_INPUT_NODE,
 };
-use crate::orchestrator::cli_runtime::CliRuntime;
 use crate::orchestrator::cli_session::{
-    finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, StrandFailure, StrandNote,
-    StrandReport,
+    EmitTarget, EmittedOutput, PlannedStrand, StrandFailure, StrandNote, StrandReport,
 };
 use crate::orchestrator::machine_plan::{ResolvedNotation, RunInputs, StrandPlan};
 use crate::orchestrator::observe::{RunKey, RunObserver};
@@ -224,7 +223,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     // One runtime for the command: a cartridge started to inspect an input is
     // the one that runs on it.
     let runtime = runtime(ctx, &registry, &args, dev_dir).await?;
-    let inspection = Inspection::new(runtime.clone(), registry.clone());
+    let inspection = Inspection::new(ctx, runtime.clone(), registry.clone());
     let (runs, single_scalar) = match &target {
         Target::Cap { cap, .. } => {
             let cap = narrow_if_abstract(ctx, &registry, cap.clone(), &args, &inspection).await?;
@@ -254,7 +253,7 @@ async fn runtime(
     registry: &Arc<FabricRegistry>,
     args: &Args,
     dev_dir: Option<PathBuf>,
-) -> CliResult<Arc<CliRuntime>> {
+) -> CliResult<Arc<dyn RunHost>> {
     let mut dev_binaries = inputs::dev_binaries(&args.dev_bins)?;
     dev_binaries.extend(dev_dir);
     let trace = match &args.trace {
@@ -268,7 +267,7 @@ async fn runtime(
 
 /// A runtime that only inspects files: it runs nothing, so it has no dev
 /// binaries, no trace and nowhere to write.
-pub fn inspection_runtime(ctx: &Ctx, registry: &Arc<FabricRegistry>) -> CliResult<Arc<CliRuntime>> {
+pub fn inspection_runtime(ctx: &Ctx, registry: &Arc<FabricRegistry>) -> CliResult<Arc<dyn RunHost>> {
     new_runtime(ctx, registry, Vec::new(), None, PathBuf::from("."))
 }
 
@@ -278,18 +277,10 @@ fn new_runtime(
     dev_binaries: Vec<PathBuf>,
     trace: Option<Arc<crate::ProtocolTraceSink>>,
     persist_dir: PathBuf,
-) -> CliResult<Arc<CliRuntime>> {
-    Ok(Arc::new(CliRuntime::new(
-        ctx::user_cartridge_dir()?,
-        if ctx.offline { None } else { ctx::BAKED_REGISTRY_URL.map(str::to_string) },
-        ctx::BUILD_CHANNEL,
-        crate::FABRIC_MANIFEST_VERSION,
-        dev_binaries,
-        ctx::bundled_cartridges_dir(),
-        registry.clone(),
-        trace,
-        persist_dir,
-    )))
+) -> CliResult<Arc<dyn RunHost>> {
+    ctx.host
+        .runtime(RunSetup { registry: registry.clone(), offline: ctx.offline, dev_binaries, trace, persist_dir })
+        .map_err(|e| ctx::host_failure("the cartridges could not be hosted", e))
 }
 
 /// Run one cap on one value, and return what it gave: how the model commands
@@ -368,8 +359,7 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
     // A cap the fabric does not define may be a dev cartridge's, run by its
     // alias before it is published — when none of its aliases means another
     // cap upstream.
-    let cartridges = ctx::user_cartridge_dir()?;
-    match crate::dev::find_dev_cap_by_alias(&cartridges, &reference) {
+    match ctx.host.find_dev_cap(&reference) {
         Ok(Some((cap, dir))) => {
             crate::dev::check_no_fabric_conflict(registry, &cap)
                 .await
@@ -381,8 +371,7 @@ async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) 
             Ok(Target::Cap { cap, dev_dir: Some(dir) })
         }
         Ok(None) => Err(unknown_cap(registry, token, "capability or machine file").await),
-        Err(e) => Err(CliError::failed(format!("the dev cartridges could not be read for '{token}'"))
-            .context(e.to_string())),
+        Err(e) => Err(ctx::host_failure(format!("the dev cartridges could not be read for '{token}'"), e)),
     }
 }
 
@@ -418,7 +407,7 @@ async fn narrow_if_abstract(
     registry: &Arc<FabricRegistry>,
     cap: Cap,
     args: &Args,
-    inspection: &Inspection,
+    inspection: &Inspection<'_>,
 ) -> CliResult<Cap> {
     let alias = names::cap(registry, &cap);
     if !cap.is_abstract() {
@@ -684,7 +673,7 @@ async fn plan_machine_runs(
     path: &Path,
     notation: &str,
     args: &Args,
-    inspection: &Inspection,
+    inspection: &Inspection<'_>,
 ) -> CliResult<Vec<PlannedRun>> {
     let label = path.display().to_string();
     let resolved = super::check::resolve(registry, path, notation).await?;
@@ -943,7 +932,7 @@ async fn execute(
     ctx: &Ctx,
     registry: &Arc<FabricRegistry>,
     args: &Args,
-    runtime: Arc<CliRuntime>,
+    runtime: Arc<dyn RunHost>,
     runs: Vec<PlannedRun>,
     single_scalar: bool,
     out: &mut dyn std::io::Write,
@@ -978,7 +967,7 @@ async fn execute(
             let key = RunKey { run: run_index, strand: strand_index };
             let label = if strand_index > 0 { format!("{} (part {})", run.label, strand_index + 1) } else { run.label.clone() };
             watch.add_run(key, label, &planned.strand, registry);
-            match spawn_strand(&runtime, &observer, key, planned, None, control.clone()) {
+            match runtime.spawn(&observer, key, planned, control.clone()) {
                 Ok(handle) => {
                     aborts.push(handle.task.abort_handle());
                     joining.push(async move { (handle.key, handle.task.await) });
@@ -1031,12 +1020,11 @@ async fn execute(
                     let (outcome, outputs) = match joined {
                         Ok((strand, result)) => {
                             let failed_at = result.as_ref().err().and_then(|e| e.step_token_id().map(|t| t.as_str().to_string()));
-                            let report = finish_strand(
+                            let report = runtime.finish(
                                 &strand,
                                 result,
                                 &EmitTarget { output_dir: emit_dir.clone(), force: args.force, stem: run.stem.clone() },
                                 out,
-                                &runtime,
                             );
                             if let Some(token) = failed_at {
                                 if let Err(e) = watch.failed_at(key, &token) {
@@ -1120,7 +1108,7 @@ async fn execute(
 #[allow(clippy::too_many_arguments)]
 fn act(
     control: &Arc<RunControl>,
-    runtime: &Arc<CliRuntime>,
+    runtime: &Arc<dyn RunHost>,
     shower: &mut Shower,
     ask: RunAsk,
     grace_deadline: &mut Option<tokio::time::Instant>,

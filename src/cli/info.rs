@@ -76,8 +76,8 @@ async fn media_named(registry: &crate::FabricRegistry, name: &str) -> CliResult<
 
 async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> CliResult<()> {
     let alias = names::cap(registry, cap);
-    let bundled = super::cartridge::bundled_providers(&cap.urn).await?;
-    let installed: Vec<String> = super::cartridge::installed()
+    let bundled = super::cartridge::bundled_providers(ctx, &cap.urn).await?;
+    let installed: Vec<String> = super::cartridge::installed(ctx)
         .await?
         .into_iter()
         .filter_map(|found| match found {
@@ -127,11 +127,10 @@ async fn show_cap(ctx: &Ctx, registry: &crate::FabricRegistry, cap: &Cap) -> Cli
         (None, None) if ctx.offline => println!("Provided by a cartridge that is not installed; it is not looked up offline."),
         (None, None) => match super::cartridge::manager(ctx).await {
             Ok(manager) => {
-                let suggestions = manager.suggestions_for_cap(&cap.urn.to_string()).await;
-                match suggestions.first() {
-                    Some(s) => println!(
-                        "Provided by {}, which is downloaded the first time a run needs it (or: capdag cartridge install {}).",
-                        s.cartridge_id, s.cartridge_id
+                let providers = manager.providers_of(&cap.urn.to_string()).await;
+                match providers.first() {
+                    Some(id) => println!(
+                        "Provided by {id}, which is downloaded the first time a run needs it (or: capdag cartridge install {id})."
                     ),
                     None => println!("No cartridge in the registry provides it."),
                 }

@@ -5,14 +5,12 @@
 //! (on demand when a run needs it, or by `install`), or a dev cartridge
 //! (`capdag dev install`). `list` says which are here and in what state.
 
-use std::path::PathBuf;
-
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
+use super::host::CartridgeStore;
 use super::names;
 use super::term::emit_record;
-use crate::cartridge_discovery::{discover_cartridges, DiscoveredCartridge, DiscoveryIdentity};
-use crate::orchestrator::executor::CartridgeManager;
+use crate::cartridge_discovery::DiscoveredCartridge;
 use crate::CapUrn;
 
 #[derive(Debug, clap::Subcommand)]
@@ -46,105 +44,60 @@ pub async fn cartridge(ctx: &Ctx, command: Command) -> CliResult<Exit> {
     }
 }
 
+/// The bundled cartridges could not be read.
+fn bundle_unreadable(error: crate::ExecutionError) -> CliError {
+    CliError::failed("the cartridges bundled with capdag could not be read").context(error.to_string())
+}
+
+/// Every bundled cartridge, as the host's discovery accepts it.
+pub async fn bundled(ctx: &Ctx) -> CliResult<Vec<crate::orchestrator::executor::HostableCartridge>> {
+    ctx.host.bundled_cartridges().await.map_err(bundle_unreadable)
+}
+
 /// Every cap the bundled cartridges declare.
-pub async fn bundled_caps() -> CliResult<Vec<CapUrn>> {
-    let Some(dir) = ctx::bundled_cartridges_dir() else {
-        return Ok(Vec::new());
-    };
-    let found = crate::orchestrator::executor::discover_bundled_cartridges(
-        &dir,
-        ctx::BUILD_CHANNEL,
-        ctx::BAKED_REGISTRY_URL,
-        crate::FABRIC_MANIFEST_VERSION,
-    )
-    .await
-    .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
-    Ok(found
+pub async fn bundled_caps(ctx: &Ctx) -> CliResult<Vec<CapUrn>> {
+    Ok(bundled(ctx)
+        .await?
         .into_iter()
         .flat_map(|cartridge| cartridge.cap_groups.into_iter().flat_map(|g| g.caps.into_iter().map(|c| c.urn)))
         .collect())
 }
 
 /// The bundled cartridges that declare a cap.
-pub async fn bundled_providers(cap: &CapUrn) -> CliResult<Vec<crate::orchestrator::executor::BundledProvider>> {
-    let Some(dir) = ctx::bundled_cartridges_dir() else {
-        return Ok(Vec::new());
-    };
-    crate::orchestrator::executor::bundled_providers_of(
-        &dir,
-        ctx::BUILD_CHANNEL,
-        ctx::BAKED_REGISTRY_URL,
-        crate::FABRIC_MANIFEST_VERSION,
-        cap,
-    )
-    .await
-    .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))
+pub async fn bundled_providers(ctx: &Ctx, cap: &CapUrn) -> CliResult<Vec<crate::orchestrator::executor::BundledProvider>> {
+    ctx.host.bundled_providers(cap).await.map_err(bundle_unreadable)
 }
 
 /// The cartridges installed under the per-user root (registry and dev).
-pub async fn installed() -> CliResult<Vec<DiscoveredCartridge>> {
-    let identity = DiscoveryIdentity {
-        channel: ctx::BUILD_CHANNEL,
-        registry_url: ctx::BAKED_REGISTRY_URL.map(str::to_string),
-        fabric_manifest_version: crate::FABRIC_MANIFEST_VERSION,
-        cartridge_registry_version: crate::CARTRIDGE_REGISTRY_VERSION,
-        signing_environment: crate::SIGNING_ENVIRONMENT.map(str::to_string),
-        charter_trust: crate::bifaci::trust::charter_trust(),
-        now_unix: mg_srel::unix_now(),
-        // Nothing in the user's cartridge directory was put there by a build,
-        // so a cartridge there that says it was bundled is refused for that.
-        bundle: crate::bifaci::bundle_manifest::BundleProof::none(
-            "the installed-cartridges directory is not a build's bundle, so nothing here \
-             can vouch for a cartridge that says it was bundled",
-        ),
-    };
-    discover_cartridges(&ctx::user_cartridge_dir()?, &identity)
+pub async fn installed(ctx: &Ctx) -> CliResult<Vec<DiscoveredCartridge>> {
+    ctx.host
+        .installed_cartridges()
         .await
-        .map_err(|e| CliError::failed("the installed cartridges could not be read").context(e.to_string()))
+        .map_err(|e| ctx::host_failure("the installed cartridges could not be read", e))
 }
 
-/// A cartridge manager bound to this build's registry, its manifest synced
-/// and verified.
-pub async fn manager(ctx: &Ctx) -> CliResult<CartridgeManager> {
+/// The cartridge registry's store, its manifest synced and verified.
+pub async fn manager(ctx: &Ctx) -> CliResult<Box<dyn CartridgeStore>> {
     if ctx.offline {
         return Err(CliError::usage("the cartridge registry is not read offline").hint("drop --offline"));
     }
-    if ctx::BAKED_REGISTRY_URL.is_none() {
+    if ctx.host.cartridge_registry().is_none() {
         return Err(CliError::failed("this capdag is a development build, bound to no cartridge registry")
             .context("it runs bundled and dev cartridges only")
             .hint("install a release of capdag, or `capdag dev install <project>` a cartridge you build"));
     }
-    let mut manager = CartridgeManager::new(
-        ctx::user_cartridge_dir()?,
-        ctx::BAKED_REGISTRY_URL.map(str::to_string),
-        ctx::BUILD_CHANNEL,
-        crate::FABRIC_MANIFEST_VERSION,
-        Vec::new(),
-        crate::bifaci::trust::content_trust(),
-        crate::RegistryConfig::default().anchor,
-        crate::bifaci::trust::charter_trust(),
-    );
-    manager.init().await.map_err(|e| {
-        CliError::failed("the cartridge registry could not be read")
-            .context(e.to_string())
-            .hint("check the connection; bundled cartridges run without one (--offline)")
-    })?;
-    Ok(manager)
+    ctx.host.cartridge_store().await.map_err(|e| match e {
+        e @ super::host::HostError::Engine(_) => ctx::host_failure("the cartridge registry could not be read", e)
+            .hint("check the connection; bundled cartridges run without one (--offline)"),
+        e => ctx::host_failure("the cartridge registry could not be read", e),
+    })
 }
 
 async fn list(ctx: &Ctx) -> CliResult<Exit> {
     let mut rows: Vec<serde_json::Value> = Vec::new();
-    if let Some(dir) = ctx::bundled_cartridges_dir() {
+    if ctx.host.has_bundle() {
         let registry = ctx.registry().await?;
-        let bundled = crate::orchestrator::executor::bundled_cartridge_adapter_groups(
-            &dir,
-            ctx::BUILD_CHANNEL,
-            ctx::BAKED_REGISTRY_URL,
-            crate::FABRIC_MANIFEST_VERSION,
-            registry,
-        )
-        .await
-        .map_err(|e| CliError::failed("the cartridges bundled with capdag could not be read").context(e.to_string()))?;
+        let bundled = ctx.host.bundled_adapter_groups(registry).await.map_err(bundle_unreadable)?;
         for cartridge in bundled {
             rows.push(serde_json::json!({
                 "type": "cartridge",
@@ -155,7 +108,7 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
             }));
         }
     }
-    for found in installed().await? {
+    for found in installed(ctx).await? {
         rows.push(match found {
             DiscoveredCartridge::Directory { id, version, registry_url, cap_groups, version_dir, .. } => serde_json::json!({
                 "type": "cartridge",
@@ -209,7 +162,7 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
     let manager = manager(ctx).await?;
     // A name with ':' is a cap URN; a bare name is a cartridge id when the
     // registry knows one by it, else a cap alias.
-    let cartridge_id = if !name.contains(':') && manager.registry_cartridge(name).await.is_some() {
+    let cartridge_id = if !name.contains(':') && manager.has(name).await {
         name.to_string()
     } else {
         let registry = ctx.registry().await?;
@@ -221,7 +174,7 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
                     .hint("see the cartridges with: capdag cartridge list; find a capability with: capdag caps"));
             }
         };
-        if let Some(provider) = bundled_providers(&cap.urn).await?.first() {
+        if let Some(provider) = bundled_providers(ctx, &cap.urn).await?.first() {
             let alias = names::cap(&registry, &cap);
             if ctx.term.json {
                 emit_record(&serde_json::json!({
@@ -235,16 +188,16 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
             }
             return Ok(Exit::Ok);
         }
-        let suggestions = manager.suggestions_for_cap(&cap.urn.to_string()).await;
-        let first = suggestions.first().ok_or_else(|| {
+        let providers = manager.providers_of(&cap.urn.to_string()).await;
+        let first = providers.first().ok_or_else(|| {
             CliError::failed(format!("no cartridge in the registry provides {}", names::cap(&registry, &cap)))
         })?;
-        first.cartridge_id.clone()
+        first.clone()
     };
     if !ctx.term.json {
         eprintln!("Installing {cartridge_id}…");
     }
-    let path = manager.get_cartridge_path(&cartridge_id).await.map_err(|e| match e.refused_cartridge() {
+    let path = manager.install(&cartridge_id).await.map_err(|e| match e.refused_cartridge() {
         // An install this capdag does not use is replaced only when the
         // person removes it: installing never overwrites one silently.
         Some((id, dir)) => super::run::refused_cartridge(id, dir, &e),
@@ -262,24 +215,18 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
 }
 
 fn remove(ctx: &Ctx, id: &str) -> CliResult<Exit> {
-    let root = ctx::user_cartridge_dir()?;
-    // `{slug}/v{n}/{channel}/{name}/`: every version of the cartridge, in every
-    // registry and the dev slot.
-    let removed = cartridge_dirs(&root, id)?;
-    for dir in &removed {
-        std::fs::remove_dir_all(dir)
-            .map_err(|e| CliError::failed(format!("{} could not be removed", dir.display())).context(e.to_string()))?;
-    }
-    if removed.is_empty() {
+    let removal = ctx
+        .host
+        .remove_cartridge(id)
+        .map_err(|e| ctx::host_failure(format!("{id} could not be removed"), e))?;
+    if removal.removed.is_empty() {
         let mut error = CliError::usage(format!("no installed cartridge is called '{id}'"));
-        if let Some(bundle) = ctx::bundled_cartridges_dir() {
-            if !cartridge_dirs(&bundle, id)?.is_empty() {
-                error = error.context(format!("{id} is bundled with capdag, and a bundled cartridge cannot be removed"));
-            }
+        if removal.bundled {
+            error = error.context(format!("{id} is bundled with capdag, and a bundled cartridge cannot be removed"));
         }
         return Err(error.hint("see the cartridges with: capdag cartridge list"));
     }
-    for dir in &removed {
+    for dir in &removal.removed {
         if ctx.term.json {
             emit_record(&serde_json::json!({ "type": "removed", "id": id, "dir": dir.display().to_string() }));
         } else {
@@ -287,30 +234,4 @@ fn remove(ctx: &Ctx, id: &str) -> CliResult<Exit> {
         }
     }
     Ok(Exit::Ok)
-}
-
-/// The directories of cartridge `id` under a cartridge root:
-/// `{slug}/v{n}/{channel}/{id}/`.
-fn cartridge_dirs(root: &std::path::Path, id: &str) -> CliResult<Vec<PathBuf>> {
-    let mut found = Vec::new();
-    for slug in subdirs(root)? {
-        for version_level in subdirs(&slug)? {
-            for channel in subdirs(&version_level)? {
-                let dir = channel.join(id);
-                if dir.is_dir() {
-                    found.push(dir);
-                }
-            }
-        }
-    }
-    Ok(found)
-}
-
-fn subdirs(dir: &std::path::Path) -> CliResult<Vec<PathBuf>> {
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| CliError::failed(format!("{} could not be read", dir.display())).context(e.to_string()))?;
-    Ok(entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect())
 }
