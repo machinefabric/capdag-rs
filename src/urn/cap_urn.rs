@@ -2276,8 +2276,9 @@ mod tests {
     //
     // `ext` promises presence, not a value, so a pattern requiring ext=pdf does
     // not accept it; reading it as "whatever the pattern wants" made `ext` and
-    // `ext=pdf` equivalent (../formal, Legacy.marker_equivalent_to_exact). The
-    // other way holds: "some ext" accepts a pdf.
+    // `ext=pdf` equivalent (tagged-urn formal, marker_is_not_exact). The other
+    // way holds: "some ext" accepts a pdf. The test is kept so this path is not
+    // taken again.
     #[test]
     fn test043_matching_semantics_test4_request_has_wildcard() {
         let cap = CapUrn::from_string(&test_urn("generate;ext=pdf")).unwrap();
@@ -2355,8 +2356,9 @@ mod tests {
     // both are unknown, not the type "anything", so it fits a cap that takes a
     // string and gives a record. Read as a type, its open output would be
     // covered only by a cap that gives `media:` — which is how a pattern
-    // search came to find nothing (../formal, Query.ofPattern, and
-    // Legacy.skipping_top_output_is_fits).
+    // search came to find nothing (../formal, Query.ofPattern and
+    // fits_asks_what_the_cap_gives). The test is kept so this path is not taken
+    // again.
     #[test]
     fn test048_matching_semantics_test8_wildcard_direction_matches_anything() {
         let cap = CapUrn::from_string("cap:generate").unwrap();
@@ -2924,6 +2926,11 @@ fn test7214_dispatch_compares_what_the_cap_gives_for_what_is_sent() {
 // TEST7215: a pattern over caps fits a cap when everything the cap gives is of
 // the type the pattern's output names; a pattern that names no output asks
 // nothing of it
+//
+// It is kept so this path is not taken again: the old rule asked a cap's output
+// to cover the pattern's, and skipped a pattern's `media:` output. It accepted a
+// cap that gives nothing named for a pattern asking for pdfs, refused one that
+// gives pdf documents, and was not transitive (../formal, fits_asks_what_the_cap_gives).
 #[test]
 fn test7215_a_pattern_fits_what_a_cap_gives() {
     let gives_pdf = CapUrn::from_string(r#"cap:op=a;out="media:ext=pdf""#).unwrap();
@@ -3264,9 +3271,9 @@ mod tier_tests {
     // anything, and only a candidate that takes anything serves it
     //
     // A call that did not say what it sent was routed to a candidate that might
-    // not take it (../formal, Legacy.wildcard_input_is_not_serves). An unknown
-    // input is a search's ("what gives this?", `CapQuery::producing`), never a
-    // call's.
+    // not take it (../formal, serves_needs_what_is_sent). An unknown input is a
+    // search's ("what gives this?", `CapQuery::producing`), never a call's. The
+    // test is kept so this path is not taken again.
     #[test]
     fn test825_dispatch_request_unconstrained_input() {
         let pdf_only =

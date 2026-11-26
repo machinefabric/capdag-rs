@@ -82,7 +82,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dAsk_dctorIdx_d__boxed(x_1: Obj) -> Obj
 }
 
 // Lean: CapDAG.Ask.exactly
-// Source: CapDAG/Query.lean:652:1
+// Source: CapDAG/Query.lean:685:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dAsk_dexactly(x_1: Obj) -> Obj {
     match rt::lean_obj_tag(x_1) {
         1 => {
@@ -322,7 +322,7 @@ pub(crate) unsafe fn l_CapDAG_dCap_dmayGiveAt_d__closed__0() -> Obj {
 }
 
 // Lean: CapDAG.Grade.ctorElim
-// Source: CapDAG/Query.lean:640:1
+// Source: CapDAG/Query.lean:673:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim(x_1: Obj, x_2: Obj, x_3: u8, x_4: Obj, x_5: Obj) -> Obj {
     rt::lean_inc(x_5);
     return x_5;
@@ -330,7 +330,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim(x_1: Obj, x_2: Obj, x_
 
 // Lean: CapDAG.Grade.ctorElim._boxed
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: CapDAG/Query.lean:640:1
+// Source: CapDAG/Query.lean:673:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj, x_5: Obj) -> Obj {
     let x_6: u8 = rt::lean_unbox(x_3) as u8;
     let x_7: Obj = l_CapDAG_dGrade_dctorElim(x_1, x_2, x_6, x_4, x_5);
@@ -341,7 +341,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__boxed(x_1: Obj, x_2
 
 // Lean: CapDAG.Grade.ctorElim._redArg
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: CapDAG/Query.lean:640:1
+// Source: CapDAG/Query.lean:673:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -349,7 +349,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg(x_1: Obj) ->
 
 // Lean: CapDAG.Grade.ctorElim._redArg._boxed
 // Compiled from: CapDAG.Grade.ctorElim
-// Source: CapDAG/Query.lean:640:1
+// Source: CapDAG/Query.lean:673:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorElim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dctorElim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -389,7 +389,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dctorIdx_d__boxed(x_1: Obj) -> O
 }
 
 // Lean: CapDAG.Grade.exact.elim
-// Source: CapDAG/Query.lean:642:3
+// Source: CapDAG/Query.lean:675:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -397,7 +397,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim(x_1: Obj, x_2: u8, 
 
 // Lean: CapDAG.Grade.exact.elim._boxed
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: CapDAG/Query.lean:642:3
+// Source: CapDAG/Query.lean:675:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dexact_delim(x_1, x_5, x_3, x_4);
@@ -407,7 +407,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__boxed(x_1: Obj, 
 
 // Lean: CapDAG.Grade.exact.elim._redArg
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: CapDAG/Query.lean:642:3
+// Source: CapDAG/Query.lean:675:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -415,7 +415,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg(x_1: Obj)
 
 // Lean: CapDAG.Grade.exact.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.exact.elim
-// Source: CapDAG/Query.lean:642:3
+// Source: CapDAG/Query.lean:675:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dexact_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -423,7 +423,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dexact_delim_d__redArg_d__boxed(
 }
 
 // Lean: CapDAG.Grade.guaranteed.elim
-// Source: CapDAG/Query.lean:644:3
+// Source: CapDAG/Query.lean:677:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -431,7 +431,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim(x_1: Obj, x_2:
 
 // Lean: CapDAG.Grade.guaranteed.elim._boxed
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: CapDAG/Query.lean:644:3
+// Source: CapDAG/Query.lean:677:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dguaranteed_delim(x_1, x_5, x_3, x_4);
@@ -441,7 +441,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__boxed(x_1: 
 
 // Lean: CapDAG.Grade.guaranteed.elim._redArg
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: CapDAG/Query.lean:644:3
+// Source: CapDAG/Query.lean:677:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -449,7 +449,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1:
 
 // Lean: CapDAG.Grade.guaranteed.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.guaranteed.elim
-// Source: CapDAG/Query.lean:644:3
+// Source: CapDAG/Query.lean:677:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dguaranteed_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -457,7 +457,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dguaranteed_delim_d__redArg_d__b
 }
 
 // Lean: CapDAG.Grade.none.elim
-// Source: CapDAG/Query.lean:648:3
+// Source: CapDAG/Query.lean:681:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -465,7 +465,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim(x_1: Obj, x_2: u8, x
 
 // Lean: CapDAG.Grade.none.elim._boxed
 // Compiled from: CapDAG.Grade.none.elim
-// Source: CapDAG/Query.lean:648:3
+// Source: CapDAG/Query.lean:681:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dnone_delim(x_1, x_5, x_3, x_4);
@@ -475,7 +475,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__boxed(x_1: Obj, x
 
 // Lean: CapDAG.Grade.none.elim._redArg
 // Compiled from: CapDAG.Grade.none.elim
-// Source: CapDAG/Query.lean:648:3
+// Source: CapDAG/Query.lean:681:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -483,7 +483,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg(x_1: Obj) 
 
 // Lean: CapDAG.Grade.none.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.none.elim
-// Source: CapDAG/Query.lean:648:3
+// Source: CapDAG/Query.lean:681:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dnone_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dnone_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -538,7 +538,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dofNat_d__boxed(x_1: Obj) -> Obj
 }
 
 // Lean: CapDAG.Grade.possible.elim
-// Source: CapDAG/Query.lean:646:3
+// Source: CapDAG/Query.lean:679:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim(x_1: Obj, x_2: u8, x_3: Obj, x_4: Obj) -> Obj {
     rt::lean_inc(x_4);
     return x_4;
@@ -546,7 +546,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim(x_1: Obj, x_2: u
 
 // Lean: CapDAG.Grade.possible.elim._boxed
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: CapDAG/Query.lean:646:3
+// Source: CapDAG/Query.lean:679:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj, x_4: Obj) -> Obj {
     let x_5: u8 = rt::lean_unbox(x_2) as u8;
     let x_6: Obj = l_CapDAG_dGrade_dpossible_delim(x_1, x_5, x_3, x_4);
@@ -556,7 +556,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__boxed(x_1: Ob
 
 // Lean: CapDAG.Grade.possible.elim._redArg
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: CapDAG/Query.lean:646:3
+// Source: CapDAG/Query.lean:679:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1: Obj) -> Obj {
     rt::lean_inc(x_1);
     return x_1;
@@ -564,7 +564,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1: O
 
 // Lean: CapDAG.Grade.possible.elim._redArg._boxed
 // Compiled from: CapDAG.Grade.possible.elim
-// Source: CapDAG/Query.lean:646:3
+// Source: CapDAG/Query.lean:679:3
 pub(crate) unsafe extern "C" fn l_CapDAG_dGrade_dpossible_delim_d__redArg_d__boxed(x_1: Obj) -> Obj {
     let x_2: Obj = l_CapDAG_dGrade_dpossible_delim_d__redArg(x_1);
     rt::lean_dec(x_1);
@@ -587,7 +587,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dconsuming(x_1: Obj, x_2: Obj) -
 }
 
 // Lean: CapDAG.Query.exactly
-// Source: CapDAG/Query.lean:657:1
+// Source: CapDAG/Query.lean:690:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dexactly(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 0);
     let x_3: Obj = rt::lean_ctor_get(x_1, 1);
@@ -673,7 +673,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgiven_d__boxed(x_1: Obj, x_2: O
 }
 
 // Lean: CapDAG.Query.grade
-// Source: CapDAG/Query.lean:660:1
+// Source: CapDAG/Query.lean:693:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade(x_1: Obj, x_2: Obj) -> u8 {
     rt::lean_inc_ref(x_1);
     let x_3: Obj = l_CapDAG_dQuery_dexactly(x_1);
@@ -717,7 +717,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade(x_1: Obj, x_2: Obj) -> u8
 
 // Lean: CapDAG.Query.grade._boxed
 // Compiled from: CapDAG.Query.grade
-// Source: CapDAG/Query.lean:660:1
+// Source: CapDAG/Query.lean:693:1
 pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dgrade_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = l_CapDAG_dQuery_dgrade(x_1, x_2);
     let x_4: Obj = rt::lean_box(x_3 as usize);
@@ -881,7 +881,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dQuery_dproducing(x_1: Obj, x_2: Obj) -
 }
 
 // Lean: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity__init() -> Obj {
     let x_1: Obj = l_CapDAG_didentity_d__closed__7();
@@ -894,7 +894,7 @@ pub(crate) unsafe fn l_CapDAG_didentity() -> Obj {
 
 // Lean: CapDAG.identity._closed_0
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"cap", 3);
@@ -907,7 +907,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__0() -> Obj {
 
 // Lean: CapDAG.identity._closed_1
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__1: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__1__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"op", 2);
@@ -920,7 +920,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__1() -> Obj {
 
 // Lean: CapDAG.identity._closed_2
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__2: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__2__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"a", 1);
@@ -933,7 +933,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__2() -> Obj {
 
 // Lean: CapDAG.identity._closed_3
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__3: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__3__init() -> Obj {
     let x_1: Obj = l_CapDAG_didentity_d__closed__2();
@@ -947,7 +947,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__3() -> Obj {
 
 // Lean: CapDAG.identity._closed_4
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__4: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__4__init() -> Obj {
     let x_1: Obj = l_CapDAG_didentity_d__closed__3();
@@ -964,7 +964,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__4() -> Obj {
 
 // Lean: CapDAG.identity._closed_5
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__5: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__5__init() -> Obj {
     let x_1: Obj = rt::lean_box(0);
@@ -981,7 +981,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__5() -> Obj {
 
 // Lean: CapDAG.identity._closed_6
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__6: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__6__init() -> Obj {
     let x_1: Obj = l_CapDAG_didentity_d__closed__5();
@@ -998,7 +998,7 @@ pub(crate) unsafe fn l_CapDAG_didentity_d__closed__6() -> Obj {
 
 // Lean: CapDAG.identity._closed_7
 // Compiled from: CapDAG.identity
-// Source: CapDAG/Query.lean:616:1
+// Source: CapDAG/Query.lean:649:1
 static C_l_CapDAG_didentity_d__closed__7: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_didentity_d__closed__7__init() -> Obj {
     let x_1: u8 = 2u8;
@@ -1362,7 +1362,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqAsk_ddecEq_d__boxed(x_1
 }
 
 // Lean: CapDAG.instDecidableEqGrade
-// Source: CapDAG/Query.lean:650:18
+// Source: CapDAG/Query.lean:683:18
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade(x_1: u8, x_2: u8) -> u8 {
     let x_3: Obj = l_CapDAG_dGrade_dctorIdx(x_1);
     let x_4: Obj = l_CapDAG_dGrade_dctorIdx(x_2);
@@ -1374,7 +1374,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade(x_1: u8, x_2: u8)
 
 // Lean: CapDAG.instDecidableEqGrade._boxed
 // Compiled from: CapDAG.instDecidableEqGrade
-// Source: CapDAG/Query.lean:650:18
+// Source: CapDAG/Query.lean:683:18
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstDecidableEqGrade_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = rt::lean_unbox(x_1) as u8;
     let x_4: u8 = rt::lean_unbox(x_2) as u8;
@@ -2142,7 +2142,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprAsk_drepr_d__closed__9() -> Obj {
 }
 
 // Lean: CapDAG.instReprGrade
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_d__closed__0();
@@ -2155,7 +2155,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade() -> Obj {
 
 // Lean: CapDAG.instReprGrade._closed_0
 // Compiled from: CapDAG.instReprGrade
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_alloc_closure(l_CapDAG_dinstReprGrade_drepr_d__boxed as *const (), 2, 0);
@@ -2167,7 +2167,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_d__closed__0() -> Obj {
 }
 
 // Lean: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr(x_1: u8, x_2: Obj) -> Obj {
     let mut x_4: Obj;
     'b3: {
@@ -2295,7 +2295,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr(x_1: u8, x_2: Obj)
 
 // Lean: CapDAG.instReprGrade.repr._boxed
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
     let x_3: u8 = rt::lean_unbox(x_1) as u8;
     let x_4: Obj = l_CapDAG_dinstReprGrade_drepr(x_3, x_2);
@@ -2305,7 +2305,7 @@ pub(crate) unsafe extern "C" fn l_CapDAG_dinstReprGrade_drepr_d__boxed(x_1: Obj,
 
 // Lean: CapDAG.instReprGrade.repr._closed_0
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.exact", 18);
@@ -2318,7 +2318,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__0() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_1
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__1: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__1__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__0();
@@ -2333,7 +2333,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__1() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_2
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__2: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__2__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.guaranteed", 23);
@@ -2346,7 +2346,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__2() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_3
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__3: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__3__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__2();
@@ -2361,7 +2361,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__3() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_4
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__4: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__4__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.possible", 21);
@@ -2374,7 +2374,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__4() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_5
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__5: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__5__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__4();
@@ -2389,7 +2389,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__5() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_6
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__6: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__6__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"CapDAG.Grade.none", 17);
@@ -2402,7 +2402,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__6() -> Obj {
 
 // Lean: CapDAG.instReprGrade.repr._closed_7
 // Compiled from: CapDAG.instReprGrade.repr
-// Source: CapDAG/Query.lean:650:12
+// Source: CapDAG/Query.lean:683:12
 static C_l_CapDAG_dinstReprGrade_drepr_d__closed__7: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_dinstReprGrade_drepr_d__closed__7__init() -> Obj {
     let x_1: Obj = l_CapDAG_dinstReprGrade_drepr_d__closed__6();
@@ -2903,7 +2903,7 @@ pub(crate) unsafe fn l_CapDAG_dinstReprQuery_drepr_d__redArg_d__closed__9() -> O
 }
 
 // Lean: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__18();
@@ -2916,7 +2916,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_0
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__0: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__0__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"media", 5);
@@ -2929,7 +2929,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__0() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_1
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__1: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__1__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"enc", 3);
@@ -2942,7 +2942,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__1() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_10
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__10: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__10__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__9();
@@ -2959,7 +2959,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__10() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_11
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__11: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__11__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__10();
@@ -2976,7 +2976,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__11() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_12
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__12: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__12__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"yaml", 4);
@@ -2989,7 +2989,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__12() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_13
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__13: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__13__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__12();
@@ -3003,7 +3003,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__13() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_14
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__14: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__14__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__13();
@@ -3020,7 +3020,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__14() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_15
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__15: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__15__init() -> Obj {
     let x_1: Obj = rt::lean_box(0);
@@ -3037,7 +3037,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__15() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_16
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__16: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__16__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__15();
@@ -3054,7 +3054,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__16() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_17
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__17: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__17__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__16();
@@ -3071,7 +3071,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__17() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_18
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__18: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__18__init() -> Obj {
     let x_1: u8 = 3u8;
@@ -3092,7 +3092,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__18() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_2
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__2: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__2__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"utf8", 4);
@@ -3105,7 +3105,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__2() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_3
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__3: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__3__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__2();
@@ -3119,7 +3119,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__3() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_4
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__4: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__4__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__3();
@@ -3136,7 +3136,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__4() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_5
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__5: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__5__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"fmt", 3);
@@ -3149,7 +3149,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__5() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_6
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__6: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__6__init() -> Obj {
     let x_1: Obj = rt::lean_mk_string_unchecked(b"json", 4);
@@ -3162,7 +3162,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__6() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_7
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__7: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__7__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__6();
@@ -3176,7 +3176,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__7() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_8
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__8: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__8__init() -> Obj {
     let x_1: Obj = l_CapDAG_djsonToYaml_d__closed__7();
@@ -3193,7 +3193,7 @@ pub(crate) unsafe fn l_CapDAG_djsonToYaml_d__closed__8() -> Obj {
 
 // Lean: CapDAG.jsonToYaml._closed_9
 // Compiled from: CapDAG.jsonToYaml
-// Source: CapDAG/Query.lean:618:1
+// Source: CapDAG/Query.lean:651:1
 static C_l_CapDAG_djsonToYaml_d__closed__9: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapDAG_djsonToYaml_d__closed__9__init() -> Obj {
     let x_1: Obj = rt::lean_box(0);

@@ -840,7 +840,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableEqUrn_ddecEq_d__lam__0
 }
 
 // Lean: TaggedUrn.instDecidableMeets
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:165:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:191:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     let x_4: Obj = rt::lean_ctor_get(x_2, 0);
@@ -868,7 +868,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets(x_1: Obj, x_2: O
 
 // Lean: TaggedUrn.instDecidableMeets._lam_0
 // Compiled from: TaggedUrn.instDecidableMeets
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:165:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:191:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets_d__lam__0(x_1: Obj, x_2: Obj, x_3: Obj) -> u8 {
     let x_4: Obj = l_TaggedUrn_dUrn_dtag(x_1, x_3);
     let x_5: Obj = l_TaggedUrn_dUrn_dtag(x_2, x_3);
@@ -880,7 +880,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets_d__lam__0(x_1: O
 
 // Lean: TaggedUrn.instDecidableMeets._lam_0._boxed
 // Compiled from: TaggedUrn.instDecidableMeets
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:165:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:191:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets_d__lam__0_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
     let x_4: u8 = l_TaggedUrn_dinstDecidableMeets_d__lam__0(x_1, x_2, x_3);
     rt::lean_dec_ref(x_3);
@@ -891,7 +891,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeets_d__lam__0_d__box
 }
 
 // Lean: TaggedUrn.instDecidableMeetsClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:284:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:332:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeetsClosed(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     let x_4: Obj = rt::lean_ctor_get(x_2, 0);
@@ -919,7 +919,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeetsClosed(x_1: Obj, 
 
 // Lean: TaggedUrn.instDecidableMeetsClosed._lam_0
 // Compiled from: TaggedUrn.instDecidableMeetsClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:284:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:332:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeetsClosed_d__lam__0(x_1: Obj, x_2: Obj, x_3: Obj) -> u8 {
     let x_4: Obj = l_TaggedUrn_dUrn_dtag(x_1, x_3);
     let x_5: Obj = l_TaggedUrn_dConstraint_dclosed(x_4);
@@ -933,7 +933,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeetsClosed_d__lam__0(
 
 // Lean: TaggedUrn.instDecidableMeetsClosed._lam_0._boxed
 // Compiled from: TaggedUrn.instDecidableMeetsClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:284:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:332:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableMeetsClosed_d__lam__0_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
     let x_4: u8 = l_TaggedUrn_dinstDecidableMeetsClosed_d__lam__0(x_1, x_2, x_3);
     rt::lean_dec_ref(x_3);
@@ -995,7 +995,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefines_d__lam__0_d__b
 }
 
 // Lean: TaggedUrn.instDecidableRefinesBothClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:329:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:377:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     let x_4: Obj = rt::lean_ctor_get(x_2, 0);
@@ -1023,7 +1023,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed(x_1:
 
 // Lean: TaggedUrn.instDecidableRefinesBothClosed._lam_0
 // Compiled from: TaggedUrn.instDecidableRefinesBothClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:329:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:377:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed_d__lam__0(x_1: Obj, x_2: Obj, x_3: Obj) -> u8 {
     let x_4: Obj = l_TaggedUrn_dUrn_dtag(x_1, x_3);
     let x_5: Obj = l_TaggedUrn_dConstraint_dclosed(x_4);
@@ -1039,7 +1039,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed_d__l
 
 // Lean: TaggedUrn.instDecidableRefinesBothClosed._lam_0._boxed
 // Compiled from: TaggedUrn.instDecidableRefinesBothClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:329:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:377:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed_d__lam__0_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
     let x_4: u8 = l_TaggedUrn_dinstDecidableRefinesBothClosed_d__lam__0(x_1, x_2, x_3);
     rt::lean_dec_ref(x_3);
@@ -1050,7 +1050,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesBothClosed_d__l
 }
 
 // Lean: TaggedUrn.instDecidableRefinesClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:223:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:260:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesClosed(x_1: Obj, x_2: Obj) -> u8 {
     let x_3: Obj = rt::lean_ctor_get(x_1, 0);
     let x_4: Obj = rt::lean_ctor_get(x_2, 0);
@@ -1078,7 +1078,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesClosed(x_1: Obj
 
 // Lean: TaggedUrn.instDecidableRefinesClosed._lam_0
 // Compiled from: TaggedUrn.instDecidableRefinesClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:223:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:260:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesClosed_d__lam__0(x_1: Obj, x_2: Obj, x_3: Obj) -> u8 {
     let x_4: Obj = l_TaggedUrn_dUrn_dtag(x_1, x_3);
     let x_5: Obj = l_TaggedUrn_dConstraint_dclosed(x_4);
@@ -1092,7 +1092,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesClosed_d__lam__
 
 // Lean: TaggedUrn.instDecidableRefinesClosed._lam_0._boxed
 // Compiled from: TaggedUrn.instDecidableRefinesClosed
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:223:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:260:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dinstDecidableRefinesClosed_d__lam__0_d__boxed(x_1: Obj, x_2: Obj, x_3: Obj) -> Obj {
     let x_4: u8 = l_TaggedUrn_dinstDecidableRefinesClosed_d__lam__0(x_1, x_2, x_3);
     rt::lean_dec_ref(x_3);
@@ -1435,7 +1435,7 @@ pub(crate) unsafe fn l_TaggedUrn_dinstReprUrn_drepr_d__redArg_d__closed__9() -> 
 }
 
 // Lean: TaggedUrn.tagScore
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:399:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:447:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagScore(x_1: Obj) -> Obj {
     match rt::lean_obj_tag(x_1) {
         0 => {
@@ -1526,7 +1526,7 @@ pub(crate) unsafe extern "C" fn l_TaggedUrn_dtagScore(x_1: Obj) -> Obj {
 }
 
 // Lean: TaggedUrn.urnScore
-// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:415:1
+// Source: <package:tagged_urn_formal>/TaggedUrn/Urn.lean:463:1
 pub(crate) unsafe extern "C" fn l_TaggedUrn_durnScore(x_1: Obj) -> Obj {
     let x_2: Obj = rt::lean_ctor_get(x_1, 1);
     rt::lean_inc(x_2);
