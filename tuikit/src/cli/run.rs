@@ -217,6 +217,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
             Target::Machine { path, notation } => super::check::show(ctx, &registry, path, notation).await,
         };
     }
+    if let Some(dir) = &args.output {
+        check_output_dir(dir)?;
+    }
     let dev_dir = match &target {
         Target::Cap { dev_dir, .. } => dev_dir.clone(),
         Target::Machine { .. } => None,
@@ -245,6 +248,27 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         return execute(ctx, &registry, &args, Some(args.progress), runtime, runs, false, Results::Into(&mut std::io::sink())).await;
     }
     execute(ctx, &registry, &args, Some(args.progress), runtime, runs, single_scalar, Results::Stdout).await
+}
+
+/// `-o`, checked before anything runs, so a run's work is never done for a
+/// directory its results cannot be written to: it is a directory, or one is
+/// made there, and a file can be written in it.
+fn check_output_dir(dir: &Path) -> CliResult<()> {
+    let shown = dir.display();
+    if dir.exists() && !dir.is_dir() {
+        return Err(CliError::usage(format!("the output directory '{shown}' is a file"))
+            .hint("give -o a directory, or a path where one can be made"));
+    }
+    std::fs::create_dir_all(dir).map_err(|e| {
+        CliError::failed(format!("the output directory '{shown}' could not be made"))
+            .context(e.to_string())
+            .hint("give -o a directory, or a path where one can be made")
+    })?;
+    tempfile::Builder::new().prefix(".capdag-check").tempfile_in(dir).map(drop).map_err(|e| {
+        CliError::failed(format!("the output directory '{shown}' cannot be written"))
+            .context(e.to_string())
+            .hint("give -o a directory you can write to")
+    })
 }
 
 /// The cartridge-hosting runtime of one command: its dev binaries, its trace,
@@ -959,6 +983,9 @@ async fn execute(
     let signals_ctrl_c = !shower.reads_keys();
     // On the terminal the live view is drawn on, a run's results are printed
     // above the block rather than into it.
+    // Whether what is written for stdout is read on a terminal: binary is
+    // not dumped there.
+    let results_on_terminal = matches!(results, Results::Stdout) && ctx.term.stdout_is_terminal;
     let mut stdout = std::io::stdout();
     let (holds_results, out): (bool, &mut dyn std::io::Write) = match results {
         Results::Stdout => (shower.holds_results(&ctx.term), &mut stdout),
@@ -1062,8 +1089,21 @@ async fn execute(
                             } else {
                                 control.outcome(report.failure.is_some(), report.tolerated)
                             };
+                            // What could not be written where it was asked is
+                            // given to the person another way, before the
+                            // summary and the error that says why.
+                            let delivered = match &report.failure {
+                                Some(StrandFailure::Emit(refusal)) => {
+                                    let sink = if holds_results { Stdout::Held } else { Stdout::Out(&mut *out) };
+                                    deliver_unsaved(ctx, refusal, &mut shower, sink, results_on_terminal)
+                                }
+                                _ => Vec::new(),
+                            };
                             say_notes(ctx, registry, &mut shower, &report);
-                            if let Some(failure) = report_failure(registry, &strand, &report, ctx.term.verbosity >= 1) {
+                            if let Some(mut failure) = report_failure(registry, &strand, &report, ctx.term.verbosity >= 1) {
+                                for line in delivered {
+                                    failure = failure.context(line);
+                                }
                                 if outcome != RunOutcome::Aborted {
                                     failures.push(failure);
                                 }
@@ -1296,16 +1336,124 @@ fn say_notes(ctx: &Ctx, registry: &FabricRegistry, shower: &mut Shower, report: 
 fn report_failure(registry: &FabricRegistry, strand: &StrandPlan, report: &StrandReport, verbose: bool) -> Option<CliError> {
     match report.failure.as_ref()? {
         StrandFailure::Run(error) => Some(explain(registry, strand, error, verbose)),
-        StrandFailure::Emit(message) => Some(
+        StrandFailure::Emit(refusal) => Some(
             CliError::failed("the run's results could not be written")
-                .context(message.clone())
-                .hint(if message.contains("--force") {
+                .context(refusal.reason.clone())
+                .hint(if refusal.reason.contains("--force") {
                     "pass --force to overwrite them, or -o <dir> to write them elsewhere".to_string()
                 } else {
                     "check the output directory".to_string()
                 }),
         ),
     }
+}
+
+/// Where what a command writes for stdout goes from a run.
+enum Stdout<'a> {
+    /// Held by the live view, drawn on the terminal stdout is: printed above
+    /// its block.
+    Held,
+    /// Written here.
+    Out(&'a mut dyn std::io::Write),
+}
+
+/// Give the person what a run made and could not write where it was asked,
+/// and say how each was given, for the error to name. Text is written to
+/// stdout, each under its name when stdout is a terminal; anything else is
+/// written to stdout when stdout is a pipe or a file, and kept in a directory
+/// of its own when stdout is a terminal, where its bytes would be noise.
+/// Under `--json` stdout is records only: everything is kept, and each kept
+/// file is named in an `unsaved` record.
+fn deliver_unsaved(
+    ctx: &Ctx,
+    refusal: &capdag::orchestrator::EmitRefusal,
+    shower: &mut Shower,
+    mut stdout: Stdout<'_>,
+    to_terminal: bool,
+) -> Vec<String> {
+    use capdag::orchestrator::{is_text_media, UnsavedContent};
+    let mut printed: Vec<String> = Vec::new();
+    let mut said: Vec<String> = Vec::new();
+    let mut kept_in: Option<PathBuf> = None;
+    for item in &refusal.unsaved {
+        let printable = !ctx.term.json && (is_text_media(&item.media_urn) || !to_terminal);
+        if printable {
+            if to_terminal {
+                shower.say(&format!("{}, not saved:", item.file_name), serde_json::Value::Null);
+            }
+            let given = match &item.content {
+                UnsavedContent::Bytes(data) => Ok(data.clone()),
+                UnsavedContent::Part(part) => std::fs::read(part),
+            }
+            .and_then(|mut data| {
+                // On a terminal the next name starts a line of its own.
+                if to_terminal && !data.ends_with(b"\n") {
+                    data.push(b'\n');
+                }
+                match &mut stdout {
+                    Stdout::Held => {
+                        shower.results(data);
+                        Ok(())
+                    }
+                    Stdout::Out(out) => out.write_all(&data).and_then(|()| out.flush()),
+                }
+            })
+            .and_then(|()| match &item.content {
+                UnsavedContent::Part(part) => std::fs::remove_file(part),
+                UnsavedContent::Bytes(_) => Ok(()),
+            });
+            match given {
+                Ok(()) => printed.push(item.file_name.clone()),
+                Err(e) => said.push(format!("{} could not be written to stdout either: {e}", item.file_name)),
+            }
+            continue;
+        }
+        let dir = match &kept_in {
+            Some(dir) => dir.clone(),
+            None => match tempfile::Builder::new().prefix("capdag-kept-").tempdir() {
+                Ok(dir) => {
+                    let dir = dir.keep();
+                    kept_in = Some(dir.clone());
+                    dir
+                }
+                Err(e) => {
+                    said.push(match &item.content {
+                        UnsavedContent::Part(part) => {
+                            format!("{} could not be kept ({e}); it is at {}", item.file_name, part.display())
+                        }
+                        UnsavedContent::Bytes(_) => format!("{} could not be kept, and is lost: {e}", item.file_name),
+                    });
+                    continue;
+                }
+            },
+        };
+        let path = dir.join(&item.file_name);
+        let kept = match &item.content {
+            UnsavedContent::Bytes(data) => std::fs::write(&path, data),
+            // Across file systems a rename cannot move it: it is copied.
+            UnsavedContent::Part(part) => std::fs::rename(part, &path)
+                .or_else(|_| std::fs::copy(part, &path).and_then(|_| std::fs::remove_file(part))),
+        };
+        match kept {
+            Ok(()) => {
+                said.push(format!("kept instead: {}", path.display()));
+                if ctx.term.json {
+                    shower.say(
+                        "",
+                        serde_json::json!({ "type": "unsaved", "output": item.file_name, "kept": path.display().to_string() }),
+                    );
+                }
+            }
+            Err(e) => said.push(match &item.content {
+                UnsavedContent::Part(part) => format!("{} could not be kept ({e}); it is at {}", item.file_name, part.display()),
+                UnsavedContent::Bytes(_) => format!("{} could not be kept, and is lost: {e}", item.file_name),
+            }),
+        }
+    }
+    if !printed.is_empty() {
+        said.insert(0, format!("written to stdout instead: {}", printed.join(", ")));
+    }
+    said
 }
 
 /// A run's failure, named by the step's alias and what its cartridge said.

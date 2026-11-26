@@ -236,6 +236,13 @@ impl CliRuntime {
         }
     }
 
+    /// Forget the part-files at `paths`: an emission that could not write
+    /// them handed them back, and its caller gives them on and removes them,
+    /// so [`discard_parts`](Self::discard_parts) leaves them be.
+    pub fn keep_parts<'a>(&self, paths: impl IntoIterator<Item = &'a std::path::Path>) {
+        self.parts.release(paths);
+    }
+
     /// Remove every part-file that was created for a sink of `plan` and was
     /// not given its name: what a run that has ended left behind.
     ///

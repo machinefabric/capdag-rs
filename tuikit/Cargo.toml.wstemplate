@@ -21,6 +21,9 @@ ratatui = "0.30"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 strsim = "0.11"
+# Where a run's results that could not be written where asked are kept, and
+# how an output directory is found writable before a run.
+tempfile = "3.20"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 unicode-segmentation = "1"
@@ -33,6 +36,4 @@ vt100 = "0.15"
 [dev-dependencies]
 # The library's own test builders, for the commands' unit tests.
 capdag = { path = "..", features = ["test-fixtures"] }
-# What the end-to-end tests share with the library's (../tests/support).
-tempfile = "3.10"
 uuid = { version = "1.0", features = ["v4"] }

@@ -65,6 +65,16 @@ impl PartFiles {
             .push((sink.to_string(), path.to_path_buf()));
     }
 
+    /// Forget the part-files at `paths`, leaving them where they are: they
+    /// are someone else's to remove now.
+    pub fn release<'a>(&self, paths: impl IntoIterator<Item = &'a Path>) {
+        let paths: Vec<&Path> = paths.into_iter().collect();
+        self.0
+            .lock()
+            .expect("part-file record")
+            .retain(|(_, path)| !paths.contains(&path.as_path()));
+    }
+
     /// Remove every part-file created for a sink `of_run` says is the run's
     /// and that is still where it was created, and forget them: one that was
     /// given its name has moved, and is an output. Returns how many were

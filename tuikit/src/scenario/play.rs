@@ -62,7 +62,9 @@ impl Player {
         if mode == Mode::Json {
             command.arg("--json");
         }
-        command.args(&journey.args).current_dir(dir);
+        // What the command keeps in a temporary directory is kept in the
+        // journey's, and goes with it.
+        command.args(&journey.args).current_dir(dir).env("TMPDIR", dir);
         if mode.on_terminal() {
             // A person's terminal: no CI to make the command keep to plain lines.
             command.env_remove("CI").env("TERM", "xterm-256color");

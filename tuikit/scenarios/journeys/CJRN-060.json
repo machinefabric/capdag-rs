@@ -1,0 +1,52 @@
+{
+  "title": "Text a run made that cannot be written where asked is printed instead, and the error says why",
+  "world": "ordinary",
+  "args": ["run", "disbind-pdf", "report.pdf", "-o", "earlier"],
+  "modes": {
+    "full_screen": {
+      "expect": {
+        "exit": 1,
+        "screen": [
+          "report.output.0.txt, not saved:",
+          "Quarterly report. Revenue rose by a tenth over the quarter.",
+          "report.output.1.txt, not saved:",
+          "Costs held level; the new office opened in March.",
+          "report.output.2.txt, not saved:",
+          "Outlook: two hires in the summer, and a second product in the autumn.",
+          "✗ report.pdf  1 step · {*} s · failed",
+          "error: the run's results could not be written",
+          "  refusing to overwrite existing file \"earlier/report.output.0.txt\" (pass --force to allow)",
+          "  written to stdout instead: report.output.0.txt, report.output.1.txt, report.output.2.txt",
+          "hint: pass --force to overwrite them, or -o <dir> to write them elsewhere"
+        ]
+      }
+    },
+    "inline": {
+      "expect": {
+        "exit": 1,
+        "stdout": ["Quarterly report.", "Costs held level", "Outlook: two hires"],
+        "screen": [
+          "✗ report.pdf  1 step · {*} s · failed",
+          "error: the run's results could not be written",
+          "  refusing to overwrite existing file \"earlier/report.output.0.txt\" (pass --force to allow)",
+          "  written to stdout instead: report.output.0.txt, report.output.1.txt, report.output.2.txt",
+          "hint: pass --force to overwrite them, or -o <dir> to write them elsewhere"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "stdout": ["Quarterly report.", "Costs held level", "Outlook: two hires"],
+        "shown": ["written to stdout instead: report.output.0.txt, report.output.1.txt, report.output.2.txt"]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 1,
+        "stdout": ["\"type\":\"unsaved\"", "\"output\":\"report.output.0.txt\"", "\"kept\":"],
+        "absent": ["Quarterly report."]
+      }
+    }
+  }
+}

@@ -62,7 +62,10 @@ pub use cli_cap::{
     InterfaceNames,
     CapInvocation, CapToken, SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
 };
-pub use cli_output::{emit_terminals, emit_terminals_by_output, extension_for_media, EmitOptions};
+pub use cli_output::{
+    emit_terminals, emit_terminals_by_output, extension_for_media, is_text_media, EmitOptions, EmitRefusal, UnsavedContent,
+    UnsavedItem,
+};
 pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_PEER_HOLD, CLI_UNSCOPED_FLOW};
 pub use cli_session::{
     finish_strand, spawn_strand, EmitTarget, EmittedOutput, PlannedStrand, StrandFailure,

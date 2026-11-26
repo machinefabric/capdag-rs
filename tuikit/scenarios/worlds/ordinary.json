@@ -18,10 +18,16 @@
     "notes.txt": "Buy milk. Call the bank. Read the report.\n",
     "build/pdfcartridge": "a pdf cartridge built from its project\n",
     "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary]\n",
-    "broken.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary\n"
+    "broken.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary\n",
+    "earlier/report.output.0.txt": "The first page, from an earlier run.\n",
+    "earlier/report.output.png": "an image from an earlier run\n"
   },
   "refused_machines": ["broken.machine"],
   "runs": {
+    "pdf2png": {
+      "signals": [{ "step": { "step": "pdf2png", "progress": 0.0 } }, { "wait": 300 }, { "step": { "step": "pdf2png", "progress": 1.0 } }],
+      "end": { "completed": { "outputs": { "png": "\u0089PNG the first page, as an image" } } }
+    },
     "disbind-pdf": {
       "signals": [
         { "progress": { "value": 0.0, "message": "Starting" } },

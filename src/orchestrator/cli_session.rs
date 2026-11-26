@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::orchestrator::cli_output::{emit_terminals_by_output, EmitOptions};
+use crate::orchestrator::cli_output::{emit_terminals_by_output, EmitOptions, EmitRefusal, UnsavedContent};
 use crate::orchestrator::cli_runtime::{CliRuntime, TransientSink};
 use crate::orchestrator::execute_plan::{
     execute_plan, EngineRuntime, PipelineResult, PlanInput, RunVerdict, StepFailure, StepOutcome,
@@ -154,8 +154,9 @@ pub struct StrandReport {
 pub enum StrandFailure {
     /// The run failed, or was aborted: the error it ended with.
     Run(ExecutionError),
-    /// What the run produced could not be written.
-    Emit(String),
+    /// What the run produced could not be written: why, what was written
+    /// before, and every item that was not, handed back.
+    Emit(EmitRefusal),
 }
 
 /// Write what a finished strand produced, by the pipe discipline, to `stdout`
@@ -163,7 +164,9 @@ pub enum StrandFailure {
 /// failure that ended it, outputs that were not produced, steps skipped,
 /// attempted again or tolerated. Whatever the run persisted and did not turn
 /// into an output — everything, when it failed — is removed: nothing of a run
-/// is left behind but its outputs.
+/// is left behind but its outputs, and what could not be written where it
+/// was asked to be, which the report hands back ([`EmitRefusal::unsaved`])
+/// for the caller to give on and remove.
 pub fn finish_strand(
     strand: &StrandPlan,
     result: Result<PipelineResult, ExecutionError>,
@@ -172,6 +175,13 @@ pub fn finish_strand(
     runtime: &CliRuntime,
 ) -> StrandReport {
     let report = emit_strand(strand, result, target, stdout);
+    if let Some(StrandFailure::Emit(refusal)) = &report.failure {
+        let handed_back = refusal.unsaved.iter().filter_map(|item| match &item.content {
+            UnsavedContent::Part(path) => Some(path.as_path()),
+            UnsavedContent::Bytes(_) => None,
+        });
+        runtime.keep_parts(handed_back);
+    }
     runtime.discard_parts(&strand.plan);
     report
 }
@@ -203,7 +213,16 @@ pub fn emit_strand(
     };
     let written = match emit_terminals_by_output(&result, &options, stdout) {
         Ok(written) => written,
-        Err(e) => return failed(StrandFailure::Emit(e), Vec::new(), BTreeMap::new()),
+        Err(refusal) => {
+            // What was written is an output all the same.
+            let mut outputs: BTreeMap<String, EmittedOutput> = BTreeMap::new();
+            for (node, path) in &refusal.written {
+                if let EmittedOutput::Files(files) = outputs.entry(node.clone()).or_insert_with(|| EmittedOutput::Files(Vec::new())) {
+                    files.push(path.clone());
+                }
+            }
+            return failed(StrandFailure::Emit(refusal), Vec::new(), outputs);
+        }
     };
     let mut notes: Vec<StrandNote> = Vec::new();
     let mut outputs: BTreeMap<String, EmittedOutput> = BTreeMap::new();
@@ -226,10 +245,14 @@ pub fn emit_strand(
                 // Every output of a plan is one the notation named.
                 let Some(name) = output_names.get(terminal.output_node_id()) else {
                     return failed(
-                        StrandFailure::Emit(format!(
-                            "the run reports output '{}', which its plan does not name",
-                            terminal.output_node_id()
-                        )),
+                        StrandFailure::Emit(EmitRefusal {
+                            reason: format!(
+                                "the run reports output '{}', which its plan does not name",
+                                terminal.output_node_id()
+                            ),
+                            written: Vec::new(),
+                            unsaved: Vec::new(),
+                        }),
                         notes,
                         outputs,
                     );

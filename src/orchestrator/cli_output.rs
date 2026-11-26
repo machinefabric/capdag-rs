@@ -11,7 +11,9 @@
 //!   machine's notation gives the output — and every written absolute path
 //!   is printed to stdout, one per line.
 //! - An existing file is a hard error unless `--force` — silent overwrites
-//!   destroy user data.
+//!   destroy user data. A refused emission hands back everything it did not
+//!   write, with what each item holds ([`EmitRefusal`]): the caller gives it
+//!   to the person another way, and nothing a run made is thrown away.
 //! - A terminal that was not produced writes nothing here: it is not an empty
 //!   file. The caller says so, from the result.
 //!
@@ -60,6 +62,50 @@ pub fn extension_for_media(media_urn: &str) -> String {
     "bin".to_string()
 }
 
+/// What a refused emission leaves: why it was refused, what it wrote before,
+/// and every item it did not write — the one refused and those after it —
+/// with what the item holds, so the caller can give it to the person another
+/// way. Nothing a run made is thrown away because it could not be written
+/// where it was asked to be.
+#[derive(Debug)]
+pub struct EmitRefusal {
+    /// Why: what could not be done, and to what.
+    pub reason: String,
+    /// What was written before the refusal: the plan `Output` node id and
+    /// the file's absolute path.
+    pub written: Vec<(String, PathBuf)>,
+    /// What was not written, in the order it would have been.
+    pub unsaved: Vec<UnsavedItem>,
+}
+
+/// One item a run produced and an emission did not write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsavedItem {
+    /// The plan `Output` node id it is an item of.
+    pub output_node_id: String,
+    /// The name it would have been written under, by the naming scheme.
+    pub file_name: String,
+    /// What it is.
+    pub media_urn: String,
+    pub content: UnsavedContent,
+}
+
+/// Where an unsaved item's bytes are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnsavedContent {
+    /// In memory.
+    Bytes(Vec<u8>),
+    /// In a part-file the CLI's disk writer persisted, left where it is: the
+    /// caller owns it now, and removes it once it has given it on.
+    Part(PathBuf),
+}
+
+/// Whether an item of `media_urn` is text: it declares its text encoding
+/// (`enc=`), so its bytes read as lines a person can be shown.
+pub fn is_text_media(media_urn: &str) -> bool {
+    MediaUrn::from_string(media_urn).is_ok_and(|parsed| parsed.get_tag("enc").is_some())
+}
+
 /// Emit a pipeline result per the pipe-discipline contract. Returns the
 /// absolute paths of files written (empty when the result went to stdout).
 /// `stdout` is injected so tests can capture it.
@@ -67,11 +113,38 @@ pub fn emit_terminals(
     result: &PipelineResult,
     options: &EmitOptions,
     stdout: &mut dyn Write,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, EmitRefusal> {
     Ok(emit_terminals_by_output(result, options, stdout)?
         .into_iter()
         .map(|(_, path)| path)
         .collect())
+}
+
+/// One item to emit: under which name, and where its bytes are.
+struct Planned<'a> {
+    output_node_id: &'a str,
+    file_name: String,
+    media_urn: &'a str,
+    content: PlannedContent<'a>,
+}
+
+enum PlannedContent<'a> {
+    Bytes(&'a [u8]),
+    Part(&'a str),
+}
+
+impl Planned<'_> {
+    fn unsaved(&self) -> UnsavedItem {
+        UnsavedItem {
+            output_node_id: self.output_node_id.to_string(),
+            file_name: self.file_name.clone(),
+            media_urn: self.media_urn.to_string(),
+            content: match self.content {
+                PlannedContent::Bytes(data) => UnsavedContent::Bytes(data.to_vec()),
+                PlannedContent::Part(part) => UnsavedContent::Part(PathBuf::from(part)),
+            },
+        }
+    }
 }
 
 /// [`emit_terminals`], saying which output each written file is of: the
@@ -81,138 +154,123 @@ pub fn emit_terminals_by_output(
     result: &PipelineResult,
     options: &EmitOptions,
     stdout: &mut dyn Write,
-) -> Result<Vec<(String, PathBuf)>, String> {
-    // The stdout fast path: one terminal, scalar, one item, no explicit dir.
-    // The item may be in memory or a single persisted part-file (the CLI's disk
-    // writer, L16) — persisted, its bytes stream to stdout and the part is
-    // removed, so the pipe contract is identical either way.
+) -> Result<Vec<(String, PathBuf)>, EmitRefusal> {
     let produced: Vec<&ProducedTerminal> = result
         .terminals
         .iter()
         .filter_map(|terminal| terminal.produced())
         .collect();
-    if let (None, 1, [terminal]) =
-        (&options.output_dir, result.terminals.len(), produced.as_slice())
-    {
-        if !terminal.is_sequence {
-            if terminal.writer_results.is_empty() && terminal.items.len() == 1 {
-                stdout
-                    .write_all(&terminal.items[0].data)
-                    .map_err(|e| format!("failed to write result to stdout: {e}"))?;
-                stdout
-                    .flush()
-                    .map_err(|e| format!("failed to flush stdout: {e}"))?;
-                return Ok(Vec::new());
+    // Every item, under the name the scheme gives it, in the order it is
+    // written: in memory, or a persisted part-file (the CLI's disk writer, L16).
+    // An output with no name is planned under its node id, and refused
+    // below if it is to be a file: a file is never named after a plan's
+    // internal node id.
+    let mut planned: Vec<Planned<'_>> = Vec::new();
+    let mut unnamed: Option<&str> = None;
+    for terminal in &produced {
+        let ext = extension_for_media(&terminal.media_urn);
+        let node = match options.output_names.get(&terminal.output_node_id) {
+            Some(node) => node.as_str(),
+            None => {
+                unnamed.get_or_insert(&terminal.output_node_id);
+                terminal.output_node_id.as_str()
             }
-            let parts: Vec<&String> = terminal
+        };
+        let contents: Vec<PlannedContent<'_>> = if terminal.writer_results.is_empty() {
+            terminal.items.iter().map(|item| PlannedContent::Bytes(&item.data)).collect()
+        } else {
+            terminal
                 .writer_results
                 .iter()
                 .flat_map(|w| w.saved_paths.iter())
-                .collect();
-            if let [part] = parts.as_slice() {
-                let mut file = std::fs::File::open(part)
-                    .map_err(|e| format!("failed to open persisted result '{part}': {e}"))?;
-                std::io::copy(&mut file, stdout)
-                    .map_err(|e| format!("failed to stream result to stdout: {e}"))?;
-                stdout
-                    .flush()
-                    .map_err(|e| format!("failed to flush stdout: {e}"))?;
-                std::fs::remove_file(part)
-                    .map_err(|e| format!("failed to remove part file '{part}': {e}"))?;
-                return Ok(Vec::new());
+                .map(|part| PlannedContent::Part(part))
+                .collect()
+        };
+        let multi_item = terminal.is_sequence || contents.len() > 1;
+        for (index, content) in contents.into_iter().enumerate() {
+            let file_name = if multi_item {
+                format!("{}.{}.{}.{}", options.input_stem, node, index, ext)
+            } else {
+                format!("{}.{}.{}", options.input_stem, node, ext)
+            };
+            planned.push(Planned {
+                output_node_id: &terminal.output_node_id,
+                file_name,
+                media_urn: &terminal.media_urn,
+                content,
+            });
+        }
+    }
+    let refused = |reason: String, written: Vec<(String, PathBuf)>, rest: &[Planned<'_>]| EmitRefusal {
+        reason,
+        written,
+        unsaved: rest.iter().map(Planned::unsaved).collect(),
+    };
+    // The stdout fast path: one terminal, scalar, one item, no explicit dir.
+    // Persisted, its bytes stream to stdout and the part is removed, so the
+    // pipe contract is identical either way.
+    if let (None, 1, [terminal], [item]) =
+        (&options.output_dir, result.terminals.len(), produced.as_slice(), planned.as_slice())
+    {
+        if !terminal.is_sequence {
+            let streamed = match item.content {
+                PlannedContent::Bytes(data) => stdout.write_all(data),
+                PlannedContent::Part(part) => {
+                    std::fs::File::open(part).and_then(|mut file| std::io::copy(&mut file, stdout).map(|_| ()))
+                }
             }
+            .and_then(|()| stdout.flush());
+            if let Err(e) = streamed {
+                return Err(refused(format!("failed to write the result to stdout: {e}"), Vec::new(), &planned));
+            }
+            if let PlannedContent::Part(part) = item.content {
+                std::fs::remove_file(part)
+                    .map_err(|e| refused(format!("failed to remove part file '{part}': {e}"), Vec::new(), &[]))?;
+            }
+            return Ok(Vec::new());
         }
     }
 
+    // A plan's every output is one the notation named.
+    if let Some(node) = unnamed {
+        return Err(refused(format!("output '{node}' has no name to write it under"), Vec::new(), &planned));
+    }
     let dir = options
         .output_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from("."));
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("failed to create output dir {dir:?}: {e}"))?;
-
-    // Every persisted part-file in processing order — so a refusal mid-emit can
-    // sweep the not-yet-renamed parts instead of littering the output dir.
-    let all_parts: Vec<String> = produced
-        .iter()
-        .flat_map(|t| t.writer_results.iter())
-        .flat_map(|w| w.saved_paths.iter().cloned())
-        .collect();
-    let mut parts_done = 0usize;
-    let refuse = |path: &Path, parts_done: usize| {
-        for part in &all_parts[parts_done..] {
-            let _ = std::fs::remove_file(part);
-        }
-        format!("refusing to overwrite existing file {path:?} (pass --force to allow)")
-    };
-
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(refused(format!("failed to create output dir {dir:?}: {e}"), Vec::new(), &planned));
+    }
     let mut written: Vec<(String, PathBuf)> = Vec::new();
-    for terminal in produced {
-        let ext = extension_for_media(&terminal.media_urn);
-        let node = options.output_names.get(&terminal.output_node_id).ok_or_else(|| {
-            // Nothing was written yet for this terminal; parts of the others
-            // not yet renamed are swept like any refusal.
-            for part in &all_parts[parts_done..] {
-                let _ = std::fs::remove_file(part);
-            }
-            format!(
-                "output '{}' has no name to write it under",
-                terminal.output_node_id
-            )
-        })?;
-        if terminal.writer_results.is_empty() {
-            let multi_item = terminal.is_sequence || terminal.items.len() > 1;
-            for item in &terminal.items {
-                let name = if multi_item {
-                    format!("{}.{}.{}.{}", options.input_stem, node, item.index, ext)
-                } else {
-                    format!("{}.{}.{}", options.input_stem, node, ext)
-                };
-                let path = dir.join(&name);
-                if path.exists() && !options.force {
-                    return Err(refuse(&path, parts_done));
-                }
-                std::fs::write(&path, &item.data)
-                    .map_err(|e| format!("failed to write {path:?}: {e}"))?;
-                let absolute = absolutize(&path);
-                writeln!(stdout, "{}", absolute.display())
-                    .map_err(|e| format!("failed to report written path: {e}"))?;
-                written.push((terminal.output_node_id.clone(), absolute));
-            }
-        } else {
-            // Persisted terminal (CLI disk writer): rename each part-file to its
-            // contract name — parts live in the destination directory, so the
-            // rename is same-filesystem and never re-buffers the data.
-            let parts: Vec<&String> = terminal
-                .writer_results
-                .iter()
-                .flat_map(|w| w.saved_paths.iter())
-                .collect();
-            let multi_item = terminal.is_sequence || parts.len() > 1;
-            for (index, part) in parts.iter().enumerate() {
-                let name = if multi_item {
-                    format!("{}.{}.{}.{}", options.input_stem, node, index, ext)
-                } else {
-                    format!("{}.{}.{}", options.input_stem, node, ext)
-                };
-                let path = dir.join(&name);
-                if path.exists() && !options.force {
-                    return Err(refuse(&path, parts_done));
-                }
-                std::fs::rename(part, &path).map_err(|e| {
-                    format!("failed to move persisted result '{part}' to {path:?}: {e}")
-                })?;
-                parts_done += 1;
-                let absolute = absolutize(&path);
-                writeln!(stdout, "{}", absolute.display())
-                    .map_err(|e| format!("failed to report written path: {e}"))?;
-                written.push((terminal.output_node_id.clone(), absolute));
-            }
+    for (at, item) in planned.iter().enumerate() {
+        let path = dir.join(&item.file_name);
+        if path.exists() && !options.force {
+            return Err(refused(
+                format!("refusing to overwrite existing file {path:?} (pass --force to allow)"),
+                written,
+                &planned[at..],
+            ));
+        }
+        // A persisted part lives in the destination directory: the rename
+        // is same-filesystem and never re-buffers the data.
+        let moved = match item.content {
+            PlannedContent::Bytes(data) => std::fs::write(&path, data).map_err(|e| format!("failed to write {path:?}: {e}")),
+            PlannedContent::Part(part) => std::fs::rename(part, &path)
+                .map_err(|e| format!("failed to move persisted result '{part}' to {path:?}: {e}")),
+        };
+        if let Err(reason) = moved {
+            return Err(refused(reason, written, &planned[at..]));
+        }
+        let absolute = absolutize(&path);
+        written.push((item.output_node_id.to_string(), absolute.clone()));
+        if let Err(e) = writeln!(stdout, "{}", absolute.display()) {
+            return Err(refused(format!("failed to report written path: {e}"), written, &planned[at + 1..]));
         }
     }
-    stdout
-        .flush()
-        .map_err(|e| format!("failed to flush stdout: {e}"))?;
+    if let Err(e) = stdout.flush() {
+        return Err(refused(format!("failed to flush stdout: {e}"), written, &[]));
+    }
     Ok(written)
 }
 
@@ -357,7 +415,7 @@ mod tests {
             &mut stdout,
         )
         .unwrap_err();
-        assert!(err.contains("refusing to overwrite"), "{err}");
+        assert!(err.reason.contains("refusing to overwrite"), "{}", err.reason);
         let mut stdout: Vec<u8> = Vec::new();
         emit_terminals(
             &result,
@@ -440,7 +498,9 @@ mod tests {
         let mut unnamed = options(&[("output_7", "summary")]);
         unnamed.output_dir = Some(other.path().to_path_buf());
         let error = emit_terminals(&result, &unnamed, &mut Vec::new()).unwrap_err();
-        assert_eq!(error, "output 'output_3' has no name to write it under");
+        assert_eq!(error.reason, "output 'output_3' has no name to write it under");
+        assert!(error.written.is_empty(), "nothing is written when an output has no name");
+        assert_eq!(error.unsaved.len(), 1, "the named output is handed back: {:?}", error.unsaved);
     }
 
     // TEST12761: a terminal that was not produced writes nothing — no file,
@@ -491,7 +551,8 @@ mod tests {
     // same emission contract as in-memory items — a persisted sequence's
     // part-files are RENAMED to contract names with paths on stdout; a single
     // persisted scalar with no --output streams its BYTES to stdout and the
-    // part-file disappears; an overwrite refusal sweeps the unrenamed parts.
+    // part-file disappears; an overwrite refusal leaves the unrenamed parts
+    // where they are and hands them back, under the names they would have had.
     #[test]
     fn test8144_emit_persisted_terminals_contract() {
         // 1. Persisted sequence → renamed contract files, paths on stdout.
@@ -580,8 +641,8 @@ mod tests {
         assert!(written[0].ends_with("mic.output.wav"), "{written:?}");
         assert_eq!(std::fs::read(&written[0]).unwrap(), b"wav-bytes");
 
-        // 4. Overwrite refusal mid-emit sweeps the not-yet-renamed parts —
-        //    no litter in the output dir, and the error names --force.
+        // 4. An overwrite refusal mid-emit hands back the not-yet-renamed
+        //    parts, left where they are, and the error names --force.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("mic.output.0.wav"), b"precious").unwrap();
         let parts = vec![
@@ -606,15 +667,79 @@ mod tests {
             &mut stdout,
         )
         .unwrap_err();
-        assert!(err.contains("refusing to overwrite"), "{err}");
+        assert!(err.reason.contains("refusing to overwrite"), "{}", err.reason);
+        assert!(err.written.is_empty());
+        assert_eq!(
+            err.unsaved,
+            vec![
+                UnsavedItem {
+                    output_node_id: "output".to_string(),
+                    file_name: "mic.output.0.wav".to_string(),
+                    media_urn: "media:audio;ext=wav".to_string(),
+                    content: UnsavedContent::Part(PathBuf::from(&parts[0])),
+                },
+                UnsavedItem {
+                    output_node_id: "output".to_string(),
+                    file_name: "mic.output.1.wav".to_string(),
+                    media_urn: "media:audio;ext=wav".to_string(),
+                    content: UnsavedContent::Part(PathBuf::from(&parts[1])),
+                },
+            ]
+        );
         assert!(
-            !Path::new(&parts[0]).exists() && !Path::new(&parts[1]).exists(),
-            "refusal sweeps the remaining part-files"
+            Path::new(&parts[0]).exists() && Path::new(&parts[1]).exists(),
+            "the parts handed back are where the run left them"
         );
         assert_eq!(
             std::fs::read(dir.path().join("mic.output.0.wav")).unwrap(),
             b"precious",
             "the existing file is untouched"
         );
+    }
+
+    // TEST22291: a refusal after some items were written says which were
+    // written and hands back every item from the refused one on, in memory,
+    // under the name it would have had; and an item is text exactly when its
+    // media declares a text encoding.
+    #[test]
+    fn test22291_a_refusal_hands_back_what_it_did_not_write() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("doc.output.1.txt"), b"an earlier page").unwrap();
+        let result = result_of(vec![terminal(
+            "output",
+            "media:enc=utf8;page-text",
+            true,
+            vec![b"page one", b"page two", b"page three"],
+        )]);
+        let mut stdout: Vec<u8> = Vec::new();
+        let refusal = emit_terminals(
+            &result,
+            &EmitOptions {
+                output_dir: Some(dir.path().to_path_buf()),
+                force: false,
+                input_stem: "doc".to_string(),
+                output_names: names(),
+            },
+            &mut stdout,
+        )
+        .unwrap_err();
+        assert!(refusal.reason.contains("refusing to overwrite"), "{}", refusal.reason);
+        assert_eq!(refusal.written.len(), 1);
+        assert!(refusal.written[0].1.ends_with("doc.output.0.txt"), "{:?}", refusal.written);
+        let unsaved: Vec<(&str, &UnsavedContent)> =
+            refusal.unsaved.iter().map(|item| (item.file_name.as_str(), &item.content)).collect();
+        assert_eq!(
+            unsaved,
+            vec![
+                ("doc.output.1.txt", &UnsavedContent::Bytes(b"page two".to_vec())),
+                ("doc.output.2.txt", &UnsavedContent::Bytes(b"page three".to_vec())),
+            ]
+        );
+        assert_eq!(std::fs::read(dir.path().join("doc.output.1.txt")).unwrap(), b"an earlier page");
+        assert!(!dir.path().join("doc.output.2.txt").exists());
+
+        assert!(is_text_media("media:enc=utf8;page-text"));
+        assert!(!is_text_media("media:ext=png;image"));
+        assert!(!is_text_media("not a media urn"));
     }
 }
