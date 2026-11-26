@@ -5,7 +5,6 @@
 
 use crate::bifaci::cartridge_repo::CartridgeChannel;
 use crate::standard::caps::{identity_urn, CAP_IDENTITY};
-use crate::urn::cap_urn::CapUrn;
 use crate::Cap;
 use serde::{Deserialize, Serialize};
 

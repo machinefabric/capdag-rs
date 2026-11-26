@@ -9,7 +9,7 @@
 
 use crate::bifaci::frame::Frame;
 use crate::bifaci::host_runtime::{AsyncHostError, ResponseChunk};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 use std::sync::Arc;
 
 /// Handle for an active peer invoke request.

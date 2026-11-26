@@ -4848,7 +4848,7 @@ impl PoolMeta {
 }
 
 /// What became of a request that arrived.
-pub(crate) enum Arrived {
+enum Arrived {
     /// Its chain had room: it holds its slots, and is handed back to be run.
     Admitted(QueuedRequest),
     /// It is in line, at this position (from 1) among the requests waiting on

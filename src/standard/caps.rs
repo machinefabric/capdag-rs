@@ -14,7 +14,6 @@ use crate::urn::media_urn::{
     MEDIA_DECISION,
     MEDIA_DOWNLOAD_OUTPUT,
     MEDIA_EMBEDDING_VECTOR,
-    MEDIA_EPUB,
     MEDIA_FABRIC_DEFVER,
     MEDIA_IDENTITY,
     MEDIA_INTEGER,
@@ -22,13 +21,10 @@ use crate::urn::media_urn::{
     MEDIA_JSON_LIST,
     MEDIA_JSON_LIST_RECORD,
     MEDIA_JSON_RECORD,
-    MEDIA_JSON_SCHEMA,
     // Format conversion types (JSON, YAML, CSV variants)
     MEDIA_JSON_VALUE,
     MEDIA_LIST_OUTPUT,
-    MEDIA_LOG,
     // Text format types
-    MEDIA_MD,
     MEDIA_MEDIA_DEFINITION,
     MEDIA_MEDIA_URN,
     // CAPDAG output types
@@ -39,11 +35,9 @@ use crate::urn::media_urn::{
     MEDIA_OBJECT,
     MEDIA_PATH_OUTPUT,
     // Document types
-    MEDIA_PDF,
     MEDIA_PLAIN_TEXT,
     // Semantic media types
     MEDIA_PNG,
-    MEDIA_RST,
     MEDIA_STATUS_OUTPUT,
     // Primitives (needed for coercion functions)
     MEDIA_STRING,
@@ -52,12 +46,11 @@ use crate::urn::media_urn::{
     // Semantic output types
     MEDIA_TEXTABLE_PAGE,
     MEDIA_TXT,
-    MEDIA_VOID,
     MEDIA_YAML_LIST,
     MEDIA_YAML_LIST_RECORD,
     MEDIA_YAML_VALUE,
 };
-use crate::{Cap, CapEffect, CapOutput, CapUrn, CapUrnBuilder, FabricRegistry, FabricRegistryError};
+use crate::{Cap, CapEffect, CapUrn, CapUrnBuilder, FabricRegistry, FabricRegistryError};
 use std::sync::Arc;
 
 // =============================================================================

@@ -26,7 +26,7 @@ use crate::bifaci::cartridge_runtime::{
 };
 use crate::bifaci::frame::{FlowKey, Frame, FrameType, Limits, MessageId, SeqAssigner};
 use crate::bifaci::io::{CborError, FrameReader, FrameWriter};
-use crate::bifaci::relay_switch::{InstalledCartridgeRecord, RelayNotifyCapabilitiesPayload};
+use crate::bifaci::relay_switch::RelayNotifyCapabilitiesPayload;
 use crate::cap::caller::CapArgumentValue;
 use crate::cap::definition::Cap;
 use crate::standard::caps::{identity_urn, CAP_IDENTITY};

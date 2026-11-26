@@ -3231,7 +3231,6 @@ impl CartridgeHostRuntime {
         // init can stretch to a few seconds. 15s is generous but
         // still bounded.
         const HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-        let hs_started_at = std::time::Instant::now();
         let mut reader = FrameReader::new(stdout);
         let mut writer = FrameWriter::new(stdin);
 
@@ -3306,7 +3305,6 @@ impl CartridgeHostRuntime {
         // cartridges — would queue forever.
         const PER_CARTRIDGE_IDENTITY_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(15);
-        let id_started_at = std::time::Instant::now();
         let id_outcome = tokio::time::timeout(
             PER_CARTRIDGE_IDENTITY_TIMEOUT,
             verify_identity(&mut reader, &mut writer),
