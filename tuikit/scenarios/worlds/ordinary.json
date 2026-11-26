@@ -16,6 +16,7 @@
     "report.pdf": "%PDF-1.7 a report of three pages\n",
     "minutes.pdf": "%PDF-1.7 the minutes of a meeting, two pages\n",
     "notes.txt": "Buy milk. Call the bank. Read the report.\n",
+    "build/pdfcartridge": "a pdf cartridge built from its project\n",
     "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary]\n",
     "broken.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary\n"
   },

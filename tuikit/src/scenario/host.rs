@@ -380,6 +380,21 @@ impl Host for ScenarioHost {
     }
 
     fn runtime(&self, setup: RunSetup) -> Result<Arc<dyn RunHost>, HostError> {
+        // A world's runs are scripts: no cartridge binary is started and no
+        // protocol is spoken, so neither can be given or traced.
+        if let Some(binary) = setup.dev_binaries.first() {
+            return Err(HostError::Engine(format!(
+                "the world '{}' starts no cartridge binary, {} included: --dev-bin runs on the engine only",
+                self.name,
+                binary.display()
+            )));
+        }
+        if setup.trace.is_some() {
+            return Err(HostError::Engine(format!(
+                "the world '{}' speaks no protocol to trace: --trace runs on the engine only",
+                self.name
+            )));
+        }
         Ok(Arc::new(ScenarioRuns {
             world: self.name.clone(),
             runs: self.world.runs.clone(),
