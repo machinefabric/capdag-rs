@@ -22,6 +22,7 @@ projects.
 - [Develop a cartridge](https://machinefabric.com/capdag/docs/18.2-getting-started-cartridge-development/)
 - [Run one capability or a machine](https://machinefabric.com/capdag/docs/18.1-cli-reference/)
 - [Watch a run, plan and edit machines in the terminal](https://machinefabric.com/capdag/docs/18.3-terminal-interface/)
+- [Work on the terminal interface with worlds and journeys](https://machinefabric.com/capdag/docs/18.6-terminal-interface-worlds/)
 - [Contribute capability and media definitions](https://machinefabric.com/capdag/docs/99-contributing/)
 
 ### Look up exact behavior
@@ -35,6 +36,7 @@ projects.
 - [Cartridge runtime](https://machinefabric.com/capdag/docs/13.1-cartridge-runtime/)
 - [Planner and execution](https://machinefabric.com/capdag/docs/15.4-planner/)
 - [`capdag` CLI](https://machinefabric.com/capdag/docs/18.1-cli-reference/)
+- [Terminal interface: crates, Host, worlds and journeys](https://machinefabric.com/capdag/docs/18.7-terminal-interface-reference/)
 
 ### Understand the design
 
@@ -56,7 +58,9 @@ projects.
   verification.
 - The `capdag` CLI for running one capability, planning and running machines,
   inspecting the fabric, warming the cartridge cache, and scaffolding local
-  cartridge projects.
+  cartridge projects. The library is the `capdag` crate and holds no terminal
+  code; the command's terminal interface is the `capdag-tuikit` crate
+  (`tuikit/`), and the `capdag` binary is built by `capdag-cli` (`cli/`).
 
 ## Language family
 
