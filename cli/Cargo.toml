@@ -4,7 +4,7 @@ description = "The capdag command: find capabilities, run them on files, and pla
 edition = "2021"
 license = "MIT"
 name = "capdag-cli"
-version = "1.1083.503"
+version = "1.1084.530"
 
 [[bin]]
 name = "capdag"

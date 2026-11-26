@@ -4,8 +4,6 @@ exit: 1
 --- screen: at the end ---
 ✗ in.txt  2 steps · 2 items · <time> · failed
   shout cancelled (3/3 w, 1 failed)
-
-
 error: shout refused its input
   'brave' is not shouted
 hint: see what shout takes: capdag info shout
