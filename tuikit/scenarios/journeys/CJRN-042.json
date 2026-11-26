@@ -1,0 +1,9 @@
+{
+  "title": "A model download is cut off",
+  "world": "failing",
+  "args": ["model", "pull", "hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"],
+  "modes": {
+    "inline": { "expect": { "exit": 1, "shown": ["model-download failed", "connection reset"] } },
+    "plain": { "expect": { "exit": 1, "shown": ["✗ model-download  1 step", "was cut off at 1.0 of 2.5 GB: connection reset"] } }
+  }
+}

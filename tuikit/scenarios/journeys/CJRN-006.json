@@ -1,0 +1,17 @@
+{
+  "title": "Plan, pick and run a machine at the terminal",
+  "world": "ordinary",
+  "args": ["plan", "report.pdf", "-o", "out"],
+  "modes": {
+    "inline": {
+      "keys": [
+        { "wait": "page-text" },
+        { "type": "page-text" },
+        { "press": "Enter" },
+        { "wait": "Choose what to do with it" },
+        { "press": "Enter" }
+      ],
+      "expect": { "exit": 0, "stdout": ["report.page-text.0.txt", "report.page-text.2.txt"], "shown": ["✓ report.pdf  1 step"] }
+    }
+  }
+}

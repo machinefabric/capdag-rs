@@ -1,0 +1,10 @@
+{
+  "description": "A build with nothing beside it: no bundled cartridges, no registry to install from, and one installed cartridge discovery refuses",
+  "fabric": "capdag.json",
+  "refused": [
+    { "id": "oldpdfcartridge", "version": "0.9.1", "reason": "it was built for capdag protocol 2, and this capdag speaks protocol 3" }
+  ],
+  "files": {
+    "report.pdf": "%PDF-1.7 a report of three pages\n"
+  }
+}

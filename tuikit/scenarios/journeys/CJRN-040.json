@@ -1,0 +1,20 @@
+{
+  "title": "A page's summary fails, and the machine with it",
+  "world": "failing",
+  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "modes": {
+    "inline": { "expect": { "exit": 1, "shown": ["summarize-en failed", "the model ran out of memory on page 2"] } },
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": [
+          "error: page 2: the model ran out of memory",
+          "✗ report.pdf  2 steps · 1 item",
+          "summarize-en cancelled (2/3 pages, 1 failed)",
+          "error: summarize-en failed"
+        ]
+      }
+    },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"summarize-en failed\"", "\"outcome\":\"failed\""] } }
+  }
+}

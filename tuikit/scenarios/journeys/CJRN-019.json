@@ -1,0 +1,12 @@
+{
+  "title": "Look at a machine in the terminal",
+  "world": "ordinary",
+  "args": ["view", "summaries.machine"],
+  "modes": {
+    "full_screen": {
+      "keys": [{ "wait": "Summarize (Purpose-" }, { "wait": "Outputs: summary" }, { "press": "q" }],
+      "expect": { "exit": 0 }
+    },
+    "plain": { "expect": { "exit": 0, "stdout": ["Disbind PDF Into Pages", "For each item"] } }
+  }
+}

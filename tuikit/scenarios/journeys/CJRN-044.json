@@ -1,0 +1,9 @@
+{
+  "title": "No network, and nothing of the fabric cached",
+  "world": "offline",
+  "args": ["caps", "pdf"],
+  "modes": {
+    "plain": { "expect": { "exit": 1, "shown": ["cannot reach fabric.capdag.com, and the fabric is not cached yet", "capdag --offline"] } },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"cannot reach fabric.capdag.com, and the fabric is not cached yet\""] } }
+  }
+}

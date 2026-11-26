@@ -1,0 +1,21 @@
+{
+  "title": "A page's summary fails, its policy tolerates it, and the run ends with what it has",
+  "world": "tolerant",
+  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "modes": {
+    "inline": { "expect": { "exit": 3, "stdout": ["report.summary.1.txt"], "shown": ["tolerated"], "absent": ["report.summary.2.txt"] } },
+    "plain": {
+      "expect": {
+        "exit": 3,
+        "stdout": ["report.summary.0.txt", "report.summary.1.txt"],
+        "shown": [
+          "warn: page 2: the model ran out of memory",
+          "failed, and tolerated: summarize-en (item 2) [resource] — the model ran out of memory on page 2",
+          "· tolerated"
+        ],
+        "absent": ["report.summary.2.txt"]
+      }
+    },
+    "json": { "expect": { "exit": 3, "stdout": ["\"type\":\"tolerated\"", "\"item\":1", "\"outcome\":\"tolerated\""] } }
+  }
+}

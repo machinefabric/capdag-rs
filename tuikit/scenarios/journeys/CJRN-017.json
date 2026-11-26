@@ -1,0 +1,9 @@
+{
+  "title": "Draw a machine as text",
+  "world": "ordinary",
+  "args": ["graph", "summaries.machine"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["Disbind PDF Into Pages", "For each item", "summarize-en"] } },
+    "full_screen": { "expect": { "exit": 0, "shown": ["Disbind PDF Into Pages", "For each item"] } }
+  }
+}

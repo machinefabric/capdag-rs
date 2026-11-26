@@ -1,0 +1,12 @@
+{
+  "description": "No network: the fabric cannot be reached and nothing of it is cached",
+  "fabric": "capdag.json",
+  "unreachable": "connection refused",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "bundled": [
+    { "id": "pdfcartridge", "version": "1.42.0", "caps": ["disbind-pdf"] }
+  ],
+  "files": {
+    "report.pdf": "%PDF-1.7 a report of three pages\n"
+  }
+}

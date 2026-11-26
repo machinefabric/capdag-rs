@@ -1,0 +1,6 @@
+{
+  "title": "Draw a machine for a Markdown page",
+  "world": "ordinary",
+  "args": ["graph", "summaries.machine", "--format", "mermaid"],
+  "modes": { "plain": { "expect": { "exit": 0, "stdout": ["flowchart LR", "disbind-pdf", "summarize-en"] } } }
+}

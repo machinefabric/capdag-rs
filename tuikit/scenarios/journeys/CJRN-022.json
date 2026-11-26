@@ -1,0 +1,16 @@
+{
+  "title": "Install a cartridge from the registry",
+  "world": "ordinary",
+  "args": ["cartridge", "install", "imagecartridge"],
+  "modes": {
+    "inline": { "expect": { "exit": 0, "stdout": ["imagecartridge/1.9.0/cartridge"], "shown": ["Installed and verified imagecartridge"] } },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["imagecartridge/1.9.0/cartridge"],
+        "shown": ["Installing imagecartridge…", "Installed and verified imagecartridge"]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"id\":\"imagecartridge\"", "\"state\":\"installed\""] } }
+  }
+}

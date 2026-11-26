@@ -1,0 +1,21 @@
+{
+  "title": "Choose among the machines that make text, and print one",
+  "world": "ordinary",
+  "args": ["plan", "report.pdf", "--to", "txt"],
+  "modes": {
+    "inline": {
+      "keys": [
+        { "wait": "ocr-gguf" },
+        { "press": "Down" },
+        { "press": "Enter" },
+        { "wait": "Choose what to do with it" },
+        { "type": "print" },
+        { "press": "Enter" }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"]
+      }
+    }
+  }
+}

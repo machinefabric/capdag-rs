@@ -1130,6 +1130,19 @@ impl FabricRegistry {
             .collect()
     }
 
+    /// Every cached alias — of a cap or a media type — by name. Cache-only:
+    /// after [`Self::prefetch_manifest_aliases`], every alias the manifest
+    /// names that could be fetched.
+    pub fn cached_aliases(&self) -> Result<Vec<StoredAlias>, FabricRegistryError> {
+        let guard = self
+            .cached_aliases
+            .lock()
+            .map_err(|e| FabricRegistryError::CacheError(format!("Failed to lock alias cache: {e}")))?;
+        let mut aliases: Vec<StoredAlias> = guard.values().cloned().collect();
+        aliases.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(aliases)
+    }
+
     /// Request that the background fetcher hydrate an alias into the cache.
     /// Non-blocking; the alias becomes available to `resolve_alias_cached`
     /// once the fetch completes. A malformed name or an unknown alias is a
@@ -6466,3 +6479,21 @@ mod reference_base_tests {
 #[cfg(test)]
 #[path = "manifest_caps_tests.rs"]
 mod manifest_caps_tests;
+
+#[cfg(test)]
+mod cached_aliases_tests {
+    use super::*;
+
+    // TEST22284: the cached aliases are every alias the registry holds, of a
+    // cap and of a media type alike, by name.
+    #[tokio::test]
+    async fn test22284_cached_aliases_are_every_alias_by_name() {
+        let registry = FabricRegistry::new_for_test();
+        for (name, target) in [("txt", "media:enc=utf8;ext=txt"), ("shout", "cap:in=\"media:enc=utf8\";shout;out=\"media:enc=utf8\"")] {
+            registry.insert_cached_alias_for_test(StoredAlias { name: name.to_string(), target: target.to_string(), version: 1 });
+        }
+        let names: Vec<String> = registry.cached_aliases().unwrap().into_iter().map(|alias| alias.name).collect();
+        assert_eq!(names, ["shout", "txt"]);
+        assert_eq!(registry.cached_cap_aliases().len(), 1, "only one of them names a cap");
+    }
+}

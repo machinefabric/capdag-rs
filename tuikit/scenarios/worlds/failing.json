@@ -1,0 +1,67 @@
+{
+  "description": "A day where things fail: a page's summary fails and the machine with it, an encrypted PDF, a download cut off, no update to be had",
+  "fabric": "capdag.json",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "bundled": [
+    { "id": "pdfcartridge", "version": "1.42.0", "caps": ["disbind-pdf"] },
+    { "id": "modelcartridge", "version": "3.2.0", "caps": ["list-models", "search-models", "model-download", "model-delete"] }
+  ],
+  "installed": [
+    { "id": "ggufcartridge", "version": "2.7.1", "caps": ["summarize-en"] }
+  ],
+  "files": {
+    "report.pdf": "%PDF-1.7 a report of three pages\n",
+    "locked.pdf": "%PDF-1.7 an encrypted report\n",
+    "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary]\n"
+  },
+  "runs": {
+    "disbind-pdf > summarize-en": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Starting" } },
+        { "step": { "step": "disbind-pdf", "progress": 0.0 } },
+        { "wait": 400 },
+        { "step": { "step": "disbind-pdf", "progress": 1.0 } },
+        { "items": { "map": "summarize-en", "items": ["Quarterly report. Revenue rose by a tenth over the quarter."] } },
+        { "items": { "map": "summarize-en", "items": ["Costs held level; the new office opened in March."] } },
+        { "items": { "map": "summarize-en", "items": ["Outlook: two hires in the summer, and a second product in the autumn."] } },
+        { "step": { "step": "summarize-en", "progress": 0.2 } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 0.5 } },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }] } },
+        { "progress": { "value": 0.78, "message": "Completed 1/3" } },
+        { "wait": 400 },
+        { "log": { "step": "summarize-en", "level": "error", "message": "page 2: the model ran out of memory" } },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": false, "error": "the model ran out of memory on page 2" }] } },
+        { "progress": { "value": 0.89, "message": "Completed 2/3" } }
+      ],
+      "end": {
+        "failed": { "step": "summarize-en", "failure": { "class": "resource", "message": "the model ran out of memory on page 2" } }
+      }
+    },
+    "disbind-pdf": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Starting" } },
+        { "step": { "step": "disbind-pdf", "progress": 0.0 } },
+        { "wait": 300 }
+      ],
+      "end": {
+        "failed": { "step": "disbind-pdf", "failure": { "class": "input", "code": "encrypted", "message": "the document is encrypted, and no password was given" } }
+      }
+    },
+    "model-download": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 0 of 2.5 GB" } },
+        { "step": { "step": "model-download", "progress": 0.0 } },
+        { "wait": 600 },
+        { "step": { "step": "model-download", "progress": 0.4 } },
+        { "progress": { "value": 0.4, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 1.0 of 2.5 GB" } },
+        { "wait": 600 },
+        { "log": { "step": "model-download", "level": "error", "message": "the connection to huggingface.co was reset" } }
+      ],
+      "end": {
+        "failed": { "step": "model-download", "failure": { "class": "environment", "message": "the download of Qwen3-4B-Instruct-2507-Q4_K_M.gguf was cut off at 1.0 of 2.5 GB: connection reset" } }
+      }
+    }
+  },
+  "update": { "fails": { "reason": "cannot reach the release channel: connection refused" } }
+}

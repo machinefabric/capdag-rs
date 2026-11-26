@@ -1,0 +1,9 @@
+{
+  "title": "Edit a machine in the terminal",
+  "world": "ordinary",
+  "args": ["edit", "summaries.machine"],
+  "modes": {
+    "full_screen": { "keys": [{ "wait": "Summarize (Purpose-" }, { "press": "q" }], "expect": { "exit": 0 } },
+    "plain": { "expect": { "exit": 2, "shown": ["capdag edit needs a terminal", "capdag check summaries.machine"] } }
+  }
+}

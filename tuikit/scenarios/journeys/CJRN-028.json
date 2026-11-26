@@ -1,0 +1,11 @@
+{
+  "title": "Stop a download with Ctrl-C: what started finishes",
+  "world": "ordinary",
+  "args": ["model", "pull", "hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"],
+  "modes": {
+    "inline": {
+      "keys": [{ "wait": "model-download" }, { "press": "Ctrl-C" }],
+      "expect": { "exit": 130, "shown": ["Stopping: nothing new starts", "· stopped"] }
+    }
+  }
+}

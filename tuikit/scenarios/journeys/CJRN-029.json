@@ -1,0 +1,9 @@
+{
+  "title": "List the downloaded models (today: refused, the fabric's model-list alias names a media type)",
+  "world": "ordinary",
+  "args": ["model", "list"],
+  "modes": {
+    "plain": { "expect": { "exit": 1, "shown": ["alias 'model-list' resolves to a media URN"] } },
+    "json": { "expect": { "exit": 1, "stdout": ["\"type\":\"error\""] } }
+  }
+}

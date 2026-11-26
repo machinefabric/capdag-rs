@@ -1,0 +1,9 @@
+{
+  "title": "Pick a planned machine and run it at once",
+  "world": "ordinary",
+  "args": ["plan", "report.pdf", "--to", "txt", "--pick", "1", "--run", "-o", "out"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["report.page-text.0.txt", "report.page-text.2.txt"], "shown": ["✓ report.pdf  1 step"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"run_finished\"", "\"outcome\":\"completed\""] } }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Clear the local copy of the fabric",
+  "world": "ordinary",
+  "args": ["cache", "clear"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "shown": ["Fabric cache cleared at", "the next command fetches what it needs"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"cache\"", "\"refreshed\":false"] } }
+  }
+}

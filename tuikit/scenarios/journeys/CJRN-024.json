@@ -1,0 +1,11 @@
+{
+  "title": "A bundled cartridge cannot be removed",
+  "world": "ordinary",
+  "args": ["cartridge", "remove", "pdfcartridge"],
+  "modes": {
+    "plain": {
+      "expect": { "exit": 2, "shown": ["no installed cartridge is called 'pdfcartridge'", "a bundled cartridge cannot be removed"] }
+    },
+    "json": { "expect": { "exit": 2, "stdout": ["\"type\":\"error\""] } }
+  }
+}

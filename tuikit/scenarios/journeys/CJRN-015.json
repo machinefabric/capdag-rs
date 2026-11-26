@@ -1,0 +1,9 @@
+{
+  "title": "Check a machine without running it",
+  "world": "ordinary",
+  "args": ["check", "summaries.machine"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["✓ summaries.machine", "inputs:  doc (pdf)", "outputs: summary (txt)"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"canonical\""] } }
+  }
+}

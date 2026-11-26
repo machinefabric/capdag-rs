@@ -1,0 +1,6 @@
+{
+  "title": "Read the cached fabric with no network",
+  "world": "ordinary",
+  "args": ["--offline", "caps", "pdf"],
+  "modes": { "plain": { "expect": { "exit": 0, "stdout": ["disbind-pdf      Disbind PDF Into Pages (pdf → page-text)"] } } }
+}

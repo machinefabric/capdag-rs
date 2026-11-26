@@ -1,0 +1,9 @@
+{
+  "title": "Never ask: a plan without a terminal lists what it would ask",
+  "world": "ordinary",
+  "args": ["--no-input", "plan", "report.pdf", "--to", "txt"],
+  "modes": {
+    "inline": { "expect": { "exit": 0, "stdout": ["5 machines make txt of 1 pdf:", "[(input=pdf) -> disbind-pdf -> (output=page-text)]"] } },
+    "plain": { "expect": { "exit": 0, "stdout": ["5 machines make txt of 1 pdf:"] } }
+  }
+}

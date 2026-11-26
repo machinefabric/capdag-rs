@@ -1,0 +1,6 @@
+{
+  "title": "A build bound to no registry installs nothing",
+  "world": "bare",
+  "args": ["cartridge", "install", "pdfcartridge"],
+  "modes": { "plain": { "expect": { "exit": 1, "shown": ["this capdag is a development build, bound to no cartridge registry"] } } }
+}

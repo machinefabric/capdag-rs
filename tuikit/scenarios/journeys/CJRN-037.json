@@ -1,0 +1,10 @@
+{
+  "title": "A capability typed as a command is answered with how to run it",
+  "world": "ordinary",
+  "args": ["disbind-pdf", "report.pdf"],
+  "modes": {
+    "plain": {
+      "expect": { "exit": 2, "shown": ["'disbind-pdf' is a capability, not a command", "run it with: capdag run disbind-pdf report.pdf"] }
+    }
+  }
+}

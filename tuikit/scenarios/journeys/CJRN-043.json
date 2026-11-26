@@ -1,0 +1,9 @@
+{
+  "title": "No update to be had",
+  "world": "failing",
+  "args": ["self", "update"],
+  "modes": {
+    "plain": { "expect": { "exit": 1, "shown": ["capdag was not updated", "cannot reach the release channel: connection refused"] } },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"capdag was not updated\""] } }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "List the cartridges: bundled, installed and dev",
+  "world": "ordinary",
+  "args": ["cartridge", "list"],
+  "modes": {
+    "full_screen": { "expect": { "exit": 0, "shown": ["pdfcartridge", "notecartridge"] } },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "pdfcartridge           1.42.0       bundled",
+          "ggufcartridge          2.7.1        installed",
+          "notecartridge          0.1.0        dev"
+        ]
+      }
+    },
+    "json": {
+      "expect": { "exit": 0, "stdout": ["\"id\":\"pdfcartridge\",\"state\":\"bundled\"", "\"id\":\"notecartridge\",\"state\":\"dev\""] }
+    }
+  }
+}

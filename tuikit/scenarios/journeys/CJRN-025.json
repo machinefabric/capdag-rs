@@ -1,0 +1,18 @@
+{
+  "title": "Search for models to download",
+  "world": "ordinary",
+  "args": ["model", "search", "qwen"],
+  "modes": {
+    "full_screen": {
+      "expect": { "exit": 0, "shown": ["hf:unsloth/Qwen3-4B-Instruct-2507-GGUF", "Download one: capdag model pull <spec>"] }
+    },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["hf:unsloth/Qwen3-4B-Instruct-2507-GGUF  482113 downloads · 312 likes"],
+        "shown": ["Download one: capdag model pull <spec>"]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF\"", "\"type\":\"model\""] } }
+  }
+}

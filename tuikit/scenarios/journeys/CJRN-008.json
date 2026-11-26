@@ -1,0 +1,9 @@
+{
+  "title": "Pick a planned machine and save it",
+  "world": "ordinary",
+  "args": ["plan", "report.pdf", "--to", "txt", "--pick", "1", "--save", "pages.machine"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "shown": ["Saved machine 1 to pages.machine", "Run it: capdag run pages.machine report.pdf"] } },
+    "json": { "expect": { "exit": 0 } }
+  }
+}

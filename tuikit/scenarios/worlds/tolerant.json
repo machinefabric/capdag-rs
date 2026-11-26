@@ -1,0 +1,49 @@
+{
+  "description": "A machine that keeps going: one page's summary fails, its policy drops it, and the run ends with what it has",
+  "fabric": "capdag.json",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "bundled": [
+    { "id": "pdfcartridge", "version": "1.42.0", "caps": ["disbind-pdf"] }
+  ],
+  "installed": [
+    { "id": "ggufcartridge", "version": "2.7.1", "caps": ["summarize-en"] }
+  ],
+  "files": {
+    "report.pdf": "%PDF-1.7 a report of three pages\n",
+    "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en{on_error=absent} -> summary]\n"
+  },
+  "runs": {
+    "disbind-pdf > summarize-en": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Starting" } },
+        { "step": { "step": "disbind-pdf", "progress": 0.0 } },
+        { "wait": 400 },
+        { "step": { "step": "disbind-pdf", "progress": 1.0 } },
+        { "items": { "map": "summarize-en", "items": ["Quarterly report. Revenue rose by a tenth over the quarter."] } },
+        { "items": { "map": "summarize-en", "items": ["Costs held level; the new office opened in March."] } },
+        { "items": { "map": "summarize-en", "items": ["Outlook: two hires in the summer, and a second product in the autumn."] } },
+        { "step": { "step": "summarize-en", "progress": 0.2 } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 0.6 } },
+        { "log": { "step": "summarize-en", "level": "warn", "message": "page 2: the model ran out of memory" } },
+        { "report": { "step": "summarize-en", "item": 1, "outcome": { "tolerated": { "failure": { "class": "resource", "message": "the model ran out of memory on page 2" } } } } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 1.0 } },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }] } },
+        { "progress": { "value": 0.78, "message": "Completed 1/3" } },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": true }] } },
+        { "progress": { "value": 0.89, "message": "Completed 2/3" } },
+        { "wait": 300 },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": true }, { "item": 2, "ok": true }] } },
+        { "progress": { "value": 1.0, "message": "Completed 3/3" } }
+      ],
+      "end": {
+        "completed": {
+          "outputs": {
+            "txt": ["Revenue up ten percent this quarter.\n", "Two summer hires and a second product planned.\n"]
+          }
+        }
+      }
+    }
+  }
+}

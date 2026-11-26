@@ -1,0 +1,6 @@
+{
+  "title": "A model spec that is not one is refused, saying what one is",
+  "world": "ordinary",
+  "args": ["model", "pull", "qwen"],
+  "modes": { "plain": { "expect": { "exit": 2, "shown": ["'qwen' is not a model spec", "hf:<owner>/<repo>"] } } }
+}

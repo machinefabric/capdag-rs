@@ -1,0 +1,9 @@
+{
+  "title": "Remove an installed cartridge",
+  "world": "ordinary",
+  "args": ["cartridge", "remove", "ggufcartridge"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "shown": ["Removed", "installed/ggufcartridge"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"id\":\"ggufcartridge\"", "\"type\":\"removed\""] } }
+  }
+}

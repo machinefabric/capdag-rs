@@ -1,0 +1,16 @@
+{
+  "title": "Find the capabilities that take or give PDF",
+  "world": "ordinary",
+  "args": ["caps", "pdf"],
+  "modes": {
+    "full_screen": { "expect": { "exit": 0, "shown": ["disbind-pdf      Disbind PDF Into Pages (pdf → page-text)", "5 capabilities"] } },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["disbind-pdf      Disbind PDF Into Pages (pdf → page-text)", "pdf2png"],
+        "shown": ["5 capabilities"]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"alias\":\"disbind-pdf\"", "\"gives\":\"page-text\"", "\"type\":\"cap\""] } }
+  }
+}

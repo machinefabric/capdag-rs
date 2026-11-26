@@ -1,0 +1,17 @@
+{
+  "title": "A cartridge discovery refuses is listed with why",
+  "world": "bare",
+  "args": ["cartridge", "list"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "oldpdfcartridge        0.9.1        refused",
+          "warning: it was built for capdag protocol 2, and this capdag speaks protocol 3"
+        ]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"id\":\"oldpdfcartridge\"", "\"state\":\"refused\""] } }
+  }
+}

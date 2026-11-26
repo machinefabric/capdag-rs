@@ -1,0 +1,12 @@
+{
+  "title": "Choose a capability from a list, and print its alias",
+  "world": "ordinary",
+  "args": ["caps", "--pick", "pdf"],
+  "modes": {
+    "inline": {
+      "keys": [{ "wait": "Disbind PDF Into Pages" }, { "type": "disbind into pages" }, { "press": "Enter" }],
+      "expect": { "exit": 0, "stdout": ["disbind-pdf"] }
+    },
+    "plain": { "expect": { "exit": 2, "shown": ["5 capabilities match, and --pick has no terminal to choose on"] } }
+  }
+}

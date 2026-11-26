@@ -1,0 +1,8 @@
+{
+  "title": "Read a command's help",
+  "world": "ordinary",
+  "args": ["help", "model"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["The models capabilities run: list, search, download, remove", "Usage: capdag model"] } }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Download a model, with its progress",
+  "world": "ordinary",
+  "args": ["model", "pull", "hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"],
+  "modes": {
+    "inline": { "expect": { "exit": 0, "shown": ["Downloaded hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"] } },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "shown": ["[1/1] model-download    0%", "[1/1] model-download  done", "Downloaded hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"step\":\"model-download\"", "\"type\":\"model_downloaded\""] } }
+  }
+}

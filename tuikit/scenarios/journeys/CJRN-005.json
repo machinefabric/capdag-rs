@@ -1,0 +1,9 @@
+{
+  "title": "See what a file can become",
+  "world": "ordinary",
+  "args": ["plan", "report.pdf"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["1 pdf can become:", "page-text", "txt"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"input\"", "\"type\":\"target\"", "\"alias\":\"page-text\""] } }
+  }
+}

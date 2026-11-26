@@ -1,0 +1,9 @@
+{
+  "title": "Remove a downloaded model",
+  "world": "ordinary",
+  "args": ["model", "remove", "hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "shown": ["Removed hf:unsloth/Qwen3-4B-Instruct-2507-GGUF"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"model_removed\""] } }
+  }
+}

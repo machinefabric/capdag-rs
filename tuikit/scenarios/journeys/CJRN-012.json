@@ -1,0 +1,28 @@
+{
+  "title": "Run a machine that summarizes each page: the map's progress, live, as lines and as JSON (today's map timing included)",
+  "world": "ordinary",
+  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "modes": {
+    "full_screen": { "expect": { "exit": 0, "shown": ["report.summary.2.txt", "✓ report.pdf  2 steps · 3 items"] } },
+    "inline": {
+      "expect": { "exit": 0, "stdout": ["report.summary.0.txt", "report.summary.2.txt"], "shown": ["✓ report.pdf  2 steps · 3 items"] }
+    },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["report.summary.0.txt"],
+        "shown": ["[2/2] summarize-en  0/1 pages", "[2/2] summarize-en  done (0/3 pages)", "✓ report.pdf  2 steps · 3 items"]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"items\":{\"done\":0,\"failed\":0,\"of\":\"pages\",\"started\":3,\"total\":null},\"progress\":1.0,\"run\":0,\"state\":\"done\"",
+          "\"items\":{\"done\":3,\"failed\":0,\"of\":\"pages\",\"started\":3,\"total\":null}",
+          "\"type\":\"run_finished\""
+        ]
+      }
+    }
+  }
+}

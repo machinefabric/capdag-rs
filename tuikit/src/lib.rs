@@ -5,7 +5,9 @@
 //! and `--json` output, the inline live view of a run and the pickers, and the
 //! full-screen machine viewer and editor ([`tui`]). What a command needs of the
 //! engine it asks of a [`cli::host::Host`]; the `capdag` binary runs it on the
-//! engine itself.
+//! engine itself, and the `capdag-tuikit` binary on worlds of test data
+//! ([`scenario`]).
 
 pub mod cli;
+pub mod scenario;
 pub mod tui;

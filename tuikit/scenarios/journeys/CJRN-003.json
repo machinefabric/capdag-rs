@@ -1,0 +1,18 @@
+{
+  "title": "Look at a capability: what it takes, gives and needs",
+  "world": "ordinary",
+  "args": ["info", "disbind-pdf"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "disbind-pdf — Disbind PDF Into Pages",
+          "Output: page-text [sequence]",
+          "Provided by pdfcartridge 1.42.0, bundled with capdag."
+        ]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["\"alias\":\"disbind-pdf\"", "\"bundled\":[\"pdfcartridge 1.42.0\"]"] } }
+  }
+}

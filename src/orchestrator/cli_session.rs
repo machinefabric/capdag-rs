@@ -176,7 +176,10 @@ pub fn finish_strand(
     report
 }
 
-fn emit_strand(
+/// Write what a finished strand produced, by the pipe discipline, to `stdout`
+/// and the output directory, and report what did not simply complete: what
+/// [`finish_strand`] does for a strand no runtime persisted any part of.
+pub fn emit_strand(
     strand: &StrandPlan,
     result: Result<PipelineResult, ExecutionError>,
     target: &EmitTarget,

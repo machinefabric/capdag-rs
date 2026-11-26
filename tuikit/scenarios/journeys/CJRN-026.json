@@ -1,0 +1,12 @@
+{
+  "title": "Choose a model from a search, and print its spec",
+  "world": "ordinary",
+  "args": ["model", "search", "qwen", "--pick"],
+  "modes": {
+    "inline": {
+      "keys": [{ "wait": "Qwen3-8B-GGUF" }, { "press": "Down" }, { "press": "Enter" }],
+      "expect": { "exit": 0, "stdout": ["hf:Qwen/Qwen3-8B-GGUF"] }
+    },
+    "plain": { "expect": { "exit": 2, "shown": ["3 models match, and --pick has no terminal to choose on"] } }
+  }
+}

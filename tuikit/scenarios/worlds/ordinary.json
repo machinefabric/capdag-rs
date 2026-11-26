@@ -1,0 +1,178 @@
+{
+  "description": "A day's work that goes well: PDFs to pages and summaries, cartridges bundled, installed and in the registry, models to find and pull",
+  "fabric": "capdag.json",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "bundled": [
+    { "id": "pdfcartridge", "version": "1.42.0", "caps": ["disbind-pdf", "pdf2png"] },
+    { "id": "txtcartridge", "version": "1.18.3", "caps": ["save-as-txt"] },
+    { "id": "modelcartridge", "version": "3.2.0", "caps": ["list-models", "search-models", "model-download", "model-delete"] }
+  ],
+  "installed": [
+    { "id": "ggufcartridge", "version": "2.7.1", "caps": ["summarize-en", "ocr-gguf"] },
+    { "id": "notecartridge", "version": "0.1.0", "caps": ["concat"], "dev": true }
+  ],
+  "store": [{ "id": "imagecartridge", "version": "1.9.0", "caps": ["convert-image"], "install_ms": 1500 }],
+  "files": {
+    "report.pdf": "%PDF-1.7 a report of three pages\n",
+    "minutes.pdf": "%PDF-1.7 the minutes of a meeting, two pages\n",
+    "notes.txt": "Buy milk. Call the bank. Read the report.\n",
+    "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary]\n",
+    "broken.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary\n"
+  },
+  "refused_machines": ["broken.machine"],
+  "runs": {
+    "disbind-pdf": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Starting" } },
+        { "step": { "step": "disbind-pdf", "progress": 0.0 } },
+        { "log": { "step": "disbind-pdf", "level": "info", "message": "the document has 3 pages" } },
+        { "wait": 500 },
+        { "step": { "step": "disbind-pdf", "progress": 0.34 } },
+        { "progress": { "value": 0.34, "message": "page 1 of 3" } },
+        { "wait": 500 },
+        { "step": { "step": "disbind-pdf", "progress": 0.67 } },
+        { "progress": { "value": 0.67, "message": "page 2 of 3" } },
+        { "wait": 500 },
+        { "step": { "step": "disbind-pdf", "progress": 1.0 } },
+        { "progress": { "value": 1.0, "message": "page 3 of 3" } }
+      ],
+      "end": {
+        "completed": {
+          "outputs": {
+            "page-text": [
+              "Quarterly report. Revenue rose by a tenth over the quarter.\n",
+              "Costs held level; the new office opened in March.\n",
+              "Outlook: two hires in the summer, and a second product in the autumn.\n"
+            ]
+          }
+        }
+      }
+    },
+    "disbind-pdf > summarize-en": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Starting" } },
+        { "step": { "step": "disbind-pdf", "progress": 0.0 } },
+        { "wait": 400 },
+        { "step": { "step": "disbind-pdf", "progress": 0.5 } },
+        { "wait": 400 },
+        { "step": { "step": "disbind-pdf", "progress": 1.0 } },
+        { "log": { "step": "disbind-pdf", "level": "info", "message": "the document has 3 pages" } },
+        { "items": { "map": "summarize-en", "items": ["Quarterly report. Revenue rose by a tenth over the quarter."] } },
+        { "items": { "map": "summarize-en", "items": ["Costs held level; the new office opened in March."] } },
+        { "items": { "map": "summarize-en", "items": ["Outlook: two hires in the summer, and a second product in the autumn."] } },
+        { "step": { "step": "summarize-en", "progress": 0.1 } },
+        { "log": { "step": "summarize-en", "level": "info", "message": "loading Qwen3-4B-Instruct-2507-Q4_K_M.gguf" } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 0.4 } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 0.7 } },
+        { "wait": 800 },
+        { "step": { "step": "summarize-en", "progress": 1.0 } },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }] } },
+        { "progress": { "value": 0.78, "message": "Completed 1/3" } },
+        { "wait": 300 },
+        { "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": true }] } },
+        { "progress": { "value": 0.89, "message": "Completed 2/3" } },
+        { "wait": 300 },
+        {
+          "outcomes": { "map": "summarize-en", "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": true }, { "item": 2, "ok": true }] }
+        },
+        { "progress": { "value": 1.0, "message": "Completed 3/3" } }
+      ],
+      "end": {
+        "completed": {
+          "outputs": {
+            "txt": [
+              "Revenue up ten percent this quarter.\n",
+              "Costs flat; new office open since March.\n",
+              "Two summer hires and a second product planned.\n"
+            ]
+          }
+        }
+      },
+      "on_stop": {
+        "signals": [
+          { "wait": 6000 },
+          { "step": { "step": "summarize-en", "progress": 1.0 } },
+          {
+            "outcomes": {
+              "map": "summarize-en",
+              "ended": [{ "item": 0, "ok": true }, { "item": 1, "ok": true }, { "item": 2, "ok": true }]
+            }
+          },
+          { "progress": { "value": 1.0, "message": "Completed 3/3" } }
+        ],
+        "end": {
+          "completed": {
+            "outputs": {
+              "txt": [
+                "Revenue up ten percent this quarter.\n",
+                "Costs flat; new office open since March.\n",
+                "Two summer hires and a second product planned.\n"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "model-search": {
+      "signals": [{ "wait": 600 }],
+      "end": {
+        "completed": {
+          "outputs": {
+            "model-search-response": "{\"models\":[{\"id\":\"unsloth/Qwen3-4B-Instruct-2507-GGUF\",\"downloads\":482113,\"likes\":312},{\"id\":\"Qwen/Qwen3-8B-GGUF\",\"downloads\":210554,\"likes\":198},{\"id\":\"bartowski/Qwen2.5-7B-Instruct-GGUF\",\"downloads\":98320,\"likes\":87}]}"
+          }
+        }
+      }
+    },
+    "model-download": {
+      "signals": [
+        { "progress": { "value": 0.0, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 0 of 2.5 GB" } },
+        { "step": { "step": "model-download", "progress": 0.0 } },
+        { "wait": 700 },
+        { "step": { "step": "model-download", "progress": 0.25 } },
+        { "progress": { "value": 0.25, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 0.6 of 2.5 GB" } },
+        { "wait": 700 },
+        { "step": { "step": "model-download", "progress": 0.5 } },
+        { "progress": { "value": 0.5, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 1.2 of 2.5 GB" } },
+        { "wait": 700 },
+        { "step": { "step": "model-download", "progress": 0.75 } },
+        { "progress": { "value": 0.75, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 1.9 of 2.5 GB" } },
+        { "wait": 700 },
+        { "step": { "step": "model-download", "progress": 1.0 } },
+        { "progress": { "value": 1.0, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 2.5 of 2.5 GB" } },
+        { "log": { "step": "model-download", "level": "info", "message": "verified sha256 of Qwen3-4B-Instruct-2507-Q4_K_M.gguf" } }
+      ],
+      "end": {
+        "completed": {
+          "outputs": {
+            "download-result": "{\"model_spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF\",\"state\":\"complete\",\"total_bytes\":2497281312}"
+          }
+        }
+      },
+      "on_stop": {
+        "signals": [
+          { "wait": 700 },
+          { "step": { "step": "model-download", "progress": 1.0 } },
+          { "progress": { "value": 1.0, "message": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf: 2.5 of 2.5 GB" } }
+        ],
+        "end": {
+          "completed": {
+            "outputs": {
+              "download-result": "{\"model_spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF\",\"state\":\"complete\",\"total_bytes\":2497281312}"
+            }
+          }
+        }
+      }
+    },
+    "model-delete": {
+      "signals": [{ "wait": 200 }],
+      "end": {
+        "completed": {
+          "outputs": { "model-delete-result": "{\"model_spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF\",\"removed_bytes\":2497281312}" }
+        }
+      }
+    }
+  },
+  "update": { "latest": { "version": "1.1080.0" } }
+}

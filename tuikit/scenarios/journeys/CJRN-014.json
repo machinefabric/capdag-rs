@@ -1,0 +1,11 @@
+{
+  "title": "Abort a run with Ctrl-C twice",
+  "world": "ordinary",
+  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "modes": {
+    "inline": {
+      "keys": [{ "wait": "summarize-en" }, { "press": "Ctrl-C" }, { "wait": "Stopping" }, { "press": "Ctrl-C" }],
+      "expect": { "exit": 130, "shown": ["aborted"], "absent": ["report.summary.0.txt"] }
+    }
+  }
+}
