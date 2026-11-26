@@ -1,21 +1,62 @@
 {
   "title": "Run a capability on a file",
   "world": "ordinary",
-  "args": ["run", "disbind-pdf", "report.pdf", "-o", "pages"],
+  "args": [
+    "run",
+    "disbind-pdf",
+    "report.pdf",
+    "-o",
+    "pages"
+  ],
   "modes": {
-    "full_screen": { "expect": { "exit": 0, "shown": ["report.output.0.txt", "✓ report.pdf  1 step"] } },
-    "inline": { "expect": { "exit": 0, "stdout": ["report.output.0.txt", "report.output.2.txt"], "shown": ["✓ report.pdf  1 step"] } },
+    "full_screen": {
+      "expect": {
+        "exit": 0,
+        "screen": [
+          "{dir}/pages/report.output.0.txt",
+          "{dir}/pages/report.output.1.txt",
+          "{dir}/pages/report.output.2.txt",
+          "✓ report.pdf  1 step · {*} s"
+        ]
+      }
+    },
+    "inline": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report.output.0.txt",
+          "report.output.2.txt"
+        ],
+        "screen": [
+          "✓ report.pdf  1 step · {*} s",
+          "  → {dir}/pages/report.output.0.txt",
+          "  → {dir}/pages/report.output.1.txt",
+          "  → {dir}/pages/report.output.2.txt"
+        ]
+      }
+    },
     "plain": {
       "expect": {
         "exit": 0,
-        "stdout": ["report.output.0.txt"],
-        "shown": ["[1/1] disbind-pdf    0%", "[1/1] disbind-pdf  done", "✓ report.pdf  1 step"]
+        "stdout": [
+          "report.output.0.txt"
+        ],
+        "shown": [
+          "[1/1] disbind-pdf    0%",
+          "[1/1] disbind-pdf  done",
+          "✓ report.pdf  1 step"
+        ]
       }
     },
     "json": {
       "expect": {
         "exit": 0,
-        "stdout": ["\"step\":\"disbind-pdf\"", "\"state\":\"done\"", "\"type\":\"run_finished\"", "\"outcome\":\"completed\""]
+        "stdout": [
+          "\"step\":\"disbind-pdf\"",
+          "\"state\":\"done\"",
+          "\"type\":\"run_finished\"",
+          "\"outcome\":\"completed\""
+        ]
       }
     }
   }

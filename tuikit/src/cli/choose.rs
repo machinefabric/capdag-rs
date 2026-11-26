@@ -4,8 +4,9 @@
 //! aliases, with the URN only on request (`-v`), and:
 //!
 //! - on a terminal, opens an inline picker — type to filter, ↑ ↓ to move,
-//!   Enter to choose, Esc to give up — drawn under the command and cleared
-//!   when it is done;
+//!   Enter to choose, Esc to give up — drawn under the command, as tall as
+//!   its options need, and cleared when it is done, so what the command
+//!   prints next starts on the row it began on;
 //! - without one (a pipe, CI, `--no-input`), prompts for nothing: the choice
 //!   not given is an error naming the flag that gives it and the values it
 //!   takes;
@@ -16,11 +17,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::style::{Color, Modifier, Style as Paint};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::{Terminal, TerminalOptions, Viewport};
 
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult};
-use super::inline::InlineBackend;
+use super::inline::Surface;
 use super::term::emit_record;
 
 /// One option.
@@ -89,25 +89,14 @@ pub fn not_chosen(question: &Question<'_>, choices: &[Choice]) -> CliError {
     error.hint(format!("choose with {} <value>", question.flag))
 }
 
-/// The inline picker.
+/// The inline picker: as tall as its options need, and no taller than twelve
+/// rows.
 async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style: super::term::Style) -> CliResult<usize> {
-    use futures_util::StreamExt;
-    const HEIGHT: u16 = 12;
+    let height = picker_height(choices.len());
     let failed = |e: std::io::Error| CliError::failed("the picker could not be drawn").context(e.to_string());
-    crossterm::terminal::enable_raw_mode().map_err(failed)?;
-    let mut terminal = match Terminal::with_options(
-        InlineBackend::new(),
-        TerminalOptions { viewport: Viewport::Inline(HEIGHT) },
-    ) {
-        Ok(terminal) => terminal,
-        Err(e) => {
-            let _ = crossterm::terminal::disable_raw_mode();
-            return Err(failed(e));
-        }
-    };
+    let mut surface = Surface::open(height).map_err(failed)?;
     let mut filter = String::new();
     let mut selected = 0usize;
-    let mut events = crossterm::event::EventStream::new();
     let chosen = loop {
         let matching: Vec<usize> = choices
             .iter()
@@ -116,21 +105,19 @@ async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style
             .map(|(i, _)| i)
             .collect();
         selected = selected.min(matching.len().saturating_sub(1));
-        let drawn = terminal.draw(|frame| {
+        let rows = surface.height();
+        let drawn = surface.draw(|frame| {
             let area = frame.area();
-            let lines = picker_lines(question, choices, &matching, &filter, selected, show_urn, style, area.width, HEIGHT);
+            let lines = picker_lines(question, choices, &matching, &filter, selected, show_urn, style, area.width, rows);
             frame.render_widget(Paragraph::new(lines), area);
         });
         if let Err(e) = drawn {
             break Err(failed(e));
         }
-        let Some(event) = events.next().await else {
-            break Err(CliError::failed("the terminal closed while choosing"));
+        let KeyEvent { code, modifiers, .. } = match next_key().await {
+            Ok(key) => key,
+            Err(e) => break Err(failed(e)),
         };
-        let Ok(Event::Key(KeyEvent { code, modifiers, kind, .. })) = event else { continue };
-        if kind != KeyEventKind::Press {
-            continue;
-        }
         match (code, modifiers) {
             (KeyCode::Enter, _) => match matching.get(selected) {
                 Some(&index) => break Ok(index),
@@ -138,6 +125,11 @@ async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style
             },
             (KeyCode::Esc, _) => break Err(gave_up(question)),
             (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => break Err(gave_up(question)),
+            (KeyCode::Char('z'), m) if m.contains(KeyModifiers::CONTROL) => {
+                if let Err(e) = surface.suspend() {
+                    break Err(failed(e));
+                }
+            }
             (KeyCode::Up, _) => selected = selected.saturating_sub(1),
             (KeyCode::Down, _) => selected = (selected + 1).min(matching.len().saturating_sub(1)),
             (KeyCode::Backspace, _) => {
@@ -151,9 +143,33 @@ async fn pick(question: &Question<'_>, choices: &[Choice], show_urn: bool, style
             _ => {}
         }
     };
-    let _ = terminal.clear();
-    let _ = crossterm::terminal::disable_raw_mode();
+    // What the command prints next starts on the row the picker began on.
+    surface.close().map_err(failed)?;
     chosen
+}
+
+/// The next key pressed. Keys are read here, between draws, and never by a
+/// thread of their own: a thread left reading the terminal would take the
+/// answer the surface waits for when it asks where the cursor is.
+async fn next_key() -> std::io::Result<KeyEvent> {
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(20);
+    loop {
+        while crossterm::event::poll(std::time::Duration::ZERO)? {
+            if let Event::Key(key) = crossterm::event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    return Ok(key);
+                }
+            }
+        }
+        tokio::time::sleep(EVERY).await;
+    }
+}
+
+/// The rows a picker of `choices` options takes: its question, an option a
+/// row, and its keys, up to twelve.
+fn picker_height(choices: usize) -> u16 {
+    const MOST: usize = 12;
+    (choices + 2).min(MOST) as u16
 }
 
 fn gave_up(question: &Question<'_>) -> CliError {

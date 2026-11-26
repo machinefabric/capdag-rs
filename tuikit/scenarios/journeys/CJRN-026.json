@@ -3,9 +3,13 @@
   "world": "ordinary",
   "args": ["model", "search", "qwen", "--pick"],
   "modes": {
+    "full_screen": {
+      "keys": [{ "wait": "Qwen3-8B-GGUF" }, { "press": "Down" }, { "press": "Enter" }],
+      "expect": { "exit": 0, "screen": ["hf:Qwen/Qwen3-8B-GGUF"] }
+    },
     "inline": {
       "keys": [{ "wait": "Qwen3-8B-GGUF" }, { "press": "Down" }, { "press": "Enter" }],
-      "expect": { "exit": 0, "stdout": ["hf:Qwen/Qwen3-8B-GGUF"] }
+      "expect": { "exit": 0, "stdout": ["hf:Qwen/Qwen3-8B-GGUF"], "screen": [] }
     },
     "plain": { "expect": { "exit": 2, "shown": ["3 models match, and --pick has no terminal to choose on"] } }
   }

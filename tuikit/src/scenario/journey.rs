@@ -103,6 +103,13 @@ pub struct Expect {
     /// Texts nothing holds: neither stdout nor what is shown.
     #[serde(default)]
     pub absent: Vec<String>,
+    /// On a terminal, the screen at the end, whole: every line from its top
+    /// row to its last row with text, as a person copies it — a line the
+    /// terminal wrapped is one line, and spaces at a line's end are not part
+    /// of it. A blank row is an empty line. `{dir}` stands for the directory
+    /// the journey is played in.
+    #[serde(default)]
+    pub screen: Option<Vec<String>>,
 }
 
 /// The bytes a terminal sends for `key`.
@@ -155,7 +162,13 @@ impl Scenarios {
         })?;
         let journey: Journey =
             serde_json::from_str(&text).map_err(|e| format!("the journey '{id}' ({}) is not valid: {e}", path.display()))?;
-        for leg in journey.modes.values() {
+        for (mode, leg) in &journey.modes {
+            if leg.expect.screen.is_some() && !mode.on_terminal() {
+                return Err(format!(
+                    "the journey '{id}' expects a screen in {} mode, which is played on pipes, not a terminal",
+                    mode.name()
+                ));
+            }
             for step in &leg.keys {
                 if let Step::Press(key) = step {
                     key_bytes(key).map_err(|e| format!("the journey '{id}': {e}"))?;

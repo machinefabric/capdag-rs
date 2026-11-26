@@ -182,7 +182,8 @@ fn journey(scenarios: &Scenarios, id: &str, mode: Option<&str>, speed: f64, step
         std::fs::create_dir_all(&dir).map_err(|e| format!("{} could not be made: {e}", dir.display()))?;
         let player = Player { exe, scenarios: scenarios.clone(), speed };
         let played = player.play(&journey, mode, &dir, Some(Watching { step }))?;
-        Ok((mode, dir, unmet(&journey.modes[&mode].expect, &played)))
+        let unmet = unmet(&journey.modes[&mode].expect, &played, &dir);
+        Ok((mode, dir, unmet))
     })();
     match played {
         Ok((mode, dir, unmet)) => {
@@ -221,7 +222,7 @@ fn check_journey(scenarios: &Scenarios, id: &str, mode: Option<&str>, speed: f64
             let dir = std::env::temp_dir().join(format!("capdag-tuikit-{id}-{}-{}", mode.name(), std::process::id()));
             std::fs::create_dir_all(&dir).map_err(|e| format!("{} could not be made: {e}", dir.display()))?;
             let played = player.play(&journey, mode, &dir, None)?;
-            let unmet = unmet(&leg.expect, &played);
+            let unmet = unmet(&leg.expect, &played, &dir);
             if unmet.is_empty() {
                 println!("{id} in {} mode came to what it should", mode.name());
                 std::fs::remove_dir_all(&dir).map_err(|e| format!("{} could not be removed: {e}", dir.display()))?;

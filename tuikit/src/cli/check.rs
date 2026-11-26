@@ -9,6 +9,7 @@ use super::names;
 use super::term::emit_record;
 use capdag::fabric::registry::FabricRegistry;
 use capdag::orchestrator::machine_plan::ResolvedNotation;
+use super::term::outln;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -102,7 +103,7 @@ pub async fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, path: &Path, notati
         return Ok(Exit::Ok);
     }
     let style = &ctx.term.style;
-    println!("{} {}", style.good("✓"), style.name(&path.display().to_string()));
+    outln!("{} {}", style.good("✓"), style.name(&path.display().to_string()));
     let anchor = |a: &capdag::orchestrator::machine_plan::MachineAnchor| {
         let mut line = format!("{} ({})", a.name, names::media(registry, &a.media_urn));
         if ctx.term.verbosity >= 1 {
@@ -110,18 +111,18 @@ pub async fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, path: &Path, notati
         }
         line
     };
-    println!("  inputs:  {}", if inputs.is_empty() { "none".into() } else { inputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
-    println!("  outputs: {}", if outputs.is_empty() { "none".into() } else { outputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
-    println!();
+    outln!("  inputs:  {}", if inputs.is_empty() { "none".into() } else { inputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
+    outln!("  outputs: {}", if outputs.is_empty() { "none".into() } else { outputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
+    outln!();
     for line in aliased.lines() {
-        println!("  {line}");
+        outln!("  {line}");
     }
     if ctx.term.verbosity >= 1 {
         if let Ok(canonical) = resolved.machine().to_machine_notation() {
-            println!("\n  canonical: {}", style.dim(&canonical));
+            outln!("\n  canonical: {}", style.dim(&canonical));
         }
     }
     let example: Vec<String> = inputs.iter().map(|i| format!("<{}>", i.name)).collect();
-    println!("\nRun it: capdag run {} {}", path.display(), example.join(" "));
+    outln!("\nRun it: capdag run {} {}", path.display(), example.join(" "));
     Ok(Exit::Ok)
 }

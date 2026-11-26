@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
 use super::term::emit_record;
+use super::term::outln;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -70,7 +71,7 @@ pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
             let hash = capdag::hash_cartridge_directory(&dir).map_err(|e| {
                 CliError::failed(format!("{} could not be hashed", dir.display())).context(e.to_string())
             })?;
-            println!("{hash}");
+            outln!("{hash}");
             Ok(Exit::Ok)
         }
         Command::BundleManifest { root, environment } => bundle_manifest(ctx, &root, &environment).await,
@@ -102,7 +103,7 @@ fn new(ctx: &Ctx, path: &std::path::Path, lang: &str) -> CliResult<Exit> {
     }
     eprintln!("  capdag dev install");
     eprintln!("  echo \"I love this\" | capdag run {name}");
-    println!("{}", project.display());
+    outln!("{}", project.display());
     Ok(Exit::Ok)
 }
 
@@ -147,7 +148,7 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
     if let Some(alias) = alias {
         eprintln!("Run it: capdag run {alias} <input>");
     }
-    println!("{}", version_dir.display());
+    outln!("{}", version_dir.display());
     Ok(Exit::Ok)
 }
 
@@ -233,7 +234,7 @@ fn write_bundle_manifest(root: &std::path::Path, manifest: &capdag::BundleManife
     for one in &manifest.cartridges {
         eprintln!("  {} {} [{}] {}", one.name, one.version, one.channel, one.sha256);
     }
-    println!("{}", path.display());
+    outln!("{}", path.display());
     Ok(())
 }
 

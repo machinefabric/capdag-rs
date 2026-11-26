@@ -10,6 +10,7 @@ use super::error::{CliError, CliResult, Exit};
 use super::live::ProgressChoice;
 use super::run::cap_value;
 use super::term::emit_record;
+use super::term::outln;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -80,7 +81,7 @@ fn check_spec(spec: &str) -> CliResult<()> {
 }
 
 async fn list(ctx: &Ctx) -> CliResult<Exit> {
-    let bytes = cap_value(ctx, "model-list", Some(b"huggingface".to_vec()), ProgressChoice::None).await?;
+    let bytes = cap_value(ctx, "model-list", Some(b"huggingface".to_vec()), None).await?;
     let response = json("model-list", &bytes)?;
     let models = response["models"].as_array().cloned().unwrap_or_default();
     if ctx.term.json {
@@ -90,12 +91,12 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
         return Ok(Exit::Ok);
     }
     if models.is_empty() {
-        println!("No models are downloaded. Find one with: capdag model search <words>");
+        outln!("No models are downloaded. Find one with: capdag model search <words>");
         return Ok(Exit::Ok);
     }
     for model in &models {
         let size = model["size_bytes"].as_u64().or_else(|| model["total_bytes"].as_u64());
-        println!(
+        outln!(
             "{}  {}{}",
             ctx.term.style.name(model["model_spec"].as_str().unwrap_or("?")),
             model["state"].as_str().map(str::to_string).unwrap_or_else(|| model["state"].to_string()),
@@ -107,7 +108,7 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
 
 async fn search(ctx: &Ctx, query: String, limit: u32, pick: bool) -> CliResult<Exit> {
     let request = serde_json::json!({ "query": query, "limit": limit });
-    let bytes = cap_value(ctx, "search-models", Some(request.to_string().into_bytes()), ProgressChoice::None).await?;
+    let bytes = cap_value(ctx, "search-models", Some(request.to_string().into_bytes()), None).await?;
     let response = json("search-models", &bytes)?;
     let models = response["models"].as_array().cloned().unwrap_or_default();
     if models.is_empty() {
@@ -133,7 +134,7 @@ async fn search(ctx: &Ctx, query: String, limit: u32, pick: bool) -> CliResult<E
             })
             .collect();
         let index = choose(ctx, &Question { what: "a model", flag: "SPEC" }, &choices).await?;
-        println!("{}", spec_of(&models[index]));
+        outln!("{}", spec_of(&models[index]));
         return Ok(Exit::Ok);
     }
     if ctx.term.json {
@@ -143,7 +144,7 @@ async fn search(ctx: &Ctx, query: String, limit: u32, pick: bool) -> CliResult<E
         return Ok(Exit::Ok);
     }
     for model in &models {
-        println!(
+        outln!(
             "{}  {}",
             ctx.term.style.name(&spec_of(model)),
             ctx.term.style.dim(&format!(
@@ -162,7 +163,7 @@ async fn pull(ctx: &Ctx, spec: &str) -> CliResult<Exit> {
     if ctx.offline {
         return Err(CliError::usage("a model cannot be downloaded offline").hint("drop --offline"));
     }
-    let bytes = cap_value(ctx, "model-download", Some(spec.as_bytes().to_vec()), ProgressChoice::Auto).await?;
+    let bytes = cap_value(ctx, "model-download", Some(spec.as_bytes().to_vec()), Some(ProgressChoice::Auto)).await?;
     let response = json("model-download", &bytes)?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "model_downloaded", "spec": spec, "result": response }));
@@ -174,7 +175,7 @@ async fn pull(ctx: &Ctx, spec: &str) -> CliResult<Exit> {
 
 async fn remove(ctx: &Ctx, spec: &str) -> CliResult<Exit> {
     check_spec(spec)?;
-    let bytes = cap_value(ctx, "model-delete", Some(spec.as_bytes().to_vec()), ProgressChoice::None).await?;
+    let bytes = cap_value(ctx, "model-delete", Some(spec.as_bytes().to_vec()), None).await?;
     let response = json("model-delete", &bytes)?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "model_removed", "spec": spec, "result": response }));

@@ -3,6 +3,20 @@
   "world": "ordinary",
   "args": ["plan", "report.pdf", "--to", "txt"],
   "modes": {
+    "full_screen": {
+      "keys": [
+        { "wait": "ocr-gguf" },
+        { "press": "Down" },
+        { "press": "Enter" },
+        { "wait": "Choose what to do with it" },
+        { "type": "print" },
+        { "press": "Enter" }
+      ],
+      "expect": {
+        "exit": 0,
+        "screen": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"]
+      }
+    },
     "inline": {
       "keys": [
         { "wait": "ocr-gguf" },
@@ -14,7 +28,8 @@
       ],
       "expect": {
         "exit": 0,
-        "stdout": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"]
+        "stdout": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"],
+        "screen": []
       }
     }
   }

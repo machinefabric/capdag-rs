@@ -8,6 +8,7 @@ use super::error::{CliError, CliResult, Exit};
 use super::names;
 use super::term::emit_record;
 use capdag::Cap;
+use super::term::outln;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -94,7 +95,7 @@ pub async fn caps(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         if ctx.term.json {
             emit_record(&record(&listed[index]));
         } else {
-            println!("{}", listed[index].alias);
+            outln!("{}", listed[index].alias);
         }
         return Ok(Exit::Ok);
     }
@@ -107,7 +108,7 @@ pub async fn caps(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let width = listed.iter().map(|l| l.alias.chars().count()).max().unwrap_or(0).min(34);
     for l in &listed {
         let urn = if ctx.term.verbosity >= 1 { format!("\n{:width$}  {}", "", ctx.term.style.dim(&l.urn)) } else { String::new() };
-        println!(
+        outln!(
             "{}  {} {}{urn}",
             ctx.term.style.name(&format!("{:<width$}", l.alias)),
             l.title,

@@ -195,9 +195,24 @@ fn on_terminal(command: Command, attached: Attached, leg: &Leg, watching: Option
     played
 }
 
-/// What `played` should have come to, and does not; nothing when it did.
-pub fn unmet(expect: &Expect, played: &Played) -> Vec<String> {
+/// What `played`, in `dir`, should have come to, and does not; nothing when
+/// it did.
+pub fn unmet(expect: &Expect, played: &Played, dir: &Path) -> Vec<String> {
     let mut unmet = Vec::new();
+    if let Some(screen) = &expect.screen {
+        // The command names the directory as it resolves it.
+        let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let expected: Vec<String> = screen.iter().map(|line| line.replace("{dir}", &dir.display().to_string())).collect();
+        let shown = screen_lines(&played.shown);
+        let same = shown.len() == expected.len() && shown.iter().zip(&expected).all(|(line, pattern)| line_matches(line, pattern));
+        if !same {
+            unmet.push(format!(
+                "the screen is not what it should be\n--- expected ---\n{}\n--- on the screen ---\n{}",
+                expected.join("\n"),
+                shown.join("\n")
+            ));
+        }
+    }
     if played.code != Some(expect.exit) {
         unmet.push(format!("it exited {:?}, not {}", played.code, expect.exit));
     }
@@ -217,4 +232,73 @@ pub fn unmet(expect: &Expect, played: &Played) -> Vec<String> {
         }
     }
     unmet
+}
+
+/// A screen's lines, as a person copies them: from the top row to the last
+/// row with text, each without the spaces at its end.
+fn screen_lines(screen: &str) -> Vec<String> {
+    let mut lines: Vec<String> = screen.lines().map(|line| line.trim_end().to_string()).collect();
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines
+}
+
+/// Whether `line` is `pattern`, where each `{*}` in the pattern stands for any
+/// text: how long a run took, which no journey can say.
+fn line_matches(line: &str, pattern: &str) -> bool {
+    let mut pieces = pattern.split("{*}");
+    let first = pieces.next().unwrap_or("");
+    let Some(mut rest) = line.strip_prefix(first) else { return false };
+    let pieces: Vec<&str> = pieces.collect();
+    let Some((last, middle)) = pieces.split_last() else { return rest.is_empty() };
+    for piece in middle {
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    rest.ends_with(last)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn played(shown: &str) -> Played {
+        Played { code: Some(0), stdout: String::new(), shown: shown.to_string() }
+    }
+
+    fn expecting(screen: &[&str]) -> Expect {
+        Expect {
+            exit: 0,
+            stdout: Vec::new(),
+            shown: Vec::new(),
+            absent: Vec::new(),
+            screen: Some(screen.iter().map(|line| line.to_string()).collect()),
+        }
+    }
+
+    // TEST22289: a screen is met only by every line from the top, blank rows
+    // and where each line starts included, with spaces at a line's end and
+    // the empty rows under the last line aside, {dir} the journey's directory
+    // and {*} any text.
+    #[test]
+    fn test22289_a_screen_is_met_line_for_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let expect = expecting(&["✓ done", "  → {dir}/a.txt"]);
+        let exact = format!("✓ done   \n  → {}/a.txt\n\n\n", canonical.display());
+        assert!(unmet(&expect, &played(&exact), dir.path()).is_empty());
+        let blank_row = format!("\n✓ done\n  → {}/a.txt", canonical.display());
+        assert_eq!(unmet(&expect, &played(&blank_row), dir.path()).len(), 1);
+        let moved = format!("✓ done\n        → {}/a.txt", canonical.display());
+        assert_eq!(unmet(&expect, &played(&moved), dir.path()).len(), 1);
+        let gap = format!("✓ done\n\n  → {}/a.txt", canonical.display());
+        assert_eq!(unmet(&expect, &played(&gap), dir.path()).len(), 1);
+        let timed = expecting(&["✓ report.pdf  1 step · {*} s"]);
+        assert!(unmet(&timed, &played("✓ report.pdf  1 step · 0.4 s"), dir.path()).is_empty());
+        assert_eq!(unmet(&timed, &played("✓ report.pdf  1 step · 0.4 s · failed"), dir.path()).len(), 1);
+        assert_eq!(unmet(&timed, &played("✗ report.pdf  1 step · 0.4 s"), dir.path()).len(), 1);
+    }
 }

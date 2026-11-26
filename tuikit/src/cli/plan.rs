@@ -22,6 +22,7 @@ use super::term::emit_record;
 use capdag::fabric::registry::FabricRegistry;
 use capdag::planner as p;
 use capdag::{CapUrn, MediaUrn};
+use super::term::outln;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -240,7 +241,7 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
             if ctx.term.json {
                 emit_record(&machine.record(chosen));
             } else {
-                println!("{}", machine.notation);
+                outln!("{}", machine.notation);
             }
         }
         return Ok(Exit::Ok);
@@ -512,11 +513,11 @@ fn print_targets(ctx: &Ctx, registry: &FabricRegistry, targets: &[p::ConvergentT
         }
         return;
     }
-    println!("{what} can become:");
+    outln!("{what} can become:");
     let width = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(28);
     for choice in &choices {
         let urn = if ctx.term.verbosity >= 1 { format!("  {}", choice.urn.as_deref().unwrap_or("")) } else { String::new() };
-        println!("  {:<width$}  {}{urn}", choice.label, choice.detail);
+        outln!("  {:<width$}  {}{urn}", choice.label, choice.detail);
     }
     eprintln!("\nFind machines that make one: capdag plan {} --to {}", files.join(" "), choices[0].label);
 }
@@ -605,19 +606,19 @@ fn print_machines(ctx: &Ctx, machines: &[Planned], target: &str, what: &str, all
         }
         return;
     }
-    println!("{} machine{} make{} {target} of {what}:", machines.len(), if machines.len() == 1 { "" } else { "s" }, if machines.len() == 1 { "s" } else { "" });
+    outln!("{} machine{} make{} {target} of {what}:", machines.len(), if machines.len() == 1 { "" } else { "s" }, if machines.len() == 1 { "s" } else { "" });
     let shown = if all { machines.len() } else { machines.len().min(LISTED) };
     for (index, machine) in machines.iter().take(shown).enumerate() {
-        println!("\n {:>2}. {}", index + 1, ctx.term.style.dim(&machine.summary()));
+        outln!("\n {:>2}. {}", index + 1, ctx.term.style.dim(&machine.summary()));
         for line in machine.notation.lines() {
-            println!("     {line}");
+            outln!("     {line}");
         }
         if ctx.term.verbosity >= 1 {
-            println!("     {}", ctx.term.style.dim(&machine.canonical));
+            outln!("     {}", ctx.term.style.dim(&machine.canonical));
         }
     }
     if shown < machines.len() {
-        println!("\n … and {} more: --all lists them", machines.len() - shown);
+        outln!("\n … and {} more: --all lists them", machines.len() - shown);
     }
     eprintln!(
         "\nSave one: capdag plan {} --to <type> --pick <n> --save <file>\nRun one:  capdag plan {} --to <type> --pick <n> --run",

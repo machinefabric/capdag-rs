@@ -13,6 +13,7 @@ use capdag::orchestrator::cli_cap::{
     render_cap_interface, synthesize_single_cap_notation, InterfaceNames, SINGLE_CAP_INPUT_NODE,
 };
 use capdag::Cap;
+use super::term::{out, outln};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -28,7 +29,7 @@ pub async fn info(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = if args.no_cache { ctx.fresh_registry().await? } else { ctx.registry().await? };
     for (index, name) in args.names.iter().enumerate() {
         if index > 0 && !ctx.term.json {
-            println!();
+            outln!();
         }
         // A cap, a media type, or neither.
         match registry.get_cap(name).await {
@@ -110,41 +111,41 @@ async fn show_cap(ctx: &Ctx, registry: &capdag::FabricRegistry, cap: &Cap) -> Cl
     let interface = InterfaceNames { cap: alias.clone(), media: &media, urns: ctx.term.verbosity >= 1 };
     let text = render_cap_interface(cap, &interface)
         .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e))?;
-    print!("{text}");
+    out!("{text}");
     if let Some(description) = cap.cap_description.as_deref().filter(|d| !d.trim().is_empty()) {
-        println!("\n{}", description.trim());
+        outln!("\n{}", description.trim());
     }
     let default_model = cap
         .default_model_spec()
         .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e.to_string()))?;
     if let Some(model) = default_model {
-        println!("\nRuns a model: {model} by default (--model-spec chooses another)");
+        outln!("\nRuns a model: {model} by default (--model-spec chooses another)");
     }
-    println!();
+    outln!();
     match (bundled.first(), installed.first()) {
-        (Some(provider), _) => println!("Provided by {} {}, bundled with capdag.", provider.id, provider.version),
-        (None, Some(cartridge)) => println!("Provided by {cartridge}, installed."),
-        (None, None) if ctx.offline => println!("Provided by a cartridge that is not installed; it is not looked up offline."),
+        (Some(provider), _) => outln!("Provided by {} {}, bundled with capdag.", provider.id, provider.version),
+        (None, Some(cartridge)) => outln!("Provided by {cartridge}, installed."),
+        (None, None) if ctx.offline => outln!("Provided by a cartridge that is not installed; it is not looked up offline."),
         (None, None) => match super::cartridge::manager(ctx).await {
             Ok(manager) => {
                 let providers = manager.providers_of(&cap.urn.to_string()).await;
                 match providers.first() {
-                    Some(id) => println!(
+                    Some(id) => outln!(
                         "Provided by {id}, which is downloaded the first time a run needs it (or: capdag cartridge install {id})."
                     ),
-                    None => println!("No cartridge in the registry provides it."),
+                    None => outln!("No cartridge in the registry provides it."),
                 }
             }
-            Err(e) => println!("Its cartridge could not be looked up: {}", e.problem),
+            Err(e) => outln!("Its cartridge could not be looked up: {}", e.problem),
         },
     }
     let takes_input = synthesize_single_cap_notation(cap)
         .map(|notation| notation.contains(&format!("[{SINGLE_CAP_INPUT_NODE} -> ")))
         .unwrap_or(true);
     if takes_input {
-        println!("\nExample:\n  capdag run {alias} <input> -o <dir>");
+        outln!("\nExample:\n  capdag run {alias} <input> -o <dir>");
     } else {
-        println!("\nExample:\n  capdag run {alias}");
+        outln!("\nExample:\n  capdag run {alias}");
     }
     Ok(())
 }
@@ -172,19 +173,19 @@ async fn show_media(ctx: &Ctx, registry: &capdag::FabricRegistry, media: &capdag
         }));
         return Ok(());
     }
-    println!("{alias} — {}", def.title);
-    println!("{}", ctx.term.style.dim(&def.urn));
+    outln!("{alias} — {}", def.title);
+    outln!("{}", ctx.term.style.dim(&def.urn));
     if !def.extensions.is_empty() {
-        println!("Files: .{}", def.extensions.join(", ."));
+        outln!("Files: .{}", def.extensions.join(", ."));
     }
     if let Some(description) = def.description.as_deref().filter(|d| !d.trim().is_empty()) {
-        println!("\n{}", description.trim());
+        outln!("\n{}", description.trim());
     }
     if takes.is_empty() {
-        println!("\nNo capability takes it.");
+        outln!("\nNo capability takes it.");
     } else {
-        println!("\nTaken by {} capabilit{}: {}", takes.len(), if takes.len() == 1 { "y" } else { "ies" }, takes.join(", "));
-        println!("\nWhat a file of it can become: capdag plan <file>");
+        outln!("\nTaken by {} capabilit{}: {}", takes.len(), if takes.len() == 1 { "y" } else { "ies" }, takes.join(", "));
+        outln!("\nWhat a file of it can become: capdag plan <file>");
     }
     Ok(())
 }

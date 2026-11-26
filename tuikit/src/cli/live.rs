@@ -4,10 +4,13 @@
 //! - **Live** (`--progress auto` on a terminal, or `live`): a compact block
 //!   drawn under the command in the normal scrollback — never the alternate
 //!   screen — with each step's state and progress, a map's items, and the
-//!   last thing the selected step's cartridge said. Keys: Ctrl-C stops,
-//!   Ctrl-C again aborts, `l` shows more of the log, ↑ ↓ select a step.
-//!   When the run ends the block is replaced by its summary, so the
-//!   scrollback keeps what happened and nothing else.
+//!   last thing the selected step's cartridge said, as tall as that takes.
+//!   Keys: Ctrl-C stops, Ctrl-C again aborts, Ctrl-Z suspends, `l` shows more
+//!   of the log, ↑ ↓ select a step. What a run writes for stdout, when stdout
+//!   is the same terminal, and the summary of each run that ends are printed
+//!   above the block as ordinary lines; when the runs end the block is
+//!   cleared, so the scrollback keeps what happened and nothing else, with
+//!   no blank rows where the block was.
 //! - **Plain** (`auto` on a pipe, or `plain`): one line when a step starts,
 //!   ends or fails, and its progress at most once a second.
 //! - **JSON** (`--json`): every change as a record on stdout.
@@ -21,11 +24,10 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style as Paint};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use ratatui::{Terminal, TerminalOptions, Viewport};
+use ratatui::widgets::Paragraph;
 
 use super::error::{CliError, CliResult};
-use super::inline::InlineBackend;
+use super::inline::{Stream, Surface};
 use super::term::{emit_record, Style, Term};
 use super::watch::{Changed, MapItems, RunWatch, StepState, Watch};
 use capdag::orchestrator::observe::RunKey;
@@ -57,10 +59,16 @@ pub enum Shower {
     Plain(PlainLines),
     Json,
     Quiet,
+    /// A lookup's run (a model search, the models listed): nothing of it is
+    /// shown, not even its summary; what it found is the command's output.
+    Silent,
 }
 
 impl Shower {
-    pub fn new(term: &Term, choice: ProgressChoice) -> CliResult<Self> {
+    /// How runs are shown: as `choice` says, or not at all for a lookup's run
+    /// (`None`).
+    pub fn new(term: &Term, choice: Option<ProgressChoice>) -> CliResult<Self> {
+        let Some(choice) = choice else { return Ok(Shower::Silent) };
         if term.json {
             return Ok(Shower::Json);
         }
@@ -79,6 +87,10 @@ impl Shower {
                     return Err(CliError::usage("--progress live needs a terminal on stderr")
                         .hint("use --progress plain, or leave --progress out"));
                 }
+                if term.dumb {
+                    return Err(CliError::usage("--progress live needs a terminal that can move its cursor, and TERM is dumb")
+                        .hint("use --progress plain, or leave --progress out"));
+                }
                 Shower::Live(LiveView::open(term.style)?)
             }
         })
@@ -94,7 +106,7 @@ impl Shower {
     pub fn changed(&mut self, watch: &Watch, key: RunKey, changed: Changed) {
         let Some(run) = watch.runs.get(&key) else { return };
         match self {
-            Shower::Live(_) | Shower::Quiet => {}
+            Shower::Live(_) | Shower::Quiet | Shower::Silent => {}
             Shower::Plain(lines) => lines.changed(watch, run, changed),
             Shower::Json => {
                 if let Some(index) = changed.row {
@@ -115,8 +127,23 @@ impl Shower {
     pub fn say(&mut self, line: &str, record: serde_json::Value) {
         match self {
             Shower::Live(view) => view.say(line),
-            Shower::Plain(_) | Shower::Quiet => eprintln!("{line}"),
+            Shower::Plain(_) | Shower::Quiet | Shower::Silent => eprintln!("{line}"),
             Shower::Json => emit_record(&record),
+        }
+    }
+
+    /// Whether what a run writes for stdout is held for the live view: stdout
+    /// is the terminal the block is drawn on, and written under it the text
+    /// would land inside the block.
+    pub fn holds_results(&self, term: &Term) -> bool {
+        matches!(self, Shower::Live(_)) && term.stdout_is_terminal
+    }
+
+    /// What a run wrote for stdout, held while the live view is drawn: it is
+    /// printed above the block.
+    pub fn results(&mut self, text: Vec<u8>) {
+        if let Shower::Live(view) = self {
+            view.results(text);
         }
     }
 
@@ -136,10 +163,14 @@ impl Shower {
         }
     }
 
-    /// A run ended: its summary goes to the scrollback.
-    pub fn run_ended(&mut self, watch: &Watch, key: RunKey, outputs: &[String]) {
+    /// A run ended: its summary goes to the scrollback, naming the files it
+    /// wrote when `names_outputs` (the `run_finished` record always names
+    /// them).
+    pub fn run_ended(&mut self, watch: &Watch, key: RunKey, outputs: &[String], names_outputs: bool) {
         let Some(run) = watch.runs.get(&key) else { return };
+        let named: &[String] = if names_outputs { outputs } else { &[] };
         match self {
+            Shower::Silent => {}
             Shower::Json => {
                 let (outcome, elapsed) = run.ended.clone().expect("a run is shown ended once it is");
                 emit_record(&serde_json::json!({
@@ -151,14 +182,14 @@ impl Shower {
                     "outputs": outputs,
                 }));
             }
-            Shower::Live(view) => view.say_lines(&summary(run, outputs, &view.style)),
+            Shower::Live(view) => view.say_lines(&summary(run, named, &view.style)),
             Shower::Plain(lines) => {
-                for line in summary(run, outputs, &lines.style) {
+                for line in summary(run, named, &lines.style) {
                     eprintln!("{line}");
                 }
             }
             Shower::Quiet => {
-                for line in summary(run, outputs, &Style::plain()) {
+                for line in summary(run, named, &Style::plain()) {
                     eprintln!("{line}");
                 }
             }
@@ -334,36 +365,25 @@ impl PlainLines {
 
 /// The inline block: drawn in the scrollback under the command.
 pub struct LiveView {
-    terminal: Terminal<InlineBackend>,
+    surface: Surface,
     style: Style,
     selected: usize,
     show_log: bool,
-    said: Vec<String>,
+    /// What goes above the block at its next draw, in order, and to which
+    /// stream.
+    said: Vec<(Stream, Vec<u8>)>,
 }
-
-/// How many lines the block takes: a header, up to 10 steps, the selected
-/// step's last line, the keys.
-const BLOCK_HEIGHT: u16 = 14;
 
 /// How often the live view looks for a key.
 const KEYS_EVERY: Duration = Duration::from_millis(50);
 
 impl LiveView {
     fn open(style: Style) -> CliResult<Self> {
-        crossterm::terminal::enable_raw_mode()
+        // A header and the keys, until the run's steps are known.
+        let surface = Surface::open(2)
             .map_err(|e| CliError::failed("the terminal could not be set up for the live view").context(e.to_string()))?;
-        let terminal = Terminal::with_options(
-            InlineBackend::new(),
-            TerminalOptions {
-                viewport: Viewport::Inline(BLOCK_HEIGHT),
-            },
-        )
-        .map_err(|e| {
-            let _ = crossterm::terminal::disable_raw_mode();
-            CliError::failed("the live view could not be drawn").context(e.to_string())
-        })?;
         Ok(Self {
-            terminal,
+            surface,
             style,
             selected: 0,
             show_log: false,
@@ -374,12 +394,20 @@ impl LiveView {
     /// Lines that go to the scrollback above the block.
     fn say_lines(&mut self, lines: &[String]) {
         for line in lines {
-            self.said.push(line.clone());
+            self.say(line);
         }
     }
 
     fn say(&mut self, line: &str) {
-        self.said.push(line.to_string());
+        self.said.push((Stream::Stderr, format!("{line}\n").into_bytes()));
+    }
+
+    /// What a run wrote for stdout, held while the block is drawn on the
+    /// same terminal: it goes above the block, as it would without it.
+    fn results(&mut self, text: Vec<u8>) {
+        if !text.is_empty() {
+            self.said.push((Stream::Stdout, text));
+        }
     }
 
     /// The next key that asks something of the run. Keys are read here, in
@@ -395,6 +423,12 @@ impl LiveView {
                 }
                 match (code, modifiers) {
                     (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => return Some(Key::Interrupt),
+                    (KeyCode::Char('z'), m) if m.contains(KeyModifiers::CONTROL) => {
+                        // Stopped, the run waits with this process; a stop
+                        // the terminal could not be given back for is not
+                        // taken, and the block is drawn on as it was.
+                        let _ = self.surface.suspend();
+                    }
                     (KeyCode::Char('l'), _) => self.show_log = !self.show_log,
                     (KeyCode::Up, _) => self.selected = self.selected.saturating_sub(1),
                     (KeyCode::Down, _) => self.selected += 1,
@@ -406,90 +440,45 @@ impl LiveView {
     }
 
     fn draw(&mut self, watch: &Watch, phase: RunPhase) -> CliResult<()> {
-        let said = std::mem::take(&mut self.said);
-        let width = self
-            .terminal
-            .size()
-            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?
-            .width;
-        for line in said {
-            let rows = rows_of(&strip_escapes(&line), width);
-            let height = u16::try_from(rows.len()).unwrap_or(u16::MAX);
-            self.terminal
-                .insert_before(height, |buf| {
-                    Paragraph::new(rows.iter().map(|row| Line::raw(row.clone())).collect::<Vec<_>>()).render(buf.area, buf)
-                })
-                .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?;
+        let failed = |e: std::io::Error| CliError::failed("the live view could not be drawn").context(e.to_string());
+        for (stream, text) in std::mem::take(&mut self.said) {
+            self.surface.print_above(stream, &text).map_err(failed)?;
         }
         let style = self.style;
-        let selected = &mut self.selected;
         let show_log = self.show_log;
-        self.terminal
+        let width = self.surface.width().map_err(failed)?;
+        let lines = block_lines(watch, phase, &mut self.selected, show_log, style, width);
+        // The block grows to show every line, and does not shrink while the
+        // run is shown, so it does not jump.
+        let needed = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+        if needed > self.surface.height() {
+            self.surface.resize(needed).map_err(failed)?;
+        }
+        self.surface
             .draw(|frame| {
                 let area = frame.area();
-                let lines = block_lines(watch, phase, selected, show_log, style, area.width);
-                let height = (lines.len() as u16).min(area.height);
+                let height = needed.min(area.height);
                 frame.render_widget(Paragraph::new(lines), Rect { height, ..area });
             })
-            .map_err(|e| CliError::failed("the live view could not be drawn").context(e.to_string()))?;
-        Ok(())
+            .map_err(failed)
     }
 
+    /// Clear the block and give the terminal back; what is still to be said
+    /// is printed from the row the block began on.
     fn close(mut self) -> CliResult<()> {
         let said = std::mem::take(&mut self.said);
-        let _ = self.terminal.clear();
-        let _ = crossterm::terminal::disable_raw_mode();
-        // The block is gone; what it leaves is the summary, in the scrollback.
-        let mut stderr = std::io::stderr();
-        let _ = crossterm::execute!(stderr, crossterm::cursor::MoveToColumn(0));
-        for line in said {
-            let _ = writeln!(stderr, "{line}");
+        self.surface
+            .close()
+            .map_err(|e| CliError::failed("the terminal could not be given back").context(e.to_string()))?;
+        for (stream, text) in said {
+            let printed = match stream {
+                Stream::Stdout => std::io::stdout().lock().write_all(&text),
+                Stream::Stderr => std::io::stderr().lock().write_all(&text),
+            };
+            printed.map_err(|e| CliError::failed("what the run said could not be printed").context(e.to_string()))?;
         }
         Ok(())
     }
-}
-
-/// Text without the escape codes the plain style adds: the block is painted
-/// by ratatui, not by escape codes in its strings.
-fn strip_escapes(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            for c in chars.by_ref() {
-                if c == 'm' {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// `text` in rows of at most `width` columns, a new row at each line break:
-/// what is said above the block is wrapped, never cut, so the paths a summary
-/// names are whole in the scrollback.
-fn rows_of(text: &str, width: u16) -> Vec<String> {
-    use unicode_width::UnicodeWidthChar;
-    let width = usize::from(width.max(1));
-    let mut rows = Vec::new();
-    for line in text.split('\n') {
-        let mut row = String::new();
-        let mut used = 0;
-        for c in line.chars() {
-            let columns = c.width().unwrap_or(0);
-            if used + columns > width && used > 0 {
-                rows.push(std::mem::take(&mut row));
-                used = 0;
-            }
-            row.push(c);
-            used += columns;
-        }
-        rows.push(row);
-    }
-    rows
 }
 
 /// The block's lines: the run being watched, its steps, the selected step's
@@ -609,18 +598,5 @@ mod tests {
         let style = Style::plain();
         assert_eq!(bar(0.5, 10, &style), "█████░░░░░  50%");
         assert_eq!(bar(1.2, 4, &style), "████ 100%", "progress past the whole is shown as the whole");
-    }
-
-    // TEST22115: a line said above the block is wrapped at the terminal's
-    // width, never cut: every character is kept, in order, no row is wider
-    // than the terminal (a wide character counts as two columns), and a line
-    // break starts a row.
-    #[test]
-    fn test22115_said_lines_wrap_and_keep_every_character() {
-        assert_eq!(rows_of("→ /tmp/work/note.pages.0.png", 10), vec!["→ /tmp/wor", "k/note.pag", "es.0.png"]);
-        assert_eq!(rows_of("ab界cd", 3), vec!["ab", "界c", "d"]);
-        assert_eq!(rows_of("one\ntwo", 80), vec!["one", "two"]);
-        assert_eq!(rows_of("", 80), vec![""], "an empty line is one empty row");
-        assert_eq!(rows_of("fits", 4), vec!["fits"]);
     }
 }

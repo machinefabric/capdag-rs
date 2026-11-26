@@ -1,17 +1,51 @@
 {
   "title": "Run a machine that summarizes each page: the map's progress, live, as lines and as JSON (today's map timing included)",
   "world": "ordinary",
-  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "-o",
+    "out"
+  ],
   "modes": {
-    "full_screen": { "expect": { "exit": 0, "shown": ["report.summary.2.txt", "✓ report.pdf  2 steps · 3 items"] } },
+    "full_screen": {
+      "expect": {
+        "exit": 0,
+        "screen": [
+          "{dir}/out/report.summary.0.txt",
+          "{dir}/out/report.summary.1.txt",
+          "{dir}/out/report.summary.2.txt",
+          "✓ report.pdf  2 steps · 3 items · {*} s"
+        ]
+      }
+    },
     "inline": {
-      "expect": { "exit": 0, "stdout": ["report.summary.0.txt", "report.summary.2.txt"], "shown": ["✓ report.pdf  2 steps · 3 items"] }
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report.summary.0.txt",
+          "report.summary.2.txt"
+        ],
+        "screen": [
+          "✓ report.pdf  2 steps · 3 items · {*} s",
+          "  → {dir}/out/report.summary.0.txt",
+          "  → {dir}/out/report.summary.1.txt",
+          "  → {dir}/out/report.summary.2.txt"
+        ]
+      }
     },
     "plain": {
       "expect": {
         "exit": 0,
-        "stdout": ["report.summary.0.txt"],
-        "shown": ["[2/2] summarize-en  0/1 pages", "[2/2] summarize-en  done (0/3 pages)", "✓ report.pdf  2 steps · 3 items"]
+        "stdout": [
+          "report.summary.0.txt"
+        ],
+        "shown": [
+          "[2/2] summarize-en  0/1 pages",
+          "[2/2] summarize-en  done (0/3 pages)",
+          "✓ report.pdf  2 steps · 3 items"
+        ]
       }
     },
     "json": {

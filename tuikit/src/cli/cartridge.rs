@@ -12,6 +12,7 @@ use super::names;
 use super::term::emit_record;
 use capdag::cartridge_discovery::DiscoveredCartridge;
 use capdag::CapUrn;
+use super::term::outln;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -136,13 +137,13 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
         return Ok(Exit::Ok);
     }
     if rows.is_empty() {
-        println!("No cartridges are bundled or installed. A run installs the ones it needs.");
+        outln!("No cartridges are bundled or installed. A run installs the ones it needs.");
         return Ok(Exit::Ok);
     }
     let style = &ctx.term.style;
     for row in &rows {
         let state = row["state"].as_str().unwrap_or("");
-        println!(
+        outln!(
             "{:<22} {:<12} {}",
             style.name(row["id"].as_str().unwrap_or("")),
             row["version"].as_str().unwrap_or(""),
@@ -152,7 +153,7 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
             }
         );
         for warning in row["warnings"].as_array().into_iter().flatten() {
-            println!("  {} {}", style.warning("warning:"), warning.as_str().unwrap_or(""));
+            outln!("  {} {}", style.warning("warning:"), warning.as_str().unwrap_or(""));
         }
     }
     Ok(Exit::Ok)
@@ -184,7 +185,7 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
             } else {
                 eprintln!("{alias} is provided by {} {}, bundled with capdag: nothing to install", provider.id, provider.version);
                 // The cartridge's path on stdout, as an install prints the one it installed.
-                println!("{}", provider.entry_point.display());
+                outln!("{}", provider.entry_point.display());
             }
             return Ok(Exit::Ok);
         }
@@ -209,7 +210,7 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
         }));
     } else {
         eprintln!("Installed and verified {cartridge_id}");
-        println!("{}", path.display());
+        outln!("{}", path.display());
     }
     Ok(Exit::Ok)
 }

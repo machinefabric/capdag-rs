@@ -7,12 +7,203 @@
 //! puts the question into whatever stdout was redirected to and waits for an
 //! answer that never comes. This backend is crossterm's in every other
 //! respect.
+//!
+//! A [`Surface`] is a block drawn there, and leaves the terminal as it found
+//! it: it takes only the rows it shows; text printed while it is up goes
+//! above it as ordinary text, which the terminal wraps and a person copies
+//! whole; when it closes, what comes next is printed from the row it began
+//! on, so it leaves no blank rows; and the terminal is given back — out of
+//! raw mode, its cursor shown — whether it closes, is dropped on an error, or
+//! the command panics.
 
 use std::io::{self, Stderr, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ratatui::backend::{Backend, ClearType, CrosstermBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
+use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
+
+/// Which stream a line printed above a surface goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
+/// Whether a surface holds the terminal: what a panic gives back.
+static HELD: AtomicBool = AtomicBool::new(false);
+
+/// A block drawn inline under the command, on stderr.
+pub struct Surface {
+    terminal: Terminal<InlineBackend>,
+    /// The rows it takes.
+    height: u16,
+    /// Closed: the terminal is given back, and dropping it does nothing more.
+    closed: bool,
+}
+
+impl Surface {
+    /// Take the terminal and open a block of `height` rows (no more than the
+    /// terminal has) under what is already there, on a row of its own.
+    pub fn open(height: u16) -> io::Result<Self> {
+        install_panic_hook();
+        crossterm::terminal::enable_raw_mode()?;
+        HELD.store(true, Ordering::SeqCst);
+        match Self::block(height) {
+            Ok(terminal) => Ok(Self { terminal, height, closed: false }),
+            Err(e) => {
+                give_back();
+                Err(e)
+            }
+        }
+    }
+
+    /// A block of `height` rows from the cursor's row, the cursor moved to a
+    /// row of its own first when a line was left unfinished.
+    fn block(height: u16) -> io::Result<Terminal<InlineBackend>> {
+        let mut backend = InlineBackend::new();
+        let rows = backend.size()?.height.max(1);
+        if backend.get_cursor_position()?.x > 0 {
+            backend.inner.write_all(b"\r\n")?;
+        }
+        let mut terminal = Terminal::with_options(backend, TerminalOptions { viewport: Viewport::Inline(height.clamp(1, rows)) })?;
+        terminal.hide_cursor()?;
+        Ok(terminal)
+    }
+
+    /// The rows it takes.
+    pub fn height(&self) -> u16 {
+        self.height
+    }
+
+    /// The columns the terminal has.
+    pub fn width(&self) -> io::Result<u16> {
+        Ok(self.terminal.size()?.width)
+    }
+
+    /// Draw one frame.
+    pub fn draw(&mut self, render: impl FnOnce(&mut Frame)) -> io::Result<()> {
+        self.terminal.draw(render).map(|_| ())
+    }
+
+    /// Take `height` rows from now on: the block is opened again, as tall,
+    /// where it began.
+    pub fn resize(&mut self, height: u16) -> io::Result<()> {
+        if height == self.height {
+            return Ok(());
+        }
+        self.clear()?;
+        self.terminal = Self::block(height)?;
+        self.height = height;
+        Ok(())
+    }
+
+    /// Print `text` above the block, as a line to `stream` would print
+    /// without it: the block is cleared, the text printed from the row it
+    /// began on, and the block opened again under it.
+    pub fn print_above(&mut self, stream: Stream, text: &[u8]) -> io::Result<()> {
+        self.clear()?;
+        // Out of raw mode, the text is printed as any line is: a newline is
+        // a new line, and the terminal wraps what is wider than it.
+        crossterm::terminal::disable_raw_mode()?;
+        let printed = print(stream, text);
+        crossterm::terminal::enable_raw_mode()?;
+        printed?;
+        self.terminal = Self::block(self.height)?;
+        Ok(())
+    }
+
+    /// Ctrl-Z: give the terminal back, stop this process as the shell asks,
+    /// and open the block again when the shell continues it.
+    #[cfg(unix)]
+    pub fn suspend(&mut self) -> io::Result<()> {
+        self.clear()?;
+        self.terminal.show_cursor()?;
+        crossterm::terminal::disable_raw_mode()?;
+        // SAFETY: raising a signal on the current process has no memory
+        // effects; SIGTSTP's default action stops the process until SIGCONT.
+        unsafe {
+            libc::raise(libc::SIGTSTP);
+        }
+        crossterm::terminal::enable_raw_mode()?;
+        self.terminal = Self::block(self.height)?;
+        Ok(())
+    }
+
+    /// A Windows console has no job control: there is nothing to stop to.
+    #[cfg(not(unix))]
+    pub fn suspend(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Clear the block and put the cursor on the row it began on: what is
+    /// printed next is printed there.
+    fn clear(&mut self) -> io::Result<()> {
+        // ratatui puts the cursor back where the last frame left it, inside
+        // the cleared block.
+        self.terminal.clear()?;
+        let top = self.terminal.get_frame().area().as_position();
+        self.terminal.set_cursor_position(top)?;
+        Backend::flush(self.terminal.backend_mut())
+    }
+
+    /// Clear the block and give the terminal back.
+    pub fn close(mut self) -> io::Result<()> {
+        let cleared = self.clear();
+        give_back();
+        self.closed = true;
+        cleared
+    }
+}
+
+impl Drop for Surface {
+    /// A surface dropped on an error is closed all the same.
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = self.clear();
+            give_back();
+        }
+    }
+}
+
+/// Print `text` on `stream`.
+fn print(stream: Stream, text: &[u8]) -> io::Result<()> {
+    match stream {
+        Stream::Stdout => {
+            let mut out = io::stdout().lock();
+            out.write_all(text)?;
+            out.flush()
+        }
+        Stream::Stderr => {
+            let mut err = io::stderr().lock();
+            err.write_all(text)?;
+            err.flush()
+        }
+    }
+}
+
+/// Out of raw mode, the cursor shown: the terminal as the shell left it,
+/// if a surface held it.
+pub fn give_back() {
+    if HELD.swap(false, Ordering::SeqCst) {
+        let _ = crossterm::execute!(io::stderr(), crossterm::cursor::Show);
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
+/// A panic gives the terminal back before it reports, so the report is
+/// readable and the shell usable.
+fn install_panic_hook() {
+    static INSTALLED: std::sync::Once = std::sync::Once::new();
+    INSTALLED.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            give_back();
+            previous(info);
+        }));
+    });
+}
 
 /// How long the terminal is given to say where its cursor is: crossterm's
 /// own allowance.

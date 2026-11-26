@@ -20,6 +20,7 @@ use crate::tui::app::edit::{edit_session, CatalogCap, EditorOutcome, EditorSpec}
 use crate::tui::app::TuiSettings;
 use crate::tui::layout::{self, Arrangement, LayoutOptions, Lod};
 use crate::tui::theme::{Appearance, ColorDepth, GlyphSet, Theme};
+use super::term::outln;
 
 /// `capdag graph --format`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -100,7 +101,7 @@ pub async fn graph(ctx: &Ctx, args: GraphArgs) -> CliResult<Exit> {
             } else {
                 capdag::planner::plans_to_mermaid(&plans, &names)
             };
-            println!("{source}");
+            outln!("{source}");
         }
     }
     Ok(Exit::Ok)

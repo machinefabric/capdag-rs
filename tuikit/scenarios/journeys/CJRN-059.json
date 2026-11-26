@@ -1,0 +1,29 @@
+{
+  "title": "An output path longer than the terminal is wide wraps as the terminal wraps it, and copies whole",
+  "world": "ordinary",
+  "args": ["run", "disbind-pdf", "report.pdf", "-o", "a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal"],
+  "modes": {
+    "full_screen": {
+      "expect": {
+        "exit": 0,
+        "screen": [
+          "{dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.0.txt",
+          "{dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.1.txt",
+          "{dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.2.txt",
+          "✓ report.pdf  1 step · {*} s"
+        ]
+      }
+    },
+    "inline": {
+      "expect": {
+        "exit": 0,
+        "screen": [
+          "✓ report.pdf  1 step · {*} s",
+          "  → {dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.0.txt",
+          "  → {dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.1.txt",
+          "  → {dir}/a-folder-whose-name-is-long-enough-that-every-path-in-it-is-wider-than-the-terminal/report.output.2.txt"
+        ]
+      }
+    }
+  }
+}

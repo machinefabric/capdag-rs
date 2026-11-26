@@ -42,6 +42,7 @@ use capdag::orchestrator::run_control::{join_outcomes, RunAct, RunAsk, RunContro
 use capdag::orchestrator::PlanInput;
 use capdag::planner::ExecutionNodeType;
 use capdag::{Cap, ExecutionError, MediaUrn};
+use super::term::{out, outln};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -206,8 +207,8 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                 let text = render_cap_interface(cap, &interface).map_err(|e| {
                     CliError::failed(format!("the interface of '{}' could not be shown", args.target)).context(e)
                 })?;
-                print!("{text}");
-                println!(
+                out!("{text}");
+                outln!(
                     "\nExample:\n  capdag run {} <input> [options] [-o <dir>]",
                     names::cap(&registry, cap)
                 );
@@ -241,9 +242,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         // Under --json stdout is records only: every result is written as a
         // file, a single value too, and the files are named in each run's
         // `run_finished` record rather than listed.
-        return execute(ctx, &registry, &args, runtime, runs, false, &mut std::io::sink()).await;
+        return execute(ctx, &registry, &args, Some(args.progress), runtime, runs, false, Results::Into(&mut std::io::sink())).await;
     }
-    execute(ctx, &registry, &args, runtime, runs, single_scalar, &mut std::io::stdout()).await
+    execute(ctx, &registry, &args, Some(args.progress), runtime, runs, single_scalar, Results::Stdout).await
 }
 
 /// The cartridge-hosting runtime of one command: its dev binaries, its trace,
@@ -285,7 +286,7 @@ fn new_runtime(
 
 /// Run one cap on one value, and return what it gave: how the model commands
 /// drive the model cartridge's own caps. The run is shown as any run is.
-pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress: ProgressChoice) -> CliResult<Vec<u8>> {
+pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress: Option<ProgressChoice>) -> CliResult<Vec<u8>> {
     let registry = ctx.registry().await?;
     let cap = registry.get_cap(alias).await.map_err(|e| match e {
         capdag::FabricRegistryError::NotFound(_) => {
@@ -322,13 +323,13 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
         args: Vec::new(),
         to: None,
         selector: None,
-        progress,
+        progress: progress.unwrap_or(ProgressChoice::None),
         trace: None,
         dev_bins: Vec::new(),
     };
     let runtime = runtime(ctx, &registry, &args, None).await?;
     let mut value: Vec<u8> = Vec::new();
-    match execute(ctx, &registry, &args, runtime, vec![run], true, &mut value).await? {
+    match execute(ctx, &registry, &args, progress, runtime, vec![run], true, Results::Into(&mut value)).await? {
         Exit::Run(RunOutcome::Completed) => Ok(value),
         other => Err(CliError { exit: other, ..CliError::failed(format!("{alias} did not complete")) }),
     }
@@ -927,23 +928,45 @@ async fn unbound_required_args(registry: &Arc<FabricRegistry>, strand: &StrandPl
     }
 }
 
-/// Run every planned run, one after another, its strands side by side.
+/// Where a run's results go.
+enum Results<'a> {
+    /// To stdout; on the terminal the live view is drawn on, above the block.
+    Stdout,
+    /// Into what the command reads them from, never shown: a lookup's value,
+    /// or nowhere under `--json`, whose records name the files written.
+    Into(&'a mut dyn std::io::Write),
+}
+
+/// Run every planned run, one after another, its strands side by side,
+/// shown as `showing` says (`None`: a lookup's run, not shown).
+#[allow(clippy::too_many_arguments)]
 async fn execute(
     ctx: &Ctx,
     registry: &Arc<FabricRegistry>,
     args: &Args,
+    showing: Option<ProgressChoice>,
     runtime: Arc<dyn RunHost>,
     runs: Vec<PlannedRun>,
     single_scalar: bool,
-    out: &mut dyn std::io::Write,
+    results: Results<'_>,
 ) -> CliResult<Exit> {
     let output_dir = args.output.clone();
     let control = Arc::new(RunControl::new());
     let (observer, mut events) = RunObserver::new();
     let mut watch = Watch::new(ctx.term.verbosity);
-    let mut shower = Shower::new(&ctx.term, args.progress)?;
+    let mut shower = Shower::new(&ctx.term, showing)?;
     // A key in the live view is Ctrl-C; otherwise the signal is.
     let signals_ctrl_c = !shower.reads_keys();
+    // On the terminal the live view is drawn on, a run's results are printed
+    // above the block rather than into it.
+    let mut stdout = std::io::stdout();
+    let (holds_results, out): (bool, &mut dyn std::io::Write) = match results {
+        Results::Stdout => (shower.holds_results(&ctx.term), &mut stdout),
+        Results::Into(into) => (false, into),
+    };
+    // The summary names the files written only where stdout does not: when
+    // stdout is the terminal, they are printed there already.
+    let names_outputs = ctx.term.json || !ctx.term.stdout_is_terminal;
     // Several runs, or several strands, never interleave raw results on stdout.
     let emit_dir = if single_scalar { output_dir.clone() } else { Some(output_dir.clone().unwrap_or_else(|| PathBuf::from("."))) };
 
@@ -1020,12 +1043,15 @@ async fn execute(
                     let (outcome, outputs) = match joined {
                         Ok((strand, result)) => {
                             let failed_at = result.as_ref().err().and_then(|e| e.step_token_id().map(|t| t.as_str().to_string()));
-                            let report = runtime.finish(
-                                &strand,
-                                result,
-                                &EmitTarget { output_dir: emit_dir.clone(), force: args.force, stem: run.stem.clone() },
-                                out,
-                            );
+                            let target = EmitTarget { output_dir: emit_dir.clone(), force: args.force, stem: run.stem.clone() };
+                            let report = if holds_results {
+                                let mut held = Vec::new();
+                                let report = runtime.finish(&strand, result, &target, &mut held);
+                                shower.results(held);
+                                report
+                            } else {
+                                runtime.finish(&strand, result, &target, out)
+                            };
                             if let Some(token) = failed_at {
                                 if let Err(e) = watch.failed_at(key, &token) {
                                     failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string()));
@@ -1053,7 +1079,7 @@ async fn execute(
                     if let Err(e) = watch.end_run(key, outcome.clone()) {
                         failures.push(CliError::failed("the run reported something this command cannot show").context(e.to_string()));
                     }
-                    shower.run_ended(&watch, key, &outputs);
+                    shower.run_ended(&watch, key, &outputs, names_outputs);
                     outcomes.push(outcome);
                 }
             }
@@ -1079,7 +1105,8 @@ async fn execute(
     }
     shower.close()?;
     let outcome = join_outcomes(outcomes);
-    if ctx.term.json {
+    // A lookup's run is not the command's: its records are what it found.
+    if ctx.term.json && showing.is_some() {
         super::term::emit_record(&serde_json::json!({
             "type": "finished",
             "outcome": super::live::outcome_word(&outcome),

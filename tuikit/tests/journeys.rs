@@ -29,7 +29,7 @@ fn test22285_every_journey_comes_to_what_it_should() {
             let dir = tempfile::tempdir().expect("a working directory for the journey");
             match player.play(&journey, *mode, dir.path(), None) {
                 Ok(played) => {
-                    let unmet = unmet(&leg.expect, &played);
+                    let unmet = unmet(&leg.expect, &played, dir.path());
                     if !unmet.is_empty() {
                         failures.push(format!(
                             "{id} in {} mode: {}\n--- stdout ---\n{}\n--- shown ---\n{}",
@@ -137,4 +137,34 @@ async fn test22288_a_world_using_what_its_snapshot_lacks_is_refused() {
     std::fs::write(dir.path().join("worlds/bad.json"), whole.to_string()).unwrap();
     let wrong = check(&Scenarios::at(dir.path())).await;
     assert!(wrong.is_empty(), "{wrong:?}");
+}
+
+// TEST22290: stdout closed before the command writes to it — `capdag caps |
+// head`, with the reader already gone — ends the command quietly and
+// successfully, as it ends any Unix filter, and does not panic.
+#[test]
+fn test22290_a_closed_stdout_ends_the_command_quietly() {
+    let scenarios = Scenarios::bundled();
+    let dir = tempfile::tempdir().expect("a working directory");
+    scenarios.world("ordinary").expect("the ordinary world").write_files(dir.path()).expect("its files are written");
+    for args in [&["caps"][..], &["info", "disbind-pdf"], &["plan", "report.pdf", "--to", "txt"]] {
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_capdag-tuikit"))
+            .arg("--scenarios")
+            .arg(&scenarios.dir)
+            .args(["--world", "ordinary", "--speed", "20", "--"])
+            .args(args)
+            .current_dir(dir.path())
+            .env("CI", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("the command starts");
+        // The reader is gone before the command writes a line.
+        drop(child.stdout.take());
+        let ended = child.wait_with_output().expect("the command ends");
+        let stderr = String::from_utf8_lossy(&ended.stderr);
+        assert_eq!(ended.status.code(), Some(0), "capdag {args:?} ended {:?}: {stderr}", ended.status);
+        assert!(!stderr.contains("panicked"), "capdag {args:?} panicked: {stderr}");
+    }
 }
