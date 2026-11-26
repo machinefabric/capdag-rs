@@ -231,9 +231,15 @@ pub fn emit_terminals_by_output(
         }
     }
 
-    // A plan's every output is one the notation named.
+    // A plan's every output is one the notation named. What the named
+    // outputs hold is handed back; an unnamed output's items are not, since
+    // keeping them would name them after the plan's internal node id.
     if let Some(node) = unnamed {
-        return Err(refused(format!("output '{node}' has no name to write it under"), Vec::new(), &planned));
+        let named: Vec<Planned<'_>> = planned
+            .into_iter()
+            .filter(|item| options.output_names.contains_key(item.output_node_id))
+            .collect();
+        return Err(refused(format!("output '{node}' has no name to write it under"), Vec::new(), &named));
     }
     let dir = options
         .output_dir
@@ -463,7 +469,8 @@ mod tests {
 
     // TEST12792: a produced file is named for the name the notation gives the
     // output, not for the plan's node id; and a terminal with no name is
-    // refused rather than written under an id nobody chose.
+    // refused rather than written under an id nobody chose. The refusal hands
+    // back what the named outputs hold, and nothing under an unnamed id.
     #[test]
     fn test12792_a_file_is_named_for_the_outputs_written_name() {
         let dir = tempfile::tempdir().unwrap();
@@ -500,7 +507,9 @@ mod tests {
         let error = emit_terminals(&result, &unnamed, &mut Vec::new()).unwrap_err();
         assert_eq!(error.reason, "output 'output_3' has no name to write it under");
         assert!(error.written.is_empty(), "nothing is written when an output has no name");
-        assert_eq!(error.unsaved.len(), 1, "the named output is handed back: {:?}", error.unsaved);
+        let handed_back: Vec<&str> = error.unsaved.iter().map(|item| item.file_name.as_str()).collect();
+        assert_eq!(handed_back, vec!["doc.summary.md"], "only the named output is handed back");
+        assert_eq!(error.unsaved[0].content, UnsavedContent::Bytes(b"# summary".to_vec()));
     }
 
     // TEST12761: a terminal that was not produced writes nothing — no file,
