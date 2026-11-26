@@ -63,6 +63,46 @@ pub struct World {
     /// What `capdag self update` finds.
     #[serde(default)]
     pub update: Option<UpdateScript>,
+    /// The cartridge projects of the working directory, by the directory
+    /// `capdag dev install` is given (`.` for the working directory itself):
+    /// built, with the manifest the built cartridge gives, or not built.
+    #[serde(default)]
+    pub dev_projects: BTreeMap<String, DevProject>,
+    /// Staged cartridges that do not start when a build asks them for their
+    /// caps (`capdag dev bundle-manifest`), and why. Every other staged
+    /// cartridge answers with the caps the world's cartridge of that id and
+    /// version provides.
+    #[serde(default)]
+    pub unstartable: Vec<RefusedCartridge>,
+}
+
+/// A cartridge project of a world.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DevProject {
+    /// Built: what the built cartridge says of itself when started.
+    Built {
+        name: String,
+        version: String,
+        /// Caps of the fabric it provides, by alias.
+        #[serde(default)]
+        caps: Vec<String>,
+        /// Caps of its own, which the fabric need not have.
+        #[serde(default)]
+        own_caps: Vec<OwnCap>,
+    },
+    /// Not built: why the engine finds no cartridge to install.
+    Unbuilt(String),
+}
+
+/// A cap a dev project declares itself.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OwnCap {
+    pub urn: String,
+    pub title: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// A cartridge of a world.

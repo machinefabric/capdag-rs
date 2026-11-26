@@ -1,0 +1,14 @@
+{
+  "title": "A project is not started where one is already",
+  "world": "builder",
+  "args": ["dev", "new", "staged", "--lang", "python"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": ["the project staged could not be made", "'./staged' already exists — pick a new name or remove it first"]
+      }
+    },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"the project staged could not be made\""] } }
+  }
+}

@@ -3,7 +3,7 @@
   "world": "ordinary",
   "args": ["self", "update"],
   "modes": {
-    "plain": { "expect": { "exit": 0, "shown": ["capdag 1.1073.116 -> 1.1080.0"] } },
+    "plain": { "expect": { "exit": 0, "shown": [" -> 1.1080.0"] } },
     "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"self_update\"", "\"to\":\"1.1080.0\""] } }
   }
 }

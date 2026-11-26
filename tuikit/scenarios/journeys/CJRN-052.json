@@ -1,0 +1,14 @@
+{
+  "title": "A project whose cap takes a fabric cap's alias is not installed",
+  "world": "builder",
+  "args": ["dev", "install", "clash"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": ["the cartridge's caps conflict with the fabric", "claims alias 'disbind-pdf'", "Rename the dev cap's alias."]
+      }
+    },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"the cartridge's caps conflict with the fabric\""] } }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "A bundle not recorded yet cannot be hashed again",
+  "world": "builder",
+  "args": ["dev", "bundle-rehash", "--root", "signed", "--environment", "dev"],
+  "modes": {
+    "plain": {
+      "expect": { "exit": 1, "shown": ["signed/bundle.json could not be read", "record it first, before the cartridges are signed"] }
+    }
+  }
+}

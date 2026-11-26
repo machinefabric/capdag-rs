@@ -1,0 +1,9 @@
+{
+  "title": "Hash a cartridge version directory",
+  "world": "builder",
+  "args": ["dev", "hash-dir", "staged/dev/v15/nightly/pdfcartridge/1.42.0"],
+  "modes": {
+    "plain": { "expect": { "exit": 0, "stdout": ["7704a4b62aa8e2c3ba09c71b5f1e999b16eedc2d4eba0434ee85cd11cffd9165"] } },
+    "json": { "expect": { "exit": 0, "stdout": ["7704a4b62aa8e2c3ba09c71b5f1e999b16eedc2d4eba0434ee85cd11cffd9165"] } }
+  }
+}

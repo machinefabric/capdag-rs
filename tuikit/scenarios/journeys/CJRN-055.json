@@ -1,0 +1,11 @@
+{
+  "title": "A staged cartridge that will not start cannot be asked for its caps",
+  "world": "builder",
+  "args": ["dev", "bundle-manifest", "--root", "signed", "--environment", "dev"],
+  "modes": {
+    "plain": {
+      "expect": { "exit": 1, "shown": ["imagecartridge 1.9.0 could not be asked for its caps", "signed into the macOS app sandbox"] }
+    },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"imagecartridge 1.9.0 could not be asked for its caps\""] } }
+  }
+}

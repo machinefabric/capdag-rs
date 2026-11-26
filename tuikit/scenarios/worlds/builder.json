@@ -1,0 +1,58 @@
+{
+  "description": "Making cartridges: projects built and not, one whose cap clashes with the fabric, and a build's staged bundle to record and hash",
+  "fabric": "capdag.json",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "bundled": [
+    { "id": "pdfcartridge", "version": "1.42.0", "caps": ["disbind-pdf"] },
+    { "id": "txtcartridge", "version": "1.18.3", "caps": ["save-as-txt"] }
+  ],
+  "unstartable": [
+    {
+      "id": "imagecartridge",
+      "version": "1.9.0",
+      "reason": "it was killed when started: it is signed into the macOS app sandbox, and only its app may start it"
+    }
+  ],
+  "files": {
+    "staged/dev/v15/nightly/pdfcartridge/1.42.0/cartridge.json": "{\"name\":\"pdfcartridge\",\"version\":\"1.42.0\",\"channel\":\"nightly\",\"registry_url\":null,\"entry\":\"cartridge\",\"installed_at\":\"2026-11-16T00:00:00Z\",\"installed_from\":\"bundle\",\"fabric_manifest_version\":15}\n",
+    "staged/dev/v15/nightly/pdfcartridge/1.42.0/cartridge": "the pdf cartridge's binary\n",
+    "staged/dev/v15/nightly/txtcartridge/1.18.3/cartridge.json": "{\"name\":\"txtcartridge\",\"version\":\"1.18.3\",\"channel\":\"nightly\",\"registry_url\":null,\"entry\":\"cartridge\",\"installed_at\":\"2026-11-16T00:00:00Z\",\"installed_from\":\"bundle\",\"fabric_manifest_version\":15}\n",
+    "staged/dev/v15/nightly/txtcartridge/1.18.3/cartridge": "the txt cartridge's binary\n",
+    "signed/dev/v15/nightly/imagecartridge/1.9.0/cartridge.json": "{\"name\":\"imagecartridge\",\"version\":\"1.9.0\",\"channel\":\"nightly\",\"registry_url\":null,\"entry\":\"cartridge\",\"installed_at\":\"2026-11-16T00:00:00Z\",\"installed_from\":\"bundle\",\"fabric_manifest_version\":15}\n",
+    "signed/dev/v15/nightly/imagecartridge/1.9.0/cartridge": "the image cartridge's binary, signed for its platform\n",
+    "sealed/dev/v15/nightly/pdfcartridge/1.42.0/cartridge.json": "{\"name\":\"pdfcartridge\",\"version\":\"1.42.0\",\"channel\":\"nightly\",\"registry_url\":null,\"entry\":\"cartridge\",\"installed_at\":\"2026-11-16T00:00:00Z\",\"installed_from\":\"bundle\",\"fabric_manifest_version\":15}\n",
+    "sealed/dev/v15/nightly/pdfcartridge/1.42.0/cartridge": "the pdf cartridge's binary, signed for its platform\n",
+    "sealed/dev/v15/nightly/txtcartridge/1.18.3/cartridge.json": "{\"name\":\"txtcartridge\",\"version\":\"1.18.3\",\"channel\":\"nightly\",\"registry_url\":null,\"entry\":\"cartridge\",\"installed_at\":\"2026-11-16T00:00:00Z\",\"installed_from\":\"bundle\",\"fabric_manifest_version\":15}\n",
+    "sealed/dev/v15/nightly/txtcartridge/1.18.3/cartridge": "the txt cartridge's binary, signed for its platform\n",
+    "sealed/bundle.json": "{\n  \"format\": \"capdag.bundle/v2\",\n  \"environment\": \"dev\",\n  \"cartridges\": [\n    {\n      \"name\": \"pdfcartridge\",\n      \"version\": \"1.42.0\",\n      \"channel\": \"nightly\",\n      \"sha256\": \"7704a4b62aa8e2c3ba09c71b5f1e999b16eedc2d4eba0434ee85cd11cffd9165\",\n      \"fabric_manifest_version\": 15,\n      \"cap_groups\": [\n        {\n          \"name\": \"pdfcartridge\",\n          \"caps\": [\n            {\n              \"urn\": \"cap:disbind;in=\\\"media:document;ext=pdf\\\";out=\\\"media:enc=utf8;ext=txt;page;plain-text\\\"\",\n              \"title\": \"Disbind PDF Into Pages\",\n              \"aliases\": [\n                \"disbind-pdf\"\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    {\n      \"name\": \"txtcartridge\",\n      \"version\": \"1.18.3\",\n      \"channel\": \"nightly\",\n      \"sha256\": \"d668367cc6d820dde1a22d6dfdf1523bdec7aba21f48592fe9c7ca64026804e9\",\n      \"fabric_manifest_version\": 15,\n      \"cap_groups\": [\n        {\n          \"name\": \"txtcartridge\",\n          \"caps\": [\n            {\n              \"urn\": \"cap:in=\\\"media:enc=utf8;ext=txt;plain-text\\\";out=\\\"media:enc=utf8;ext=txt;plain-text\\\";save-as-txt\",\n              \"title\": \"Save as Plain Text\",\n              \"aliases\": [\n                \"save-as-txt\"\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}\n"
+  },
+  "dev_projects": {
+    "sentiment": {
+      "built": {
+        "name": "sentiment",
+        "version": "0.1.0",
+        "own_caps": [
+          {
+            "urn": "cap:in=\"media:enc=utf8;plain-text\";out=\"media:enc=utf8;fmt=json;record\";sentiment",
+            "title": "Sentiment of a text",
+            "aliases": ["sentiment"]
+          }
+        ]
+      }
+    },
+    "clash": {
+      "built": {
+        "name": "clash",
+        "version": "0.1.0",
+        "own_caps": [
+          {
+            "urn": "cap:in=\"media:document;ext=pdf\";out=\"media:enc=utf8;plain-text\";pages-my-way",
+            "title": "Pages, my way",
+            "aliases": ["disbind-pdf"]
+          }
+        ]
+      }
+    },
+    "unbuilt": { "unbuilt": "unbuilt/target/release has no cartridge: build it first" }
+  }
+}

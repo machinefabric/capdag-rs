@@ -3,7 +3,9 @@
 //! Every operation answers what the world says, with the engine's own types:
 //! the fabric is the world's snapshot, the cartridges its cartridges, and a
 //! run of a machine plays the world's script for the caps the strand runs
-//! (`super::script`). Nothing is fetched, started or installed.
+//! (`super::script`). A dev project is built or not as the world says, and a
+//! staged cartridge asked for its caps answers with those of the world's
+//! cartridge of its id and version. Nothing is fetched, started or installed.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -24,7 +26,7 @@ use capdag::planner::ExecutionNodeType;
 use capdag::{Cap, CapGroup, CapManifest, CapUrn, ExecutionError, FabricRegistry, FabricRegistryError, PipelineResult};
 
 use super::script::{self, Names, RunScript};
-use super::world::{FabricSnapshot, UpdateScript, World, WorldCartridge};
+use super::world::{DevProject, FabricSnapshot, UpdateScript, World, WorldCartridge};
 use crate::cli::host::{CartridgeStore, Host, HostError, Removal, RunHost, RunSetup, Update};
 
 /// A world, served as the engine.
@@ -74,7 +76,36 @@ impl ScenarioHost {
                 }
             }
         }
+        for (dir, project) in &self.world.dev_projects {
+            if let DevProject::Built { caps, own_caps, .. } = project {
+                if let Some(alias) = caps.iter().find(|alias| self.fabric.cap(alias).is_none()) {
+                    return Err(format!(
+                        "the world '{}' gives the project {dir} the cap '{alias}', which its fabric does not have; a cap of its own goes in own_caps",
+                        self.name
+                    ));
+                }
+                for own in own_caps {
+                    CapUrn::from_string(&own.urn)
+                        .map_err(|e| format!("the world '{}' gives the project {dir} the cap '{}': {e}", self.name, own.urn))?;
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The world's project in the directory `project`, as `capdag dev install`
+    /// is given it: `.`, `sentiment`, `./sentiment`.
+    fn dev_project(&self, project: &Path) -> Result<&DevProject, HostError> {
+        let parts: Vec<String> = project
+            .components()
+            .filter(|part| !matches!(part, std::path::Component::CurDir))
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let key = if parts.is_empty() { ".".to_string() } else { parts.join("/") };
+        self.world
+            .dev_projects
+            .get(&key)
+            .ok_or_else(|| HostError::Engine(format!("{} holds no cartridge project", project.display())))
     }
 
     fn cap_groups(&self, cartridge: &WorldCartridge) -> Vec<CapGroup> {
@@ -284,23 +315,60 @@ impl Host for ScenarioHost {
     }
 
     fn dev_project_entry(&self, project: &Path) -> Result<PathBuf, HostError> {
-        Err(HostError::Engine(format!(
-            "{} is no project of the world '{}': a world builds and starts no cartridge",
-            project.display(),
-            self.name
-        )))
+        match self.dev_project(project)? {
+            DevProject::Built { .. } => Ok(project.join("cartridge")),
+            DevProject::Unbuilt(reason) => Err(HostError::Engine(reason.clone())),
+        }
     }
 
     fn dev_entry_manifest(&self, entry: &Path) -> Result<CapManifest, HostError> {
-        Err(HostError::Engine(format!("the world '{}' starts no cartridge, {} included", self.name, entry.display())))
+        let project = entry.parent().unwrap_or(Path::new("."));
+        let DevProject::Built { name, version, caps, own_caps } = self.dev_project(project)? else {
+            return Err(HostError::Engine(format!("{} is not built", project.display())));
+        };
+        let mut declared: Vec<Cap> = caps.iter().filter_map(|alias| self.fabric.cap(alias).cloned()).collect();
+        for own in own_caps {
+            let urn = CapUrn::from_string(&own.urn).map_err(|e| HostError::Engine(format!("{}: {e}", own.urn)))?;
+            declared.push(Cap::new(urn, own.title.clone(), own.aliases.clone()));
+        }
+        Ok(CapManifest::new(
+            name.clone(),
+            version.clone(),
+            CartridgeChannel::Release,
+            None,
+            format!("The {name} cartridge"),
+            vec![CapGroup { name: name.clone(), caps: declared, adapter_urns: Vec::new() }],
+        ))
     }
 
-    fn install_dev_cartridge(&self, project: &Path, _manifest: &CapManifest) -> Result<PathBuf, HostError> {
-        Err(HostError::Engine(format!("the world '{}' installs no project, {} included", self.name, project.display())))
+    fn install_dev_cartridge(&self, project: &Path, manifest: &CapManifest) -> Result<PathBuf, HostError> {
+        self.dev_project(project)?;
+        Ok(self.root.join("dev").join(&manifest.name).join(&manifest.version))
     }
 
     async fn probe_cap_groups(&self, entry: &Path) -> Result<Vec<CapGroup>, HostError> {
-        Err(HostError::Engine(format!("the world '{}' starts no cartridge, {} included", self.name, entry.display())))
+        // A staged cartridge's entry is `…/{name}/{version}/{entry}`.
+        let version_dir = entry.parent().unwrap_or(Path::new(""));
+        let part = |path: &Path| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (name, version) = (part(version_dir.parent().unwrap_or(Path::new(""))), part(version_dir));
+        if let Some(refused) = self.world.unstartable.iter().find(|c| c.id == name && c.version == version) {
+            return Err(HostError::Engine(refused.reason.clone()));
+        }
+        match self
+            .world
+            .bundled
+            .iter()
+            .chain(&self.world.installed)
+            .chain(&self.world.store)
+            .find(|cartridge| cartridge.id == name && cartridge.version == version)
+        {
+            Some(cartridge) => Ok(self.cap_groups(cartridge)),
+            None => Err(HostError::Engine(format!(
+                "{} is {name} {version}, which is no cartridge of the world '{}': nothing answers when it is started",
+                entry.display(),
+                self.name
+            ))),
+        }
     }
 
     async fn self_update(&self, current: &str) -> Result<Update, HostError> {

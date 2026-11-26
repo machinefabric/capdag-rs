@@ -1,0 +1,19 @@
+{
+  "title": "Hash a recorded bundle again after signing changed its cartridges (--json prints the same text today)",
+  "world": "builder",
+  "args": ["dev", "bundle-rehash", "--root", "sealed", "--environment", "dev"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["sealed/bundle.json"],
+        "shown": [
+          "rehashed sealed/bundle.json — 2 cartridge(s), environment dev",
+          "next: sign it, and put the envelope at sealed/bundle.json.sig"
+        ],
+        "absent": ["7704a4b62aa8e2c3ba09c71b5f1e999b16eedc2d4eba0434ee85cd11cffd9165"]
+      }
+    },
+    "json": { "expect": { "exit": 0, "stdout": ["sealed/bundle.json"], "shown": ["rehashed sealed/bundle.json"] } }
+  }
+}

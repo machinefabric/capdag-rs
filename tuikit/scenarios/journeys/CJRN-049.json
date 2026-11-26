@@ -1,0 +1,10 @@
+{
+  "title": "A language capdag does not scaffold is refused, naming those it does",
+  "world": "builder",
+  "args": ["dev", "new", "sentiment2", "--lang", "cobol"],
+  "modes": {
+    "plain": {
+      "expect": { "exit": 2, "shown": ["invalid value 'cobol' for '--lang <LANGUAGE>'", "[possible values: python, rust, go, swift]"] }
+    }
+  }
+}

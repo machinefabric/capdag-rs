@@ -1,0 +1,21 @@
+{
+  "title": "Record the manifest of a staged bundle, asking each cartridge for its caps (--json prints the same text today)",
+  "world": "builder",
+  "args": ["dev", "bundle-manifest", "--root", "staged", "--environment", "dev"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["staged/bundle.json"],
+        "shown": [
+          "recorded staged/bundle.json — 2 cartridge(s), environment dev",
+          "pdfcartridge 1.42.0 [nightly] 7704a4b62aa8e2c3ba09c71b5f1e999b16eedc2d4eba0434ee85cd11cffd9165",
+          "next: sign the cartridges for their platform"
+        ]
+      }
+    },
+    "json": {
+      "expect": { "exit": 0, "stdout": ["staged/bundle.json"], "shown": ["recorded staged/bundle.json — 2 cartridge(s), environment dev"] }
+    }
+  }
+}

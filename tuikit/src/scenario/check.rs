@@ -62,20 +62,21 @@ async fn check_world(scenarios: &Scenarios, name: &str) -> Result<(), Vec<String
     let host = ScenarioHost::new(name, world.clone(), fabric, std::path::Path::new("/nonexistent"), 1.0).map_err(at)?;
     let registry = host.registry();
     let mut wrong = Vec::new();
-    // A world's files are of file types its snapshot holds: the snapshot
-    // keeps only part of a fabric, and a file of a type it left out would be
-    // told from its extension as no fabric tells it.
+    // A world's files with an extension are of file types its snapshot
+    // holds: the snapshot keeps only part of a fabric, and a file of a type it
+    // left out would be told from its extension as no fabric tells it. A file
+    // with none (a cartridge's binary) is told by no extension anywhere.
     for path in world.files.keys().filter(|path| !path.ends_with(".machine")) {
-        match std::path::Path::new(path).extension().and_then(|extension| extension.to_str()) {
-            None => wrong.push(format!("world {name}: the file '{path}' has no extension to tell its type by")),
-            Some(extension) => match registry.file_media_for_extension(extension).await {
-                Ok(types) if types.is_empty() => wrong.push(format!(
-                    "world {name}: the file '{path}' is of no file type its fabric snapshot {} holds (.{extension})",
-                    world.fabric
-                )),
-                Ok(_) => {}
-                Err(e) => wrong.push(format!("world {name}: the type of the file '{path}' cannot be told: {e}")),
-            },
+        let Some(extension) = std::path::Path::new(path).extension().and_then(|extension| extension.to_str()) else {
+            continue;
+        };
+        match registry.file_media_for_extension(extension).await {
+            Ok(types) if types.is_empty() => wrong.push(format!(
+                "world {name}: the file '{path}' is of no file type its fabric snapshot {} holds (.{extension})",
+                world.fabric
+            )),
+            Ok(_) => {}
+            Err(e) => wrong.push(format!("world {name}: the type of the file '{path}' cannot be told: {e}")),
         }
     }
     // The strands each script could be a run of: of the world's machine

@@ -1,0 +1,18 @@
+{
+  "title": "A project not built yet is not installed",
+  "world": "builder",
+  "args": ["dev", "install", "unbuilt"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": [
+          "unbuilt is not a cartridge project that is built",
+          "unbuilt/target/release has no cartridge: build it first",
+          "build it first, as `capdag dev new` said"
+        ]
+      }
+    },
+    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"unbuilt is not a cartridge project that is built\""] } }
+  }
+}
