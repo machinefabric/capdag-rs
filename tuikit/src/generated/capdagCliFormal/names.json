@@ -12,6 +12,60 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.CliRefusal",
+    "kind": "type",
+    "rust_path": "CliRefusal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict",
+    "kind": "type",
+    "rust_path": "CliVerdict",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld",
+    "kind": "type",
+    "rust_path": "CliWorld",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command",
+    "kind": "type",
+    "rust_path": "Command",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Globals",
+    "kind": "type",
+    "rust_path": "Globals",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Group",
+    "kind": "type",
+    "rust_path": "Group",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic",
+    "kind": "type",
+    "rust_path": "HelpTopic",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget",
+    "kind": "type",
+    "rust_path": "InstallTarget",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation",
+    "kind": "type",
+    "rust_path": "Invocation",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.PlanLine",
     "kind": "type",
     "rust_path": "PlanLine",
@@ -72,6 +126,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.WordKind",
+    "kind": "type",
+    "rust_path": "WordKind",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.World",
     "kind": "type",
     "rust_path": "World",
@@ -88,6 +148,18 @@
     "kind": "function",
     "rust_path": "choices::of_count",
     "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.says",
+    "kind": "function",
+    "rust_path": "cli_refusal::says",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.exit",
+    "kind": "function",
+    "rust_path": "cli_verdict::exit",
+    "renamed": false
   },
   {
     "lean_name": "CapdagCli.Refusal.says",
@@ -108,6 +180,24 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.cli",
+    "kind": "function",
+    "rust_path": "cli",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.commandTable",
+    "kind": "function",
+    "rust_path": "command_table",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.decide_",
+    "kind": "function",
+    "rust_path": "decide",
+    "renamed": true
+  },
+  {
     "lean_name": "CapdagCli.firstStop",
     "kind": "function",
     "rust_path": "first_stop",
@@ -118,6 +208,18 @@
     "kind": "function",
     "rust_path": "give",
     "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.globalFlags",
+    "kind": "function",
+    "rust_path": "global_flags",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.ofLine",
+    "kind": "function",
+    "rust_path": "of_line",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.planVerdict",
@@ -208,6 +310,720 @@
     "kind": "constructor",
     "rust_path": "Choices::Taken",
     "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.unreadable",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::Unreadable",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.twoFabrics",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::TwoFabrics",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.offline",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::Offline",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.planningWithMachine",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::PlanningWithMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchType",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NoSuchType",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchName",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NoSuchName",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.widthWithoutText",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::WidthWithoutText",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.viewInputsWithoutTerminal",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::ViewInputsWithoutTerminal",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.needsTerminal",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NeedsTerminal",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notInstalled",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NotInstalled",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notAModelSpec",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NotAModelSpec",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notDownloaded",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NotDownloaded",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noDirectoryToMake",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NoDirectoryToMake",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchRoot",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NoSuchRoot",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchCommand",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NoSuchCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.machineFileIsNoCommand",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::MachineFileIsNoCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.nearCommand",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::NearCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.capabilityIsNoCommand",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::CapabilityIsNoCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.unknownWord",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::UnknownWord",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.line",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::Line",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.line.r",
+    "kind": "field",
+    "rust_path": "CliRefusal::Line.r",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.refused",
+    "kind": "constructor",
+    "rust_path": "CliVerdict::Refused",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.refused.r",
+    "kind": "field",
+    "rust_path": "CliVerdict::Refused.r",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.is",
+    "kind": "constructor",
+    "rust_path": "CliVerdict::Is",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.is.v",
+    "kind": "field",
+    "rust_path": "CliVerdict::Is.v",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.mk",
+    "kind": "constructor",
+    "rust_path": "CliWorld",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.base",
+    "kind": "field",
+    "rust_path": "CliWorld.base",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.screen",
+    "kind": "field",
+    "rust_path": "CliWorld.screen",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.typesKnown",
+    "kind": "field",
+    "rust_path": "CliWorld.types_known",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.capsMatch",
+    "kind": "field",
+    "rust_path": "CliWorld.caps_match",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.nameKnown",
+    "kind": "field",
+    "rust_path": "CliWorld.name_known",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.installTarget",
+    "kind": "field",
+    "rust_path": "CliWorld.install_target",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.installed",
+    "kind": "field",
+    "rust_path": "CliWorld.installed",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.specValid",
+    "kind": "field",
+    "rust_path": "CliWorld.spec_valid",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.downloaded",
+    "kind": "field",
+    "rust_path": "CliWorld.downloaded",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.modelsMatch",
+    "kind": "field",
+    "rust_path": "CliWorld.models_match",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.nameable",
+    "kind": "field",
+    "rust_path": "CliWorld.nameable",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.dirThere",
+    "kind": "field",
+    "rust_path": "CliWorld.dir_there",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.helpKnown",
+    "kind": "field",
+    "rust_path": "CliWorld.help_known",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.wordKind",
+    "kind": "field",
+    "rust_path": "CliWorld.word_kind",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.succeeds",
+    "kind": "field",
+    "rust_path": "CliWorld.succeeds",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.caps",
+    "kind": "constructor",
+    "rust_path": "Command::Caps",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.caps.pick",
+    "kind": "field",
+    "rust_path": "Command::Caps.pick",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.info",
+    "kind": "constructor",
+    "rust_path": "Command::Info",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.info.names",
+    "kind": "field",
+    "rust_path": "Command::Info.names",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.info.noCache",
+    "kind": "field",
+    "rust_path": "Command::Info.no_cache",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.run",
+    "kind": "constructor",
+    "rust_path": "Command::Run",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.run.l",
+    "kind": "field",
+    "rust_path": "Command::Run.l",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.run.planningFlags",
+    "kind": "field",
+    "rust_path": "Command::Run.planning_flags",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.plan",
+    "kind": "constructor",
+    "rust_path": "Command::Plan",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.plan.l",
+    "kind": "field",
+    "rust_path": "Command::Plan.l",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.check",
+    "kind": "constructor",
+    "rust_path": "Command::Check",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.check.m",
+    "kind": "field",
+    "rust_path": "Command::Check.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.graph",
+    "kind": "constructor",
+    "rust_path": "Command::Graph",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.graph.m",
+    "kind": "field",
+    "rust_path": "Command::Graph.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.graph.text",
+    "kind": "field",
+    "rust_path": "Command::Graph.text",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.graph.width",
+    "kind": "field",
+    "rust_path": "Command::Graph.width",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.view",
+    "kind": "constructor",
+    "rust_path": "Command::View",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.view.m",
+    "kind": "field",
+    "rust_path": "Command::View.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.view.inputs",
+    "kind": "field",
+    "rust_path": "Command::View.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.edit",
+    "kind": "constructor",
+    "rust_path": "Command::Edit",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.edit.m",
+    "kind": "field",
+    "rust_path": "Command::Edit.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.edit.inputs",
+    "kind": "field",
+    "rust_path": "Command::Edit.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeList",
+    "kind": "constructor",
+    "rust_path": "Command::CartridgeList",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeInstall",
+    "kind": "constructor",
+    "rust_path": "Command::CartridgeInstall",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeInstall.name",
+    "kind": "field",
+    "rust_path": "Command::CartridgeInstall.name",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeRemove",
+    "kind": "constructor",
+    "rust_path": "Command::CartridgeRemove",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeRemove.id",
+    "kind": "field",
+    "rust_path": "Command::CartridgeRemove.id",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelList",
+    "kind": "constructor",
+    "rust_path": "Command::ModelList",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelSearch",
+    "kind": "constructor",
+    "rust_path": "Command::ModelSearch",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelSearch.pick",
+    "kind": "field",
+    "rust_path": "Command::ModelSearch.pick",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelPull",
+    "kind": "constructor",
+    "rust_path": "Command::ModelPull",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelPull.spec",
+    "kind": "field",
+    "rust_path": "Command::ModelPull.spec",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelRemove",
+    "kind": "constructor",
+    "rust_path": "Command::ModelRemove",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelRemove.spec",
+    "kind": "field",
+    "rust_path": "Command::ModelRemove.spec",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.cacheRefresh",
+    "kind": "constructor",
+    "rust_path": "Command::CacheRefresh",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.cacheClear",
+    "kind": "constructor",
+    "rust_path": "Command::CacheClear",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devNew",
+    "kind": "constructor",
+    "rust_path": "Command::DevNew",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devNew.path",
+    "kind": "field",
+    "rust_path": "Command::DevNew.path",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.devInstall",
+    "kind": "constructor",
+    "rust_path": "Command::DevInstall",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devInstall.dir",
+    "kind": "field",
+    "rust_path": "Command::DevInstall.dir",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.devHashDir",
+    "kind": "constructor",
+    "rust_path": "Command::DevHashDir",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devHashDir.dir",
+    "kind": "field",
+    "rust_path": "Command::DevHashDir.dir",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleManifest",
+    "kind": "constructor",
+    "rust_path": "Command::DevBundleManifest",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleManifest.root",
+    "kind": "field",
+    "rust_path": "Command::DevBundleManifest.root",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleRehash",
+    "kind": "constructor",
+    "rust_path": "Command::DevBundleRehash",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleRehash.root",
+    "kind": "field",
+    "rust_path": "Command::DevBundleRehash.root",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.selfUpdate",
+    "kind": "constructor",
+    "rust_path": "Command::SelfUpdate",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Globals.mk",
+    "kind": "constructor",
+    "rust_path": "Globals",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Globals.fabrics",
+    "kind": "field",
+    "rust_path": "Globals.fabrics",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Globals.offline",
+    "kind": "field",
+    "rust_path": "Globals.offline",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Group.cartridge",
+    "kind": "constructor",
+    "rust_path": "Group::Cartridge",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Group.model",
+    "kind": "constructor",
+    "rust_path": "Group::Model",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Group.cache",
+    "kind": "constructor",
+    "rust_path": "Group::Cache",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Group.dev",
+    "kind": "constructor",
+    "rust_path": "Group::Dev",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Group.self_",
+    "kind": "constructor",
+    "rust_path": "Group::Self_",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.overview",
+    "kind": "constructor",
+    "rust_path": "HelpTopic::Overview",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.command",
+    "kind": "constructor",
+    "rust_path": "HelpTopic::Command",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.machine",
+    "kind": "constructor",
+    "rust_path": "HelpTopic::Machine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.machine.m",
+    "kind": "field",
+    "rust_path": "HelpTopic::Machine.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.cartridge",
+    "kind": "constructor",
+    "rust_path": "InstallTarget::Cartridge",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.bundled",
+    "kind": "constructor",
+    "rust_path": "InstallTarget::Bundled",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.capability",
+    "kind": "constructor",
+    "rust_path": "InstallTarget::Capability",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.capability.providers",
+    "kind": "field",
+    "rust_path": "InstallTarget::Capability.providers",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.unknown",
+    "kind": "constructor",
+    "rust_path": "InstallTarget::Unknown",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.bare",
+    "kind": "constructor",
+    "rust_path": "Invocation::Bare",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.unreadable",
+    "kind": "constructor",
+    "rust_path": "Invocation::Unreadable",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.version",
+    "kind": "constructor",
+    "rust_path": "Invocation::Version",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpFlag",
+    "kind": "constructor",
+    "rust_path": "Invocation::HelpFlag",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpFlag.topic",
+    "kind": "field",
+    "rust_path": "Invocation::HelpFlag.topic",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpCommand",
+    "kind": "constructor",
+    "rust_path": "Invocation::HelpCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpCommand.words",
+    "kind": "field",
+    "rust_path": "Invocation::HelpCommand.words",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.group",
+    "kind": "constructor",
+    "rust_path": "Invocation::Group",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.group.g",
+    "kind": "field",
+    "rust_path": "Invocation::Group.g",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.unknown",
+    "kind": "constructor",
+    "rust_path": "Invocation::Unknown",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.unknown.word",
+    "kind": "field",
+    "rust_path": "Invocation::Unknown.word",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.command",
+    "kind": "constructor",
+    "rust_path": "Invocation::Command",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.command.g",
+    "kind": "field",
+    "rust_path": "Invocation::Command.g",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.command.c",
+    "kind": "field",
+    "rust_path": "Invocation::Command.c",
+    "renamed": false
   },
   {
     "lean_name": "CapdagCli.PlanLine.mk",
@@ -528,6 +1344,24 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Stage.capability",
+    "kind": "constructor",
+    "rust_path": "Stage::Capability",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.model",
+    "kind": "constructor",
+    "rust_path": "Stage::Model",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.provider",
+    "kind": "constructor",
+    "rust_path": "Stage::Provider",
+    "renamed": true
+  },
+  {
     "lean_name": "CapdagCli.Terminal.mk",
     "kind": "constructor",
     "rust_path": "Terminal",
@@ -663,6 +1497,60 @@
     "lean_name": "CapdagCli.Verdict.answers",
     "kind": "constructor",
     "rust_path": "Verdict::Answers",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.help",
+    "kind": "constructor",
+    "rust_path": "Verdict::Help",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.helpUsage",
+    "kind": "constructor",
+    "rust_path": "Verdict::HelpUsage",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.version",
+    "kind": "constructor",
+    "rust_path": "Verdict::Version",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.opens",
+    "kind": "constructor",
+    "rust_path": "Verdict::Opens",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.failed",
+    "kind": "constructor",
+    "rust_path": "Verdict::Failed",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.machineFile",
+    "kind": "constructor",
+    "rust_path": "WordKind::MachineFile",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.nearCommand",
+    "kind": "constructor",
+    "rust_path": "WordKind::NearCommand",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.capability",
+    "kind": "constructor",
+    "rust_path": "WordKind::Capability",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.unknown",
+    "kind": "constructor",
+    "rust_path": "WordKind::Unknown",
     "renamed": true
   },
   {

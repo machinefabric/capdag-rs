@@ -38,23 +38,23 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 592,
+          "line": 593,
           "column": 1
         },
         "end": {
-          "line": 599,
+          "line": 600,
           "column": 103
         }
       }
     },
     {
-      "name": "CapdagCli.exit_usage_iff",
+      "name": "CapdagCli.cli_exit_usage_iff",
       "relation": "lungo.law",
       "subjects": [
-        "CapdagCli.Verdict.exit"
+        "CapdagCli.CliVerdict.exit"
       ],
       "specifications": [],
-      "statement": "∀ (v : CapdagCli.Verdict),\n  v.exit = some 2 ↔\n    (∃ r, v = CapdagCli.Verdict.refused r) ∨ (∃ s, v = CapdagCli.Verdict.names s) ∨ ∃ s, v = CapdagCli.Verdict.extra s",
+      "statement": "∀ (v : CapdagCli.CliVerdict),\n  v.exit = some 2 ↔ (∃ r, v = CapdagCli.CliVerdict.refused r) ∨ ∃ u, v = CapdagCli.CliVerdict.is u ∧ u.exit = some 2",
       "status": "proved",
       "evidence_trust": {
         "axioms": [
@@ -65,7 +65,197 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "e096f33a9dcc48c88ac04d1740e29f3789cb026c9f760a92d8ffbed785e12b46",
+      "fingerprint": "c7b93e5464f422ded71ffcb99d7fe85c830783efa3b7ba27bdb8faaabbe63f1a",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 456,
+          "column": 1
+        },
+        "end": {
+          "line": 461,
+          "column": 37
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.cli_fits",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (inv : CapdagCli.Invocation) (v : CapdagCli.Verdict),\n  CapdagCli.cli w inv = CapdagCli.CliVerdict.is v → CapdagCli.Fits w v",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "1743a708e479df15ae98f6dee48f6967f37276487e6d9c8d5f73eb2447cec73a",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 119,
+          "column": 1
+        },
+        "end": {
+          "line": 239,
+          "column": 43
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.cli_refusal_says",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.CliRefusal.says"
+      ],
+      "specifications": [],
+      "statement": "∀ (r : CapdagCli.CliRefusal), r.says ≠ \"\"",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Classical.choice",
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "dde26243846419e63ba3af511a38e2932619167e7e729821f2654e6fad5e7070",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 463,
+          "column": 1
+        },
+        "end": {
+          "line": 468,
+          "column": 32
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.commandTable_named_once",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.commandTable",
+        "CapdagCli.globalFlags"
+      ],
+      "specifications": [],
+      "statement": "(List.map (fun x => x.fst) CapdagCli.commandTable).Nodup ∧ CapdagCli.globalFlags.Nodup",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "c9ccfc66d4c976feb12c35ec36c97582bc4e7e89ec180028abf522f5a7af0f1f",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 470,
+          "column": 1
+        },
+        "end": {
+          "line": 473,
+          "column": 9
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.decide_cases",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.decide_"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (s : CapdagCli.Stage) (c : CapdagCli.Choices) (then_ : CapdagCli.CliVerdict),\n  c = CapdagCli.Choices.one ∧ CapdagCli.decide_ w s c then_ = then_ ∨\n    (c = CapdagCli.Choices.many ∨ c = CapdagCli.Choices.free) ∧\n        w.canAsk = true ∧ CapdagCli.decide_ w s c then_ = CapdagCli.CliVerdict.is (CapdagCli.Verdict.asks s) ∨\n      (c = CapdagCli.Choices.many ∨ c = CapdagCli.Choices.free) ∧\n          w.canAsk = false ∧ CapdagCli.decide_ w s c then_ = CapdagCli.CliVerdict.is (CapdagCli.Verdict.names s) ∨\n        c = CapdagCli.Choices.taken ∧\n            CapdagCli.decide_ w s c then_ = CapdagCli.CliVerdict.is (CapdagCli.Verdict.extra s) ∨\n          c = CapdagCli.Choices.none ∧\n            CapdagCli.decide_ w s c then_ = CapdagCli.CliVerdict.is (CapdagCli.Verdict.nothing s)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "444cff163bc5fe52afa726f0b26901f59d9f56dad62439e6e6539f7dffafb931",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 70,
+          "column": 1
+        },
+        "end": {
+          "line": 82,
+          "column": 47
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.edit_needs_terminal",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (g : CapdagCli.Globals) (m : CapdagCli.Written) (ins : List CapdagCli.Positional),\n  g.fabrics.eraseDups.length ≤ 1 →\n    CapdagCli.cli w (CapdagCli.Invocation.command g (CapdagCli.Command.edit m ins)) =\n      if w.fullScreen = true then CapdagCli.CliVerdict.is CapdagCli.Verdict.opens\n      else CapdagCli.CliVerdict.refused CapdagCli.CliRefusal.needsTerminal",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "d0ffe6e5810862b5ddc8f840240e71b30abea674f19cb126cacefc98fdbf899a",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 446,
+          "column": 1
+        },
+        "end": {
+          "line": 452,
+          "column": 46
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.exit_usage_iff",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.Verdict.exit"
+      ],
+      "specifications": [],
+      "statement": "∀ (v : CapdagCli.Verdict),\n  v.exit = some 2 ↔\n    (∃ r, v = CapdagCli.Verdict.refused r) ∨\n      (∃ s, v = CapdagCli.Verdict.names s) ∨ (∃ s, v = CapdagCli.Verdict.extra s) ∨ v = CapdagCli.Verdict.helpUsage",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "969b2075b42c6e4f9c5ff69f71b9a547167bb05949fda57990c48577eacc6e09",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -74,7 +264,7 @@
           "column": 1
         },
         "end": {
-          "line": 319,
+          "line": 320,
           "column": 34
         }
       }
@@ -96,7 +286,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "293641b2f3cb089d766511d404b8491d58cf0b0f43575f404d4915c113d6b333",
+      "fingerprint": "fbdf9955b5b3115bae2f74a507a321933d5396145934606d9ddc43edd515ae7d",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -128,7 +318,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "837bbe9c45954ba0d70c88a5af436c4653322c042f8c8b5b8f8d35fdf3bba552",
+      "fingerprint": "2e97d8f43553b4c21ade2601300faf96ad87d627d30885cd490d18b647edfd23",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -160,7 +350,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "a075c91f45037239889666ed5af25313e4f84cfbdcf8adce2539127c9a4468b8",
+      "fingerprint": "3f51f362175400208c600281fae4a67052ad80bee507cbd114a7ba5cc1c9eb6d",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -191,7 +381,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "44e762af56aa684d8e8057e415fd95997d007eb7fdb76fe6c6280c702af9286c",
+      "fingerprint": "5094b0032aa97c782cbdbc70c8eef6108477c8a73d6f2fed29edb7b7d5878f44",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -222,16 +412,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "e2de85e5a28fb42de535bc0b7e6a010465b6d8e11afae8d1366aaf3355591d0d",
+      "fingerprint": "054d0cd2e519a81e1f0aaf7a1d679b00c71313d8f5a9ab0e084ee1199e4c99ea",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 584,
+          "line": 585,
           "column": 1
         },
         "end": {
-          "line": 588,
+          "line": 589,
           "column": 14
         }
       }
@@ -253,16 +443,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "4cb2d45c32c18ba6fc3de172743c2eb3b827309548c0fc918cb2bb3e6e5754d2",
+      "fingerprint": "016299267e82e2adb3c0eff7e4119b8df50aff0c57b4fe526814017d40bc7840",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 570,
+          "line": 571,
           "column": 1
         },
         "end": {
-          "line": 575,
+          "line": 576,
           "column": 25
         }
       }
@@ -285,17 +475,79 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "8dbd0f5f8fec9d6f2bb5fc5708feb664bc956c08c1d65af9fa6206a39607fb6b",
+      "fingerprint": "c2e8346005b2859b7bce1ba4ac4f347b66af06ab995c82e6e5521a389305fda8",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 577,
+          "line": 578,
           "column": 1
         },
         "end": {
-          "line": 582,
+          "line": 583,
           "column": 39
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.help_command",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (words : List Nat),\n  CapdagCli.cli w (CapdagCli.Invocation.helpCommand words) =\n    if w.helpKnown words = true then CapdagCli.CliVerdict.is CapdagCli.Verdict.help\n    else CapdagCli.CliVerdict.refused CapdagCli.CliRefusal.noSuchCommand",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "8629656f3a547c3faafc09768257270a0724f29fbdfd13ef498ba21104810d97",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 260,
+          "column": 1
+        },
+        "end": {
+          "line": 265,
+          "column": 13
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.help_runs_nothing",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (t : CapdagCli.HelpTopic),\n  CapdagCli.cli w (CapdagCli.Invocation.helpFlag t) = CapdagCli.CliVerdict.is CapdagCli.Verdict.help ∨\n    CapdagCli.cli w (CapdagCli.Invocation.helpFlag t) =\n        CapdagCli.CliVerdict.refused (CapdagCli.CliRefusal.line CapdagCli.Refusal.noSuchMachine) ∨\n      CapdagCli.cli w (CapdagCli.Invocation.helpFlag t) = CapdagCli.CliVerdict.is CapdagCli.Verdict.unresolved",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "75d950c33e7366ca841f2fad4578d0673a276e390bf7251c3ba2613a15adfdb4",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 243,
+          "column": 1
+        },
+        "end": {
+          "line": 258,
+          "column": 21
         }
       }
     },
@@ -318,16 +570,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "5b2aca7ab72533d11d5f23ef86070c758cf05b8bda5385804ab1d94ac2fcd328",
+      "fingerprint": "97e58308b878cf93892cf23b2a370caefd487121c6065a9ff9cb64b817e2e5c8",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 350,
+          "line": 351,
           "column": 1
         },
         "end": {
-          "line": 362,
+          "line": 363,
           "column": 34
         }
       }
@@ -354,12 +606,44 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 560,
+          "line": 561,
           "column": 1
         },
         "end": {
-          "line": 566,
+          "line": 567,
           "column": 20
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.nothing_named_is_usage",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli",
+        "CapdagCli.CliVerdict.exit"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (g : CapdagCli.Group),\n  CapdagCli.cli w CapdagCli.Invocation.bare = CapdagCli.CliVerdict.is CapdagCli.Verdict.helpUsage ∧\n    CapdagCli.cli w (CapdagCli.Invocation.group g) = CapdagCli.CliVerdict.is CapdagCli.Verdict.helpUsage ∧\n      (CapdagCli.cli w CapdagCli.Invocation.bare).exit = some 2 ∧\n        (CapdagCli.cli w (CapdagCli.Invocation.group g)).exit = some 2",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "e9f29fbd92e3e8b8c0bfd5f8d69907d81d7aeb18c195ccc23a1d8da4576d16a0",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 271,
+          "column": 1
+        },
+        "end": {
+          "line": 277,
+          "column": 44
         }
       }
     },
@@ -459,6 +743,68 @@
       }
     },
     {
+      "name": "CapdagCli.ofLine_is",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.ofLine"
+      ],
+      "specifications": [],
+      "statement": "∀ (u v : CapdagCli.Verdict), CapdagCli.ofLine u = CapdagCli.CliVerdict.is v → u = v",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "bd4a71b8615bccf75d6173dc3d560ad1a2dca6dcd88edebe1820ac474d32b131",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 63,
+          "column": 1
+        },
+        "end": {
+          "line": 66,
+          "column": 46
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.offline_fetches_nothing",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (g : CapdagCli.Globals) (c : CapdagCli.Command),\n  g.fabrics.eraseDups.length ≤ 1 →\n    g.offline = true →\n      c.fetches = true →\n        CapdagCli.cli w (CapdagCli.Invocation.command g c) = CapdagCli.CliVerdict.refused CapdagCli.CliRefusal.offline",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "673c8198c380ae16d4719b70e88793378b6a0633c08b17e92fb3a6f05646eaa4",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 432,
+          "column": 1
+        },
+        "end": {
+          "line": 438,
+          "column": 37
+        }
+      }
+    },
+    {
       "name": "CapdagCli.openOptions_closed",
       "relation": "lungo.law",
       "subjects": [
@@ -482,12 +828,44 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 323,
+          "line": 324,
           "column": 1
         },
         "end": {
-          "line": 330,
+          "line": 331,
           "column": 48
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.plan_cases",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.planVerdict"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.World) (l : CapdagCli.PlanLine),\n  (∃ r, CapdagCli.planVerdict w l = CapdagCli.Verdict.refused r) ∨\n    CapdagCli.planVerdict w l = CapdagCli.Verdict.answers ∨\n      (∃ s, CapdagCli.planVerdict w l = CapdagCli.Verdict.asks s ∧ w.canAsk = true) ∨\n        (∃ s, CapdagCli.planVerdict w l = CapdagCli.Verdict.names s ∧ w.canAsk = false) ∨\n          (∃ s, CapdagCli.planVerdict w l = CapdagCli.Verdict.extra s) ∨\n            ∃ s, CapdagCli.planVerdict w l = CapdagCli.Verdict.nothing s",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "Quot.sound",
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "d621725be18639b6b6b57b1de5f845f88852242f6a42e2bcf12e85170e71ead4",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 33,
+          "column": 1
+        },
+        "end": {
+          "line": 61,
+          "column": 28
         }
       }
     },
@@ -508,7 +886,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "079ac73808a705f933b0b9ec7e786bbd6ecf8ba4390cd8fdd4b546d9210903f0",
+      "fingerprint": "5b8bed3af735ff11f28c86b352aa0e5aab425a1772b00e1b8a3e7060e7083817",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -545,11 +923,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 407,
+          "line": 408,
           "column": 1
         },
         "end": {
-          "line": 423,
+          "line": 424,
           "column": 22
         }
       }
@@ -576,11 +954,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 554,
+          "line": 555,
           "column": 1
         },
         "end": {
-          "line": 558,
+          "line": 559,
           "column": 21
         }
       }
@@ -766,11 +1144,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 343,
+          "line": 344,
           "column": 1
         },
         "end": {
-          "line": 348,
+          "line": 349,
           "column": 12
         }
       }
@@ -795,16 +1173,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "2f5a9e89a6a8a03d519dc81763bf4411e38f8211e6dd2e187a20892c66c8ae45",
+      "fingerprint": "dc1472ec176377fadb8c4fa119bae977af3e9cc6ffdf5512906590fb8f97837b",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 529,
+          "line": 530,
           "column": 1
         },
         "end": {
-          "line": 537,
+          "line": 538,
           "column": 64
         }
       }
@@ -833,11 +1211,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 332,
+          "line": 333,
           "column": 1
         },
         "end": {
-          "line": 341,
+          "line": 342,
           "column": 21
         }
       }
@@ -861,16 +1239,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "c6c555d5c8062157214f73adf217540a1bea80d215d37d7cefe708bcb499f770",
+      "fingerprint": "639de608bddd688ac0a056c162b02bdee794aff27a4b2269fba9d6fe16c3ee0d",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 425,
+          "line": 426,
           "column": 1
         },
         "end": {
-          "line": 527,
+          "line": 528,
           "column": 20
         }
       }
@@ -894,16 +1272,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "eb5b5efb74e8741da0c11b02ef4c601b628c74cf82b24107c093f757e1bdb99f",
+      "fingerprint": "886aae48674e1263a4517c4c527c0f391a0d009af4254289e7a8482bc63e5e9a",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 364,
+          "line": 365,
           "column": 1
         },
         "end": {
-          "line": 386,
+          "line": 387,
           "column": 49
         }
       }
@@ -930,12 +1308,43 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 539,
+          "line": 540,
           "column": 1
         },
         "end": {
-          "line": 543,
+          "line": 544,
           "column": 41
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.resolve_asks_only_if",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.resolve"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.World) (l : CapdagCli.RunLine) (s : CapdagCli.Stage),\n  CapdagCli.resolve w l = CapdagCli.Verdict.asks s → w.canAsk = true",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "edf07008804017b60e3b1d572e29f59708d08cc3b073b49d041a467208684650",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 13,
+          "column": 1
+        },
+        "end": {
+          "line": 18,
+          "column": 30
         }
       }
     },
@@ -956,7 +1365,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "61d73833bf8bb6b7c140a656dce5db74876d6cc0ead6fbaeb2031b4bcd883f39",
+      "fingerprint": "74c7bcf5ab17b8e59acca67d38cf809f6fc3366ffceeddde8ed806e8fead87cb",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -967,6 +1376,68 @@
         "end": {
           "line": 218,
           "column": 75
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.resolve_names_only_if",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.resolve"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.World) (l : CapdagCli.RunLine) (s : CapdagCli.Stage),\n  CapdagCli.resolve w l = CapdagCli.Verdict.names s → w.canAsk = false",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "e7c1488f6cfffe1d73b72b9051bf109ae6341e955c9574b2ff950f3c811fab98",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 20,
+          "column": 1
+        },
+        "end": {
+          "line": 25,
+          "column": 30
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.resolve_not_opens",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.resolve"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.World) (l : CapdagCli.RunLine), CapdagCli.resolve w l ≠ CapdagCli.Verdict.opens",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "61a4a4589ccf5449929d300a50ad94f78737802011d33e4037a43c6cb8961a46",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 27,
+          "column": 1
+        },
+        "end": {
+          "line": 31,
+          "column": 21
         }
       }
     },
@@ -987,7 +1458,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "2d76e4088d4fc08535b84b0394c06b69279d75e7eca98dcfee4ff35dbacc7872",
+      "fingerprint": "35c98e4a16384104d493a8e322957faa4bf2b3cf76d0e4559f9944e7d8027123",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -1019,7 +1490,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "e2445af157e409318751a116962f990b30de56da95d34ce12aad0a69f93311d2",
+      "fingerprint": "8672192c2d7b913b5003b456267d5c90ce4201f6f506a41543666b2a98ee3559",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -1051,7 +1522,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "84c3ab77ff3654eea915aaa7ea63c652c72cc0d7b41161e6461b6aadb9c30d19",
+      "fingerprint": "cd90b6c88c8f56e7133285ea74f4883aca035f069d8756612a9ec30c9127b118",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -1083,7 +1554,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "1d98eea3113a8a19fc0c48ddaf880d763fc76851135812e83c1ddc00d55acc1b",
+      "fingerprint": "391ad13321a09145c7feebe6410776c997361db454b80d84e858bf807fcc19e9",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
@@ -1094,6 +1565,37 @@
         "end": {
           "line": 233,
           "column": 80
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.runs_only_run",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (inv : CapdagCli.Invocation),\n  CapdagCli.cli w inv = CapdagCli.CliVerdict.is CapdagCli.Verdict.runs →\n    ∃ g l pf, inv = CapdagCli.Invocation.command g (CapdagCli.Command.run l pf)",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "fea6dfce0f291e9ed00021a47a1e95850dfc836c82809cdec22f0525f05dcb93",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 298,
+          "column": 1
+        },
+        "end": {
+          "line": 430,
+          "column": 31
         }
       }
     },
@@ -1361,12 +1863,74 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 396,
+          "line": 397,
           "column": 1
         },
         "end": {
-          "line": 405,
+          "line": 406,
           "column": 95
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.two_fabrics_refused",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld) (g : CapdagCli.Globals) (c : CapdagCli.Command),\n  g.fabrics.eraseDups.length > 1 →\n    CapdagCli.cli w (CapdagCli.Invocation.command g c) = CapdagCli.CliVerdict.refused CapdagCli.CliRefusal.twoFabrics",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "b9c0dee299e10af4d1fc3811fb9c8e9aa5f4f11a6fa2f47ddb142bb2bb246add",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 440,
+          "column": 1
+        },
+        "end": {
+          "line": 444,
+          "column": 27
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.version_shown",
+      "relation": "lungo.law",
+      "subjects": [
+        "CapdagCli.cli"
+      ],
+      "specifications": [],
+      "statement": "∀ (w : CapdagCli.CliWorld),\n  CapdagCli.cli w CapdagCli.Invocation.version = CapdagCli.CliVerdict.is CapdagCli.Verdict.version",
+      "status": "proved",
+      "evidence_trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false
+      },
+      "assumptions": [],
+      "package": "capdagCliFormal",
+      "fingerprint": "3595309c02401f1e6b42f99482941658414c6f3578a1a99805e3b0cde2b620e8",
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Laws/Cli.lean",
+        "start": {
+          "line": 267,
+          "column": 1
+        },
+        "end": {
+          "line": 269,
+          "column": 76
         }
       }
     },
@@ -1388,16 +1952,16 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "c972fb4c5bc9b9f8dd06639ef9ff74ef751ac286a65179a9d7223044660ab77e",
+      "fingerprint": "249d0d99fe38aa78cb54f8386d7eb4cb5812851da21b6ddbb30da68c684313a0",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Line.lean",
         "start": {
-          "line": 545,
+          "line": 546,
           "column": 1
         },
         "end": {
-          "line": 552,
+          "line": 553,
           "column": 6
         }
       }
@@ -1439,6 +2003,67 @@
       }
     },
     {
+      "name": "CapdagCli.CliRefusal.says",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.cli_refusal_says"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 249,
+          "column": 1
+        },
+        "end": {
+          "line": 270,
+          "column": 22
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.CliVerdict.exit",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.cli_exit_usage_iff",
+        "CapdagCli.nothing_named_is_usage"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 392,
+          "column": 1
+        },
+        "end": {
+          "line": 395,
+          "column": 20
+        }
+      }
+    },
+    {
       "name": "CapdagCli.Refusal.says",
       "module": "CapdagCli.Line",
       "async": false,
@@ -1459,11 +2084,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 331,
+          "line": 338,
           "column": 1
         },
         "end": {
-          "line": 345,
+          "line": 352,
           "column": 70
         }
       }
@@ -1519,12 +2144,121 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 593,
+          "line": 613,
           "column": 1
         },
         "end": {
-          "line": 605,
-          "column": 20
+          "line": 633,
+          "column": 19
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.cli",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": [
+          "lean_array_push",
+          "lean_array_to_list",
+          "lean_mk_empty_array_with_capacity",
+          "lean_nat_add",
+          "lean_nat_dec_eq",
+          "lean_nat_dec_le",
+          "lean_nat_dec_lt",
+          "lean_nat_sub"
+        ]
+      },
+      "claims": [
+        "CapdagCli.cli_fits",
+        "CapdagCli.edit_needs_terminal",
+        "CapdagCli.help_command",
+        "CapdagCli.help_runs_nothing",
+        "CapdagCli.nothing_named_is_usage",
+        "CapdagCli.offline_fetches_nothing",
+        "CapdagCli.runs_only_run",
+        "CapdagCli.two_fabrics_refused",
+        "CapdagCli.version_shown"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 374,
+          "column": 1
+        },
+        "end": {
+          "line": 390,
+          "column": 34
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.commandTable",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.commandTable_named_once"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 399,
+          "column": 1
+        },
+        "end": {
+          "line": 428,
+          "column": 2
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.decide_",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.decide_cases"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 287,
+          "column": 1
+        },
+        "end": {
+          "line": 296,
+          "column": 33
         }
       }
     },
@@ -1552,11 +2286,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 530,
+          "line": 550,
           "column": 1
         },
         "end": {
-          "line": 540,
+          "line": 560,
           "column": 38
         }
       }
@@ -1591,12 +2325,74 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 614,
+          "line": 642,
           "column": 1
         },
         "end": {
-          "line": 630,
-          "column": 104
+          "line": 663,
+          "column": 19
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.globalFlags",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.commandTable_named_once"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 430,
+          "column": 1
+        },
+        "end": {
+          "line": 432,
+          "column": 110
+        }
+      }
+    },
+    {
+      "name": "CapdagCli.ofLine",
+      "module": "CapdagCli.Cli",
+      "async": false,
+      "trust": {
+        "axioms": [
+          "propext"
+        ],
+        "depends_on_sorry": false,
+        "unsafe_dependencies": [],
+        "partial_dependencies": [],
+        "extern_dependencies": []
+      },
+      "claims": [
+        "CapdagCli.ofLine_is"
+      ],
+      "assumptions": [],
+      "facilities": [],
+      "roles": [],
+      "source": {
+        "package": "capdagCliFormal",
+        "file": "CapdagCli/Cli.lean",
+        "start": {
+          "line": 281,
+          "column": 1
+        },
+        "end": {
+          "line": 285,
+          "column": 15
         }
       }
     },
@@ -1621,6 +2417,7 @@
         ]
       },
       "claims": [
+        "CapdagCli.plan_cases",
         "CapdagCli.plan_never_runs"
       ],
       "assumptions": [],
@@ -1630,11 +2427,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 574,
+          "line": 594,
           "column": 1
         },
         "end": {
-          "line": 591,
+          "line": 611,
           "column": 28
         }
       }
@@ -1669,11 +2466,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 643,
+          "line": 676,
           "column": 1
         },
         "end": {
-          "line": 645,
+          "line": 678,
           "column": 85
         }
       }
@@ -1705,11 +2502,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 251,
+          "line": 258,
           "column": 1
         },
         "end": {
-          "line": 260,
+          "line": 267,
           "column": 45
         }
       }
@@ -1746,11 +2543,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 372,
+          "line": 379,
           "column": 1
         },
         "end": {
-          "line": 384,
+          "line": 391,
           "column": 12
         }
       }
@@ -1788,11 +2585,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 632,
+          "line": 665,
           "column": 1
         },
         "end": {
-          "line": 641,
+          "line": 674,
           "column": 106
         }
       }
@@ -1821,7 +2618,10 @@
       },
       "claims": [
         "CapdagCli.rerun_asks_nothing",
+        "CapdagCli.resolve_asks_only_if",
         "CapdagCli.resolve_cases",
+        "CapdagCli.resolve_names_only_if",
+        "CapdagCli.resolve_not_opens",
         "CapdagCli.resolve_refused",
         "CapdagCli.resolve_runs",
         "CapdagCli.resolve_runs_any_terminal",
@@ -1835,11 +2635,11 @@
         "package": "capdagCliFormal",
         "file": "CapdagCli/Line.lean",
         "start": {
-          "line": 554,
+          "line": 574,
           "column": 1
         },
         "end": {
-          "line": 566,
+          "line": 586,
           "column": 28
         }
       }

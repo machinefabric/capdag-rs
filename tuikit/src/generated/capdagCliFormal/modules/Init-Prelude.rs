@@ -190,6 +190,17 @@ pub(crate) unsafe extern "C" fn l_Nat_ddecEq(x_1: Obj, x_2: Obj) -> u8 {
     r
 }
 
+// Lean: Nat.decEq._boxed
+// Compiled from: Nat.decEq
+// Source: <lean>/Init/Prelude.lean:1975:1
+pub(crate) unsafe extern "C" fn l_Nat_ddecEq_d__boxed(x_1: Obj, x_2: Obj) -> Obj {
+    let x_3: u8 = l_Nat_ddecEq(x_1, x_2);
+    rt::lean_dec(x_2);
+    rt::lean_dec(x_1);
+    let x_4: Obj = rt::lean_box(x_3 as usize);
+    return x_4;
+}
+
 // Lean: Nat.decLe
 // Source: <lean>/Init/Prelude.lean:2196:1
 #[inline(always)]

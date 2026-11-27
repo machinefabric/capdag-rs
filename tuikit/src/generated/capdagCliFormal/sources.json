@@ -123,11 +123,11 @@
     "lean_name": "CapdagCli.Arg.input",
     "file": "CapdagCli/Line.lean",
     "start": [
-      238,
+      245,
       1
     ],
     "end": [
-      243,
+      250,
       23
     ]
   },
@@ -240,14 +240,986 @@
     ]
   },
   {
-    "lean_name": "CapdagCli.PlanLine.paths",
-    "file": "CapdagCli/Line.lean",
+    "lean_name": "CapdagCli.CliRefusal.capabilityIsNoCommand.elim",
+    "file": "CapdagCli/Cli.lean",
     "start": [
-      568,
+      241,
+      3
+    ],
+    "end": [
+      242,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      205,
       1
     ],
     "end": [
-      572,
+      247,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.line.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      245,
+      3
+    ],
+    "end": [
+      246,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.machineFileIsNoCommand.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      237,
+      3
+    ],
+    "end": [
+      238,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.nearCommand.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      239,
+      3
+    ],
+    "end": [
+      240,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.needsTerminal.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      223,
+      3
+    ],
+    "end": [
+      224,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noDirectoryToMake.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      231,
+      3
+    ],
+    "end": [
+      232,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchCommand.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      235,
+      3
+    ],
+    "end": [
+      236,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchName.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      217,
+      3
+    ],
+    "end": [
+      218,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchRoot.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      233,
+      3
+    ],
+    "end": [
+      234,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.noSuchType.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      215,
+      3
+    ],
+    "end": [
+      216,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notAModelSpec.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      227,
+      3
+    ],
+    "end": [
+      228,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notDownloaded.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      229,
+      3
+    ],
+    "end": [
+      230,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.notInstalled.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      225,
+      3
+    ],
+    "end": [
+      226,
+      17
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.offline.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      211,
+      3
+    ],
+    "end": [
+      212,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.planningWithMachine.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      213,
+      3
+    ],
+    "end": [
+      214,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.says",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      249,
+      1
+    ],
+    "end": [
+      270,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.twoFabrics.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      209,
+      3
+    ],
+    "end": [
+      210,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.unknownWord.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      243,
+      3
+    ],
+    "end": [
+      244,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.unreadable.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      207,
+      3
+    ],
+    "end": [
+      208,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.viewInputsWithoutTerminal.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      221,
+      3
+    ],
+    "end": [
+      222,
+      30
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.widthWithoutText.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      219,
+      3
+    ],
+    "end": [
+      220,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      274,
+      1
+    ],
+    "end": [
+      279,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.exit",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      392,
+      1
+    ],
+    "end": [
+      395,
+      20
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.is.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      278,
+      3
+    ],
+    "end": [
+      278,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliVerdict.refused.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      277,
+      3
+    ],
+    "end": [
+      277,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.canAsk",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      196,
+      1
+    ],
+    "end": [
+      197,
+      59
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.CliWorld.fullScreen",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      199,
+      1
+    ],
+    "end": [
+      201,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.cacheClear.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      113,
+      3
+    ],
+    "end": [
+      114,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.cacheRefresh.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      111,
+      3
+    ],
+    "end": [
+      112,
+      17
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.caps.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      80,
+      3
+    ],
+    "end": [
+      81,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeInstall.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      99,
+      3
+    ],
+    "end": [
+      100,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeList.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      97,
+      3
+    ],
+    "end": [
+      98,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.cartridgeRemove.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      101,
+      3
+    ],
+    "end": [
+      102,
+      31
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.check.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      89,
+      3
+    ],
+    "end": [
+      90,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      78,
+      1
+    ],
+    "end": [
+      127,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleManifest.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      121,
+      3
+    ],
+    "end": [
+      122,
+      35
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.devBundleRehash.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      123,
+      3
+    ],
+    "end": [
+      124,
+      33
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.devHashDir.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      119,
+      3
+    ],
+    "end": [
+      120,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.devInstall.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      117,
+      3
+    ],
+    "end": [
+      118,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.devNew.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      115,
+      3
+    ],
+    "end": [
+      116,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.edit.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      95,
+      3
+    ],
+    "end": [
+      96,
+      50
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.fetches",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      312,
+      1
+    ],
+    "end": [
+      320,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.graph.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      91,
+      3
+    ],
+    "end": [
+      92,
+      53
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.info.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      82,
+      3
+    ],
+    "end": [
+      83,
+      45
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelList.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      103,
+      3
+    ],
+    "end": [
+      104,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelPull.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      107,
+      3
+    ],
+    "end": [
+      108,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelRemove.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      109,
+      3
+    ],
+    "end": [
+      110,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelSearch.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      105,
+      3
+    ],
+    "end": [
+      106,
+      30
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.plan.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      87,
+      3
+    ],
+    "end": [
+      88,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.run.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      84,
+      3
+    ],
+    "end": [
+      86,
+      45
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.selfUpdate.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      125,
+      3
+    ],
+    "end": [
+      126,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Command.view.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      93,
+      3
+    ],
+    "end": [
+      94,
+      50
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.cache.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      133,
+      3
+    ],
+    "end": [
+      133,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.cartridge.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      131,
+      3
+    ],
+    "end": [
+      131,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      129,
+      1
+    ],
+    "end": [
+      136,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Group.dev.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      134,
+      3
+    ],
+    "end": [
+      134,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.model.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      132,
+      3
+    ],
+    "end": [
+      132,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Group.ofNat",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Group.self_.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      135,
+      3
+    ],
+    "end": [
+      135,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.command.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      46,
+      3
+    ],
+    "end": [
+      47,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      42,
+      1
+    ],
+    "end": [
+      51,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.machine.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      48,
+      3
+    ],
+    "end": [
+      50,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.HelpTopic.overview.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      44,
+      3
+    ],
+    "end": [
+      45,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.bundled.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      58,
+      3
+    ],
+    "end": [
+      59,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.capability.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      60,
+      3
+    ],
+    "end": [
+      61,
+      37
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.cartridge.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      56,
+      3
+    ],
+    "end": [
+      57,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      53,
+      1
+    ],
+    "end": [
+      64,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.InstallTarget.unknown.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      62,
+      3
+    ],
+    "end": [
+      63,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.bare.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      140,
+      3
+    ],
+    "end": [
+      141,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.command.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      156,
+      3
+    ],
+    "end": [
+      157,
+      40
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      138,
+      1
+    ],
+    "end": [
+      158,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.group.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      152,
+      3
+    ],
+    "end": [
+      153,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpCommand.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      149,
+      3
+    ],
+    "end": [
+      151,
+      35
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.helpFlag.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      147,
+      3
+    ],
+    "end": [
+      148,
+      33
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.unknown.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      154,
+      3
+    ],
+    "end": [
+      155,
+      25
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.unreadable.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      142,
+      3
+    ],
+    "end": [
+      144,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Invocation.version.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      145,
+      3
+    ],
+    "end": [
+      146,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.PlanLine.paths",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      588,
+      1
+    ],
+    "end": [
+      592,
       16
     ]
   },
@@ -255,11 +1227,11 @@
     "lean_name": "CapdagCli.Positional.ctorElim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      186,
+      193,
       1
     ],
     "end": [
-      192,
+      199,
       29
     ]
   },
@@ -273,11 +1245,11 @@
     "lean_name": "CapdagCli.Positional.isLive",
     "file": "CapdagCli/Line.lean",
     "start": [
-      484,
+      491,
       1
     ],
     "end": [
-      487,
+      494,
       15
     ]
   },
@@ -285,11 +1257,11 @@
     "lean_name": "CapdagCli.Positional.live.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      190,
+      197,
       3
     ],
     "end": [
-      190,
+      197,
       19
     ]
   },
@@ -297,11 +1269,11 @@
     "lean_name": "CapdagCli.Positional.path.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      189,
+      196,
       3
     ],
     "end": [
-      189,
+      196,
       19
     ]
   },
@@ -309,11 +1281,11 @@
     "lean_name": "CapdagCli.Positional.stdin.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      191,
+      198,
       3
     ],
     "end": [
-      191,
+      198,
       10
     ]
   },
@@ -321,11 +1293,11 @@
     "lean_name": "CapdagCli.Positional.value",
     "file": "CapdagCli/Line.lean",
     "start": [
-      477,
+      484,
       1
     ],
     "end": [
-      482,
+      489,
       26
     ]
   },
@@ -333,11 +1305,11 @@
     "lean_name": "CapdagCli.Refusal.ctorElim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      300,
+      307,
       1
     ],
     "end": [
-      329,
+      336,
       29
     ]
   },
@@ -351,11 +1323,11 @@
     "lean_name": "CapdagCli.Refusal.fromWithMachine.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      306,
+      313,
       3
     ],
     "end": [
-      307,
+      314,
       20
     ]
   },
@@ -363,11 +1335,11 @@
     "lean_name": "CapdagCli.Refusal.fromWithoutStdin.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      308,
+      315,
       3
     ],
     "end": [
-      309,
+      316,
       21
     ]
   },
@@ -375,11 +1347,11 @@
     "lean_name": "CapdagCli.Refusal.liveWithoutMachine.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      314,
+      321,
       3
     ],
     "end": [
-      316,
+      323,
       23
     ]
   },
@@ -387,11 +1359,11 @@
     "lean_name": "CapdagCli.Refusal.namedWithoutMachine.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      312,
+      319,
       3
     ],
     "end": [
-      313,
+      320,
       24
     ]
   },
@@ -399,11 +1371,11 @@
     "lean_name": "CapdagCli.Refusal.noSuchFile.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      323,
+      330,
       3
     ],
     "end": [
-      324,
+      331,
       25
     ]
   },
@@ -411,11 +1383,11 @@
     "lean_name": "CapdagCli.Refusal.noSuchInput.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      321,
+      328,
       3
     ],
     "end": [
-      322,
+      329,
       26
     ]
   },
@@ -423,11 +1395,11 @@
     "lean_name": "CapdagCli.Refusal.noSuchMachine.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      325,
+      332,
       3
     ],
     "end": [
-      326,
+      333,
       18
     ]
   },
@@ -435,11 +1407,11 @@
     "lean_name": "CapdagCli.Refusal.nothingToPlan.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      327,
+      334,
       3
     ],
     "end": [
-      328,
+      335,
       18
     ]
   },
@@ -447,11 +1419,11 @@
     "lean_name": "CapdagCli.Refusal.nothingToRun.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      302,
+      309,
       3
     ],
     "end": [
-      303,
+      310,
       17
     ]
   },
@@ -459,79 +1431,7 @@
     "lean_name": "CapdagCli.Refusal.says",
     "file": "CapdagCli/Line.lean",
     "start": [
-      331,
-      1
-    ],
-    "end": [
-      345,
-      70
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.selectorAmbiguous.elim",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      319,
-      3
-    ],
-    "end": [
-      320,
-      22
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.selectorWithoutLive.elim",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      317,
-      3
-    ],
-    "end": [
-      318,
-      24
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.stdinTwice.elim",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      310,
-      3
-    ],
-    "end": [
-      311,
-      15
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.toWithMachine.elim",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      304,
-      3
-    ],
-    "end": [
-      305,
-      18
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.RunLine.files",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      366,
-      1
-    ],
-    "end": [
-      370,
-      16
-    ]
-  },
-  {
-    "lean_name": "CapdagCli.RunLine.hasStdin",
-    "file": "CapdagCli/Line.lean",
-    "start": [
-      351,
+      338,
       1
     ],
     "end": [
@@ -540,14 +1440,86 @@
     ]
   },
   {
-    "lean_name": "CapdagCli.RunLine.lives",
+    "lean_name": "CapdagCli.Refusal.selectorAmbiguous.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      360,
+      326,
+      3
+    ],
+    "end": [
+      327,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.selectorWithoutLive.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      324,
+      3
+    ],
+    "end": [
+      325,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.stdinTwice.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      317,
+      3
+    ],
+    "end": [
+      318,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.toWithMachine.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      311,
+      3
+    ],
+    "end": [
+      312,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.files",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      373,
       1
     ],
     "end": [
-      364,
+      377,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.hasStdin",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      358,
+      1
+    ],
+    "end": [
+      359,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.lives",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      367,
+      1
+    ],
+    "end": [
+      371,
       16
     ]
   },
@@ -555,11 +1527,11 @@
     "lean_name": "CapdagCli.RunLine.namedInputs",
     "file": "CapdagCli/Line.lean",
     "start": [
-      405,
+      412,
       1
     ],
     "end": [
-      406,
+      413,
       70
     ]
   },
@@ -567,11 +1539,11 @@
     "lean_name": "CapdagCli.RunLine.paths",
     "file": "CapdagCli/Line.lean",
     "start": [
-      354,
+      361,
       1
     ],
     "end": [
-      358,
+      365,
       16
     ]
   },
@@ -579,11 +1551,11 @@
     "lean_name": "CapdagCli.RunLine.resolves",
     "file": "CapdagCli/Line.lean",
     "start": [
-      548,
+      568,
       1
     ],
     "end": [
-      552,
+      572,
       17
     ]
   },
@@ -591,11 +1563,11 @@
     "lean_name": "CapdagCli.RunLine.stdinCount",
     "file": "CapdagCli/Line.lean",
     "start": [
-      347,
+      354,
       1
     ],
     "end": [
-      349,
+      356,
       83
     ]
   },
@@ -711,11 +1683,11 @@
     "lean_name": "CapdagCli.Spelling.bracket.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      219,
+      226,
       3
     ],
     "end": [
-      220,
+      227,
       12
     ]
   },
@@ -723,11 +1695,11 @@
     "lean_name": "CapdagCli.Spelling.ctorElim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      217,
+      224,
       1
     ],
     "end": [
-      229,
+      236,
       29
     ]
   },
@@ -741,11 +1713,11 @@
     "lean_name": "CapdagCli.Spelling.dash.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      223,
+      230,
       3
     ],
     "end": [
-      224,
+      231,
       9
     ]
   },
@@ -753,11 +1725,11 @@
     "lean_name": "CapdagCli.Spelling.isMachine",
     "file": "CapdagCli/Line.lean",
     "start": [
-      245,
+      252,
       1
     ],
     "end": [
-      249,
+      256,
       15
     ]
   },
@@ -765,11 +1737,11 @@
     "lean_name": "CapdagCli.Spelling.liveUrn.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      225,
+      232,
       3
     ],
     "end": [
-      226,
+      233,
       12
     ]
   },
@@ -777,11 +1749,11 @@
     "lean_name": "CapdagCli.Spelling.machineFile.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      221,
+      228,
       3
     ],
     "end": [
-      222,
+      229,
       16
     ]
   },
@@ -795,12 +1767,24 @@
     "lean_name": "CapdagCli.Spelling.other.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      227,
+      234,
       3
     ],
     "end": [
-      228,
+      235,
       10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.capability.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      163,
+      3
+    ],
+    "end": [
+      164,
+      15
     ]
   },
   {
@@ -811,7 +1795,7 @@
       1
     ],
     "end": [
-      163,
+      170,
       29
     ]
   },
@@ -858,6 +1842,18 @@
     ]
   },
   {
+    "lean_name": "CapdagCli.Stage.model.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      165,
+      3
+    ],
+    "end": [
+      166,
+      10
+    ]
+  },
+  {
     "lean_name": "CapdagCli.Stage.option.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
@@ -879,6 +1875,18 @@
     "end": [
       153,
       19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.provider.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      167,
+      3
+    ],
+    "end": [
+      169,
+      13
     ]
   },
   {
@@ -933,11 +1941,11 @@
     "lean_name": "CapdagCli.Value.ctorElim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      167,
+      174,
       1
     ],
     "end": [
-      175,
+      182,
       29
     ]
   },
@@ -951,11 +1959,11 @@
     "lean_name": "CapdagCli.Value.file.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      169,
+      176,
       3
     ],
     "end": [
-      170,
+      177,
       19
     ]
   },
@@ -963,11 +1971,11 @@
     "lean_name": "CapdagCli.Value.stdin.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      173,
+      180,
       3
     ],
     "end": [
-      174,
+      181,
       10
     ]
   },
@@ -975,11 +1983,11 @@
     "lean_name": "CapdagCli.Value.text.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      171,
+      178,
       3
     ],
     "end": [
-      172,
+      179,
       9
     ]
   },
@@ -987,11 +1995,11 @@
     "lean_name": "CapdagCli.Verdict.answers.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      526,
+      533,
       3
     ],
     "end": [
-      527,
+      535,
       12
     ]
   },
@@ -999,11 +2007,11 @@
     "lean_name": "CapdagCli.Verdict.asks.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      518,
+      525,
       3
     ],
     "end": [
-      519,
+      526,
       21
     ]
   },
@@ -1011,11 +2019,11 @@
     "lean_name": "CapdagCli.Verdict.ctorElim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      510,
+      517,
       1
     ],
     "end": [
-      528,
+      548,
       29
     ]
   },
@@ -1029,35 +2037,71 @@
     "lean_name": "CapdagCli.Verdict.exit",
     "file": "CapdagCli/Line.lean",
     "start": [
-      593,
+      613,
       1
     ],
     "end": [
-      605,
-      20
+      633,
+      19
     ]
   },
   {
     "lean_name": "CapdagCli.Verdict.extra.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      522,
+      529,
       3
     ],
     "end": [
-      523,
+      530,
       22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.failed.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      545,
+      3
+    ],
+    "end": [
+      547,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.help.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      536,
+      3
+    ],
+    "end": [
+      537,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.helpUsage.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      538,
+      3
+    ],
+    "end": [
+      540,
+      14
     ]
   },
   {
     "lean_name": "CapdagCli.Verdict.names.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      520,
+      527,
       3
     ],
     "end": [
-      521,
+      528,
       22
     ]
   },
@@ -1065,23 +2109,35 @@
     "lean_name": "CapdagCli.Verdict.nothing.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      524,
+      531,
       3
     ],
     "end": [
-      525,
+      532,
       24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.opens.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      543,
+      3
+    ],
+    "end": [
+      544,
+      10
     ]
   },
   {
     "lean_name": "CapdagCli.Verdict.refused.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      512,
+      519,
       3
     ],
     "end": [
-      513,
+      520,
       26
     ]
   },
@@ -1089,11 +2145,11 @@
     "lean_name": "CapdagCli.Verdict.runs.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      516,
+      523,
       3
     ],
     "end": [
-      517,
+      524,
       9
     ]
   },
@@ -1101,23 +2157,107 @@
     "lean_name": "CapdagCli.Verdict.unresolved.elim",
     "file": "CapdagCli/Line.lean",
     "start": [
-      514,
+      521,
       3
     ],
     "end": [
-      515,
+      522,
       15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.version.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      541,
+      3
+    ],
+    "end": [
+      542,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.capability.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      72,
+      3
+    ],
+    "end": [
+      73,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.ctorElim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      66,
+      1
+    ],
+    "end": [
+      76,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.ctorIdx",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.machineFile.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      68,
+      3
+    ],
+    "end": [
+      69,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.nearCommand.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      70,
+      3
+    ],
+    "end": [
+      71,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.ofNat",
+    "file": "CapdagCli/Cli.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.WordKind.unknown.elim",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      74,
+      3
+    ],
+    "end": [
+      75,
+      12
     ]
   },
   {
     "lean_name": "CapdagCli.World.canAsk",
     "file": "CapdagCli/Line.lean",
     "start": [
-      295,
+      302,
       1
     ],
     "end": [
-      296,
+      303,
       57
     ]
   },
@@ -1125,23 +2265,71 @@
     "lean_name": "CapdagCli.bound",
     "file": "CapdagCli/Line.lean",
     "start": [
-      453,
+      460,
       1
     ],
     "end": [
-      455,
+      462,
       74
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.cli",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      374,
+      1
+    ],
+    "end": [
+      390,
+      34
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.command",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      322,
+      1
+    ],
+    "end": [
+      372,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.commandTable",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      399,
+      1
+    ],
+    "end": [
+      428,
+      2
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.decide_",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      287,
+      1
+    ],
+    "end": [
+      296,
+      33
     ]
   },
   {
     "lean_name": "CapdagCli.dropFirst",
     "file": "CapdagCli/Line.lean",
     "start": [
-      609,
+      637,
       1
     ],
     "end": [
-      612,
+      640,
       58
     ]
   },
@@ -1149,11 +2337,11 @@
     "lean_name": "CapdagCli.firstStop",
     "file": "CapdagCli/Line.lean",
     "start": [
-      530,
+      550,
       1
     ],
     "end": [
-      540,
+      560,
       38
     ]
   },
@@ -1161,23 +2349,35 @@
     "lean_name": "CapdagCli.give",
     "file": "CapdagCli/Line.lean",
     "start": [
-      614,
+      642,
       1
     ],
     "end": [
-      630,
-      104
+      663,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.globalFlags",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      430,
+      1
+    ],
+    "end": [
+      432,
+      110
     ]
   },
   {
     "lean_name": "CapdagCli.instDecidableEqArg",
     "file": "CapdagCli/Line.lean",
     "start": [
-      236,
+      243,
       18
     ],
     "end": [
-      236,
+      243,
       29
     ]
   },
@@ -1185,11 +2385,11 @@
     "lean_name": "CapdagCli.instDecidableEqArg.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      236,
+      243,
       18
     ],
     "end": [
-      236,
+      243,
       29
     ]
   },
@@ -1206,14 +2406,194 @@
     ]
   },
   {
-    "lean_name": "CapdagCli.instDecidableEqPlanLine",
-    "file": "CapdagCli/Line.lean",
+    "lean_name": "CapdagCli.instDecidableEqCliRefusal",
+    "file": "CapdagCli/Cli.lean",
     "start": [
-      215,
+      247,
       18
     ],
     "end": [
-      215,
+      247,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqCliRefusal.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      247,
+      18
+    ],
+    "end": [
+      247,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqCliVerdict",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      279,
+      18
+    ],
+    "end": [
+      279,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqCliVerdict.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      279,
+      18
+    ],
+    "end": [
+      279,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqCommand",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      127,
+      18
+    ],
+    "end": [
+      127,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqCommand.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      127,
+      18
+    ],
+    "end": [
+      127,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqGlobals",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      40,
+      18
+    ],
+    "end": [
+      40,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqGlobals.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      40,
+      18
+    ],
+    "end": [
+      40,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqGroup",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      136,
+      18
+    ],
+    "end": [
+      136,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqHelpTopic",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      51,
+      18
+    ],
+    "end": [
+      51,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqHelpTopic.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      51,
+      18
+    ],
+    "end": [
+      51,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqInstallTarget",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      64,
+      18
+    ],
+    "end": [
+      64,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqInstallTarget.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      64,
+      18
+    ],
+    "end": [
+      64,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqInvocation",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      158,
+      18
+    ],
+    "end": [
+      158,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqInvocation.decEq",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      158,
+      18
+    ],
+    "end": [
+      158,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqPlanLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      222,
+      18
+    ],
+    "end": [
+      222,
       29
     ]
   },
@@ -1221,11 +2601,11 @@
     "lean_name": "CapdagCli.instDecidableEqPlanLine.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      215,
+      222,
       18
     ],
     "end": [
-      215,
+      222,
       29
     ]
   },
@@ -1233,11 +2613,11 @@
     "lean_name": "CapdagCli.instDecidableEqPositional",
     "file": "CapdagCli/Line.lean",
     "start": [
-      192,
+      199,
       18
     ],
     "end": [
-      192,
+      199,
       29
     ]
   },
@@ -1245,11 +2625,11 @@
     "lean_name": "CapdagCli.instDecidableEqPositional.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      192,
+      199,
       18
     ],
     "end": [
-      192,
+      199,
       29
     ]
   },
@@ -1257,11 +2637,11 @@
     "lean_name": "CapdagCli.instDecidableEqRefusal",
     "file": "CapdagCli/Line.lean",
     "start": [
-      329,
+      336,
       18
     ],
     "end": [
-      329,
+      336,
       29
     ]
   },
@@ -1269,11 +2649,11 @@
     "lean_name": "CapdagCli.instDecidableEqRefusal.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      329,
+      336,
       18
     ],
     "end": [
-      329,
+      336,
       29
     ]
   },
@@ -1281,11 +2661,11 @@
     "lean_name": "CapdagCli.instDecidableEqRunLine",
     "file": "CapdagCli/Line.lean",
     "start": [
-      208,
+      215,
       18
     ],
     "end": [
-      208,
+      215,
       29
     ]
   },
@@ -1293,11 +2673,11 @@
     "lean_name": "CapdagCli.instDecidableEqRunLine.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      208,
+      215,
       18
     ],
     "end": [
-      208,
+      215,
       29
     ]
   },
@@ -1317,11 +2697,11 @@
     "lean_name": "CapdagCli.instDecidableEqSpelling",
     "file": "CapdagCli/Line.lean",
     "start": [
-      229,
+      236,
       18
     ],
     "end": [
-      229,
+      236,
       29
     ]
   },
@@ -1329,11 +2709,11 @@
     "lean_name": "CapdagCli.instDecidableEqStage",
     "file": "CapdagCli/Line.lean",
     "start": [
-      163,
+      170,
       18
     ],
     "end": [
-      163,
+      170,
       29
     ]
   },
@@ -1341,11 +2721,11 @@
     "lean_name": "CapdagCli.instDecidableEqStage.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      163,
+      170,
       18
     ],
     "end": [
-      163,
+      170,
       29
     ]
   },
@@ -1377,11 +2757,11 @@
     "lean_name": "CapdagCli.instDecidableEqValue",
     "file": "CapdagCli/Line.lean",
     "start": [
-      175,
+      182,
       18
     ],
     "end": [
-      175,
+      182,
       29
     ]
   },
@@ -1389,11 +2769,11 @@
     "lean_name": "CapdagCli.instDecidableEqValue.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      175,
+      182,
       18
     ],
     "end": [
-      175,
+      182,
       29
     ]
   },
@@ -1401,11 +2781,11 @@
     "lean_name": "CapdagCli.instDecidableEqVerdict",
     "file": "CapdagCli/Line.lean",
     "start": [
-      528,
+      548,
       18
     ],
     "end": [
-      528,
+      548,
       29
     ]
   },
@@ -1413,11 +2793,23 @@
     "lean_name": "CapdagCli.instDecidableEqVerdict.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      528,
+      548,
       18
     ],
     "end": [
-      528,
+      548,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqWordKind",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      76,
+      18
+    ],
+    "end": [
+      76,
       29
     ]
   },
@@ -1425,11 +2817,11 @@
     "lean_name": "CapdagCli.instDecidableEqWritten",
     "file": "CapdagCli/Line.lean",
     "start": [
-      184,
+      191,
       18
     ],
     "end": [
-      184,
+      191,
       29
     ]
   },
@@ -1437,11 +2829,11 @@
     "lean_name": "CapdagCli.instDecidableEqWritten.decEq",
     "file": "CapdagCli/Line.lean",
     "start": [
-      184,
+      191,
       18
     ],
     "end": [
-      184,
+      191,
       29
     ]
   },
@@ -1449,11 +2841,11 @@
     "lean_name": "CapdagCli.instReprArg",
     "file": "CapdagCli/Line.lean",
     "start": [
-      236,
+      243,
       12
     ],
     "end": [
-      236,
+      243,
       16
     ]
   },
@@ -1461,11 +2853,11 @@
     "lean_name": "CapdagCli.instReprArg.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      236,
+      243,
       12
     ],
     "end": [
-      236,
+      243,
       16
     ]
   },
@@ -1494,14 +2886,206 @@
     ]
   },
   {
-    "lean_name": "CapdagCli.instReprPlanLine",
-    "file": "CapdagCli/Line.lean",
+    "lean_name": "CapdagCli.instReprCliRefusal",
+    "file": "CapdagCli/Cli.lean",
     "start": [
-      215,
+      247,
       12
     ],
     "end": [
-      215,
+      247,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprCliRefusal.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      247,
+      12
+    ],
+    "end": [
+      247,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprCliVerdict",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      279,
+      12
+    ],
+    "end": [
+      279,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprCliVerdict.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      279,
+      12
+    ],
+    "end": [
+      279,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprCommand",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      127,
+      12
+    ],
+    "end": [
+      127,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprCommand.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      127,
+      12
+    ],
+    "end": [
+      127,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprGlobals",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      40,
+      12
+    ],
+    "end": [
+      40,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprGlobals.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      40,
+      12
+    ],
+    "end": [
+      40,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprGroup",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      136,
+      12
+    ],
+    "end": [
+      136,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprGroup.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      136,
+      12
+    ],
+    "end": [
+      136,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprHelpTopic",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      51,
+      12
+    ],
+    "end": [
+      51,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprHelpTopic.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      51,
+      12
+    ],
+    "end": [
+      51,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprInstallTarget",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      64,
+      12
+    ],
+    "end": [
+      64,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprInstallTarget.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      64,
+      12
+    ],
+    "end": [
+      64,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprInvocation",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      158,
+      12
+    ],
+    "end": [
+      158,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprInvocation.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      158,
+      12
+    ],
+    "end": [
+      158,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprPlanLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      222,
+      12
+    ],
+    "end": [
+      222,
       16
     ]
   },
@@ -1509,11 +3093,11 @@
     "lean_name": "CapdagCli.instReprPlanLine.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      215,
+      222,
       12
     ],
     "end": [
-      215,
+      222,
       16
     ]
   },
@@ -1521,11 +3105,11 @@
     "lean_name": "CapdagCli.instReprPositional",
     "file": "CapdagCli/Line.lean",
     "start": [
-      192,
+      199,
       12
     ],
     "end": [
-      192,
+      199,
       16
     ]
   },
@@ -1533,11 +3117,11 @@
     "lean_name": "CapdagCli.instReprPositional.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      192,
+      199,
       12
     ],
     "end": [
-      192,
+      199,
       16
     ]
   },
@@ -1545,11 +3129,11 @@
     "lean_name": "CapdagCli.instReprRefusal",
     "file": "CapdagCli/Line.lean",
     "start": [
-      329,
+      336,
       12
     ],
     "end": [
-      329,
+      336,
       16
     ]
   },
@@ -1557,11 +3141,11 @@
     "lean_name": "CapdagCli.instReprRefusal.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      329,
+      336,
       12
     ],
     "end": [
-      329,
+      336,
       16
     ]
   },
@@ -1569,11 +3153,11 @@
     "lean_name": "CapdagCli.instReprRunLine",
     "file": "CapdagCli/Line.lean",
     "start": [
-      208,
+      215,
       12
     ],
     "end": [
-      208,
+      215,
       16
     ]
   },
@@ -1581,11 +3165,11 @@
     "lean_name": "CapdagCli.instReprRunLine.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      208,
+      215,
       12
     ],
     "end": [
-      208,
+      215,
       16
     ]
   },
@@ -1617,11 +3201,11 @@
     "lean_name": "CapdagCli.instReprSpelling",
     "file": "CapdagCli/Line.lean",
     "start": [
-      229,
+      236,
       12
     ],
     "end": [
-      229,
+      236,
       16
     ]
   },
@@ -1629,11 +3213,11 @@
     "lean_name": "CapdagCli.instReprSpelling.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      229,
+      236,
       12
     ],
     "end": [
-      229,
+      236,
       16
     ]
   },
@@ -1641,11 +3225,11 @@
     "lean_name": "CapdagCli.instReprStage",
     "file": "CapdagCli/Line.lean",
     "start": [
-      163,
+      170,
       12
     ],
     "end": [
-      163,
+      170,
       16
     ]
   },
@@ -1653,11 +3237,11 @@
     "lean_name": "CapdagCli.instReprStage.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      163,
+      170,
       12
     ],
     "end": [
-      163,
+      170,
       16
     ]
   },
@@ -1689,11 +3273,11 @@
     "lean_name": "CapdagCli.instReprValue",
     "file": "CapdagCli/Line.lean",
     "start": [
-      175,
+      182,
       12
     ],
     "end": [
-      175,
+      182,
       16
     ]
   },
@@ -1701,11 +3285,11 @@
     "lean_name": "CapdagCli.instReprValue.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      175,
+      182,
       12
     ],
     "end": [
-      175,
+      182,
       16
     ]
   },
@@ -1713,11 +3297,11 @@
     "lean_name": "CapdagCli.instReprVerdict",
     "file": "CapdagCli/Line.lean",
     "start": [
-      528,
+      548,
       12
     ],
     "end": [
-      528,
+      548,
       16
     ]
   },
@@ -1725,11 +3309,35 @@
     "lean_name": "CapdagCli.instReprVerdict.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      528,
+      548,
       12
     ],
     "end": [
-      528,
+      548,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprWordKind",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      76,
+      12
+    ],
+    "end": [
+      76,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprWordKind.repr",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      76,
+      12
+    ],
+    "end": [
+      76,
       16
     ]
   },
@@ -1737,11 +3345,11 @@
     "lean_name": "CapdagCli.instReprWritten",
     "file": "CapdagCli/Line.lean",
     "start": [
-      184,
+      191,
       12
     ],
     "end": [
-      184,
+      191,
       16
     ]
   },
@@ -1749,11 +3357,11 @@
     "lean_name": "CapdagCli.instReprWritten.repr",
     "file": "CapdagCli/Line.lean",
     "start": [
-      184,
+      191,
       12
     ],
     "end": [
-      184,
+      191,
       16
     ]
   },
@@ -1761,11 +3369,11 @@
     "lean_name": "CapdagCli.liveBound",
     "file": "CapdagCli/Line.lean",
     "start": [
-      441,
+      448,
       1
     ],
     "end": [
-      442,
+      449,
       85
     ]
   },
@@ -1773,11 +3381,11 @@
     "lean_name": "CapdagCli.liveOf",
     "file": "CapdagCli/Line.lean",
     "start": [
-      437,
+      444,
       1
     ],
     "end": [
-      439,
+      446,
       74
     ]
   },
@@ -1785,11 +3393,11 @@
     "lean_name": "CapdagCli.liveStages",
     "file": "CapdagCli/Line.lean",
     "start": [
-      426,
+      433,
       1
     ],
     "end": [
-      435,
+      442,
       80
     ]
   },
@@ -1797,11 +3405,11 @@
     "lean_name": "CapdagCli.machineMissing",
     "file": "CapdagCli/Line.lean",
     "start": [
-      386,
+      393,
       1
     ],
     "end": [
-      389,
+      396,
       18
     ]
   },
@@ -1809,11 +3417,11 @@
     "lean_name": "CapdagCli.machineStages",
     "file": "CapdagCli/Line.lean",
     "start": [
-      465,
+      472,
       1
     ],
     "end": [
-      473,
+      480,
       88
     ]
   },
@@ -1821,11 +3429,11 @@
     "lean_name": "CapdagCli.missing",
     "file": "CapdagCli/Line.lean",
     "start": [
-      457,
+      464,
       1
     ],
     "end": [
-      459,
+      466,
       75
     ]
   },
@@ -1833,23 +3441,35 @@
     "lean_name": "CapdagCli.missingThing",
     "file": "CapdagCli/Line.lean",
     "start": [
-      391,
+      398,
       1
     ],
     "end": [
-      401,
+      408,
       23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.ofLine",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      281,
+      1
+    ],
+    "end": [
+      285,
+      15
     ]
   },
   {
     "lean_name": "CapdagCli.only",
     "file": "CapdagCli/Line.lean",
     "start": [
-      408,
+      415,
       1
     ],
     "end": [
-      411,
+      418,
       14
     ]
   },
@@ -1857,11 +3477,11 @@
     "lean_name": "CapdagCli.openOptions",
     "file": "CapdagCli/Line.lean",
     "start": [
-      461,
+      468,
       1
     ],
     "end": [
-      463,
+      470,
       71
     ]
   },
@@ -1869,11 +3489,11 @@
     "lean_name": "CapdagCli.pathBound",
     "file": "CapdagCli/Line.lean",
     "start": [
-      419,
+      426,
       1
     ],
     "end": [
-      421,
+      428,
       59
     ]
   },
@@ -1881,11 +3501,11 @@
     "lean_name": "CapdagCli.pathCandidates",
     "file": "CapdagCli/Line.lean",
     "start": [
-      413,
+      420,
       1
     ],
     "end": [
-      417,
+      424,
       61
     ]
   },
@@ -1893,11 +3513,11 @@
     "lean_name": "CapdagCli.planStages",
     "file": "CapdagCli/Line.lean",
     "start": [
-      500,
+      507,
       1
     ],
     "end": [
-      506,
+      513,
       117
     ]
   },
@@ -1905,11 +3525,11 @@
     "lean_name": "CapdagCli.planVerdict",
     "file": "CapdagCli/Line.lean",
     "start": [
-      574,
+      594,
       1
     ],
     "end": [
-      591,
+      611,
       28
     ]
   },
@@ -1917,11 +3537,11 @@
     "lean_name": "CapdagCli.printsRerun",
     "file": "CapdagCli/Line.lean",
     "start": [
-      643,
+      676,
       1
     ],
     "end": [
-      645,
+      678,
       85
     ]
   },
@@ -1929,11 +3549,11 @@
     "lean_name": "CapdagCli.readArgs",
     "file": "CapdagCli/Line.lean",
     "start": [
-      251,
+      258,
       1
     ],
     "end": [
-      260,
+      267,
       45
     ]
   },
@@ -1941,11 +3561,11 @@
     "lean_name": "CapdagCli.refusal",
     "file": "CapdagCli/Line.lean",
     "start": [
-      372,
+      379,
       1
     ],
     "end": [
-      384,
+      391,
       12
     ]
   },
@@ -1953,11 +3573,11 @@
     "lean_name": "CapdagCli.rerun",
     "file": "CapdagCli/Line.lean",
     "start": [
-      632,
+      665,
       1
     ],
     "end": [
-      641,
+      674,
       106
     ]
   },
@@ -1965,11 +3585,11 @@
     "lean_name": "CapdagCli.resolve",
     "file": "CapdagCli/Line.lean",
     "start": [
-      554,
+      574,
       1
     ],
     "end": [
-      566,
+      586,
       28
     ]
   },
@@ -1986,14 +3606,26 @@
     ]
   },
   {
-    "lean_name": "CapdagCli.stages",
-    "file": "CapdagCli/Line.lean",
+    "lean_name": "CapdagCli.showing",
+    "file": "CapdagCli/Cli.lean",
     "start": [
-      542,
+      301,
       1
     ],
     "end": [
-      546,
+      306,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.stages",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      562,
+      1
+    ],
+    "end": [
+      566,
       27
     ]
   },
@@ -2001,11 +3633,11 @@
     "lean_name": "CapdagCli.stdinBound",
     "file": "CapdagCli/Line.lean",
     "start": [
-      449,
+      456,
       1
     ],
     "end": [
-      451,
+      458,
       67
     ]
   },
@@ -2013,11 +3645,11 @@
     "lean_name": "CapdagCli.stdinCandidates",
     "file": "CapdagCli/Line.lean",
     "start": [
-      444,
+      451,
       1
     ],
     "end": [
-      447,
+      454,
       96
     ]
   },
@@ -2025,12 +3657,36 @@
     "lean_name": "CapdagCli.toMachine",
     "file": "CapdagCli/Line.lean",
     "start": [
-      489,
+      496,
       1
     ],
     "end": [
-      498,
+      505,
       31
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.tried",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      298,
+      1
+    ],
+    "end": [
+      299,
+      88
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.viewLine",
+    "file": "CapdagCli/Cli.lean",
+    "start": [
+      308,
+      1
+    ],
+    "end": [
+      310,
+      40
     ]
   },
   {
@@ -2607,6 +4263,42 @@
     "end": [
       790,
       25
+    ]
+  },
+  {
+    "lean_name": "List.eraseDups",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2279,
+      1
+    ],
+    "end": [
+      2288,
+      76
+    ]
+  },
+  {
+    "lean_name": "List.eraseDupsBy",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2259,
+      1
+    ],
+    "end": [
+      2275,
+      31
+    ]
+  },
+  {
+    "lean_name": "List.eraseDupsBy.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2271,
+      3
+    ],
+    "end": [
+      2275,
+      31
     ]
   },
   {
