@@ -4,7 +4,7 @@ description = "The capdag command's terminal interface: its surfaces, flags and 
 edition = "2021"
 license = "MIT"
 name = "capdag-tuikit"
-version = "1.1087.0"
+version = "1.1088.41"
 
 [dependencies]
 # The library the commands work with: its own types, notation, planning and

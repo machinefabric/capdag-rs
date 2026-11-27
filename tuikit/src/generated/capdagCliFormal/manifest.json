@@ -660,98 +660,98 @@
     "Init",
     "CapdagCli.Line"
   ],
-  "declarations": 720,
+  "declarations": 817,
   "exports": [
     {
       "lean_name": "CapdagCli.Choices.ofCount",
       "module": "CapdagCli.Line",
       "rust_path": "choices::of_count",
       "lean_type": "Nat → CapdagCli.Choices",
-      "source": "CapdagCli/Line.lean:79:1"
+      "source": "CapdagCli/Line.lean:95:1"
     },
     {
       "lean_name": "CapdagCli.Refusal.says",
       "module": "CapdagCli.Line",
       "rust_path": "refusal::says",
       "lean_type": "CapdagCli.Refusal → String",
-      "source": "CapdagCli/Line.lean:273:1"
+      "source": "CapdagCli/Line.lean:331:1"
     },
     {
       "lean_name": "CapdagCli.Terminal.canAsk",
       "module": "CapdagCli.Line",
       "rust_path": "terminal::can_ask",
       "lean_type": "CapdagCli.Terminal → Bool",
-      "source": "CapdagCli/Line.lean:61:1"
+      "source": "CapdagCli/Line.lean:74:1"
     },
     {
       "lean_name": "CapdagCli.Verdict.exit",
       "module": "CapdagCli.Line",
       "rust_path": "verdict::exit",
       "lean_type": "CapdagCli.Verdict → Option Nat",
-      "source": "CapdagCli/Line.lean:464:1"
+      "source": "CapdagCli/Line.lean:593:1"
     },
     {
       "lean_name": "CapdagCli.firstStop",
       "module": "CapdagCli.Line",
       "rust_path": "first_stop",
       "lean_type": "Bool → List CapdagCli.Entry → Option CapdagCli.Verdict",
-      "source": "CapdagCli/Line.lean:409:1"
+      "source": "CapdagCli/Line.lean:530:1"
     },
     {
       "lean_name": "CapdagCli.give",
       "module": "CapdagCli.Line",
       "rust_path": "give",
       "lean_type": "CapdagCli.World → CapdagCli.RunLine → CapdagCli.Stage → Nat → CapdagCli.RunLine",
-      "source": "CapdagCli/Line.lean:483:1"
+      "source": "CapdagCli/Line.lean:614:1"
     },
     {
       "lean_name": "CapdagCli.planVerdict",
       "module": "CapdagCli.Line",
       "rust_path": "plan_verdict",
       "lean_type": "CapdagCli.World → CapdagCli.PlanLine → CapdagCli.Verdict",
-      "source": "CapdagCli/Line.lean:450:1"
+      "source": "CapdagCli/Line.lean:574:1"
     },
     {
       "lean_name": "CapdagCli.printsRerun",
       "module": "CapdagCli.Line",
       "rust_path": "prints_rerun",
       "lean_type": "CapdagCli.World → CapdagCli.RunLine → CapdagCli.RunLine → Bool",
-      "source": "CapdagCli/Line.lean:510:1"
+      "source": "CapdagCli/Line.lean:643:1"
     },
     {
       "lean_name": "CapdagCli.readArgs",
       "module": "CapdagCli.Line",
       "rust_path": "read_args",
       "lean_type": "Bool → List CapdagCli.Arg → Option CapdagCli.Written × List CapdagCli.Positional",
-      "source": "CapdagCli/Line.lean:214:1"
+      "source": "CapdagCli/Line.lean:251:1"
     },
     {
       "lean_name": "CapdagCli.refusal",
       "module": "CapdagCli.Line",
       "rust_path": "refusal",
       "lean_type": "CapdagCli.RunLine → Option CapdagCli.Refusal",
-      "source": "CapdagCli/Line.lean:297:1"
+      "source": "CapdagCli/Line.lean:372:1"
     },
     {
       "lean_name": "CapdagCli.rerun",
       "module": "CapdagCli.Line",
       "rust_path": "rerun",
       "lean_type": "CapdagCli.World → CapdagCli.RunLine → CapdagCli.RunLine",
-      "source": "CapdagCli/Line.lean:500:1"
+      "source": "CapdagCli/Line.lean:632:1"
     },
     {
       "lean_name": "CapdagCli.resolve",
       "module": "CapdagCli.Line",
       "rust_path": "resolve",
       "lean_type": "CapdagCli.World → CapdagCli.RunLine → CapdagCli.Verdict",
-      "source": "CapdagCli/Line.lean:438:1"
+      "source": "CapdagCli/Line.lean:554:1"
     },
     {
       "lean_name": "CapdagCli.settle",
       "module": "CapdagCli.Line",
       "rust_path": "settle",
       "lean_type": "Bool → Bool → CapdagCli.Choices → CapdagCli.Settled",
-      "source": "CapdagCli/Line.lean:100:1"
+      "source": "CapdagCli/Line.lean:125:1"
     }
   ]
 }
