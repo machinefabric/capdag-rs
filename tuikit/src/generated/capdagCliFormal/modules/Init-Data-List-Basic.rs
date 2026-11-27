@@ -141,6 +141,25 @@ pub(crate) unsafe extern "C" fn l_List_deraseDupsBy_dloop_d__redArg(mut x_1: Obj
     }
 }
 
+// Lean: List.head?._redArg
+// Compiled from: List.head?
+// Source: <lean>/Init/Data/List/Basic.lean:362:1
+pub(crate) unsafe extern "C" fn l_List_dhead_x3f__d__redArg(x_1: Obj) -> Obj {
+    match rt::lean_obj_tag(x_1) {
+        0 => {
+            let x_2: Obj = rt::lean_box(0);
+            return x_2;
+        }
+        _ => {
+            let x_3: Obj = rt::lean_ctor_get(x_1, 0);
+            rt::lean_inc(x_3);
+            let x_4: Obj = rt::lean_alloc_ctor(1, 1, 0);
+            rt::lean_ctor_set(x_4, 0, x_3);
+            return x_4;
+        }
+    }
+}
+
 // Lean: List.isEmpty._redArg
 // Compiled from: List.isEmpty
 // Source: <lean>/Init/Data/List/Basic.lean:754:1
