@@ -1,0 +1,3164 @@
+[
+  {
+    "lean_name": "Array.getInternalBorrowed",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3413,
+      1
+    ],
+    "end": [
+      3420,
+      22
+    ]
+  },
+  {
+    "lean_name": "Array.mk",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3351,
+      3
+    ],
+    "end": [
+      3351,
+      5
+    ]
+  },
+  {
+    "lean_name": "Array.mkEmpty",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3376,
+      1
+    ],
+    "end": [
+      3383,
+      21
+    ]
+  },
+  {
+    "lean_name": "Array.push",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3468,
+      1
+    ],
+    "end": [
+      3480,
+      35
+    ]
+  },
+  {
+    "lean_name": "Array.size",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3400,
+      1
+    ],
+    "end": [
+      3411,
+      17
+    ]
+  },
+  {
+    "lean_name": "Array.toList",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3358,
+      3
+    ],
+    "end": [
+      3358,
+      9
+    ]
+  },
+  {
+    "lean_name": "Bool.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      76,
+      1
+    ],
+    "end": [
+      78,
+      24
+    ]
+  },
+  {
+    "lean_name": "ByteArray.get!",
+    "file": "<lean>/Init/Data/ByteArray/Basic.lean",
+    "start": [
+      65,
+      1
+    ],
+    "end": [
+      70,
+      22
+    ]
+  },
+  {
+    "lean_name": "ByteArray.size",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3613,
+      1
+    ],
+    "end": [
+      3621,
+      20
+    ]
+  },
+  {
+    "lean_name": "ByteArray.toUInt64LE!",
+    "file": "<lean>/Init/Data/ByteArray/Extra.lean",
+    "start": [
+      15,
+      1
+    ],
+    "end": [
+      29,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Arg.input",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      202,
+      1
+    ],
+    "end": [
+      206,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      67,
+      1
+    ],
+    "end": [
+      77,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Choices.free.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      75,
+      3
+    ],
+    "end": [
+      76,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.many.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      73,
+      3
+    ],
+    "end": [
+      74,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.none.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      69,
+      3
+    ],
+    "end": [
+      70,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.ofCount",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      79,
+      1
+    ],
+    "end": [
+      83,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Choices.ofNat",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Choices.one.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      71,
+      3
+    ],
+    "end": [
+      72,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Positional.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      156,
+      1
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Positional.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Positional.path.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      158,
+      3
+    ],
+    "end": [
+      158,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Positional.stdin.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      159,
+      3
+    ],
+    "end": [
+      159,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Positional.value",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      369,
+      1
+    ],
+    "end": [
+      372,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      253,
+      1
+    ],
+    "end": [
+      271,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.fromWithMachine.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      259,
+      3
+    ],
+    "end": [
+      260,
+      20
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.fromWithoutStdin.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      261,
+      3
+    ],
+    "end": [
+      262,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.namedWithoutMachine.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      265,
+      3
+    ],
+    "end": [
+      266,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.noSuchInput.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      267,
+      3
+    ],
+    "end": [
+      268,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.nothingToPlan.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      269,
+      3
+    ],
+    "end": [
+      270,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.nothingToRun.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      255,
+      3
+    ],
+    "end": [
+      256,
+      17
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.says",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      273,
+      1
+    ],
+    "end": [
+      282,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.stdinTwice.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      263,
+      3
+    ],
+    "end": [
+      264,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.toWithMachine.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      257,
+      3
+    ],
+    "end": [
+      258,
+      18
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.hasStdin",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      288,
+      1
+    ],
+    "end": [
+      289,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.namedInputs",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      310,
+      1
+    ],
+    "end": [
+      311,
+      70
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.paths",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      291,
+      1
+    ],
+    "end": [
+      295,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.runs",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      426,
+      1
+    ],
+    "end": [
+      430,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.stdinCount",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      284,
+      1
+    ],
+    "end": [
+      286,
+      83
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ask.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      91,
+      3
+    ],
+    "end": [
+      92,
+      8
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      85,
+      1
+    ],
+    "end": [
+      98,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Settled.given.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      87,
+      3
+    ],
+    "end": [
+      88,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.implicit.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      89,
+      3
+    ],
+    "end": [
+      90,
+      13
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.name.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      93,
+      3
+    ],
+    "end": [
+      95,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.nothing.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      96,
+      3
+    ],
+    "end": [
+      97,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ofNat",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ok",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      112,
+      1
+    ],
+    "end": [
+      116,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.bracket.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      185,
+      3
+    ],
+    "end": [
+      186,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      183,
+      1
+    ],
+    "end": [
+      193,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.dash.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      189,
+      3
+    ],
+    "end": [
+      190,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.isMachine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      208,
+      1
+    ],
+    "end": [
+      212,
+      15
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.machineFile.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      187,
+      3
+    ],
+    "end": [
+      188,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.ofNat",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.other.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      191,
+      3
+    ],
+    "end": [
+      192,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      118,
+      1
+    ],
+    "end": [
+      135,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Stage.input.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      130,
+      3
+    ],
+    "end": [
+      131,
+      20
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.machine.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      124,
+      3
+    ],
+    "end": [
+      125,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.option.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      132,
+      3
+    ],
+    "end": [
+      134,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.path.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      126,
+      3
+    ],
+    "end": [
+      127,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.stdin.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      128,
+      3
+    ],
+    "end": [
+      129,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.stdinType.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      120,
+      3
+    ],
+    "end": [
+      121,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Stage.target.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      122,
+      3
+    ],
+    "end": [
+      123,
+      11
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.canAsk",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      61,
+      1
+    ],
+    "end": [
+      63,
+      59
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Value.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      139,
+      1
+    ],
+    "end": [
+      147,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Value.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Value.file.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      141,
+      3
+    ],
+    "end": [
+      142,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Value.stdin.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      145,
+      3
+    ],
+    "end": [
+      146,
+      10
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Value.text.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      143,
+      3
+    ],
+    "end": [
+      144,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.answers.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      405,
+      3
+    ],
+    "end": [
+      406,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.asks.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      399,
+      3
+    ],
+    "end": [
+      400,
+      21
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.ctorElim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      393,
+      1
+    ],
+    "end": [
+      407,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.ctorIdx",
+    "file": "CapdagCli/Line.lean",
+    "start": null,
+    "end": null
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.exit",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      464,
+      1
+    ],
+    "end": [
+      474,
+      20
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.names.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      401,
+      3
+    ],
+    "end": [
+      402,
+      22
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.nothing.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      403,
+      3
+    ],
+    "end": [
+      404,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.refused.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      395,
+      3
+    ],
+    "end": [
+      396,
+      26
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.runs.elim",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      397,
+      3
+    ],
+    "end": [
+      398,
+      23
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.World.canAsk",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      248,
+      1
+    ],
+    "end": [
+      249,
+      57
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.bound",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      336,
+      1
+    ],
+    "end": [
+      338,
+      55
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.candidates",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      313,
+      1
+    ],
+    "end": [
+      316,
+      61
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.dropFirst",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      478,
+      1
+    ],
+    "end": [
+      481,
+      58
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.firstStop",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      409,
+      1
+    ],
+    "end": [
+      418,
+      38
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.give",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      483,
+      1
+    ],
+    "end": [
+      498,
+      104
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqArg",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      200,
+      18
+    ],
+    "end": [
+      200,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqArg.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      200,
+      18
+    ],
+    "end": [
+      200,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqChoices",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      77,
+      18
+    ],
+    "end": [
+      77,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqPlanLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      181,
+      18
+    ],
+    "end": [
+      181,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqPlanLine.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      181,
+      18
+    ],
+    "end": [
+      181,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqPositional",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqPositional.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      160,
+      18
+    ],
+    "end": [
+      160,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqRefusal",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      271,
+      18
+    ],
+    "end": [
+      271,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqRefusal.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      271,
+      18
+    ],
+    "end": [
+      271,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqRunLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      174,
+      18
+    ],
+    "end": [
+      174,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqRunLine.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      174,
+      18
+    ],
+    "end": [
+      174,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqSettled",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      98,
+      18
+    ],
+    "end": [
+      98,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqSpelling",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      193,
+      18
+    ],
+    "end": [
+      193,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqStage",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      135,
+      18
+    ],
+    "end": [
+      135,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqStage.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      135,
+      18
+    ],
+    "end": [
+      135,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqTerminal",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      59,
+      18
+    ],
+    "end": [
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqTerminal.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      59,
+      18
+    ],
+    "end": [
+      59,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqValue",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      147,
+      18
+    ],
+    "end": [
+      147,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqValue.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      147,
+      18
+    ],
+    "end": [
+      147,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqVerdict",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      407,
+      18
+    ],
+    "end": [
+      407,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqVerdict.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      407,
+      18
+    ],
+    "end": [
+      407,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqWritten",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      154,
+      18
+    ],
+    "end": [
+      154,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instDecidableEqWritten.decEq",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      154,
+      18
+    ],
+    "end": [
+      154,
+      29
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprArg",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      200,
+      12
+    ],
+    "end": [
+      200,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprArg.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      200,
+      12
+    ],
+    "end": [
+      200,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprChoices",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      77,
+      12
+    ],
+    "end": [
+      77,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprChoices.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      77,
+      12
+    ],
+    "end": [
+      77,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprPlanLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      181,
+      12
+    ],
+    "end": [
+      181,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprPlanLine.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      181,
+      12
+    ],
+    "end": [
+      181,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprPositional",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprPositional.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      160,
+      12
+    ],
+    "end": [
+      160,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprRefusal",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      271,
+      12
+    ],
+    "end": [
+      271,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprRefusal.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      271,
+      12
+    ],
+    "end": [
+      271,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprRunLine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      174,
+      12
+    ],
+    "end": [
+      174,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprRunLine.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      174,
+      12
+    ],
+    "end": [
+      174,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprSettled",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      98,
+      12
+    ],
+    "end": [
+      98,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprSettled.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      98,
+      12
+    ],
+    "end": [
+      98,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprSpelling",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      193,
+      12
+    ],
+    "end": [
+      193,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprSpelling.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      193,
+      12
+    ],
+    "end": [
+      193,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprStage",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      135,
+      12
+    ],
+    "end": [
+      135,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprStage.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      135,
+      12
+    ],
+    "end": [
+      135,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprTerminal",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      59,
+      12
+    ],
+    "end": [
+      59,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprTerminal.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      59,
+      12
+    ],
+    "end": [
+      59,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprValue",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      147,
+      12
+    ],
+    "end": [
+      147,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprValue.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      147,
+      12
+    ],
+    "end": [
+      147,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprVerdict",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      407,
+      12
+    ],
+    "end": [
+      407,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprVerdict.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      407,
+      12
+    ],
+    "end": [
+      407,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprWritten",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      154,
+      12
+    ],
+    "end": [
+      154,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.instReprWritten.repr",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      154,
+      12
+    ],
+    "end": [
+      154,
+      16
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.machineStages",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      351,
+      1
+    ],
+    "end": [
+      358,
+      88
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.missing",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      340,
+      1
+    ],
+    "end": [
+      342,
+      75
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.only",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      318,
+      1
+    ],
+    "end": [
+      321,
+      14
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.openOptions",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      344,
+      1
+    ],
+    "end": [
+      346,
+      71
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.pathBound",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      323,
+      1
+    ],
+    "end": [
+      325,
+      55
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.planStages",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      383,
+      1
+    ],
+    "end": [
+      389,
+      111
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.planVerdict",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      450,
+      1
+    ],
+    "end": [
+      462,
+      24
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.printsRerun",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      510,
+      1
+    ],
+    "end": [
+      512,
+      85
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.readArgs",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      214,
+      1
+    ],
+    "end": [
+      222,
+      45
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.refusal",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      297,
+      1
+    ],
+    "end": [
+      306,
+      12
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.rerun",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      500,
+      1
+    ],
+    "end": [
+      508,
+      94
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.resolve",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      438,
+      1
+    ],
+    "end": [
+      448,
+      37
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.runCount",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      360,
+      1
+    ],
+    "end": [
+      365,
+      9
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.settle",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      100,
+      1
+    ],
+    "end": [
+      110,
+      46
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.stages",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      420,
+      1
+    ],
+    "end": [
+      424,
+      27
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.stdinBound",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      332,
+      1
+    ],
+    "end": [
+      334,
+      67
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.stdinCandidates",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      327,
+      1
+    ],
+    "end": [
+      330,
+      63
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.toMachine",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      374,
+      1
+    ],
+    "end": [
+      381,
+      19
+    ]
+  },
+  {
+    "lean_name": "CapdagCli.unknownInput",
+    "file": "CapdagCli/Line.lean",
+    "start": [
+      432,
+      1
+    ],
+    "end": [
+      436,
+      17
+    ]
+  },
+  {
+    "lean_name": "IO.Error.fopenErrorToString",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      256,
+      1
+    ],
+    "end": [
+      258,
+      91
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkAlreadyExists",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      202,
+      1
+    ],
+    "end": [
+      204,
+      21
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkAlreadyExistsFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      158,
+      1
+    ],
+    "end": [
+      160,
+      23
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkEofError",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      162,
+      1
+    ],
+    "end": [
+      164,
+      16
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkHardwareFault",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      234,
+      1
+    ],
+    "end": [
+      236,
+      16
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkIllegalOperation",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      242,
+      1
+    ],
+    "end": [
+      244,
+      19
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkInappropriateType",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      206,
+      1
+    ],
+    "end": [
+      208,
+      25
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkInappropriateTypeFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      166,
+      1
+    ],
+    "end": [
+      168,
+      27
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkInterrupted",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      170,
+      1
+    ],
+    "end": [
+      172,
+      14
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkInvalidArgument",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      222,
+      1
+    ],
+    "end": [
+      224,
+      23
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkInvalidArgumentFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      174,
+      1
+    ],
+    "end": [
+      176,
+      25
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkNoFileOrDirectory",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      178,
+      1
+    ],
+    "end": [
+      180,
+      20
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkNoSuchThing",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      210,
+      1
+    ],
+    "end": [
+      212,
+      19
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkNoSuchThingFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      182,
+      1
+    ],
+    "end": [
+      184,
+      21
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkOtherError",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      226,
+      1
+    ],
+    "end": [
+      228,
+      13
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkPermissionDenied",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      230,
+      1
+    ],
+    "end": [
+      232,
+      24
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkPermissionDeniedFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      186,
+      1
+    ],
+    "end": [
+      188,
+      26
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkProtocolError",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      246,
+      1
+    ],
+    "end": [
+      248,
+      16
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkResourceBusy",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      218,
+      1
+    ],
+    "end": [
+      220,
+      15
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkResourceExhausted",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      198,
+      1
+    ],
+    "end": [
+      200,
+      25
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkResourceExhaustedFile",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      190,
+      1
+    ],
+    "end": [
+      192,
+      27
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkResourceVanished",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      214,
+      1
+    ],
+    "end": [
+      216,
+      19
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkTimeExpired",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      250,
+      1
+    ],
+    "end": [
+      252,
+      14
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkUnsatisfiedConstraints",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      238,
+      1
+    ],
+    "end": [
+      240,
+      25
+    ]
+  },
+  {
+    "lean_name": "IO.Error.mkUnsupportedOperation",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      194,
+      1
+    ],
+    "end": [
+      196,
+      23
+    ]
+  },
+  {
+    "lean_name": "IO.Error.otherErrorToString",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      260,
+      1
+    ],
+    "end": [
+      262,
+      75
+    ]
+  },
+  {
+    "lean_name": "IO.Error.toString",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      264,
+      1
+    ],
+    "end": [
+      297,
+      52
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.flush",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      822,
+      1
+    ],
+    "end": [
+      826,
+      77
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.getLine",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      856,
+      1
+    ],
+    "end": [
+      862,
+      84
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.isTty",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      817,
+      1
+    ],
+    "end": [
+      820,
+      82
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.putStr",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      863,
+      1
+    ],
+    "end": [
+      869,
+      96
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.read",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      841,
+      1
+    ],
+    "end": [
+      847,
+      96
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Handle.write",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      848,
+      1
+    ],
+    "end": [
+      854,
+      101
+    ]
+  },
+  {
+    "lean_name": "IO.FS.Stream.ofHandle",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      1678,
+      1
+    ],
+    "end": [
+      1689,
+      28
+    ]
+  },
+  {
+    "lean_name": "IO.eprint",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      1279,
+      1
+    ],
+    "end": [
+      1285,
+      27
+    ]
+  },
+  {
+    "lean_name": "IO.eprintln",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      1287,
+      1
+    ],
+    "end": [
+      1292,
+      36
+    ]
+  },
+  {
+    "lean_name": "IO.getRandomBytes",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      423,
+      1
+    ],
+    "end": [
+      428,
+      91
+    ]
+  },
+  {
+    "lean_name": "IO.getStderr",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      749,
+      1
+    ],
+    "end": [
+      754,
+      64
+    ]
+  },
+  {
+    "lean_name": "IO.stdGenRef",
+    "file": "<lean>/Init/Data/Random.lean",
+    "start": [
+      124,
+      1
+    ],
+    "end": [
+      126,
+      27
+    ]
+  },
+  {
+    "lean_name": "IO.userError",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      145,
+      1
+    ],
+    "end": [
+      152,
+      23
+    ]
+  },
+  {
+    "lean_name": "Int.decLt",
+    "file": "<lean>/Init/Data/Int/Basic.lean",
+    "start": [
+      303,
+      1
+    ],
+    "end": [
+      314,
+      14
+    ]
+  },
+  {
+    "lean_name": "Int.natAbs",
+    "file": "<lean>/Init/Data/Int/Basic.lean",
+    "start": [
+      317,
+      1
+    ],
+    "end": [
+      332,
+      22
+    ]
+  },
+  {
+    "lean_name": "Int.ofNat",
+    "file": "<lean>/Init/Data/Int/Basic.lean",
+    "start": [
+      47,
+      3
+    ],
+    "end": [
+      52,
+      24
+    ]
+  },
+  {
+    "lean_name": "Int.repr",
+    "file": "<lean>/Init/Data/Int/Repr.lean",
+    "start": [
+      14,
+      1
+    ],
+    "end": [
+      19,
+      46
+    ]
+  },
+  {
+    "lean_name": "List.appendTR",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      579,
+      1
+    ],
+    "end": [
+      594,
+      27
+    ]
+  },
+  {
+    "lean_name": "List.beq",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3120,
+      1
+    ],
+    "end": [
+      3129,
+      59
+    ]
+  },
+  {
+    "lean_name": "List.elem",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      774,
+      1
+    ],
+    "end": [
+      790,
+      25
+    ]
+  },
+  {
+    "lean_name": "List.filterMapTR.go",
+    "file": "<lean>/Init/Data/List/Impl.lean",
+    "start": [
+      107,
+      17
+    ],
+    "end": [
+      111,
+      35
+    ]
+  },
+  {
+    "lean_name": "List.filterTR.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2464,
+      17
+    ],
+    "end": [
+      2468,
+      28
+    ]
+  },
+  {
+    "lean_name": "List.find?",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      1598,
+      1
+    ],
+    "end": [
+      1613,
+      26
+    ]
+  },
+  {
+    "lean_name": "List.foldl",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3243,
+      1
+    ],
+    "end": [
+      3255,
+      37
+    ]
+  },
+  {
+    "lean_name": "List.hasDecEq",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3131,
+      1
+    ],
+    "end": [
+      3145,
+      43
+    ]
+  },
+  {
+    "lean_name": "List.isEmpty",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      754,
+      1
+    ],
+    "end": [
+      767,
+      20
+    ]
+  },
+  {
+    "lean_name": "List.lengthTR",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3202,
+      1
+    ],
+    "end": [
+      3213,
+      19
+    ]
+  },
+  {
+    "lean_name": "List.lengthTRAux",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3197,
+      1
+    ],
+    "end": [
+      3200,
+      48
+    ]
+  },
+  {
+    "lean_name": "List.mapTR.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2432,
+      17
+    ],
+    "end": [
+      2434,
+      37
+    ]
+  },
+  {
+    "lean_name": "List.range",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2084,
+      1
+    ],
+    "end": [
+      2099,
+      32
+    ]
+  },
+  {
+    "lean_name": "List.range.loop",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      2097,
+      3
+    ],
+    "end": [
+      2099,
+      32
+    ]
+  },
+  {
+    "lean_name": "List.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      431,
+      1
+    ],
+    "end": [
+      435,
+      77
+    ]
+  },
+  {
+    "lean_name": "List.repr'",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      440,
+      1
+    ],
+    "end": [
+      444,
+      81
+    ]
+  },
+  {
+    "lean_name": "List.reverse",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      553,
+      1
+    ],
+    "end": [
+      567,
+      19
+    ]
+  },
+  {
+    "lean_name": "List.reverseAux",
+    "file": "<lean>/Init/Data/List/Basic.lean",
+    "start": [
+      545,
+      1
+    ],
+    "end": [
+      548,
+      35
+    ]
+  },
+  {
+    "lean_name": "Nat.add",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1879,
+      1
+    ],
+    "end": [
+      1890,
+      44
+    ]
+  },
+  {
+    "lean_name": "Nat.ble",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1998,
+      1
+    ],
+    "end": [
+      2013,
+      30
+    ]
+  },
+  {
+    "lean_name": "Nat.decEq",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1975,
+      1
+    ],
+    "end": [
+      1993,
+      36
+    ]
+  },
+  {
+    "lean_name": "Nat.decLe",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2196,
+      1
+    ],
+    "end": [
+      2212,
+      85
+    ]
+  },
+  {
+    "lean_name": "Nat.decLt",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2214,
+      1
+    ],
+    "end": [
+      2226,
+      19
+    ]
+  },
+  {
+    "lean_name": "Nat.digitChar",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      169,
+      1
+    ],
+    "end": [
+      197,
+      6
+    ]
+  },
+  {
+    "lean_name": "Nat.div",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2291,
+      1
+    ],
+    "end": [
+      2318,
+      17
+    ]
+  },
+  {
+    "lean_name": "Nat.mod",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2369,
+      1
+    ],
+    "end": [
+      2406,
+      57
+    ]
+  },
+  {
+    "lean_name": "Nat.pow",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1917,
+      1
+    ],
+    "end": [
+      1926,
+      38
+    ]
+  },
+  {
+    "lean_name": "Nat.reprFast",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      238,
+      1
+    ],
+    "end": [
+      241,
+      37
+    ]
+  },
+  {
+    "lean_name": "Nat.sub",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2231,
+      1
+    ],
+    "end": [
+      2250,
+      36
+    ]
+  },
+  {
+    "lean_name": "Nat.toDigits",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      207,
+      1
+    ],
+    "end": [
+      218,
+      31
+    ]
+  },
+  {
+    "lean_name": "Nat.toDigitsCore",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      199,
+      1
+    ],
+    "end": [
+      205,
+      43
+    ]
+  },
+  {
+    "lean_name": "Option.instDecidableEq",
+    "file": "<lean>/Init/Data/Option/Basic.lean",
+    "start": [
+      18,
+      1
+    ],
+    "end": [
+      30,
+      115
+    ]
+  },
+  {
+    "lean_name": "Option.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      113,
+      1
+    ],
+    "end": [
+      121,
+      65
+    ]
+  },
+  {
+    "lean_name": "Prod.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      147,
+      1
+    ],
+    "end": [
+      148,
+      109
+    ]
+  },
+  {
+    "lean_name": "Repr.addAppParen",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      83,
+      1
+    ],
+    "end": [
+      94,
+      6
+    ]
+  },
+  {
+    "lean_name": "ST.Prim.mkRef",
+    "file": "<lean>/Init/System/ST.lean",
+    "start": [
+      186,
+      1
+    ],
+    "end": [
+      187,
+      123
+    ]
+  },
+  {
+    "lean_name": "Std.Format.fill",
+    "file": "<lean>/Init/Data/Format/Basic.lean",
+    "start": [
+      122,
+      1
+    ],
+    "end": [
+      128,
+      45
+    ]
+  },
+  {
+    "lean_name": "Std.Format.joinSep",
+    "file": "<lean>/Init/Data/Format/Basic.lean",
+    "start": [
+      443,
+      1
+    ],
+    "end": [
+      451,
+      61
+    ]
+  },
+  {
+    "lean_name": "String.Internal.append",
+    "file": "<lean>/Init/Data/String/Bootstrap.lean",
+    "start": [
+      77,
+      1
+    ],
+    "end": [
+      78,
+      46
+    ]
+  },
+  {
+    "lean_name": "String.Internal.length",
+    "file": "<lean>/Init/Data/String/Bootstrap.lean",
+    "start": [
+      70,
+      1
+    ],
+    "end": [
+      71,
+      34
+    ]
+  },
+  {
+    "lean_name": "String.Pos.Raw.get",
+    "file": "<lean>/Init/Data/String/Basic.lean",
+    "start": [
+      1877,
+      1
+    ],
+    "end": [
+      1894,
+      26
+    ]
+  },
+  {
+    "lean_name": "String.Pos.Raw.set",
+    "file": "<lean>/Init/Data/String/Modify.lean",
+    "start": [
+      143,
+      1
+    ],
+    "end": [
+      162,
+      58
+    ]
+  },
+  {
+    "lean_name": "String.append",
+    "file": "<lean>/Init/Data/String/Defs.lean",
+    "start": [
+      83,
+      1
+    ],
+    "end": [
+      96,
+      52
+    ]
+  },
+  {
+    "lean_name": "String.ofList",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3692,
+      1
+    ],
+    "end": [
+      3702,
+      42
+    ]
+  },
+  {
+    "lean_name": "String.push",
+    "file": "<lean>/Init/Data/String/Bootstrap.lean",
+    "start": [
+      23,
+      1
+    ],
+    "end": [
+      39,
+      80
+    ]
+  },
+  {
+    "lean_name": "System.Platform.getNumBits",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2418,
+      1
+    ],
+    "end": [
+      2427,
+      28
+    ]
+  },
+  {
+    "lean_name": "System.Platform.numBits",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2429,
+      1
+    ],
+    "end": [
+      2433,
+      22
+    ]
+  },
+  {
+    "lean_name": "UInt32.add",
+    "file": "<lean>/Init/Data/UInt/BasicAux.lean",
+    "start": [
+      216,
+      1
+    ],
+    "end": [
+      223,
+      78
+    ]
+  },
+  {
+    "lean_name": "UInt32.decLe",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2818,
+      1
+    ],
+    "end": [
+      2832,
+      60
+    ]
+  },
+  {
+    "lean_name": "UInt32.toNat",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2764,
+      1
+    ],
+    "end": [
+      2770,
+      56
+    ]
+  },
+  {
+    "lean_name": "UInt64.lor",
+    "file": "<lean>/Init/Data/UInt/Basic.lean",
+    "start": [
+      647,
+      1
+    ],
+    "end": [
+      656,
+      80
+    ]
+  },
+  {
+    "lean_name": "UInt64.shiftLeft",
+    "file": "<lean>/Init/Data/UInt/Basic.lean",
+    "start": [
+      667,
+      1
+    ],
+    "end": [
+      673,
+      102
+    ]
+  },
+  {
+    "lean_name": "UInt64.toNat",
+    "file": "<lean>/Init/Data/UInt/BasicAux.lean",
+    "start": [
+      277,
+      1
+    ],
+    "end": [
+      283,
+      56
+    ]
+  },
+  {
+    "lean_name": "UInt8.toUInt64",
+    "file": "<lean>/Init/Data/UInt/BasicAux.lean",
+    "start": [
+      305,
+      1
+    ],
+    "end": [
+      311,
+      97
+    ]
+  },
+  {
+    "lean_name": "USize.ofNat",
+    "file": "<lean>/Init/Data/UInt/BasicAux.lean",
+    "start": [
+      332,
+      1
+    ],
+    "end": [
+      339,
+      59
+    ]
+  },
+  {
+    "lean_name": "USize.ofNatLT",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      2932,
+      1
+    ],
+    "end": [
+      2940,
+      33
+    ]
+  },
+  {
+    "lean_name": "USize.repr",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      220,
+      1
+    ],
+    "end": [
+      232,
+      38
+    ]
+  },
+  {
+    "lean_name": "_private.Init.Data.Random.0.initFn._@.Init.Data.Random.2456098205._hygCtx._hyg.2",
+    "file": "<lean>/Init/Data/Random.lean",
+    "start": [
+      124,
+      1
+    ],
+    "end": [
+      126,
+      27
+    ]
+  },
+  {
+    "lean_name": "_private.Init.Data.Repr.0.Nat.reprArray",
+    "file": "<lean>/Init/Data/Repr.lean",
+    "start": [
+      234,
+      1
+    ],
+    "end": [
+      236,
+      53
+    ]
+  },
+  {
+    "lean_name": "_private.Init.System.IO.0.IO.eprintlnAux",
+    "file": "<lean>/Init/System/IO.lean",
+    "start": [
+      1298,
+      1
+    ],
+    "end": [
+      1300,
+      13
+    ]
+  },
+  {
+    "lean_name": "_private.Init.System.IOError.0.IO.Error.downCaseFirst",
+    "file": "<lean>/Init/System/IOError.lean",
+    "start": [
+      254,
+      1
+    ],
+    "end": [
+      254,
+      66
+    ]
+  },
+  {
+    "lean_name": "instBEqOfDecidableEq",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1300,
+      1
+    ],
+    "end": [
+      1301,
+      29
+    ]
+  },
+  {
+    "lean_name": "instDecidableEqList",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3147,
+      1
+    ],
+    "end": [
+      3164,
+      121
+    ]
+  },
+  {
+    "lean_name": "instDecidableEqNat",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      1995,
+      1
+    ],
+    "end": [
+      1995,
+      50
+    ]
+  },
+  {
+    "lean_name": "instDecidableEqProd",
+    "file": "<lean>/Init/Core.lean",
+    "start": [
+      1460,
+      1
+    ],
+    "end": [
+      1468,
+      112
+    ]
+  },
+  {
+    "lean_name": "mkPanicMessage",
+    "file": "<lean>/Init/Util.lean",
+    "start": [
+      44,
+      1
+    ],
+    "end": [
+      57,
+      8
+    ]
+  },
+  {
+    "lean_name": "mkPanicMessageWithDecl",
+    "file": "<lean>/Init/Util.lean",
+    "start": [
+      62,
+      1
+    ],
+    "end": [
+      79,
+      8
+    ]
+  },
+  {
+    "lean_name": "mkStdGen",
+    "file": "<lean>/Init/Data/Random.lean",
+    "start": [
+      40,
+      1
+    ],
+    "end": [
+      45,
+      19
+    ]
+  },
+  {
+    "lean_name": "panic",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3851,
+      1
+    ],
+    "end": [
+      3864,
+      16
+    ]
+  },
+  {
+    "lean_name": "panicCore",
+    "file": "<lean>/Init/Prelude.lean",
+    "start": [
+      3837,
+      1
+    ],
+    "end": [
+      3849,
+      73
+    ]
+  }
+]

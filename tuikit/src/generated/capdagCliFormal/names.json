@@ -1,0 +1,650 @@
+[
+  {
+    "lean_name": "CapdagCli.Arg",
+    "kind": "type",
+    "rust_path": "Arg",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Choices",
+    "kind": "type",
+    "rust_path": "Choices",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.PlanLine",
+    "kind": "type",
+    "rust_path": "PlanLine",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Positional",
+    "kind": "type",
+    "rust_path": "Positional",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Refusal",
+    "kind": "type",
+    "rust_path": "Refusal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine",
+    "kind": "type",
+    "rust_path": "RunLine",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Settled",
+    "kind": "type",
+    "rust_path": "Settled",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Spelling",
+    "kind": "type",
+    "rust_path": "Spelling",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Stage",
+    "kind": "type",
+    "rust_path": "Stage",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal",
+    "kind": "type",
+    "rust_path": "Terminal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Value",
+    "kind": "type",
+    "rust_path": "Value",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict",
+    "kind": "type",
+    "rust_path": "Verdict",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World",
+    "kind": "type",
+    "rust_path": "World",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Written",
+    "kind": "type",
+    "rust_path": "Written",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Choices.ofCount",
+    "kind": "function",
+    "rust_path": "choices::of_count",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.says",
+    "kind": "function",
+    "rust_path": "refusal::says",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.canAsk",
+    "kind": "function",
+    "rust_path": "terminal::can_ask",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.exit",
+    "kind": "function",
+    "rust_path": "verdict::exit",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.firstStop",
+    "kind": "function",
+    "rust_path": "first_stop",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.give",
+    "kind": "function",
+    "rust_path": "give",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.planVerdict",
+    "kind": "function",
+    "rust_path": "plan_verdict",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.printsRerun",
+    "kind": "function",
+    "rust_path": "prints_rerun",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.readArgs",
+    "kind": "function",
+    "rust_path": "read_args",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.refusal",
+    "kind": "function",
+    "rust_path": "refusal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.rerun",
+    "kind": "function",
+    "rust_path": "rerun",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.resolve",
+    "kind": "function",
+    "rust_path": "resolve",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.settle",
+    "kind": "function",
+    "rust_path": "settle",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Arg.mk",
+    "kind": "constructor",
+    "rust_path": "Arg",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Arg.spelling",
+    "kind": "field",
+    "rust_path": "Arg.spelling",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Arg.names",
+    "kind": "field",
+    "rust_path": "Arg.names",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Choices.none",
+    "kind": "constructor",
+    "rust_path": "Choices::None",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Choices.one",
+    "kind": "constructor",
+    "rust_path": "Choices::One",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Choices.many",
+    "kind": "constructor",
+    "rust_path": "Choices::Many",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Choices.free",
+    "kind": "constructor",
+    "rust_path": "Choices::Free",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.PlanLine.mk",
+    "kind": "constructor",
+    "rust_path": "PlanLine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.PlanLine.inputs",
+    "kind": "field",
+    "rust_path": "PlanLine.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.PlanLine.hasFrom",
+    "kind": "field",
+    "rust_path": "PlanLine.has_from",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Positional.path",
+    "kind": "constructor",
+    "rust_path": "Positional::Path",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Positional.path.p",
+    "kind": "field",
+    "rust_path": "Positional::Path.p",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Positional.stdin",
+    "kind": "constructor",
+    "rust_path": "Positional::Stdin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.nothingToRun",
+    "kind": "constructor",
+    "rust_path": "Refusal::NothingToRun",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.toWithMachine",
+    "kind": "constructor",
+    "rust_path": "Refusal::ToWithMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.fromWithMachine",
+    "kind": "constructor",
+    "rust_path": "Refusal::FromWithMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.fromWithoutStdin",
+    "kind": "constructor",
+    "rust_path": "Refusal::FromWithoutStdin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.stdinTwice",
+    "kind": "constructor",
+    "rust_path": "Refusal::StdinTwice",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.namedWithoutMachine",
+    "kind": "constructor",
+    "rust_path": "Refusal::NamedWithoutMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.noSuchInput",
+    "kind": "constructor",
+    "rust_path": "Refusal::NoSuchInput",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.noSuchInput.j",
+    "kind": "field",
+    "rust_path": "Refusal::NoSuchInput.j",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Refusal.nothingToPlan",
+    "kind": "constructor",
+    "rust_path": "Refusal::NothingToPlan",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.mk",
+    "kind": "constructor",
+    "rust_path": "RunLine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.machine",
+    "kind": "field",
+    "rust_path": "RunLine.machine",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.inputs",
+    "kind": "field",
+    "rust_path": "RunLine.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.named",
+    "kind": "field",
+    "rust_path": "RunLine.named",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.targets",
+    "kind": "field",
+    "rust_path": "RunLine.targets",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.hasFrom",
+    "kind": "field",
+    "rust_path": "RunLine.has_from",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Settled.given",
+    "kind": "constructor",
+    "rust_path": "Settled::Given",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Settled.implicit",
+    "kind": "constructor",
+    "rust_path": "Settled::Implicit",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Settled.ask",
+    "kind": "constructor",
+    "rust_path": "Settled::Ask",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Settled.name",
+    "kind": "constructor",
+    "rust_path": "Settled::Name",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Settled.nothing",
+    "kind": "constructor",
+    "rust_path": "Settled::Nothing",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.bracket",
+    "kind": "constructor",
+    "rust_path": "Spelling::Bracket",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.machineFile",
+    "kind": "constructor",
+    "rust_path": "Spelling::MachineFile",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.dash",
+    "kind": "constructor",
+    "rust_path": "Spelling::Dash",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Spelling.other",
+    "kind": "constructor",
+    "rust_path": "Spelling::Other",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.stdinType",
+    "kind": "constructor",
+    "rust_path": "Stage::StdinType",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.target",
+    "kind": "constructor",
+    "rust_path": "Stage::Target",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.machine",
+    "kind": "constructor",
+    "rust_path": "Stage::Machine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.path",
+    "kind": "constructor",
+    "rust_path": "Stage::Path",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.path.p",
+    "kind": "field",
+    "rust_path": "Stage::Path.p",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Stage.stdin",
+    "kind": "constructor",
+    "rust_path": "Stage::Stdin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.input",
+    "kind": "constructor",
+    "rust_path": "Stage::Input",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.input.j",
+    "kind": "field",
+    "rust_path": "Stage::Input.j",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Stage.option",
+    "kind": "constructor",
+    "rust_path": "Stage::Option",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.option.j",
+    "kind": "field",
+    "rust_path": "Stage::Option.j",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.mk",
+    "kind": "constructor",
+    "rust_path": "Terminal",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.reachable",
+    "kind": "field",
+    "rust_path": "Terminal.reachable",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.noInput",
+    "kind": "field",
+    "rust_path": "Terminal.no_input",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.json",
+    "kind": "field",
+    "rust_path": "Terminal.json",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.ci",
+    "kind": "field",
+    "rust_path": "Terminal.ci",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Terminal.dumb",
+    "kind": "field",
+    "rust_path": "Terminal.dumb",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Value.file",
+    "kind": "constructor",
+    "rust_path": "Value::File",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Value.file.p",
+    "kind": "field",
+    "rust_path": "Value::File.p",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Value.text",
+    "kind": "constructor",
+    "rust_path": "Value::Text",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Value.stdin",
+    "kind": "constructor",
+    "rust_path": "Value::Stdin",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.refused",
+    "kind": "constructor",
+    "rust_path": "Verdict::Refused",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.refused.r",
+    "kind": "field",
+    "rust_path": "Verdict::Refused.r",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.runs",
+    "kind": "constructor",
+    "rust_path": "Verdict::Runs",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.runs.count",
+    "kind": "field",
+    "rust_path": "Verdict::Runs.count",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.asks",
+    "kind": "constructor",
+    "rust_path": "Verdict::Asks",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.asks.s",
+    "kind": "field",
+    "rust_path": "Verdict::Asks.s",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.names",
+    "kind": "constructor",
+    "rust_path": "Verdict::Names",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.names.s",
+    "kind": "field",
+    "rust_path": "Verdict::Names.s",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.nothing",
+    "kind": "constructor",
+    "rust_path": "Verdict::Nothing",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.nothing.s",
+    "kind": "field",
+    "rust_path": "Verdict::Nothing.s",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Verdict.answers",
+    "kind": "constructor",
+    "rust_path": "Verdict::Answers",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.World.mk",
+    "kind": "constructor",
+    "rust_path": "World",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.World.terminal",
+    "kind": "field",
+    "rust_path": "World.terminal",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.targets",
+    "kind": "field",
+    "rust_path": "World.targets",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.machines",
+    "kind": "field",
+    "rust_path": "World.machines",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.planned",
+    "kind": "field",
+    "rust_path": "World.planned",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.plannedInput",
+    "kind": "field",
+    "rust_path": "World.planned_input",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.World.inputs",
+    "kind": "field",
+    "rust_path": "World.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.fit",
+    "kind": "field",
+    "rust_path": "World.fit",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.options",
+    "kind": "field",
+    "rust_path": "World.options",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.optionChoices",
+    "kind": "field",
+    "rust_path": "World.option_choices",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Written.mk",
+    "kind": "constructor",
+    "rust_path": "Written",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Written.base",
+    "kind": "field",
+    "rust_path": "Written.base",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Written.consts",
+    "kind": "field",
+    "rust_path": "Written.consts",
+    "renamed": false
+  }
+]
