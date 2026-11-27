@@ -4,7 +4,7 @@ description = "The capdag command's terminal interface: its surfaces, flags and 
 edition = "2021"
 license = "MIT"
 name = "capdag-tuikit"
-version = "1.1090.78"
+version = "1.1091.97"
 
 [dependencies]
 # The library the commands work with: its own types, notation, planning and
@@ -28,6 +28,12 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 unicode-segmentation = "1"
 unicode-width = "0.2"
+
+# The runtime the code generated from ../../tuikit-formal runs on (see its
+# lungo.toml): what the command decides of every command line. The generated
+# code is lungo's of the same version, so the runtime is pinned exactly.
+[dependencies.lungo]
+version = "=1.131.83"
 
 # The terminal a journey is played on, read as a person sees it.
 [target.'cfg(unix)'.dependencies]

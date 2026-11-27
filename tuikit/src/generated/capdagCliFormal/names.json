@@ -186,9 +186,27 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.fetches",
+    "kind": "function",
+    "rust_path": "command::fetches",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.readsFabric",
+    "kind": "function",
+    "rust_path": "command::reads_fabric",
+    "renamed": true
+  },
+  {
     "lean_name": "CapdagCli.Refusal.says",
     "kind": "function",
     "rust_path": "refusal::says",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunLine.written",
+    "kind": "function",
+    "rust_path": "run_line::written",
     "renamed": false
   },
   {
@@ -234,6 +252,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapdagCli.freeze",
+    "kind": "function",
+    "rust_path": "freeze",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.give",
     "kind": "function",
     "rust_path": "give",
@@ -246,6 +270,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapdagCli.globalRefusal",
+    "kind": "function",
+    "rust_path": "global_refusal",
+    "renamed": true
+  },
+  {
     "lean_name": "CapdagCli.hiddenCommands",
     "kind": "function",
     "rust_path": "hidden_commands",
@@ -255,6 +285,12 @@
     "lean_name": "CapdagCli.ofLine",
     "kind": "function",
     "rust_path": "of_line",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.pathCandidates",
+    "kind": "function",
+    "rust_path": "path_candidates",
     "renamed": true
   },
   {
@@ -315,6 +351,12 @@
     "lean_name": "CapdagCli.shortFlags",
     "kind": "function",
     "rust_path": "short_flags",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.stdinCandidates",
+    "kind": "function",
+    "rust_path": "stdin_candidates",
     "renamed": true
   },
   {
@@ -600,22 +642,10 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.CliWorld.base",
+    "lean_name": "CapdagCli.CliWorld.terminal",
     "kind": "field",
-    "rust_path": "CliWorld.base",
+    "rust_path": "CliWorld.terminal",
     "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.fabricCached",
-    "kind": "field",
-    "rust_path": "CliWorld.fabric_cached",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.saveThere",
-    "kind": "field",
-    "rust_path": "CliWorld.save_there",
-    "renamed": true
   },
   {
     "lean_name": "CapdagCli.CliWorld.screen",
@@ -624,82 +654,10 @@
     "renamed": false
   },
   {
-    "lean_name": "CapdagCli.CliWorld.typesKnown",
+    "lean_name": "CapdagCli.CliWorld.fabricCached",
     "kind": "field",
-    "rust_path": "CliWorld.types_known",
+    "rust_path": "CliWorld.fabric_cached",
     "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.capsMatch",
-    "kind": "field",
-    "rust_path": "CliWorld.caps_match",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.nameKnown",
-    "kind": "field",
-    "rust_path": "CliWorld.name_known",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.installTarget",
-    "kind": "field",
-    "rust_path": "CliWorld.install_target",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.installed",
-    "kind": "field",
-    "rust_path": "CliWorld.installed",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.specValid",
-    "kind": "field",
-    "rust_path": "CliWorld.spec_valid",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.downloaded",
-    "kind": "field",
-    "rust_path": "CliWorld.downloaded",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.modelsMatch",
-    "kind": "field",
-    "rust_path": "CliWorld.models_match",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.nameable",
-    "kind": "field",
-    "rust_path": "CliWorld.nameable",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.dirThere",
-    "kind": "field",
-    "rust_path": "CliWorld.dir_there",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.helpKnown",
-    "kind": "field",
-    "rust_path": "CliWorld.help_known",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.wordKind",
-    "kind": "field",
-    "rust_path": "CliWorld.word_kind",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.CliWorld.succeeds",
-    "kind": "field",
-    "rust_path": "CliWorld.succeeds",
-    "renamed": false
   },
   {
     "lean_name": "CapdagCli.Command.caps",
@@ -714,16 +672,28 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.caps.typesKnown",
+    "kind": "field",
+    "rust_path": "Command::Caps.types_known",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.caps.found",
+    "kind": "field",
+    "rust_path": "Command::Caps.found",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.info",
     "kind": "constructor",
     "rust_path": "Command::Info",
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.info.names",
+    "lean_name": "CapdagCli.Command.info.allKnown",
     "kind": "field",
-    "rust_path": "Command::Info.names",
-    "renamed": false
+    "rust_path": "Command::Info.all_known",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.Command.info.noCache",
@@ -750,6 +720,12 @@
     "renamed": true
   },
   {
+    "lean_name": "CapdagCli.Command.run.w",
+    "kind": "field",
+    "rust_path": "Command::Run.w",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.plan",
     "kind": "constructor",
     "rust_path": "Command::Plan",
@@ -762,6 +738,18 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.plan.w",
+    "kind": "field",
+    "rust_path": "Command::Plan.w",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.plan.saveThere",
+    "kind": "field",
+    "rust_path": "Command::Plan.save_there",
+    "renamed": true
+  },
+  {
     "lean_name": "CapdagCli.Command.check",
     "kind": "constructor",
     "rust_path": "Command::Check",
@@ -771,6 +759,12 @@
     "lean_name": "CapdagCli.Command.check.m",
     "kind": "field",
     "rust_path": "Command::Check.m",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.check.w",
+    "kind": "field",
+    "rust_path": "Command::Check.w",
     "renamed": false
   },
   {
@@ -798,6 +792,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.graph.w",
+    "kind": "field",
+    "rust_path": "Command::Graph.w",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.view",
     "kind": "constructor",
     "rust_path": "Command::View",
@@ -813,6 +813,12 @@
     "lean_name": "CapdagCli.Command.view.inputs",
     "kind": "field",
     "rust_path": "Command::View.inputs",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.Command.view.w",
+    "kind": "field",
+    "rust_path": "Command::View.w",
     "renamed": false
   },
   {
@@ -834,6 +840,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.edit.w",
+    "kind": "field",
+    "rust_path": "Command::Edit.w",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.cartridgeList",
     "kind": "constructor",
     "rust_path": "Command::CartridgeList",
@@ -846,9 +858,9 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.cartridgeInstall.name",
+    "lean_name": "CapdagCli.Command.cartridgeInstall.target",
     "kind": "field",
-    "rust_path": "Command::CartridgeInstall.name",
+    "rust_path": "Command::CartridgeInstall.target",
     "renamed": false
   },
   {
@@ -858,9 +870,9 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.cartridgeRemove.id",
+    "lean_name": "CapdagCli.Command.cartridgeRemove.installed",
     "kind": "field",
-    "rust_path": "Command::CartridgeRemove.id",
+    "rust_path": "Command::CartridgeRemove.installed",
     "renamed": false
   },
   {
@@ -882,16 +894,22 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.Command.modelSearch.found",
+    "kind": "field",
+    "rust_path": "Command::ModelSearch.found",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.modelPull",
     "kind": "constructor",
     "rust_path": "Command::ModelPull",
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.modelPull.spec",
+    "lean_name": "CapdagCli.Command.modelPull.specValid",
     "kind": "field",
-    "rust_path": "Command::ModelPull.spec",
-    "renamed": false
+    "rust_path": "Command::ModelPull.spec_valid",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.Command.modelRemove",
@@ -900,9 +918,15 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.modelRemove.spec",
+    "lean_name": "CapdagCli.Command.modelRemove.specValid",
     "kind": "field",
-    "rust_path": "Command::ModelRemove.spec",
+    "rust_path": "Command::ModelRemove.spec_valid",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Command.modelRemove.downloaded",
+    "kind": "field",
+    "rust_path": "Command::ModelRemove.downloaded",
     "renamed": false
   },
   {
@@ -924,9 +948,9 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.devNew.path",
+    "lean_name": "CapdagCli.Command.devNew.nameable",
     "kind": "field",
-    "rust_path": "Command::DevNew.path",
+    "rust_path": "Command::DevNew.nameable",
     "renamed": false
   },
   {
@@ -936,22 +960,16 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.devInstall.dir",
-    "kind": "field",
-    "rust_path": "Command::DevInstall.dir",
-    "renamed": false
-  },
-  {
     "lean_name": "CapdagCli.Command.devHashDir",
     "kind": "constructor",
     "rust_path": "Command::DevHashDir",
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.devHashDir.dir",
+    "lean_name": "CapdagCli.Command.devHashDir.dirThere",
     "kind": "field",
-    "rust_path": "Command::DevHashDir.dir",
-    "renamed": false
+    "rust_path": "Command::DevHashDir.dir_there",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.Command.devBundleManifest",
@@ -960,10 +978,10 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.devBundleManifest.root",
+    "lean_name": "CapdagCli.Command.devBundleManifest.rootThere",
     "kind": "field",
-    "rust_path": "Command::DevBundleManifest.root",
-    "renamed": false
+    "rust_path": "Command::DevBundleManifest.root_there",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.Command.devBundleRehash",
@@ -972,10 +990,10 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Command.devBundleRehash.root",
+    "lean_name": "CapdagCli.Command.devBundleRehash.rootThere",
     "kind": "field",
-    "rust_path": "Command::DevBundleRehash.root",
-    "renamed": false
+    "rust_path": "Command::DevBundleRehash.root_there",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.Command.selfUpdate",
@@ -1056,6 +1074,12 @@
     "renamed": false
   },
   {
+    "lean_name": "CapdagCli.HelpTopic.machine.w",
+    "kind": "field",
+    "rust_path": "HelpTopic::Machine.w",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.InstallTarget.cartridge",
     "kind": "constructor",
     "rust_path": "InstallTarget::Cartridge",
@@ -1122,9 +1146,9 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Invocation.helpCommand.words",
+    "lean_name": "CapdagCli.Invocation.helpCommand.known",
     "kind": "field",
-    "rust_path": "Invocation::HelpCommand.words",
+    "rust_path": "Invocation::HelpCommand.known",
     "renamed": false
   },
   {
@@ -1146,9 +1170,9 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Invocation.unknown.word",
+    "lean_name": "CapdagCli.Invocation.unknown.kind",
     "kind": "field",
-    "rust_path": "Invocation::Unknown.word",
+    "rust_path": "Invocation::Unknown.kind",
     "renamed": false
   },
   {
@@ -1809,12 +1833,6 @@
     "lean_name": "CapdagCli.Verdict.opens",
     "kind": "constructor",
     "rust_path": "Verdict::Opens",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Verdict.failed",
-    "kind": "constructor",
-    "rust_path": "Verdict::Failed",
     "renamed": true
   },
   {
