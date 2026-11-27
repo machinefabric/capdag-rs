@@ -622,6 +622,7 @@ impl EngineRuntime for Scripted {
                                 total_bytes: items.iter().map(Vec::len).sum(),
                                 stream_meta: None,
                                 item_metas: Vec::new(),
+                                body_coordinate: None,
                             }],
                         );
                         out.node_data.insert(node.clone(), Vec::new());

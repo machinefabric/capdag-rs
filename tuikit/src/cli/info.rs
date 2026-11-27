@@ -9,9 +9,8 @@ use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
 use super::names;
 use super::term::emit_record;
-use capdag::orchestrator::cli_cap::{
-    render_cap_interface, synthesize_single_cap_notation, InterfaceNames, SINGLE_CAP_INPUT_NODE,
-};
+use super::formal as f;
+use capdag::orchestrator::cli_cap::{render_cap_interface, InterfaceNames};
 use capdag::Cap;
 use super::term::{out, outln};
 
@@ -25,25 +24,80 @@ pub struct Args {
     pub no_cache: bool,
 }
 
+/// What a name an `info` line gives is.
+enum Named {
+    Cap(Cap),
+    Media(capdag::MediaUrn),
+    Nothing,
+}
+
 pub async fn info(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = if args.no_cache { ctx.fresh_registry().await? } else { ctx.registry().await? };
-    for (index, name) in args.names.iter().enumerate() {
-        if index > 0 && !ctx.term.json {
-            outln!();
-        }
+    let mut named = Vec::with_capacity(args.names.len());
+    for name in &args.names {
         // A cap, a media type, or neither.
-        match registry.get_cap(name).await {
-            Ok(cap) => show_cap(ctx, &registry, &cap).await?,
+        named.push(match registry.get_cap(name).await {
+            Ok(cap) => Named::Cap(cap),
             Err(e) => {
                 super::ctx::nothing_by_that_name(e)?;
                 match media_named(&registry, name).await? {
-                    Some(media) => show_media(ctx, &registry, &media).await?,
-                    None => return Err(super::run::unknown_cap(&registry, name, "capability or media type").await),
+                    Some(media) => Named::Media(media),
+                    None => Named::Nothing,
                 }
             }
+        });
+    }
+    let all_known = !named.iter().any(|n| matches!(n, Named::Nothing));
+    let verdict = ctx.decide(f::Command::Info { all_known, no_cache: args.no_cache }, false);
+    if let f::CliVerdict::Refused { r: f::CliRefusal::NoSuchName } = verdict {
+        let name = args
+            .names
+            .iter()
+            .zip(&named)
+            .find(|(_, n)| matches!(n, Named::Nothing))
+            .map(|(name, _)| name.clone())
+            .expect("a name nothing has was found above");
+        return Err(super::say::with_exit(unknown_name(&registry, &name).await, &verdict));
+    }
+    if let Some(error) = super::ends(&verdict) {
+        return Err(error);
+    }
+    for (index, found) in named.iter().enumerate() {
+        if index > 0 && !ctx.term.json {
+            outln!();
+        }
+        match found {
+            Named::Cap(cap) => show_cap(ctx, &registry, cap).await?,
+            Named::Media(media) => show_media(ctx, &registry, media).await?,
+            Named::Nothing => unreachable!("the model refuses a name nothing has"),
         }
     }
     Ok(Exit::Ok)
+}
+
+/// No capability or media type has this name: say which capabilities are
+/// near it.
+async fn unknown_name(registry: &capdag::FabricRegistry, token: &str) -> CliError {
+    let mut error = CliError::usage(format!("'{token}': {}", f::says(&f::CliRefusal::NoSuchName)));
+    let aliases: Vec<String> = match registry.manifest_caps().await {
+        Ok(caps) => caps.iter().flat_map(|c| c.aliases.clone()).collect(),
+        Err(e) => {
+            return error
+                .context(format!("names near it cannot be offered: {e}"))
+                .hint(format!("find capabilities with: capdag caps {token}"))
+        }
+    };
+    let mut near: Vec<(f64, &String)> = aliases
+        .iter()
+        .map(|a| (strsim::jaro_winkler(token, a), a))
+        .filter(|(score, _)| *score > 0.75)
+        .collect();
+    near.sort_by(|a, b| b.0.total_cmp(&a.0));
+    if !near.is_empty() {
+        let names: Vec<&str> = near.iter().take(3).map(|(_, a)| a.as_str()).collect();
+        error = error.context(format!("did you mean {}?", names.join(", ")));
+    }
+    error.hint(format!("find capabilities with: capdag caps {token}"))
 }
 
 /// The media type `name` names, `None` when the registry has none by that
@@ -119,7 +173,12 @@ async fn show_cap(ctx: &Ctx, registry: &capdag::FabricRegistry, cap: &Cap) -> Cl
         .default_model_spec()
         .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e.to_string()))?;
     if let Some(model) = default_model {
-        outln!("\nRuns a model: {model} by default (--model-spec chooses another)");
+        let option = cap
+            .model_spec_arg()
+            .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e.to_string()))?
+            .map(|arg| arg.name.clone())
+            .unwrap_or_default();
+        outln!("\nRuns a model: {model} by default (--arg {option}=<spec> chooses another)");
     }
     outln!();
     match (bundled.first(), installed.first()) {
@@ -139,14 +198,10 @@ async fn show_cap(ctx: &Ctx, registry: &capdag::FabricRegistry, cap: &Cap) -> Cl
             Err(e) => outln!("Its cartridge could not be looked up: {}", e.problem),
         },
     }
-    let takes_input = synthesize_single_cap_notation(cap)
-        .map(|notation| notation.contains(&format!("[{SINGLE_CAP_INPUT_NODE} -> ")))
-        .unwrap_or(true);
-    if takes_input {
-        outln!("\nExample:\n  capdag run {alias} <input> -o <dir>");
-    } else {
-        outln!("\nExample:\n  capdag run {alias}");
-    }
+    let machine = names::one_step_machine(registry, cap)
+        .map_err(|e| CliError::failed(format!("the machine of {alias}'s one step could not be written")).context(e))?;
+    let input = if machine.starts_with("[()") { "" } else { " <input>" };
+    outln!("\nRun it as a machine of one step:\n  capdag run {}{input} -o <dir>", super::shell_word(&machine));
     Ok(())
 }
 

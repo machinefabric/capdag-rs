@@ -1,0 +1,20 @@
+{
+  "title": "Inputs to a view with no terminal are refused: they are run with capdag run",
+  "world": "ordinary",
+  "args": [
+    "view",
+    "summaries.machine",
+    "report.pdf"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "the view runs its inputs only on a terminal",
+          "run it with: capdag run summaries.machine report.pdf"
+        ]
+      }
+    }
+  }
+}

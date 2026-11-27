@@ -1,0 +1,24 @@
+{
+  "title": "A planning flag beside a machine is refused: a machine is not planned",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "--depth",
+    "3"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "planning flags shape a planned machine, and a machine was given"
+        ],
+        "absent": [
+          "disbind-pdf  done"
+        ]
+      }
+    }
+  }
+}

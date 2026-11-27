@@ -1,15 +1,33 @@
 {
   "title": "Install a built project for local runs",
   "world": "builder",
-  "args": ["dev", "install", "sentiment"],
+  "args": [
+    "dev",
+    "install",
+    "sentiment"
+  ],
   "modes": {
     "plain": {
       "expect": {
         "exit": 0,
-        "stdout": ["dev/sentiment/0.1.0"],
-        "shown": ["Installed the dev cartridge 'sentiment' 0.1.0 at", "Run it: capdag run sentiment <input>"]
+        "stdout": [
+          "dev/sentiment/0.1.0"
+        ],
+        "shown": [
+          "Installed the dev cartridge 'sentiment' 0.1.0 at",
+          "Run it: capdag run '[in -> sentiment -> ()]' <input>"
+        ]
       }
     },
-    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"cartridge\"", "\"id\":\"sentiment\"", "\"state\":\"dev\""] } }
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"cartridge\"",
+          "\"id\":\"sentiment\"",
+          "\"state\":\"dev\""
+        ]
+      }
+    }
   }
 }

@@ -1,0 +1,37 @@
+{
+  "title": "The line a run printed runs the same machine again, asking nothing and printing nothing more",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "[(input=pdf) -> disbind-pdf -> (output=page-text)]",
+    "--input",
+    "pdf=@report.pdf",
+    "-o",
+    "out"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report · 1.page-text.txt"
+        ],
+        "absent": [
+          "Run it again"
+        ]
+      }
+    },
+    "inline": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report · 3.page-text.txt"
+        ],
+        "absent": [
+          "Run it again",
+          "Choose"
+        ]
+      }
+    }
+  }
+}

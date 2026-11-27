@@ -1,0 +1,29 @@
+{
+  "title": "Declining a question ends the command as an interrupted one",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "report.pdf"
+  ],
+  "modes": {
+    "inline": {
+      "keys": [
+        {
+          "wait": "Choose what to make"
+        },
+        {
+          "press": "Esc"
+        }
+      ],
+      "expect": {
+        "exit": 130,
+        "shown": [
+          "nothing was chosen, and the command ends here"
+        ],
+        "absent": [
+          "disbind-pdf  done"
+        ]
+      }
+    }
+  }
+}

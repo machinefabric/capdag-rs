@@ -1,0 +1,18 @@
+{
+  "title": "A machine written inline is not edited: there is no file to save it to",
+  "world": "ordinary",
+  "args": [
+    "edit",
+    "[doc -> disbind-pdf -> pages]"
+  ],
+  "modes": {
+    "full_screen": {
+      "expect": {
+        "exit": 2,
+        "screen": [
+          "error: a machine written inline has no file to save to: write it to a .machine file"
+        ]
+      }
+    }
+  }
+}

@@ -1,75 +1,92 @@
-//! `capdag run <cap|machine> [inputs…]`.
+//! `capdag run [MACHINE] [INPUT…]`.
 //!
-//! One command runs a capability or a machine. A cap is run inside a full
-//! host with the bundled cartridges beside it, so its peer calls work, through
-//! its own declared interface: its input from files or stdin, its options as
-//! it names them (`--index-range 1-5`) or `--arg <name>=<value>`. A machine's
-//! inputs are addressed by the names its notation gives them: a path goes to
-//! the input its media fits, `--input <name>=<value>` says which.
+//! What runs is always a machine: written inline (`'[doc -> disbind-pdf ->
+//! pages]'`) or in a `.machine` file, or planned from the inputs to what
+//! `--to` names. A line runs its machine once; an input given several values
+//! takes them as one sequence, and the machine decides, step by step, whether
+//! a step runs once per item or takes them all.
 //!
-//! Each input file of a cap — and each path given a machine with one input —
-//! is a run of its own. While the runs go they are shown ([`super::live`]);
-//! Ctrl-C stops them (nothing new starts, what started finishes and is
-//! written), Ctrl-C again aborts (the cartridges are cancelled and given
-//! [`ABORT_GRACE`] to end), and a third Ctrl-C during the grace ends them at
-//! once. What each does is the model's decision ([`RunControl`]).
+//! Whatever the line leaves open — what to make, which machine, which input a
+//! file goes to, a value for an input or a step option, which cartridge to
+//! install — is decided by the model of the command line ([`super::formal`]):
+//! at a terminal a person is asked; in a script the command fails, naming the
+//! choices and the flag that gives each. A run that settled anything prints
+//! the line that runs the same machine again, asking nothing.
+//!
+//! While the run goes it is shown ([`super::live`]); Ctrl-C stops it (nothing
+//! new starts, what started finishes and is written), Ctrl-C again aborts (the
+//! cartridges are cancelled and given [`ABORT_GRACE`] to end), and a third
+//! Ctrl-C during the grace ends them at once. What each does is the model's
+//! decision ([`RunControl`]).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::ask::{self, Answered, Choice, Question};
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
+use super::formal::{self as f, index, nat};
 use super::host::{RunHost, RunSetup};
 use super::inputs;
 use super::inspect::Inspection;
+use super::line::{self, Extras, MachineEntry, MachineFacts, PlanningFlags, RunState, Tables, World};
 use super::live::{Key, ProgressChoice, Shower};
 use super::names;
 use super::watch::Watch;
+use capdag::bifaci::live_feed::{StopInputsError, StopInputsOutcome};
 use capdag::fabric::registry::FabricRegistry;
-use capdag::orchestrator::cli_cap::{
-    classify_cap_token, map_invocation, render_cap_interface, synthesize_single_cap_notation,
-    CapToken, InterfaceNames, SINGLE_CAP_INPUT_NODE,
-};
+use capdag::orchestrator::cli_cap::{synthesize_single_cap_notation, SINGLE_CAP_INPUT_NODE};
 use capdag::orchestrator::cli_session::{
     EmitTarget, EmittedOutput, PlannedStrand, StrandFailure, StrandNote, StrandReport,
 };
 use capdag::orchestrator::machine_plan::{ResolvedNotation, RunInputs, StrandPlan};
 use capdag::orchestrator::observe::{RunKey, RunObserver};
-use capdag::bifaci::live_feed::{StopInputsError, StopInputsOutcome};
 use capdag::orchestrator::run_control::{join_outcomes, RunAct, RunAsk, RunControl, RunOutcome, ABORT_GRACE};
 use capdag::orchestrator::PlanInput;
 use capdag::planner::ExecutionNodeType;
-use capdag::{Cap, ExecutionError, MediaUrn};
-use super::term::{out, outln};
+use capdag::ExecutionError;
+use super::term::emit_record;
 
 #[derive(Debug, clap::Args)]
+#[command(disable_help_flag = true)]
 pub struct Args {
-    /// A capability, by its alias or URN, or a machine file
-    #[arg(value_name = "CAP|MACHINE")]
-    pub target: String,
-    /// Files, directories or globs to run on; for a cap, also its own options
-    #[arg(value_name = "INPUTS", last = true)]
-    pub rest: Vec<String>,
+    /// The machine — written inline, or a .machine file — and then its inputs; or only
+    /// inputs, to plan a machine to what --to names. An input is a file, a directory or
+    /// glob (its files, sorted), a live source, or - (stdin)
+    #[arg(value_name = "MACHINE|INPUT")]
+    pub args: Vec<String>,
+    /// Inputs: after --, no argument is taken for the machine
+    #[arg(last = true, value_name = "INPUT")]
+    pub after: Vec<String>,
+    /// An input of the machine by its name: @<file|glob|directory>, - (stdin), or text
+    /// (==<text> for text that starts with @ or =, or is -) (repeatable)
+    #[arg(long = "input", value_name = "NAME=VALUE")]
+    pub inputs: Vec<String>,
+    /// A live source for an input of the machine, by the input's name (repeatable)
+    #[arg(long = "live", value_name = "NAME=URN")]
+    pub lives: Vec<String>,
+    /// A step option the machine leaves to the run: <option>=<value> when one step has an
+    /// option of that name, <step>.<option>=<value> otherwise; @<file> reads a file (repeatable)
+    #[arg(long = "arg", value_name = "[STEP.]OPTION=VALUE")]
+    pub options: Vec<String>,
+    /// What to make, when no machine is given: a media alias, an extension or a media URN;
+    /// several name what one machine makes together (repeatable)
+    #[arg(long, value_name = "TYPE")]
+    pub to: Vec<String>,
+    /// What - holds, when no machine is given
+    #[arg(long, value_name = "TYPE")]
+    pub from: Option<String>,
+    /// What a live source captures, as JSON ('{"duration_ms":5000}')
+    #[arg(long, value_name = "JSON")]
+    pub selector: Option<String>,
     /// Write results into this directory (default: the working directory)
     #[arg(short, long, value_name = "DIR")]
     pub output: Option<PathBuf>,
     /// Overwrite result files that exist
     #[arg(long)]
     pub force: bool,
-    /// A machine's input by its name in the notation; `@<path>` reads a file (repeatable)
-    #[arg(long = "input", value_name = "NAME=VALUE")]
-    pub inputs: Vec<String>,
-    /// A cap's option by its name or media URN; `@<path>` reads a file (repeatable)
-    #[arg(long = "arg", value_name = "NAME=VALUE")]
-    pub args: Vec<String>,
-    /// For a generic cap such as convert-image: the type to make
-    #[arg(long, value_name = "TYPE")]
-    pub to: Option<String>,
-    /// For a live source: what to capture, as JSON (`{"duration_ms":5000}`)
-    #[arg(long, value_name = "JSON")]
-    pub selector: Option<String>,
     /// How the run is shown while it goes
     #[arg(long, value_enum, default_value_t = ProgressChoice::Auto, value_name = "HOW")]
     pub progress: ProgressChoice,
@@ -79,208 +96,812 @@ pub struct Args {
     /// Use this cartridge binary, or every binary in this directory (repeatable)
     #[arg(long = "dev-bin", value_name = "PATH")]
     pub dev_bins: Vec<PathBuf>,
+    #[command(flatten)]
+    pub planning: PlanningFlags,
+    /// Print help; with a machine, the machine's own: its inputs, steps and the options it
+    /// leaves to the run
+    #[arg(short = 'h', long, action = clap::ArgAction::SetTrue)]
+    pub help: bool,
 }
 
-/// Put `run`'s own flags before its target and everything else after `--`.
-///
-/// A cap is run through its own declared interface: `capdag run disbind-pdf
-/// report.pdf --index-range 1-5`. Its options are not `run`'s, and only the
-/// cap knows them, so before the command line is parsed every token after
-/// `run` that is not one of `run`'s flags (or a global one), nor the target,
-/// is moved after `--` in the order given, where the cap's interface — or a
-/// machine's input binding — reads it. `--help` after a target is the
-/// target's: a cap's interface, a machine's inputs and steps.
-///
-/// The command is built first: clap settles how many values an argument takes
-/// only when it builds, so an unbuilt `-o` reads as a switch and its value
-/// would be moved to the cap.
-pub fn separate_cap_tokens(mut command: clap::Command, argv: Vec<String>) -> Vec<String> {
-    command.build();
-    let Some(run_at) = argv.iter().position(|a| a == "run") else {
-        return argv;
-    };
-    // `run` is the subcommand only when everything before it is a global flag.
-    let globals: Vec<&clap::Arg> = command.get_arguments().filter(|a| a.is_global_set()).collect();
-    if !before_is_global(&argv[1..run_at], &globals) {
-        return argv;
-    }
-    let Some(run) = command.find_subcommand("run") else {
-        return argv;
-    };
-    let flags: Vec<&clap::Arg> = run.get_arguments().chain(globals.iter().copied()).collect();
-    let mut kept: Vec<String> = argv[..=run_at].to_vec();
-    let mut moved: Vec<String> = Vec::new();
-    let mut target_seen = false;
-    let mut tokens = argv[run_at + 1..].iter();
-    while let Some(token) = tokens.next() {
-        if token == "--" {
-            moved.extend(tokens.by_ref().cloned());
-            break;
-        }
-        if (token == "--help" || token == "-h") && target_seen {
-            moved.push(token.clone());
-            continue;
-        }
-        if let Some(arg) = known_flag(token, &flags) {
-            kept.push(token.clone());
-            if takes_value(arg) && !token.contains('=') && !is_attached_short(token, arg) {
-                if let Some(value) = tokens.next() {
-                    kept.push(value.clone());
-                }
-            }
-            continue;
-        }
-        if !token.starts_with('-') && !target_seen {
-            kept.push(token.clone());
-            target_seen = true;
-            continue;
-        }
-        moved.push(token.clone());
-    }
-    if !moved.is_empty() {
-        kept.push("--".to_string());
-        kept.extend(moved);
-    }
-    kept
-}
-
-fn before_is_global(tokens: &[String], globals: &[&clap::Arg]) -> bool {
-    let mut i = 0;
-    while i < tokens.len() {
-        match known_flag(&tokens[i], globals) {
-            Some(arg) => {
-                i += if takes_value(arg) && !tokens[i].contains('=') { 2 } else { 1 };
-            }
-            None => return false,
-        }
-    }
-    true
-}
-
-fn known_flag<'a>(token: &str, flags: &[&'a clap::Arg]) -> Option<&'a clap::Arg> {
-    if let Some(long) = token.strip_prefix("--") {
-        let name = long.split('=').next().unwrap_or(long);
-        return flags.iter().copied().find(|a| a.get_long() == Some(name));
-    }
-    let mut chars = token.strip_prefix('-')?.chars();
-    let short = chars.next()?;
-    let arg = flags.iter().copied().find(|a| a.get_short() == Some(short))?;
-    // `-vv` is two of a counting flag; `-odir` a short with its value attached.
-    let rest: String = chars.collect();
-    if rest.is_empty() || takes_value(arg) || rest.chars().all(|c| c == short) {
-        Some(arg)
-    } else {
-        None
+impl Args {
+    /// Whether the line reads stdin as data: `-` by position or by name.
+    pub fn reads_stdin(&self) -> bool {
+        self.args.iter().chain(self.after.iter()).any(|a| a == "-")
+            || self.inputs.iter().any(|given| given.split_once('=').is_some_and(|(_, value)| value == "-"))
     }
 }
 
-fn takes_value(arg: &clap::Arg) -> bool {
-    arg.get_num_args().map(|n| n.takes_values()).unwrap_or(false)
+/// What a run does with what it makes, beyond the machine.
+pub struct RunSettings {
+    pub output: Option<PathBuf>,
+    pub force: bool,
 }
 
-fn is_attached_short(token: &str, arg: &clap::Arg) -> bool {
-    !token.starts_with("--") && arg.get_short().is_some() && token.chars().count() > 2
-}
-
-/// What `run` was given to run.
-enum Target {
-    Cap { cap: Cap, dev_dir: Option<PathBuf> },
-    Machine { path: PathBuf, notation: String },
-}
-
-/// One run: what it is of, the name its outputs are written under, and its
-/// strands, planned.
+/// One run: what it is of, its strands, planned, and what its outputs are
+/// named after — what each source it was given is called, what each strand's
+/// input slots were given, and the machine's name for an output that reads
+/// no input.
 struct PlannedRun {
     label: String,
-    stem: String,
     strands: Vec<PlannedStrand>,
+    sources: Vec<String>,
+    slots: Vec<Vec<(String, Vec<usize>)>>,
+    machine_name: String,
+}
+
+/// A line read: the tables of what it names, its state, and its extras.
+pub struct ReadLine {
+    pub tables: Tables,
+    pub state: RunState,
+    pub extras: Extras,
+}
+
+/// Read a `run` line into the model's terms. The names `--input`, `--live` and
+/// `--arg` give are a machine's, so a written machine is resolved first to
+/// know them; a name it does not have is a place past its own, for the model
+/// to refuse by name.
+async fn read_line(world_ctx: &Ctx, registry: &Arc<FabricRegistry>, args: &Args) -> CliResult<(ReadLine, Option<MachineFacts>)> {
+    let mut tables = Tables::default();
+    let (machine, positionals) = line::read_positionals(&mut tables, &args.args, &args.after)?;
+    let facts = match (&machine, args.inputs.is_empty() && args.lives.is_empty() && args.options.is_empty()) {
+        (Some(m), false) => Some(line::resolve_entry(world_ctx, registry, &tables.machines[index(&m.base)]).await?),
+        _ => None,
+    };
+    let resolved = facts.as_ref().and_then(MachineFacts::resolved);
+    let input_names: Vec<String> = resolved.map(|r| r.inputs.iter().map(|i| i.name.clone()).collect()).unwrap_or_default();
+    let mut unknown_inputs: Vec<String> = Vec::new();
+    let place = |name: &str, unknown: &mut Vec<String>| -> usize {
+        match input_names.iter().position(|known| known == name) {
+            Some(j) => j,
+            None => {
+                let at = match unknown.iter().position(|u| u == name) {
+                    Some(at) => at,
+                    None => {
+                        unknown.push(name.to_string());
+                        unknown.len() - 1
+                    }
+                };
+                input_names.len() + at
+            }
+        }
+    };
+    let mut named: Vec<(lungo::Nat, f::Value)> = Vec::new();
+    let mut texts: Vec<Option<String>> = Vec::new();
+    for given in &args.inputs {
+        let (name, value) = inputs::pair("--input", given)?;
+        let j = place(name, &mut unknown_inputs);
+        if value == "-" {
+            named.push((nat(j), f::Value::Stdin));
+            texts.push(None);
+        } else if let Some(text) = value.strip_prefix('=') {
+            named.push((nat(j), f::Value::Text));
+            texts.push(Some(text.to_string()));
+        } else if let Some(path) = value.strip_prefix('@') {
+            for p in line::files_of(&mut tables, path)? {
+                named.push((nat(j), f::Value::File { p: nat(p) }));
+                texts.push(None);
+            }
+        } else {
+            named.push((nat(j), f::Value::Text));
+            texts.push(Some(value.to_string()));
+        }
+    }
+    for given in &args.lives {
+        let (name, urn) = inputs::pair("--live", given)?;
+        let j = place(name, &mut unknown_inputs);
+        let r = tables.add_live(urn.to_string());
+        named.push((nat(j), f::Value::Live { r: nat(r) }));
+        texts.push(None);
+    }
+    let mut unknown_options: Vec<String> = Vec::new();
+    let mut given_args: Vec<f::ArgGiven> = Vec::new();
+    let mut arg_values: Vec<String> = Vec::new();
+    for given in &args.options {
+        let (name, value) = inputs::pair("--arg", given)?;
+        let (option, qualified) = match resolved {
+            Some(r) => option_place(r, name, &mut unknown_options),
+            None => {
+                unknown_options.push(name.to_string());
+                (unknown_options.len() - 1, name.contains('.'))
+            }
+        };
+        given_args.push(f::ArgGiven { option: nat(option), qualified });
+        arg_values.push(value.to_string());
+    }
+    let selector_reads = match &args.selector {
+        Some(raw) => capdag::bifaci::live_feed::LiveFeedSelector::parse(raw.as_bytes()).is_ok(),
+        None => true,
+    };
+    let state = RunState {
+        line: f::RunLine {
+            machine,
+            inputs: f::list(positionals),
+            named: f::list(named),
+            args: f::list(given_args),
+            targets: nat(args.to.len()),
+            has_from: args.from.is_some(),
+            has_selector: args.selector.is_some(),
+            selector_reads,
+        },
+        texts,
+        arg_values,
+        unknown_inputs,
+        unknown_options,
+    };
+    let extras = Extras {
+        to: args.to.clone(),
+        from: args.from.clone(),
+        selector: args.selector.clone(),
+        output: args.output.clone(),
+    };
+    Ok((ReadLine { tables, state, extras }, facts))
+}
+
+/// Which open option of a resolved machine `--arg <name>` binds, and whether
+/// it names the step: `<step>.<option>` when the part before the first dot
+/// names a step that leaves an option of the rest's name to the run. A name
+/// that is no open option is a place past the machine's own options.
+fn option_place(resolved: &line::Resolved, name: &str, unknown: &mut Vec<String>) -> (usize, bool) {
+    if let Some((step, option)) = name.split_once('.') {
+        if resolved.options.iter().any(|o| o.step == step) {
+            return match resolved.options.iter().position(|o| o.step == step && o.name == option) {
+                Some(j) => (j, true),
+                None => {
+                    unknown.push(name.to_string());
+                    (resolved.options.len() + unknown.len() - 1, true)
+                }
+            };
+        }
+    }
+    match resolved.options.iter().position(|o| o.name == name) {
+        Some(j) => (j, false),
+        None => {
+            unknown.push(name.to_string());
+            (resolved.options.len() + unknown.len() - 1, false)
+        }
+    }
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = ctx.registry().await?;
-    let target = resolve_target(ctx, &registry, &args.target).await?;
-    if args.rest.iter().any(|a| a == "--help" || a == "-h") {
-        return match &target {
-            Target::Cap { cap, .. } => {
-                let media = |urn: &str| names::media_urn(&registry, urn);
-                let interface = InterfaceNames { cap: names::cap(&registry, cap), media: &media, urns: ctx.term.verbosity >= 1 };
-                let text = render_cap_interface(cap, &interface).map_err(|e| {
-                    CliError::failed(format!("the interface of '{}' could not be shown", args.target)).context(e)
-                })?;
-                out!("{text}");
-                outln!(
-                    "\nExample:\n  capdag run {} <input> [options] [-o <dir>]",
-                    names::cap(&registry, cap)
-                );
-                Ok(Exit::Ok)
+    let (read, machine_facts) = read_line(ctx, &registry, &args).await?;
+    let ReadLine { tables, mut state, extras } = read;
+    let inspection = Inspection::new(ctx, inspection_runtime(ctx, &registry)?, registry.clone());
+    let mut world = World::new(ctx, registry.clone(), inspection, tables, extras, args.planning.clone());
+    if let (Some(facts), Some(m)) = (machine_facts, &state.line.machine) {
+        world.know_machine(index(&m.base), facts);
+    }
+    world.learn_line(&args.dev_bins).await?;
+    if args.help {
+        return machine_help(ctx, &mut world, &state).await;
+    }
+    let typed = state.line.clone();
+    let positionals: Vec<f::Positional> = state.line.inputs.0.clone();
+    let planning_flags = args.planning.given();
+    loop {
+        let line_now = state.line.clone();
+        let cli_world = ctx.cli_world(false);
+        let globals = ctx.globals();
+        let verdict = world
+            .settle(&positionals, |w| {
+                f::cli(
+                    cli_world.clone(),
+                    f::Invocation::Command {
+                        g: globals.clone(),
+                        c: f::Command::Run { l: line_now.clone(), planning_flags, w },
+                    },
+                )
+            })
+            .await?;
+        match verdict {
+            f::CliVerdict::Is { v: f::Verdict::Runs } => break,
+            f::CliVerdict::Is { v: f::Verdict::Asks { s } } => {
+                state = answer(ctx, &mut world, &positionals, state, s).await?;
             }
-            Target::Machine { path, notation } => super::check::show(ctx, &registry, path, notation).await,
-        };
-    }
-    if let Some(dir) = &args.output {
-        check_output_dir(dir)?;
-    }
-    let dev_dir = match &target {
-        Target::Cap { dev_dir, .. } => dev_dir.clone(),
-        Target::Machine { .. } => None,
-    };
-    // One runtime for the command: a cartridge started to inspect an input is
-    // the one that runs on it.
-    let runtime = runtime(ctx, &registry, &args, dev_dir).await?;
-    let inspection = Inspection::new(ctx, runtime.clone(), registry.clone());
-    let (runs, single_scalar) = match &target {
-        Target::Cap { cap, .. } => {
-            let cap = narrow_if_abstract(ctx, &registry, cap.clone(), &args, &inspection).await?;
-            let runs = plan_cap_runs(&registry, &cap, &args).await?;
-            let single = runs.len() == 1;
-            (runs, single)
+            other => return Err(super::say::line_verdict_error(ctx, &mut world, &state, &positionals, &other).await),
         }
-        Target::Machine { path, notation } => {
-            let runs = plan_machine_runs(&registry, path, notation, &args, &inspection).await?;
-            let single = runs.len() == 1 && runs[0].strands.len() == 1;
-            (runs, single)
-        }
+    }
+    let settled = state.line.clone();
+    let rerun = world.settle(&positionals, |w| f::rerun(w, settled.clone())).await?;
+    let prints = world.settle(&positionals, |w| f::prints_rerun(w, typed.clone(), settled.clone())).await?;
+    let rerun_state = carried(&world, &state, rerun)?;
+    let running_line = {
+        let line = rerun_state.line.clone();
+        world.settle(&positionals, |w| f::freeze(w, line.clone())).await?
     };
+    let running = carried(&world, &rerun_state, running_line)?;
+    if !running.line.inputs.is_empty() {
+        return Err(CliError::failed("the run was settled with an input given by position")
+            .hint("report it: a line that runs gives every value to a named input"));
+    }
+    if prints {
+        say_rerun(ctx, &world, &rerun_state, &args)?;
+    }
+    let m = index(&running.line.machine.as_ref().expect("a line that runs writes its machine").base);
+    let runtime = runtime(ctx, &registry, &args, world.dev_binaries(Some(m))).await?;
+    let (run, single_scalar) = planned_run(&world, &running, args.selector.as_deref()).await?;
+    let settings = RunSettings { output: args.output.clone(), force: args.force };
     if ctx.term.json {
         // Under --json stdout is records only: every result is written as a
         // file, a single value too, and the files are named in each run's
         // `run_finished` record rather than listed.
-        return execute(ctx, &registry, &args, Some(args.progress), runtime, runs, false, Results::Into(&mut std::io::sink())).await;
+        return execute(ctx, &registry, &settings, Some(args.progress), runtime, vec![run], false, Results::Into(&mut std::io::sink())).await;
     }
-    execute(ctx, &registry, &args, Some(args.progress), runtime, runs, single_scalar, Results::Stdout).await
+    execute(ctx, &registry, &settings, Some(args.progress), runtime, vec![run], single_scalar, Results::Stdout).await
 }
 
-/// `-o`, checked before anything runs, so a run's work is never done for a
-/// directory its results cannot be written to: it is a directory, or one is
-/// made there, and a file can be written in it.
-fn check_output_dir(dir: &Path) -> CliResult<()> {
-    let shown = dir.display();
-    if dir.exists() && !dir.is_dir() {
-        return Err(CliError::usage(format!("the output directory '{shown}' is a file"))
-            .hint("give -o a directory, or a path where one can be made"));
+/// The state a model line carries, from the state it came from: the text of
+/// each `named` entry and the value of each `--arg` follow their entries. An
+/// entry the line kept keeps its value; an `--arg` the model added for an
+/// option with one value takes that value.
+fn carried(world: &World<'_>, from: &RunState, line: f::RunLine) -> CliResult<RunState> {
+    let mut texts = Vec::with_capacity(line.named.len());
+    for (at, entry) in line.named.iter().enumerate() {
+        if at < from.line.named.len() && from.line.named[at] == *entry {
+            texts.push(from.texts[at].clone());
+        } else if matches!(entry.1, f::Value::Text) {
+            return Err(CliError::failed("a value of the line was lost settling it")
+                .hint("report it: settling a line never adds text it was not given"));
+        } else {
+            texts.push(None);
+        }
     }
-    std::fs::create_dir_all(dir).map_err(|e| {
-        CliError::failed(format!("the output directory '{shown}' could not be made"))
-            .context(e.to_string())
-            .hint("give -o a directory, or a path where one can be made")
-    })?;
-    tempfile::Builder::new().prefix(".capdag-check").tempfile_in(dir).map(drop).map_err(|e| {
-        CliError::failed(format!("the output directory '{shown}' cannot be written"))
-            .context(e.to_string())
-            .hint("give -o a directory you can write to")
+    let mut arg_values = Vec::with_capacity(line.args.len());
+    for (at, given) in line.args.iter().enumerate() {
+        if at < from.line.args.len() && from.line.args[at] == *given {
+            arg_values.push(from.arg_values[at].clone());
+            continue;
+        }
+        let m = index(&line.machine.as_ref().expect("a line with --arg writes its machine").base);
+        let option = world
+            .machine(m)
+            .and_then(MachineFacts::resolved)
+            .and_then(|r| r.options.get(index(&given.option)))
+            .ok_or_else(|| CliError::failed("the model bound an option the machine does not leave to the run"))?;
+        match option.allowed.as_deref() {
+            Some([only]) => arg_values.push(only.clone()),
+            _ => {
+                return Err(CliError::failed(format!("the option {} was bound without a value", option.name))
+                    .hint("report it: only an option with one value is bound without being given one"))
+            }
+        }
+    }
+    Ok(RunState {
+        line,
+        texts,
+        arg_values,
+        unknown_inputs: from.unknown_inputs.clone(),
+        unknown_options: from.unknown_options.clone(),
     })
+}
+
+/// Ask a person the stage the model asks, and give the answer to the line as
+/// the flag that gives it.
+async fn answer(ctx: &Ctx, world: &mut World<'_>, positionals: &[f::Positional], state: RunState, s: f::Stage) -> CliResult<RunState> {
+    let line_now = state.line.clone();
+    let (given, text): (f::Answer, Option<String>) = match &s {
+        f::Stage::StdinType => {
+            let typed = loop {
+                match ask::value(ctx, &ask::ValueQuestion::stdin_type()).await? {
+                    Answered::Declined => return Err(ask::declined()),
+                    Answered::Given(text) => {
+                        if line::media_type(&world.registry, &text).await?.is_some() {
+                            break text;
+                        }
+                        ask::say_retry(ctx, &format!("'{text}' names no media type: see capdag caps"));
+                    }
+                }
+            };
+            world.extras.from = Some(typed);
+            world.learn_types().await?;
+            (f::Answer::Pick { k: nat(0) }, None)
+        }
+        f::Stage::Target => {
+            let plan = world.plan(positionals).cloned().expect("what to make is asked once the inputs are planned");
+            let choices: Vec<Choice> = plan.targets.iter().map(|t| super::plan::target_choice(&world.registry, t)).collect();
+            let k = pick(ctx, &Question { what: "what to make".into(), flag: "--to ".into() }, &choices).await?;
+            world.extras.to = vec![choices[k].value.clone()];
+            world.learn_types().await?;
+            (f::Answer::Pick { k: nat(0) }, None)
+        }
+        f::Stage::Machine => {
+            let plan = world.plan(positionals).cloned().expect("the machine is asked once it is planned");
+            let choices: Vec<Choice> = plan
+                .described
+                .iter()
+                .enumerate()
+                .map(|(k, d)| Choice {
+                    label: d.notation.replace('\n', " "),
+                    detail: d.summary(),
+                    urn: Some(d.canonical.clone()),
+                    value: (k + 1).to_string(),
+                })
+                .collect();
+            let k = pick(ctx, &Question { what: "the machine".into(), flag: "capdag run ".into() }, &choices).await?;
+            (f::Answer::Pick { k: nat(k) }, None)
+        }
+        f::Stage::Path { p } => {
+            let (m, written) = running_machine(world, positionals, &line_now).await?;
+            let machine = written.machine.clone().expect("the line that runs a machine writes it");
+            let candidates: Vec<usize> = world
+                .settle(positionals, |w| f::path_candidates(w, machine.clone(), written.clone(), p.clone()))
+                .await?
+                .iter()
+                .map(index)
+                .collect();
+            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("asked of a machine that resolves");
+            let file = world.tables.files[index(p)].path.display().to_string();
+            let choices: Vec<Choice> = candidates
+                .iter()
+                .map(|&j| Choice {
+                    label: resolved.inputs[j].name.clone(),
+                    detail: names::media(&world.registry, &resolved.inputs[j].media_urn),
+                    urn: Some(resolved.inputs[j].media_urn.to_string()),
+                    value: format!("{}=@{file}", resolved.inputs[j].name),
+                })
+                .collect();
+            let at = pick(ctx, &Question { what: format!("the input {file} goes to"), flag: "--input ".into() }, &choices).await?;
+            (f::Answer::Pick { k: nat(candidates[at]) }, None)
+        }
+        f::Stage::Stdin => {
+            let (m, written) = running_machine(world, positionals, &line_now).await?;
+            let machine = written.machine.clone().expect("the line that runs a machine writes it");
+            let candidates: Vec<usize> = world
+                .settle(positionals, |w| f::stdin_candidates(w, machine.clone(), written.clone()))
+                .await?
+                .iter()
+                .map(index)
+                .collect();
+            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("asked of a machine that resolves");
+            let choices: Vec<Choice> = candidates
+                .iter()
+                .map(|&j| Choice {
+                    label: resolved.inputs[j].name.clone(),
+                    detail: names::media(&world.registry, &resolved.inputs[j].media_urn),
+                    urn: Some(resolved.inputs[j].media_urn.to_string()),
+                    value: format!("{}=-", resolved.inputs[j].name),
+                })
+                .collect();
+            let at = pick(ctx, &Question { what: "the input - goes to".into(), flag: "--input ".into() }, &choices).await?;
+            (f::Answer::Pick { k: nat(candidates[at]) }, None)
+        }
+        f::Stage::Input { j } => {
+            let (m, _) = running_machine(world, positionals, &line_now).await?;
+            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("asked of a machine that resolves");
+            let input = resolved.inputs[index(j)].clone();
+            let question = ask::ValueQuestion::input(&input.name, &names::media(&world.registry, &input.media_urn));
+            loop {
+                let typed = match ask::value(ctx, &question).await? {
+                    Answered::Declined => return Err(ask::declined()),
+                    Answered::Given(typed) => typed,
+                };
+                if typed == "-" {
+                    break (f::Answer::Value { v: f::Value::Stdin }, None);
+                }
+                if let Some(text) = typed.strip_prefix('=') {
+                    break (f::Answer::Value { v: f::Value::Text }, Some(text.to_string()));
+                }
+                if let Some(path) = typed.strip_prefix('@') {
+                    let path = PathBuf::from(path);
+                    if !path.is_file() {
+                        ask::say_retry(ctx, &format!("{} is no file: give one file, or several with --input <name>=@<glob>", path.display()));
+                        continue;
+                    }
+                    let p = world.tables.add_file(path, true);
+                    break (f::Answer::Value { v: f::Value::File { p: nat(p) } }, None);
+                }
+                break (f::Answer::Value { v: f::Value::Text }, Some(typed));
+            }
+        }
+        f::Stage::Option { j } => {
+            let (m, _) = running_machine(world, positionals, &line_now).await?;
+            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("asked of a machine that resolves");
+            let option = resolved.options[index(j)].clone();
+            let flag = format!("--arg {}=", resolved.flag_name(index(j)));
+            let value = match &option.allowed {
+                Some(values) => {
+                    let choices: Vec<Choice> = values
+                        .iter()
+                        .map(|value| Choice { label: value.clone(), detail: String::new(), urn: None, value: value.clone() })
+                        .collect();
+                    let at = pick(
+                        ctx,
+                        &Question { what: format!("{} of step {}", option.name, option.step), flag: flag.clone() },
+                        &choices,
+                    )
+                    .await?;
+                    values[at].clone()
+                }
+                None => match ask::value(
+                    ctx,
+                    &ask::ValueQuestion::option(
+                        &option.name,
+                        &option.step,
+                        &resolved.flag_name(index(j)),
+                        &names::media_urn(&world.registry, &option.media_urn),
+                    ),
+                )
+                .await?
+                {
+                    Answered::Declined => return Err(ask::declined()),
+                    Answered::Given(value) => value,
+                },
+            };
+            (f::Answer::Value { v: f::Value::Text }, Some(value))
+        }
+        f::Stage::Provider => {
+            let (m, _) = running_machine(world, positionals, &line_now).await?;
+            let needs = world.needs(m).cloned().expect("a provider is asked once what the run needs is known");
+            let (cap, providers) = needs
+                .missing
+                .iter()
+                .find(|(_, providers)| providers.len() > 1)
+                .cloned()
+                .expect("a provider is asked only when a cap has several");
+            let cap_name = names::cap_urn(&world.registry, &cap.to_string());
+            let choices: Vec<Choice> = providers
+                .iter()
+                .map(|id| Choice { label: id.clone(), detail: format!("provides {cap_name}"), urn: None, value: id.clone() })
+                .collect();
+            let at = pick(
+                ctx,
+                &Question { what: format!("the cartridge to install for {cap_name}"), flag: "capdag cartridge install ".into() },
+                &choices,
+            )
+            .await?;
+            super::cartridge::install_cartridge(ctx, &providers[at]).await?;
+            world.forget_needs(m);
+            return Ok(state);
+        }
+        f::Stage::Capability | f::Stage::Model => {
+            return Err(CliError::failed("a run was asked a question of another command")
+                .hint("report it: a run asks only what its line leaves open"))
+        }
+    };
+    let option_answer = matches!(s, f::Stage::Option { .. });
+    let given_line = {
+        let (line, stage, given) = (line_now.clone(), s.clone(), given.clone());
+        world.settle(positionals, |w| f::give(w, line.clone(), stage.clone(), given.clone())).await?
+    };
+    let mut next = carried_answer(&state, given_line, if option_answer { None } else { text.clone() })?;
+    if option_answer {
+        next.arg_values.push(text.expect("an option's answer is a value"));
+    }
+    Ok(next)
+}
+
+/// The state after an answer: entries the line kept keep their values; the
+/// one entry the answer added that is text holds what was typed.
+fn carried_answer(from: &RunState, line: f::RunLine, mut text: Option<String>) -> CliResult<RunState> {
+    let mut texts = Vec::with_capacity(line.named.len());
+    for (at, entry) in line.named.iter().enumerate() {
+        if at < from.line.named.len() && from.line.named[at] == *entry {
+            texts.push(from.texts[at].clone());
+        } else if matches!(entry.1, f::Value::Text) {
+            texts.push(Some(text.take().ok_or_else(|| {
+                CliError::failed("an answer added text that was not typed").hint("report it")
+            })?));
+        } else {
+            texts.push(None);
+        }
+    }
+    let kept = line.args.len().min(from.line.args.len());
+    if line.args[..kept] != from.line.args[..kept] {
+        return Err(CliError::failed("an answer changed an --arg the line gave").hint("report it"));
+    }
+    let mut arg_values = from.arg_values.clone();
+    arg_values.truncate(kept);
+    Ok(RunState {
+        line,
+        texts,
+        arg_values,
+        unknown_inputs: from.unknown_inputs.clone(),
+        unknown_options: from.unknown_options.clone(),
+    })
+}
+
+/// Pick one of `choices`, or end the command when the person declines.
+async fn pick(ctx: &Ctx, question: &Question, choices: &[Choice]) -> CliResult<usize> {
+    match ask::pick(ctx, question, choices).await? {
+        Answered::Given(at) => Ok(at),
+        Answered::Declined => Err(ask::declined()),
+    }
+}
+
+/// The machine a line runs — the one it writes, or the one planning settled
+/// on — and the line that runs it, the way the model reads it
+/// (`RunLine.written`). A question about a machine's inputs or options is
+/// about this machine.
+async fn running_machine(world: &mut World<'_>, positionals: &[f::Positional], line: &f::RunLine) -> CliResult<(usize, f::RunLine)> {
+    let written = world.settle(positionals, |w| f::run_line::written(w, line.clone())).await?;
+    let m = index(&written.machine.as_ref().expect("the line that runs a machine writes it").base);
+    world.resolve_machine(m).await?;
+    if world.machine(m).and_then(MachineFacts::resolved).is_none() {
+        return Err(CliError::failed("a question was asked about a machine that does not resolve").hint("report it"));
+    }
+    Ok((m, written))
+}
+
+/// The line to run the same machine again, asking nothing, as words a shell
+/// reads back: on stderr, and under `--json` as a `rerun` record.
+fn say_rerun(ctx: &Ctx, world: &World<'_>, rerun: &RunState, args: &Args) -> CliResult<()> {
+    let words = rerun_words(ctx, world, rerun, args)?;
+    if ctx.term.json {
+        emit_record(&serde_json::json!({ "type": "rerun", "argv": words }));
+    } else if ctx.term.verbosity >= 0 {
+        eprintln!("Run it again with: {}", super::shell_line(&words));
+    }
+    Ok(())
+}
+
+/// The words of the line to run the same machine again.
+pub fn rerun_words(ctx: &Ctx, world: &World<'_>, rerun: &RunState, args: &Args) -> CliResult<Vec<String>> {
+    let line = &rerun.line;
+    let m = index(&line.machine.as_ref().expect("the line to run again writes its machine").base);
+    let resolved = world
+        .machine(m)
+        .and_then(MachineFacts::resolved)
+        .ok_or_else(|| CliError::failed("the machine that ran is not known").hint("report it"))?;
+    let mut words: Vec<String> = vec!["capdag".into()];
+    words.extend(ctx.global_words());
+    words.push("run".into());
+    words.push(world.tables.machines[m].argument());
+    let mut after: Vec<String> = Vec::new();
+    for x in line.inputs.iter() {
+        let word = match x {
+            f::Positional::Path { p } => world.tables.files[index(p)].path.display().to_string(),
+            f::Positional::Stdin => "-".to_string(),
+            f::Positional::Live { r } => world.tables.lives[index(r)].clone(),
+        };
+        // A path that would be read as a flag, the machine or stdin goes
+        // after `--`.
+        if word.starts_with('-') && word != "-" {
+            after.push(word);
+        } else {
+            words.push(word);
+        }
+    }
+    for ((j, value), text) in line.named.iter().zip(&rerun.texts) {
+        let name = &resolved.inputs[index(j)].name;
+        match value {
+            f::Value::File { p } => {
+                words.push("--input".into());
+                words.push(format!("{name}=@{}", world.tables.files[index(p)].path.display()));
+            }
+            f::Value::Stdin => {
+                words.push("--input".into());
+                words.push(format!("{name}=-"));
+            }
+            f::Value::Text => {
+                let text = text.as_deref().expect("text is carried with its entry");
+                let escaped = if text.starts_with('@') || text.starts_with('=') || text == "-" { "=" } else { "" };
+                words.push("--input".into());
+                words.push(format!("{name}={escaped}{text}"));
+            }
+            f::Value::Live { r } => {
+                words.push("--live".into());
+                words.push(format!("{name}={}", world.tables.lives[index(r)]));
+            }
+        }
+    }
+    for (given, value) in line.args.iter().zip(&rerun.arg_values) {
+        let j = index(&given.option);
+        let name = if given.qualified { resolved.options[j].flag_name(true) } else { resolved.options[j].name.clone() };
+        words.push("--arg".into());
+        words.push(format!("{name}={value}"));
+    }
+    if let Some(selector) = &args.selector {
+        words.push("--selector".into());
+        words.push(selector.clone());
+    }
+    if let Some(dir) = &args.output {
+        words.push("-o".into());
+        words.push(dir.display().to_string());
+    }
+    if args.force {
+        words.push("--force".into());
+    }
+    if let Some(trace) = &args.trace {
+        words.push("--trace".into());
+        words.push(trace.display().to_string());
+    }
+    for dev in &args.dev_bins {
+        words.push("--dev-bin".into());
+        words.push(dev.display().to_string());
+    }
+    if !after.is_empty() {
+        words.push("--".into());
+        words.extend(after);
+    }
+    Ok(words)
+}
+
+/// `capdag run <machine> --help`: the machine's inputs, steps and the options
+/// it leaves to the run, as `capdag check` shows them; `capdag run --help`
+/// without a machine: run's own help.
+async fn machine_help(ctx: &Ctx, world: &mut World<'_>, state: &RunState) -> CliResult<Exit> {
+    let Some(machine) = state.line.machine.clone() else {
+        super::print_command_help(&["run"])?;
+        return Ok(Exit::Ok);
+    };
+    let m = index(&machine.base);
+    let positionals: Vec<f::Positional> = Vec::new();
+    let cli_world = ctx.cli_world(false);
+    let verdict = world
+        .settle(&positionals, |w| {
+            f::cli(cli_world.clone(), f::Invocation::HelpFlag { topic: f::HelpTopic::Machine { m: machine.clone(), w } })
+        })
+        .await?;
+    match verdict {
+        f::CliVerdict::Is { v: f::Verdict::Help } => {
+            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("help is shown for a machine that resolves");
+            super::check::show(ctx, &world.registry, &world.tables.machines[m], resolved)?;
+            Ok(Exit::Ok)
+        }
+        other => Err(super::check::showing_error(world, &machine, &other)),
+    }
+}
+
+/// The run of a settled line: every value it gives each input of its machine,
+/// in the order given — one value, or several as one sequence — and every
+/// option it binds, given to its step.
+async fn planned_run(world: &World<'_>, running: &RunState, selector: Option<&str>) -> CliResult<(PlannedRun, bool)> {
+    let m = index(&running.line.machine.as_ref().expect("a line that runs writes its machine").base);
+    let resolved = world
+        .machine(m)
+        .and_then(MachineFacts::resolved)
+        .ok_or_else(|| CliError::failed("the machine that runs is not known").hint("report it"))?;
+    let selector = selector_bytes(selector)?;
+    let mut stdin: Option<Vec<u8>> = None;
+    let mut values: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+    let mut live: HashMap<String, String> = HashMap::new();
+    let mut files_given: Vec<PathBuf> = Vec::new();
+    // Each value given is a source of the run, in the order given; what it
+    // is called names what descends from it.
+    let mut sources: Vec<String> = Vec::new();
+    let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
+    for ((j, value), text) in running.line.named.iter().zip(&running.texts) {
+        let name = resolved.inputs[index(j)].name.clone();
+        positions.entry(name.clone()).or_default().push(sources.len());
+        match value {
+            f::Value::File { p } => {
+                let path = &world.tables.files[index(p)].path;
+                values.entry(name).or_default().push(inputs::read(path)?);
+                sources.push(inputs::stem(path));
+                files_given.push(path.clone());
+            }
+            f::Value::Text => {
+                values.entry(name.clone()).or_default().push(text.clone().expect("text is carried with its entry").into_bytes());
+                sources.push(name);
+            }
+            f::Value::Stdin => {
+                if stdin.is_none() {
+                    stdin = Some(read_stdin()?);
+                }
+                values.entry(name).or_default().push(stdin.clone().expect("read just above"));
+                sources.push("stdin".to_string());
+            }
+            f::Value::Live { r } => {
+                let reference = world.tables.lives[index(r)].clone();
+                sources.push(inputs::file_safe(&reference));
+                live.insert(name, reference);
+            }
+        }
+    }
+    let mut strands = Vec::with_capacity(resolved.resolution.strand_count());
+    let mut slots = Vec::with_capacity(resolved.resolution.strand_count());
+    for strand_index in 0..resolved.resolution.strand_count() {
+        let sequences = resolved
+            .inputs
+            .iter()
+            .filter(|input| input.strand == strand_index)
+            .filter(|input| live.contains_key(&input.name) || values.get(&input.name).is_some_and(|v| v.len() > 1))
+            .map(|input| input.name.clone())
+            .collect();
+        let strand = resolved
+            .resolution
+            .plan(strand_index, &RunInputs { sequences, ..RunInputs::default() })
+            .await
+            .map_err(|e| CliError::failed("the machine could not be planned").context(e.to_string()))?;
+        let mut plan_inputs = HashMap::new();
+        let mut is_sequence = HashMap::new();
+        slots.push(
+            strand
+                .input_slots()
+                .iter()
+                .map(|(name, slot)| (slot.clone(), positions.get(name).cloned().unwrap_or_default()))
+                .collect::<Vec<_>>(),
+        );
+        for (name, slot) in &strand.input_slots() {
+            let (value, sequence) = match (values.get(name), live.get(name)) {
+                (_, Some(reference)) => (
+                    PlanInput::LiveReference { reference_urn: reference.clone(), selector: selector.clone() },
+                    true,
+                ),
+                (Some(given), None) if given.len() == 1 => (PlanInput::Bytes(given[0].clone()), false),
+                (Some(given), None) => (
+                    PlanInput::Bytes(capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(given).map_err(|e| {
+                        CliError::failed(format!("the {} values for input '{name}' could not be put together", given.len()))
+                            .context(e.to_string())
+                    })?),
+                    true,
+                ),
+                (None, None) => {
+                    return Err(CliError::failed(format!("the input '{name}' was given nothing"))
+                        .hint("report it: a line that runs gives every input of its machine a value"))
+                }
+            };
+            plan_inputs.insert(slot.clone(), value);
+            is_sequence.insert(slot.clone(), sequence);
+        }
+        let mut cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
+        for (given, value) in running.line.args.iter().zip(&running.arg_values) {
+            let option = &resolved.options[index(&given.option)];
+            if option.strand != strand_index {
+                continue;
+            }
+            let node = strand
+                .plan
+                .nodes
+                .iter()
+                .find(|(_, node)| matches!(&node.node_type, ExecutionNodeType::Cap { token_id, .. } if token_id.as_str() == option.token))
+                .map(|(id, _)| id.clone())
+                .ok_or_else(|| CliError::failed(format!("the step {} is not in the machine's plan", option.step)).hint("report it"))?;
+            let bytes = match value.strip_prefix('@') {
+                Some(path) => inputs::read(Path::new(path))?,
+                None => value.clone().into_bytes(),
+            };
+            cap_arguments.entry(node).or_default().push((option.media_urn.clone(), bytes));
+        }
+        strands.push(PlannedStrand { strand, inputs: plan_inputs, is_sequence, cap_arguments });
+    }
+    let entry = &world.tables.machines[m];
+    // What an output that reads no input is called: the machine file's
+    // stem, or for a machine written inline, its first step's name.
+    let machine_name = match entry {
+        MachineEntry::File(path) => inputs::stem(path),
+        MachineEntry::Inline(_) => resolved
+            .caps
+            .first()
+            .map(|cap| names::cap_urn(&world.registry, &cap.to_string()))
+            .ok_or_else(|| CliError::failed("the machine has no step").hint("report it"))?,
+    };
+    let label = match files_given.as_slice() {
+        [one] => one.display().to_string(),
+        _ => entry.shown(),
+    };
+    let single_scalar = strands.len() == 1;
+    Ok((PlannedRun { label, strands, sources, slots, machine_name }, single_scalar))
+}
+
+fn read_stdin() -> CliResult<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .read_to_end(&mut bytes)
+        .map_err(|e| CliError::failed("stdin could not be read").context(e.to_string()))?;
+    Ok(bytes)
+}
+
+/// What a live source captures: `--selector`, or everything it gives.
+fn selector_bytes(given: Option<&str>) -> CliResult<Vec<u8>> {
+    match given {
+        None => Ok(b"{}".to_vec()),
+        Some(raw) => {
+            capdag::bifaci::live_feed::LiveFeedSelector::parse(raw.as_bytes()).map_err(|e| {
+                CliError::usage("--selector is not a valid live-feed selector")
+                    .context(e.to_string())
+                    .hint("for example: --selector '{\"duration_ms\":5000}'")
+            })?;
+            Ok(raw.as_bytes().to_vec())
+        }
+    }
 }
 
 /// The cartridge-hosting runtime of one command: its dev binaries, its trace,
 /// and where it writes what it makes.
-async fn runtime(
-    ctx: &Ctx,
-    registry: &Arc<FabricRegistry>,
-    args: &Args,
-    dev_dir: Option<PathBuf>,
-) -> CliResult<Arc<dyn RunHost>> {
-    let mut dev_binaries = inputs::dev_binaries(&args.dev_bins)?;
-    dev_binaries.extend(dev_dir);
+async fn runtime(ctx: &Ctx, registry: &Arc<FabricRegistry>, args: &Args, dev_binaries: Vec<PathBuf>) -> CliResult<Arc<dyn RunHost>> {
     let trace = match &args.trace {
         Some(path) => Some(capdag::ProtocolTraceSink::open(&path.display().to_string()).await.map_err(|e| {
             CliError::failed(format!("the trace file {} could not be opened", path.display())).context(e.to_string())
@@ -329,626 +950,25 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
         .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
     let mut plan_inputs = HashMap::new();
     let mut is_sequence = HashMap::new();
+    let mut slots = Vec::new();
     if let (Some(slot), Some(value)) = (strand.input_slots().get(SINGLE_CAP_INPUT_NODE).cloned(), input) {
         plan_inputs.insert(slot.clone(), PlanInput::Bytes(value));
-        is_sequence.insert(slot, false);
+        is_sequence.insert(slot.clone(), false);
+        slots.push((slot, vec![0]));
     }
     let run = PlannedRun {
         label: alias.to_string(),
-        stem: inputs::file_safe(alias),
         strands: vec![PlannedStrand { strand, inputs: plan_inputs, is_sequence, cap_arguments: HashMap::new() }],
+        sources: if slots.is_empty() { Vec::new() } else { vec![inputs::file_safe(alias)] },
+        slots: vec![slots],
+        machine_name: inputs::file_safe(alias),
     };
-    let args = Args {
-        target: alias.to_string(),
-        rest: Vec::new(),
-        output: None,
-        force: false,
-        inputs: Vec::new(),
-        args: Vec::new(),
-        to: None,
-        selector: None,
-        progress: progress.unwrap_or(ProgressChoice::None),
-        trace: None,
-        dev_bins: Vec::new(),
-    };
-    let runtime = runtime(ctx, &registry, &args, None).await?;
+    let runtime = new_runtime(ctx, &registry, Vec::new(), None, PathBuf::from("."))?;
+    let settings = RunSettings { output: None, force: false };
     let mut value: Vec<u8> = Vec::new();
-    match execute(ctx, &registry, &args, progress, runtime, vec![run], true, Results::Into(&mut value)).await? {
+    match execute(ctx, &registry, &settings, progress, runtime, vec![run], true, Results::Into(&mut value)).await? {
         Exit::Run(RunOutcome::Completed) => Ok(value),
         other => Err(CliError { exit: other, ..CliError::failed(format!("{alias} did not complete")) }),
-    }
-}
-
-/// A target names a machine file when it is a file; otherwise a capability.
-async fn resolve_target(ctx: &Ctx, registry: &Arc<FabricRegistry>, token: &str) -> CliResult<Target> {
-    let path = Path::new(token);
-    if path.is_file() {
-        let notation = std::fs::read_to_string(path).map_err(|e| {
-            CliError::failed(format!("the machine file '{token}' could not be read")).context(e.to_string())
-        })?;
-        return Ok(Target::Machine { path: path.to_path_buf(), notation });
-    }
-    if token.ends_with(".machine") {
-        return Err(CliError::usage(format!("the machine file '{token}' does not exist"))
-            .hint("check the path; `capdag plan <files> --to <type> --save <file>` writes one"));
-    }
-    let reference = match classify_cap_token(token) {
-        Ok(CapToken::Urn(urn)) => urn,
-        Ok(CapToken::Alias(alias)) => alias,
-        Err(e) => return Err(CliError::usage(format!("'{token}' is neither a capability nor a file")).context(e)),
-    };
-    match registry.get_cap(&reference).await {
-        Ok(cap) => return Ok(Target::Cap { cap, dev_dir: None }),
-        Err(e) => ctx::nothing_by_that_name(e)?,
-    }
-    // A cap the fabric does not define may be a dev cartridge's, run by its
-    // alias before it is published — when none of its aliases means another
-    // cap upstream.
-    match ctx.host.find_dev_cap(&reference) {
-        Ok(Some((cap, dir))) => {
-            capdag::dev::check_no_fabric_conflict(registry, &cap)
-                .await
-                .map_err(|e| CliError::failed(e.to_string()))?;
-            if ctx.term.verbosity >= 0 && !ctx.term.json {
-                eprintln!("'{token}' is not in the fabric: running the dev cartridge at {}", dir.display());
-            }
-            registry.add_caps_to_cache(vec![cap.clone()]);
-            Ok(Target::Cap { cap, dev_dir: Some(dir) })
-        }
-        Ok(None) => Err(unknown_cap(registry, token, "capability or machine file").await),
-        Err(e) => Err(ctx::host_failure(format!("the dev cartridges could not be read for '{token}'"), e)),
-    }
-}
-
-/// No capability has this name: say which ones are near it. `what` is what
-/// the name was looked for as: "capability or machine file".
-pub async fn unknown_cap(registry: &FabricRegistry, token: &str, what: &str) -> CliError {
-    let mut error = CliError::usage(format!("there is no {what} named '{token}'"));
-    let aliases: Vec<String> = match registry.manifest_caps().await {
-        Ok(caps) => caps.iter().flat_map(|c| c.aliases.clone()).collect(),
-        Err(e) => {
-            return error
-                .context(format!("names near it cannot be offered: {e}"))
-                .hint(format!("find capabilities with: capdag caps {token}"))
-        }
-    };
-    let mut near: Vec<(f64, &String)> = aliases
-        .iter()
-        .map(|a| (strsim::jaro_winkler(token, a), a))
-        .filter(|(score, _)| *score > 0.75)
-        .collect();
-    near.sort_by(|a, b| b.0.total_cmp(&a.0));
-    if !near.is_empty() {
-        let names: Vec<&str> = near.iter().take(3).map(|(_, a)| a.as_str()).collect();
-        error = error.context(format!("did you mean {}?", names.join(", ")));
-    }
-    error.hint(format!("find capabilities with: capdag caps {token}"))
-}
-
-/// A generic cap (`convert-image`) is narrowed to the concrete one for its
-/// input's type, and `--to`'s.
-async fn narrow_if_abstract(
-    ctx: &Ctx,
-    registry: &Arc<FabricRegistry>,
-    cap: Cap,
-    args: &Args,
-    inspection: &Inspection<'_>,
-) -> CliResult<Cap> {
-    let alias = names::cap(registry, &cap);
-    if !cap.is_abstract() {
-        if args.to.is_some() {
-            return Err(CliError::usage(format!("--to is for a generic cap, and '{alias}' is a specific one"))
-                .hint("leave out --to"));
-        }
-        return Ok(cap);
-    }
-    let input = args
-        .rest
-        .iter()
-        .filter(|t| !t.starts_with('-'))
-        .find_map(|t| inputs::expand(t).ok().and_then(|files| files.into_iter().next()))
-        .ok_or_else(|| {
-            CliError::usage(format!("'{alias}' is generic: it needs an input file to tell which cap to run"))
-                .context("piped input has no type to tell it by")
-                .hint(format!("capdag run {alias} <file> --to <type>"))
-        })?;
-    let media = inputs::detect(&input, inspection).await?;
-    let target = match &args.to {
-        Some(to) => Some(super::plan::target_media(registry, to).await?),
-        None => None,
-    };
-    let concrete = registry
-        .narrow_abstract_cap(&cap.urn, &media, target.as_ref())
-        .await
-        .map_err(|e| {
-            CliError::failed(format!(
-                "'{alias}' could not choose the cap to run for {}",
-                inputs::describe(&input, &media, registry)
-            ))
-            .context(e.to_string())
-            .hint(format!(
-                "say what to make with --to <type>, or see what it can become: capdag plan {}",
-                input.display()
-            ))
-        })?;
-    let concrete = registry.get_cap(&concrete.to_string()).await.map_err(|e| match e {
-        capdag::FabricRegistryError::NotFound(_) => {
-            CliError::failed(format!("'{alias}' was narrowed to a cap the fabric does not hold")).context(e.to_string())
-        }
-        e => ctx::registry_failure(e),
-    })?;
-    // What actually runs is said, as the generic name chose it.
-    if ctx.term.verbosity >= 0 && !ctx.term.json {
-        eprintln!("{alias} → {} (for {})", names::cap(registry, &concrete), inputs::describe(&input, &media, registry));
-    }
-    Ok(concrete)
-}
-
-/// What a cap's input is.
-enum CapInput {
-    Files(Vec<PathBuf>),
-    Stdin(Vec<u8>),
-    Live(String),
-    Nothing,
-}
-
-/// The runs of one cap: one per input file, or one on stdin, a live source,
-/// or nothing.
-async fn plan_cap_runs(registry: &Arc<FabricRegistry>, cap: &Cap, args: &Args) -> CliResult<Vec<PlannedRun>> {
-    let alias = names::cap(registry, cap);
-    let notation = synthesize_single_cap_notation(cap)
-        .map_err(|e| CliError::failed(format!("'{alias}' cannot be run on its own")).context(e))?;
-    let mut explicit: Vec<(String, String)> = Vec::new();
-    for given in &args.args {
-        let (name, value) = inputs::pair("--arg", given)?;
-        explicit.push((name.to_string(), value.to_string()));
-    }
-    let mut tokens = args.rest.clone();
-    // `--input` names a cap's one input as `input`.
-    for given in &args.inputs {
-        let (name, value) = inputs::pair("--input", given)?;
-        if name != SINGLE_CAP_INPUT_NODE {
-            return Err(CliError::usage(format!("a cap has one input, '{SINGLE_CAP_INPUT_NODE}', and --input named '{name}'"))
-                .hint(format!("give its input as a path, or --input {SINGLE_CAP_INPUT_NODE}=@<path>")));
-        }
-        match value.strip_prefix('@') {
-            Some(path) => tokens.push(path.to_string()),
-            None => explicit.push((SINGLE_CAP_INPUT_NODE.to_string(), value.to_string())),
-        }
-    }
-    let media = |urn: &str| names::media_urn(registry, urn);
-    let interface = InterfaceNames { cap: alias.clone(), media: &media, urns: false };
-    let invocation = map_invocation(cap, &tokens, &explicit, &interface).map_err(|e| {
-        CliError::usage(format!("'{alias}' was given an option it does not have"))
-            .context(e)
-            .hint(format!("its options: capdag run {alias} --help"))
-    })?;
-    let takes_input = notation.contains(&format!("[{SINGLE_CAP_INPUT_NODE} -> "));
-    if !takes_input && !invocation.input_paths.is_empty() {
-        return Err(CliError::usage(format!(
-            "'{alias}' takes no input, and was given {}",
-            invocation.input_paths.join(", ")
-        ))
-        .hint(format!("run it on nothing: capdag run {alias}")));
-    }
-    let live: Vec<&String> = invocation
-        .input_paths
-        .iter()
-        .filter(|t| MediaUrn::from_string(t).map(|u| u.is_live_feed()).unwrap_or(false))
-        .collect();
-    if live.len() > 1 || (!live.is_empty() && invocation.input_paths.len() > live.len()) {
-        return Err(CliError::usage("a cap's run takes one live source, and no files beside it"));
-    }
-    let input = if !takes_input {
-        CapInput::Nothing
-    } else if let Some(reference) = live.first() {
-        CapInput::Live((*reference).clone())
-    } else if invocation.input_paths.is_empty() {
-        use std::io::IsTerminal;
-        if std::io::stdin().is_terminal() {
-            return Err(CliError::usage(format!("'{alias}' needs an input"))
-                .context(format!("it takes {}", input_media_name(registry, cap)))
-                .hint(format!("give a file: capdag run {alias} <file>, or pipe one in: cat <file> | capdag run {alias}")));
-        }
-        let mut bytes = Vec::new();
-        use std::io::Read;
-        std::io::stdin()
-            .read_to_end(&mut bytes)
-            .map_err(|e| CliError::failed("stdin could not be read").context(e.to_string()))?;
-        if bytes.is_empty() {
-            return Err(CliError::usage(format!("stdin was empty: there is nothing to run '{alias}' on")));
-        }
-        CapInput::Stdin(bytes)
-    } else {
-        let mut files = Vec::new();
-        for path in &invocation.input_paths {
-            files.extend(inputs::expand(path)?);
-        }
-        files.sort();
-        CapInput::Files(files)
-    };
-    let selector = selector_bytes(args.selector.as_deref(), matches!(input, CapInput::Live(_)))?;
-
-    let resolved = ResolvedNotation::resolve(&notation, registry.clone())
-        .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
-    let run_inputs = match &input {
-        CapInput::Live(_) => RunInputs {
-            sequences: std::iter::once(SINGLE_CAP_INPUT_NODE.to_string()).collect(),
-            ..RunInputs::default()
-        },
-        _ => RunInputs::declared(),
-    };
-    let strand = resolved
-        .plan(0, &run_inputs)
-        .await
-        .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
-    let slot = strand.input_slots().get(SINGLE_CAP_INPUT_NODE).cloned();
-    let cap_node = strand
-        .plan
-        .nodes
-        .iter()
-        .find(|(_, n)| matches!(n.node_type, ExecutionNodeType::Cap { .. }))
-        .map(|(id, _)| id.clone())
-        .ok_or_else(|| CliError::failed(format!("the plan of '{alias}' has no step")))?;
-    let mut cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
-    if !invocation.cap_arguments.is_empty() {
-        cap_arguments.insert(cap_node, invocation.cap_arguments.clone());
-    }
-    let one = |label: String, stem: String, given: Option<(PlanInput, bool)>| -> PlannedRun {
-        let mut plan_inputs = HashMap::new();
-        let mut is_sequence = HashMap::new();
-        if let (Some(slot), Some((value, sequence))) = (&slot, given) {
-            plan_inputs.insert(slot.clone(), value);
-            is_sequence.insert(slot.clone(), sequence);
-        }
-        PlannedRun {
-            label,
-            stem,
-            strands: vec![PlannedStrand {
-                strand: strand.clone(),
-                inputs: plan_inputs,
-                is_sequence,
-                cap_arguments: cap_arguments.clone(),
-            }],
-        }
-    };
-    let runs = match input {
-        CapInput::Nothing => vec![one(alias.clone(), inputs::file_safe(&alias), None)],
-        CapInput::Stdin(bytes) => vec![one(format!("{alias} on stdin"), "stdin".into(), Some((PlanInput::Bytes(bytes), false)))],
-        CapInput::Live(reference) => vec![one(
-            format!("{alias} on {reference}"),
-            inputs::file_safe(&reference),
-            Some((PlanInput::LiveReference { reference_urn: reference.clone(), selector }, true)),
-        )],
-        CapInput::Files(files) => {
-            let mut runs = Vec::with_capacity(files.len());
-            for file in files {
-                let bytes = inputs::read(&file)?;
-                runs.push(one(file.display().to_string(), inputs::stem(&file), Some((PlanInput::Bytes(bytes), false))));
-            }
-            runs
-        }
-    };
-    Ok(runs)
-}
-
-fn input_media_name(registry: &FabricRegistry, cap: &Cap) -> String {
-    cap.urn
-        .in_media_urn()
-        .map(|media| names::media(registry, &media))
-        .unwrap_or_else(|_| "an input".to_string())
-}
-
-fn selector_bytes(given: Option<&str>, live: bool) -> CliResult<Vec<u8>> {
-    match given {
-        None => Ok(b"{}".to_vec()),
-        Some(_) if !live => Err(CliError::usage("--selector is for a live source, and none was given")
-            .hint("give a live source such as media:audio;live;microphone, or leave out --selector")),
-        Some(raw) => {
-            capdag::bifaci::live_feed::LiveFeedSelector::parse(raw.as_bytes()).map_err(|e| {
-                CliError::usage("--selector is not a valid live-feed selector")
-                    .context(e.to_string())
-                    .hint("for example: --selector '{\"duration_ms\":5000}'")
-            })?;
-            Ok(raw.as_bytes().to_vec())
-        }
-    }
-}
-
-/// The inputs a value fits most closely, by the signed specificity distance
-/// between what it is and what each takes. A value — a detected file, a live
-/// source's content — is a complete thing: what it does not mention it does not
-/// have, so it fits an input it satisfies, and may fit one that says more than
-/// it writes (a distance below zero). Several are returned only when they tie.
-fn nearest_inputs<'a, T>(media: &MediaUrn, inputs: impl IntoIterator<Item = (T, &'a MediaUrn)>) -> Vec<T> {
-    let mut best: Vec<T> = Vec::new();
-    let mut nearest: Option<i64> = None;
-    for (input, takes) in inputs {
-        if !media.satisfies(takes) {
-            continue;
-        }
-        let distance = media.specificity() as i64 - takes.specificity() as i64;
-        match nearest {
-            Some(closest) if distance > closest => {}
-            Some(closest) if distance == closest => best.push(input),
-            _ => {
-                nearest = Some(distance);
-                best = vec![input];
-            }
-        }
-    }
-    best
-}
-
-/// What one input of a machine is given for one run.
-#[derive(Clone)]
-enum Given {
-    /// One or more values in the order given: one is the value, several a sequence.
-    Values(Vec<Vec<u8>>),
-    /// A live source.
-    Live(String),
-}
-
-/// The runs of a machine: one per path when it has one input given several
-/// paths and nothing else, else one in which an input given several paths
-/// takes them as a sequence.
-async fn plan_machine_runs(
-    registry: &Arc<FabricRegistry>,
-    path: &Path,
-    notation: &str,
-    args: &Args,
-    inspection: &Inspection<'_>,
-) -> CliResult<Vec<PlannedRun>> {
-    let label = path.display().to_string();
-    let resolved = super::check::resolve(registry, path, notation).await?;
-    let (machine_inputs, _outputs) = match (resolved.inputs(), resolved.outputs()) {
-        (Ok(i), Ok(o)) => (i, o),
-        (Err(e), _) | (_, Err(e)) => {
-            return Err(CliError::failed(format!("{label} is not a machine that can run")).context(e.to_string()))
-        }
-    };
-    let input_names = || -> String {
-        if machine_inputs.is_empty() {
-            return "it has none".to_string();
-        }
-        machine_inputs
-            .iter()
-            .map(|i| format!("{} ({})", i.name, names::media(registry, &i.media_urn)))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    // Partition: live sources, and paths.
-    let mut live_sources: Vec<(String, MediaUrn)> = Vec::new();
-    let mut files: Vec<PathBuf> = Vec::new();
-    for token in &args.rest {
-        if token.starts_with('-') {
-            return Err(CliError::usage(format!("a machine run has no option '{token}'"))
-                .hint("a machine's steps are configured in the machine; see `capdag run --help` for run's own flags"));
-        }
-        if let Ok(urn) = MediaUrn::from_string(token) {
-            if urn.is_live_feed() {
-                let content = registry
-                    .live_source_content_urn(&urn)
-                    .await
-                    .map_err(|e| CliError::failed(format!("the live source '{token}' could not be looked up")).context(e.to_string()))?
-                    .ok_or_else(|| {
-                        CliError::failed(format!("'{token}' is a live reference the fabric defines no source for"))
-                            .hint("check the reference; `capdag info <alias>` shows a media type")
-                    })?;
-                let content = MediaUrn::from_string(&content)
-                    .map_err(|e| CliError::failed(format!("the fabric's content for '{token}' is no media URN")).context(e.to_string()))?;
-                live_sources.push((urn.to_string(), content));
-                continue;
-            }
-        }
-        files.extend(inputs::expand(token)?);
-    }
-    files.sort();
-    let selector = selector_bytes(args.selector.as_deref(), !live_sources.is_empty())?;
-    if args.selector.is_some() && live_sources.len() > 1 {
-        return Err(CliError::usage(format!("--selector is ambiguous with {} live sources", live_sources.len()))
-            .hint("run one live source per command when you configure it"));
-    }
-
-    let mut given: HashMap<String, Given> = HashMap::new();
-    let mut named: HashSet<String> = HashSet::new();
-    for pair in &args.inputs {
-        let (name, value) = inputs::pair("--input", pair)?;
-        if !machine_inputs.iter().any(|i| i.name == name) {
-            return Err(CliError::usage(format!("the machine has no input named '{name}'"))
-                .context(format!("its inputs: {}", input_names())));
-        }
-        let bytes = inputs::value("--input", name, value)?;
-        match given.entry(name.to_string()).or_insert_with(|| Given::Values(Vec::new())) {
-            Given::Values(values) => values.push(bytes),
-            Given::Live(_) => unreachable!("only values are given by name"),
-        }
-        named.insert(name.to_string());
-    }
-    // The input a path or live source fits most closely, among those not named.
-    // `file`: the file the value is, when it is one — what `plan` can be
-    // asked about.
-    let closest = |media: &MediaUrn, what: &str, file: Option<&Path>| -> CliResult<String> {
-        let best = nearest_inputs(
-            media,
-            machine_inputs
-                .iter()
-                .filter(|i| !named.contains(&i.name))
-                .map(|i| (i, &i.media_urn)),
-        );
-        match best.as_slice() {
-            [input] => Ok(input.name.clone()),
-            [] => Err({
-                let error = CliError::failed(format!("{what} is not what this machine takes"))
-                    .context(format!("its inputs: {}", input_names()));
-                match file {
-                    Some(file) => error.hint(format!("see what it can become: capdag plan {}", file.display())),
-                    None => error.hint("give the machine a source of a kind its inputs take"),
-                }
-            }),
-            several => Err(CliError::usage(format!("{what} fits several inputs of this machine"))
-                .context(format!(
-                    "it fits {}",
-                    several.iter().map(|i| format!("'{}'", i.name)).collect::<Vec<_>>().join(", ")
-                ))
-                .hint("say which with --input <name>=@<path>")),
-        }
-    };
-    let mut file_inputs: Vec<(String, PathBuf, Vec<u8>)> = Vec::with_capacity(files.len());
-    for file in &files {
-        let media = inputs::detect(file, inspection).await?;
-        let name = closest(&media, &inputs::describe(file, &media, registry), Some(file))?;
-        file_inputs.push((name, file.clone(), inputs::read(file)?));
-    }
-    let mut live_inputs: Vec<(String, String)> = Vec::new();
-    for (reference, content) in &live_sources {
-        let name = closest(content, &format!("the live source {reference}"), None)?;
-        if file_inputs.iter().any(|(input, _, _)| input == &name) {
-            return Err(CliError::usage(format!("input '{name}' was given both files and the live source {reference}")));
-        }
-        if live_inputs.iter().any(|(input, _)| input == &name) {
-            return Err(CliError::usage(format!("input '{name}' was given two live sources")));
-        }
-        live_inputs.push((name, reference.clone()));
-    }
-
-    struct Run {
-        label: String,
-        stem: String,
-        given: HashMap<String, Given>,
-    }
-    let once_per_path =
-        machine_inputs.len() == 1 && args.inputs.is_empty() && live_inputs.is_empty() && file_inputs.len() > 1;
-    let runs: Vec<Run> = if once_per_path {
-        file_inputs
-            .iter()
-            .map(|(name, path, bytes)| Run {
-                label: path.display().to_string(),
-                stem: inputs::stem(path),
-                given: HashMap::from([(name.clone(), Given::Values(vec![bytes.clone()]))]),
-            })
-            .collect()
-    } else {
-        for (name, _, bytes) in &file_inputs {
-            match given.entry(name.clone()).or_insert_with(|| Given::Values(Vec::new())) {
-                Given::Values(values) => values.push(bytes.clone()),
-                Given::Live(_) => unreachable!("files and a live source on one input were refused above"),
-            }
-        }
-        for (name, reference) in &live_inputs {
-            given.insert(name.clone(), Given::Live(reference.clone()));
-        }
-        let stem = match (file_inputs.as_slice(), live_inputs.as_slice()) {
-            ([(_, path, _)], []) => inputs::stem(path),
-            ([(_, path, _), ..], _) => format!("{}.combined", inputs::stem(path)),
-            ([], [(_, reference), ..]) => inputs::file_safe(reference),
-            ([], []) => inputs::stem(path),
-        };
-        let run_label = match file_inputs.as_slice() {
-            [(_, file, _)] => file.display().to_string(),
-            _ => label.clone(),
-        };
-        vec![Run { label: run_label, stem, given }]
-    };
-    for run in &runs {
-        let missing: Vec<String> = machine_inputs
-            .iter()
-            .filter(|i| !run.given.contains_key(&i.name))
-            .map(|i| format!("{} ({})", i.name, names::media(registry, &i.media_urn)))
-            .collect();
-        if !missing.is_empty() {
-            return Err(CliError::usage(format!("the machine's input {} was given nothing", missing.join(", ")))
-                .hint("give a path it takes, or --input <name>=<value> (`@<path>` reads a file)"));
-        }
-    }
-
-    let mut planned = Vec::with_capacity(runs.len());
-    for (index, run) in runs.into_iter().enumerate() {
-        let sequences: HashSet<String> = run
-            .given
-            .iter()
-            .filter(|(_, g)| match g {
-                Given::Values(values) => values.len() > 1,
-                Given::Live(_) => true,
-            })
-            .map(|(name, _)| name.clone())
-            .collect();
-        let mut strands = Vec::with_capacity(resolved.strand_count());
-        for strand_index in 0..resolved.strand_count() {
-            let of_strand: HashSet<String> = sequences
-                .iter()
-                .filter(|name| machine_inputs.iter().any(|i| i.strand == strand_index && &i.name == *name))
-                .cloned()
-                .collect();
-            let strand = resolved
-                .plan(strand_index, &RunInputs { sequences: of_strand, ..RunInputs::default() })
-                .await
-                .map_err(|e| CliError::failed(format!("{label} could not be planned")).context(e.to_string()))?;
-            if index == 0 {
-                unbound_required_args(registry, &strand).await?;
-            }
-            let mut plan_inputs = HashMap::new();
-            let mut is_sequence = HashMap::new();
-            for (name, slot) in &strand.input_slots() {
-                let (value, sequence) = match &run.given[name] {
-                    Given::Values(values) if values.len() == 1 => (PlanInput::Bytes(values[0].clone()), false),
-                    Given::Values(values) => (
-                        PlanInput::Bytes(
-                            capdag::orchestrator::cbor_util::wrap_raw_items_as_cbor_sequence(values).map_err(|e| {
-                                CliError::failed(format!("the {} values for input '{name}' could not be put together", values.len()))
-                                    .context(e.to_string())
-                            })?,
-                        ),
-                        true,
-                    ),
-                    Given::Live(reference) => (
-                        PlanInput::LiveReference { reference_urn: reference.clone(), selector: selector.clone() },
-                        true,
-                    ),
-                };
-                plan_inputs.insert(slot.clone(), value);
-                is_sequence.insert(slot.clone(), sequence);
-            }
-            strands.push(PlannedStrand {
-                strand,
-                inputs: plan_inputs,
-                is_sequence,
-                cap_arguments: HashMap::new(),
-            });
-        }
-        planned.push(PlannedRun { label: run.label, stem: run.stem, strands });
-    }
-    Ok(planned)
-}
-
-/// Every required argument of a step the machine leaves unbound, before
-/// anything runs.
-async fn unbound_required_args(registry: &Arc<FabricRegistry>, strand: &StrandPlan) -> CliResult<()> {
-    let requirements = capdag::planner::MachinePlanBuilder::new(registry.clone())
-        .analyze_plan_arguments(&strand.plan)
-        .await
-        .map_err(|e| CliError::failed("the machine's steps could not be checked").context(e.to_string()))?;
-    let mut error: Option<CliError> = None;
-    for step in &requirements.steps {
-        for slot in &step.slots {
-            if slot.is_required && slot.resolution == capdag::planner::ArgumentResolution::RequiresUserInput {
-                let line = format!(
-                    "step {} needs '{}' ({}), and the machine gives it no value",
-                    names::cap_urn(registry, &step.cap_urn),
-                    slot.name,
-                    names::media_urn(registry, &slot.media_urn),
-                );
-                error = Some(match error {
-                    None => CliError::failed("the machine cannot run as written").context(line),
-                    Some(e) => e.context(line),
-                });
-            }
-        }
-    }
-    match error {
-        None => Ok(()),
-        Some(e) => Err(e.hint("bind it in the machine: a constant in the wiring (`<arg>=<value>`), or a node given with --input")),
     }
 }
 
@@ -967,14 +987,14 @@ enum Results<'a> {
 async fn execute(
     ctx: &Ctx,
     registry: &Arc<FabricRegistry>,
-    args: &Args,
+    settings: &RunSettings,
     showing: Option<ProgressChoice>,
     runtime: Arc<dyn RunHost>,
     runs: Vec<PlannedRun>,
     single_scalar: bool,
     results: Results<'_>,
 ) -> CliResult<Exit> {
-    let output_dir = args.output.clone();
+    let output_dir = settings.output.clone();
     let control = Arc::new(RunControl::new());
     let (observer, mut events) = RunObserver::new();
     let mut watch = Watch::new(ctx.term.verbosity);
@@ -1070,7 +1090,13 @@ async fn execute(
                     let (outcome, outputs) = match joined {
                         Ok((strand, result)) => {
                             let failed_at = result.as_ref().err().and_then(|e| e.step_token_id().map(|t| t.as_str().to_string()));
-                            let target = EmitTarget { output_dir: emit_dir.clone(), force: args.force, stem: run.stem.clone() };
+                            let target = EmitTarget {
+                                output_dir: emit_dir.clone(),
+                                force: settings.force,
+                                slots: run.slots[key.strand].clone(),
+                                sources: run.sources.clone(),
+                                machine_name: run.machine_name.clone(),
+                            };
                             let report = if holds_results {
                                 let mut held = Vec::new();
                                 let report = runtime.finish(&strand, result, &target, &mut held);
@@ -1325,6 +1351,18 @@ fn say_notes(ctx: &Ctx, registry: &FabricRegistry, shower: &mut Shower, report: 
                     "class": failure.class.to_string(), "code": failure.code, "message": failure.message,
                 }),
             ),
+            StrandNote::Dropped { cap_urn, item: at, message } => (
+                format!(
+                    "dropped: item {} — {} failed: {}; the other items were kept",
+                    at + 1,
+                    names::cap_urn(registry, cap_urn),
+                    one_line(message)
+                ),
+                serde_json::json!({
+                    "type": "dropped", "step": names::cap_urn(registry, cap_urn), "urn": cap_urn, "item": at,
+                    "message": message,
+                }),
+            ),
         };
         if ctx.term.verbosity >= 0 || ctx.term.json {
             shower.say(&line, record);
@@ -1540,13 +1578,6 @@ fn one_line(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
-
-    fn separated(line: &str) -> Vec<String> {
-        let argv: Vec<String> = line.split(' ').map(str::to_string).collect();
-        separate_cap_tokens(super::super::Cli::command(), argv)
-    }
-
     fn feeds_stopped() -> StopInputsOutcome {
         StopInputsOutcome { host_taps_closed: 1, feed_requests_stopped: 1, feeds_ended: 1 }
     }
@@ -1586,48 +1617,4 @@ mod tests {
         assert!(watched.is_finished(), "the abandoned stop is ended");
     }
 
-    // TEST20120: a cap's own options and inputs are put after `--`, in order,
-    // and run's own flags — wherever they were — stay `run`'s.
-    #[test]
-    fn test20120_cap_tokens_are_separated_from_runs_flags() {
-        assert_eq!(
-            separated("capdag run disbind-pdf report.pdf --index-range 1-5 -o pages --force"),
-            ["capdag", "run", "disbind-pdf", "-o", "pages", "--force", "--", "report.pdf", "--index-range", "1-5"]
-        );
-        assert_eq!(
-            separated("capdag --offline run -v csv2json people.csv"),
-            ["capdag", "--offline", "run", "-v", "csv2json", "--", "people.csv"]
-        );
-        assert_eq!(
-            separated("capdag --fabric https://fabric.example run csv2json people.csv"),
-            ["capdag", "--fabric", "https://fabric.example", "run", "csv2json", "--", "people.csv"]
-        );
-        assert_eq!(
-            separated("capdag run tagger --dev-bin stand-in/cartridge.py --dev-bin=other"),
-            ["capdag", "run", "tagger", "--dev-bin", "stand-in/cartridge.py", "--dev-bin=other"]
-        );
-        assert_eq!(separated("capdag run csv2json --help"), ["capdag", "run", "csv2json", "--", "--help"]);
-        assert_eq!(separated("capdag run --help"), ["capdag", "run", "--help"]);
-        assert_eq!(separated("capdag plan run.pdf"), ["capdag", "plan", "run.pdf"]);
-    }
-
-    // TEST7218: a detected file goes to the input it fits most closely, read
-    // as a complete thing: a JSON record file, which does not mention `list`,
-    // fits an input that refuses lists, and that input is closer than one
-    // that takes any text.
-    #[test]
-    fn test7218_a_file_goes_to_the_closest_input_it_satisfies() {
-        let file = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;record").unwrap();
-        let record = MediaUrn::from_string("media:enc=utf8;fmt=json;record;!list").unwrap();
-        let text = MediaUrn::from_string("media:enc=utf8").unwrap();
-        assert!(!file.conforms_to(&record), "as a type the file may be a list");
-        for inputs in [[("record", &record), ("text", &text)], [("text", &text), ("record", &record)]] {
-            assert_eq!(nearest_inputs(&file, inputs), vec!["record"]);
-        }
-        // A file that is a list fits only the text input.
-        let list = MediaUrn::from_string("media:enc=utf8;ext=json;fmt=json;list").unwrap();
-        assert_eq!(nearest_inputs(&list, [("record", &record), ("text", &text)]), vec!["text"]);
-        // Two inputs the file is equally close to are both returned.
-        assert_eq!(nearest_inputs(&file, [("one", &text), ("two", &text)]), vec!["one", "two"]);
-    }
 }

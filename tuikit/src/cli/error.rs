@@ -28,12 +28,16 @@ pub enum Exit {
     /// It was not asked properly: an unknown command or flag, a missing or
     /// malformed value, a choice that was not made.
     Usage,
+    /// A person declined a question the command asked: it ends as an
+    /// interrupted command.
+    Declined,
     /// A run ended as it did.
     Run(RunOutcome),
 }
 
 impl Exit {
-    /// The process's exit status: 0, 1, 2, and for a run the model's
+    /// The process's exit status: 0, 1, 2, 130 for a question declined, and
+    /// for a run the model's
     /// (`capdag/formal` `Run.Control.exitStatus`): 3 tolerated, 130 stopped or
     /// aborted.
     pub fn code(&self) -> i32 {
@@ -41,6 +45,7 @@ impl Exit {
             Exit::Ok => 0,
             Exit::Failed => 1,
             Exit::Usage => 2,
+            Exit::Declined => 130,
             Exit::Run(outcome) => exit_status(outcome.clone()),
         }
     }

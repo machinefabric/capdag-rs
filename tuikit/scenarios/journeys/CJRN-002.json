@@ -1,12 +1,39 @@
 {
-  "title": "Choose a capability from a list, and print its alias",
+  "title": "Choose a capability from a list, and print the machine of its one step",
   "world": "ordinary",
-  "args": ["caps", "--pick", "pdf"],
+  "args": [
+    "caps",
+    "--pick",
+    "pdf"
+  ],
   "modes": {
     "inline": {
-      "keys": [{ "wait": "Disbind PDF Into Pages" }, { "type": "disbind into pages" }, { "press": "Enter" }],
-      "expect": { "exit": 0, "stdout": ["disbind-pdf"] }
+      "keys": [
+        {
+          "wait": "Disbind PDF Into Pages"
+        },
+        {
+          "type": "disbind into pages"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "[in -> disbind-pdf -> out]"
+        ]
+      }
     },
-    "plain": { "expect": { "exit": 2, "shown": ["5 capabilities match, and --pick has no terminal to choose on"] } }
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "5 options for a capability, and nobody to ask",
+          "'[in -> disbind-pdf -> out]'  Disbind PDF Into Pages"
+        ]
+      }
+    }
   }
 }

@@ -5,14 +5,15 @@
 //! (on demand when a run needs it, or by `install`), or a dev cartridge
 //! (`capdag dev install`). `list` says which are here and in what state.
 
+use super::ask::{self, Answered, Choice, Question};
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
+use super::formal as f;
 use super::host::CartridgeStore;
 use super::names;
-use super::term::emit_record;
+use super::term::{emit_record, outln};
 use capdag::cartridge_discovery::DiscoveredCartridge;
 use capdag::CapUrn;
-use super::term::outln;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -37,11 +38,20 @@ pub enum Command {
     },
 }
 
+/// The command as the model knows it, before its own facts are known.
+pub fn placeholder(command: &Command) -> f::Command {
+    match command {
+        Command::List => f::Command::CartridgeList,
+        Command::Install { .. } => f::Command::CartridgeInstall { target: f::InstallTarget::Unknown },
+        Command::Remove { .. } => f::Command::CartridgeRemove { installed: false },
+    }
+}
+
 pub async fn cartridge(ctx: &Ctx, command: Command) -> CliResult<Exit> {
     match command {
         Command::List => list(ctx).await,
         Command::Install { name } => install(ctx, &name).await,
-        Command::Remove { id } => remove(ctx, &id),
+        Command::Remove { id } => remove(ctx, &id).await,
     }
 }
 
@@ -79,9 +89,6 @@ pub async fn installed(ctx: &Ctx) -> CliResult<Vec<DiscoveredCartridge>> {
 
 /// The cartridge registry's store, its manifest synced and verified.
 pub async fn manager(ctx: &Ctx) -> CliResult<Box<dyn CartridgeStore>> {
-    if ctx.offline {
-        return Err(CliError::usage("the cartridge registry is not read offline").hint("drop --offline"));
-    }
     if ctx.host.cartridge_registry().is_none() {
         return Err(CliError::failed("this capdag is a development build, bound to no cartridge registry")
             .context("it runs bundled and dev cartridges only")
@@ -95,6 +102,9 @@ pub async fn manager(ctx: &Ctx) -> CliResult<Box<dyn CartridgeStore>> {
 }
 
 async fn list(ctx: &Ctx) -> CliResult<Exit> {
+    if let Some(error) = super::ends(&ctx.decide(f::Command::CartridgeList, false)) {
+        return Err(error);
+    }
     let mut rows: Vec<serde_json::Value> = Vec::new();
     if ctx.host.has_bundle() {
         let registry = ctx.registry().await?;
@@ -159,24 +169,53 @@ async fn list(ctx: &Ctx) -> CliResult<Exit> {
     Ok(Exit::Ok)
 }
 
+/// What `capdag cartridge install` was given, as the cartridge registry and
+/// the fabric know it.
+enum Target {
+    Cartridge(String),
+    Bundled { alias: String, provider: capdag::orchestrator::executor::BundledProvider },
+    Capability { alias: String, providers: Vec<String> },
+    Unknown,
+}
+
 async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
-    let manager = manager(ctx).await?;
+    let store = manager(ctx).await?;
     // A name with ':' is a cap URN; a bare name is a cartridge id when the
     // registry knows one by it, else a cap alias.
-    let cartridge_id = if !name.contains(':') && manager.has(name).await {
-        name.to_string()
+    let target = if !name.contains(':') && store.has(name).await {
+        Target::Cartridge(name.to_string())
     } else {
         let registry = ctx.registry().await?;
-        let cap = match registry.get_cap(name).await {
-            Ok(cap) => cap,
+        match registry.get_cap(name).await {
+            Ok(cap) => {
+                let alias = names::cap(&registry, &cap);
+                match bundled_providers(ctx, &cap.urn).await?.into_iter().next() {
+                    Some(provider) => Target::Bundled { alias, provider },
+                    None => Target::Capability { alias, providers: store.providers_of(&cap.urn.to_string()).await },
+                }
+            }
             Err(e) => {
                 super::ctx::nothing_by_that_name(e)?;
-                return Err(CliError::usage(format!("there is no cartridge or capability named '{name}'"))
-                    .hint("see the cartridges with: capdag cartridge list; find a capability with: capdag caps"));
+                Target::Unknown
             }
-        };
-        if let Some(provider) = bundled_providers(ctx, &cap.urn).await?.first() {
-            let alias = names::cap(&registry, &cap);
+        }
+    };
+    let modelled = match &target {
+        Target::Cartridge(_) => f::InstallTarget::Cartridge,
+        Target::Bundled { .. } => f::InstallTarget::Bundled,
+        Target::Capability { providers, .. } => f::InstallTarget::Capability {
+            providers: match providers.len() {
+                0 => f::Choices::None,
+                1 => f::Choices::One,
+                _ => f::Choices::Many,
+            },
+        },
+        Target::Unknown => f::InstallTarget::Unknown,
+    };
+    let verdict = ctx.decide(f::Command::CartridgeInstall { target: modelled }, false);
+    let cartridge_id = match (&verdict, &target) {
+        (f::CliVerdict::Is { v: f::Verdict::Answers }, Target::Cartridge(id)) => id.clone(),
+        (f::CliVerdict::Is { v: f::Verdict::Answers }, Target::Bundled { alias, provider }) => {
             if ctx.term.json {
                 emit_record(&serde_json::json!({
                     "type": "cartridge", "id": provider.id, "version": provider.version, "state": "bundled",
@@ -189,43 +228,94 @@ async fn install(ctx: &Ctx, name: &str) -> CliResult<Exit> {
             }
             return Ok(Exit::Ok);
         }
-        let providers = manager.providers_of(&cap.urn.to_string()).await;
-        let first = providers.first().ok_or_else(|| {
-            CliError::failed(format!("no cartridge in the registry provides {}", names::cap(&registry, &cap)))
-        })?;
-        first.clone()
+        (f::CliVerdict::Is { v: f::Verdict::Answers }, Target::Capability { providers, .. }) => providers[0].clone(),
+        (f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::Provider } }, Target::Capability { alias, providers }) => {
+            match ask::pick(ctx, &provider_question(alias), &provider_choices(alias, providers)).await? {
+                Answered::Given(at) => providers[at].clone(),
+                Answered::Declined => return Err(ask::declined()),
+            }
+        }
+        (f::CliVerdict::Is { v: f::Verdict::Names { .. } }, Target::Capability { alias, providers }) => {
+            return Err(super::say::with_exit(
+                ask::named(ctx, &provider_question(alias), &provider_choices(alias, providers)),
+                &verdict,
+            ))
+        }
+        (f::CliVerdict::Is { v: f::Verdict::Nothing { .. } }, Target::Capability { alias, .. }) => {
+            return Err(super::say::with_exit(CliError::failed(format!("no cartridge in the registry provides {alias}")), &verdict))
+        }
+        (f::CliVerdict::Refused { r: f::CliRefusal::NoSuchName }, _) => {
+            return Err(super::say::with_exit(
+                CliError::usage(format!("'{name}': {}", f::says(&f::CliRefusal::NoSuchName)))
+                    .hint("see the cartridges with: capdag cartridge list; find a capability with: capdag caps"),
+                &verdict,
+            ))
+        }
+        (other, _) => return Err(super::ends(other).expect("a verdict other than answers ends the command")),
     };
-    if !ctx.term.json {
-        eprintln!("Installing {cartridge_id}…");
-    }
-    let path = manager.install(&cartridge_id).await.map_err(|e| match e.refused_cartridge() {
-        // An install this capdag does not use is replaced only when the
-        // person removes it: installing never overwrites one silently.
-        Some((id, dir)) => super::run::refused_cartridge(id, dir, &e),
-        None => CliError::failed(format!("{cartridge_id} could not be installed")).context(e.to_string()),
-    })?;
+    let path = install_cartridge(ctx, &cartridge_id).await?;
     if ctx.term.json {
         emit_record(&serde_json::json!({
             "type": "cartridge", "id": cartridge_id, "state": "installed", "path": path.display().to_string(),
         }));
     } else {
-        eprintln!("Installed and verified {cartridge_id}");
         outln!("{}", path.display());
     }
     Ok(Exit::Ok)
 }
 
-fn remove(ctx: &Ctx, id: &str) -> CliResult<Exit> {
+fn provider_question(alias: &str) -> Question {
+    Question { what: format!("the cartridge to install for {alias}"), flag: "capdag cartridge install ".into() }
+}
+
+fn provider_choices(alias: &str, providers: &[String]) -> Vec<Choice> {
+    providers
+        .iter()
+        .map(|id| Choice { label: id.clone(), detail: format!("provides {alias}"), urn: None, value: id.clone() })
+        .collect()
+}
+
+/// Download, verify and install cartridge `id` from the registry: answers
+/// its entry point.
+pub async fn install_cartridge(ctx: &Ctx, id: &str) -> CliResult<std::path::PathBuf> {
+    let store = manager(ctx).await?;
+    if !ctx.term.json {
+        eprintln!("Installing {id}…");
+    }
+    let path = store.install(id).await.map_err(|e| match e.refused_cartridge() {
+        // An install this capdag does not use is replaced only when the
+        // person removes it: installing never overwrites one silently.
+        Some((refused, dir)) => super::run::refused_cartridge(refused, dir, &e),
+        None => CliError::failed(format!("{id} could not be installed")).context(e.to_string()),
+    })?;
+    if !ctx.term.json {
+        eprintln!("Installed and verified {id}");
+    }
+    Ok(path)
+}
+
+async fn remove(ctx: &Ctx, id: &str) -> CliResult<Exit> {
+    let present = installed(ctx).await?.iter().any(|found| match found {
+        DiscoveredCartridge::Directory { id: have, .. } | DiscoveredCartridge::Incompatible { id: have, .. } => have == id,
+    });
+    let verdict = ctx.decide(f::Command::CartridgeRemove { installed: present }, false);
+    if let f::CliVerdict::Refused { r: f::CliRefusal::NotInstalled } = verdict {
+        let mut error = CliError::usage(format!("'{id}': {}", f::says(&f::CliRefusal::NotInstalled)));
+        if bundled(ctx).await?.iter().any(|b| b.identity.as_ref().is_some_and(|(name, _, _)| name == id)) {
+            error = error.context(format!("{id} is bundled with capdag, and a bundled cartridge cannot be removed"));
+        }
+        return Err(super::say::with_exit(error, &verdict));
+    }
+    if let Some(error) = super::ends(&verdict) {
+        return Err(error);
+    }
     let removal = ctx
         .host
         .remove_cartridge(id)
         .map_err(|e| ctx::host_failure(format!("{id} could not be removed"), e))?;
     if removal.removed.is_empty() {
-        let mut error = CliError::usage(format!("no installed cartridge is called '{id}'"));
-        if removal.bundled {
-            error = error.context(format!("{id} is bundled with capdag, and a bundled cartridge cannot be removed"));
-        }
-        return Err(error.hint("see the cartridges with: capdag cartridge list"));
+        return Err(CliError::failed(format!("{id} was found installed, and nothing of it was removed"))
+            .hint("see the cartridges with: capdag cartridge list"));
     }
     for dir in &removal.removed {
         if ctx.term.json {

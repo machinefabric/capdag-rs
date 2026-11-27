@@ -6,8 +6,11 @@
 //!   `capdag run pdf2summary doc.pdf | wc -w` behaves like a Unix tool.
 //! - Anything else (sequence output, several terminals, or an explicit
 //!   `--output`) → each item is written as a FILE in the output directory
-//!   (default: the current directory), named
-//!   `{input_stem}.{node}[.{index}].{ext}` — `{node}` being the name the
+//!   (default: the current directory), named `{title}.{node}.{ext}` —
+//!   `{title}` what the item descends from, as every front-end names what a
+//!   run makes ([`crate::orchestrator::lineage`]): the inputs it was made of,
+//!   joined, and for the items of a sequence that descend from one thing,
+//!   their position among them (`report · 2`); `{node}` the name the
 //!   machine's notation gives the output — and every written absolute path
 //!   is printed to stdout, one per line.
 //! - An existing file is a hard error unless `--force` — silent overwrites
@@ -26,7 +29,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::orchestrator::execute_plan::{PipelineResult, ProducedTerminal};
+use crate::orchestrator::execute_plan::{ForEachBodyCoordinate, PipelineResult, ProducedTerminal};
+use crate::orchestrator::lineage::{lineage_title, sequence_item_titles, RunLineage};
+use crate::planner::MachinePlan;
 use crate::urn::media_urn::MediaUrn;
 
 /// Options for [`emit_terminals`].
@@ -36,13 +41,30 @@ pub struct EmitOptions {
     pub output_dir: Option<PathBuf>,
     /// Overwrite existing files instead of hard-erroring.
     pub force: bool,
-    /// Stem for produced file names — the input file's stem, or `stdin`.
-    pub input_stem: String,
+    /// What the produced files are named after: what each descends from.
+    pub naming: OutputNaming,
     /// The name the notation gives each output, by plan `Output` node id: the
     /// `{node}` of a produced file's name. Every terminal of the result must
     /// have one — a file is never named after a plan's internal node id,
     /// which changes whenever the machine is edited.
     pub output_names: std::collections::HashMap<String, String>,
+}
+
+/// What a run's files are named after: the plan it ran, the sources it gave
+/// each input slot, and what each source is called.
+#[derive(Debug, Clone)]
+pub struct OutputNaming {
+    /// The plan the result is of: what each output descends from is read
+    /// from it.
+    pub plan: MachinePlan,
+    /// What the run gave each input slot: positions among `sources`, in the
+    /// order given.
+    pub slots: Vec<(String, Vec<usize>)>,
+    /// What each source of the run is called — a file by its stem — by
+    /// position.
+    pub sources: Vec<String>,
+    /// What a file that reads no input is called: the machine's name.
+    pub machine_name: String,
 }
 
 /// File extension for a terminal's media URN, per the naming scheme above.
@@ -165,37 +187,61 @@ pub fn emit_terminals_by_output(
     // An output with no name is planned under its node id, and refused
     // below if it is to be a file: a file is never named after a plan's
     // internal node id.
+    let source_ids: Vec<String> = (0..options.naming.sources.len()).map(|at| at.to_string()).collect();
+    let lineage = RunLineage::new(&options.naming.plan, &options.naming.slots, &source_ids);
     let mut planned: Vec<Planned<'_>> = Vec::new();
     let mut unnamed: Option<&str> = None;
+    // What the items descend from that could not be told: the run and its
+    // plan disagree, and its items are handed back under their place.
+    let mut untold: Option<String> = None;
     for terminal in &produced {
         let ext = extension_for_media(&terminal.media_urn);
         let node = match options.output_names.get(&terminal.output_node_id) {
-            Some(node) => node.as_str(),
+            Some(node) => Some(node.as_str()),
             None => {
                 unnamed.get_or_insert(&terminal.output_node_id);
-                terminal.output_node_id.as_str()
+                None
             }
         };
-        let contents: Vec<PlannedContent<'_>> = if terminal.writer_results.is_empty() {
-            terminal.items.iter().map(|item| PlannedContent::Bytes(&item.data)).collect()
+        let contents: Vec<(PlannedContent<'_>, Option<&ForEachBodyCoordinate>)> = if terminal.writer_results.is_empty() {
+            terminal.items.iter().map(|item| (PlannedContent::Bytes(&item.data), None)).collect()
         } else {
             terminal
                 .writer_results
                 .iter()
-                .flat_map(|w| w.saved_paths.iter())
-                .map(|part| PlannedContent::Part(part))
+                .flat_map(|w| w.saved_paths.iter().map(move |part| (PlannedContent::Part(part), w.body_coordinate.as_ref())))
                 .collect()
         };
         let multi_item = terminal.is_sequence || contents.len() > 1;
-        for (index, content) in contents.into_iter().enumerate() {
-            let file_name = if multi_item {
-                format!("{}.{}.{}.{}", options.input_stem, node, index, ext)
-            } else {
-                format!("{}.{}.{}", options.input_stem, node, ext)
-            };
+        let told: Result<Vec<String>, String> = match (&lineage, node) {
+            (Ok(lineage), Some(_)) => contents
+                .iter()
+                .map(|(_, coordinate)| {
+                    lineage.sources_of(&terminal.output_node_id, *coordinate).map(|ids| {
+                        let titles: Vec<&str> = ids
+                            .iter()
+                            .map(|id| options.naming.sources[id.parse::<usize>().expect("a source id is its position")].as_str())
+                            .collect();
+                        lineage_title(&titles, &options.naming.machine_name)
+                    })
+                })
+                .collect(),
+            (Err(reason), Some(_)) => Err(reason.clone()),
+            (_, None) => Ok(contents.iter().map(|_| terminal.output_node_id.clone()).collect()),
+        };
+        let titles = match told {
+            Ok(titles) if multi_item => sequence_item_titles(&titles),
+            Ok(titles) => titles,
+            Err(reason) => {
+                untold.get_or_insert(reason);
+                (0..contents.len()).map(|index| format!("{}.{index}", terminal.output_node_id)).collect()
+            }
+        };
+        let node = node.unwrap_or(terminal.output_node_id.as_str());
+        for ((content, _), title) in contents.into_iter().zip(titles) {
             planned.push(Planned {
                 output_node_id: &terminal.output_node_id,
-                file_name,
+                file_name: format!("{title}.{node}.{ext}"),
                 media_urn: &terminal.media_urn,
                 content,
             });
@@ -206,6 +252,9 @@ pub fn emit_terminals_by_output(
         written,
         unsaved: rest.iter().map(Planned::unsaved).collect(),
     };
+    if let Some(reason) = untold {
+        return Err(refused(format!("what the results descend from could not be told: {reason}"), Vec::new(), &planned));
+    }
     // The stdout fast path: one terminal, scalar, one item, no explicit dir.
     // Persisted, its bytes stream to stdout and the part is removed, so the
     // pipe contract is identical either way.
@@ -319,6 +368,27 @@ mod tests {
             .collect()
     }
 
+    /// What files of a run of one source are named after: a plan whose
+    /// input slot `in` is given the source, read by one step, whose main
+    /// output every output of these tests is.
+    fn naming(source: &str) -> OutputNaming {
+        use crate::planner::{InputCardinality, MachineNode, MachinePlanEdge};
+        let mut plan = MachinePlan::new("test");
+        plan.add_node(MachineNode::input_slot("in", "in", "media:", InputCardinality::Single));
+        plan.add_node(MachineNode::cap("step", "cap:in=media:;step;out=media:"));
+        plan.add_edge(MachinePlanEdge::direct("in", "step"));
+        for output in ["output", "kept", "rejected", "thumb", "text", "output_7", "output_3"] {
+            plan.add_node(MachineNode::output(output, output, "step"));
+            plan.add_edge(MachinePlanEdge::direct("step", output));
+        }
+        OutputNaming {
+            plan,
+            slots: vec![("in".to_string(), vec![0])],
+            sources: vec![source.to_string()],
+            machine_name: "machine".to_string(),
+        }
+    }
+
     fn result_of(terminals: Vec<PlanTerminal>) -> PipelineResult {
         PipelineResult {
             terminals,
@@ -347,7 +417,7 @@ mod tests {
             &EmitOptions {
                 output_dir: None,
                 force: false,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
@@ -356,8 +426,9 @@ mod tests {
         assert!(written.is_empty());
         assert_eq!(stdout, b"the summary text");
 
-        // 2. Sequence → one file per item, named {stem}.{node}.{index}.{ext},
-        //    paths listed on stdout.
+        // 2. Sequence → one file per item, named after what it descends
+        //    from and its place among the items that share it:
+        //    {title · k}.{node}.{ext}; paths listed on stdout.
         let dir = tempfile::tempdir().unwrap();
         let result = result_of(vec![terminal(
             "output",
@@ -371,15 +442,15 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
         )
         .unwrap();
         assert_eq!(written.len(), 2);
-        assert!(written[0].ends_with("doc.output.0.png"), "{written:?}");
-        assert!(written[1].ends_with("doc.output.1.png"), "{written:?}");
+        assert!(written[0].ends_with("doc · 1.output.png"), "{written:?}");
+        assert!(written[1].ends_with("doc · 2.output.png"), "{written:?}");
         assert_eq!(std::fs::read(&written[0]).unwrap(), b"png0");
         let listing = String::from_utf8(stdout).unwrap();
         assert_eq!(listing.lines().count(), 2, "one path per line: {listing}");
@@ -397,7 +468,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
@@ -415,7 +486,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
@@ -428,7 +499,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: true,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
@@ -463,8 +534,86 @@ mod tests {
                 total_bytes: 0,
                 stream_meta: None,
                 item_metas: Vec::new(),
+                body_coordinate: None,
             }],
         })
+    }
+
+    // TEST8073: a file a run of a map writes is named after the item that run
+    // read — each document of a sequence its own file — and the items one run
+    // writes from one document after it and their place among them; an output
+    // that gathers every document is named after all of them, joined.
+    #[test]
+    fn test8073_files_of_a_map_are_named_after_the_item_each_run_read() {
+        use crate::planner::{ForEachSource, InputCardinality, MachineNode, MachinePlanEdge, MapRun, StepToken};
+        let mut plan = MachinePlan::new("docs");
+        plan.add_node(MachineNode::input_slot("in_docs", "docs", "media:pdf", InputCardinality::Sequence));
+        plan.add_node(MachineNode::for_each_token(
+            "map",
+            vec![ForEachSource { node: "in_docs".into(), item: "doc".into() }],
+            vec!["doc".into(), "split".into()],
+            "tok-map".parse::<StepToken>().unwrap(),
+        ));
+        plan.add_node(MachineNode::item("doc", "map", "in_docs", "media:pdf"));
+        plan.add_node(MachineNode::cap("split", "cap:in=media:pdf;split;out=media:txt"));
+        plan.add_edge(MachinePlanEdge::direct("doc", "split"));
+        plan.add_node(MachineNode::output("out_pages", "pages", "split"));
+        plan.add_edge(MachinePlanEdge::direct("split", "out_pages"));
+        plan.add_node(MachineNode::collect("gather", vec!["split".into()], "media:enc=utf8"));
+        plan.add_node(MachineNode::cap("join", "cap:in=media:txt;join;out=media:txt"));
+        plan.add_edge(MachinePlanEdge::direct("gather", "join"));
+        plan.add_node(MachineNode::output("out_all", "all", "join"));
+        plan.add_edge(MachinePlanEdge::direct("join", "out_all"));
+        let naming = OutputNaming {
+            plan,
+            slots: vec![("in_docs".to_string(), vec![0, 1])],
+            sources: vec!["letter".to_string(), "invoice".to_string()],
+            machine_name: "docs".to_string(),
+        };
+        let run = |index: usize| ForEachBodyCoordinate {
+            foreach_token_id: "tok-map".parse().unwrap(),
+            body_index: index,
+            enclosing: Vec::<MapRun>::new(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let part = |name: &str| write_part(dir.path(), name, name.as_bytes());
+        let pages = |index: usize, parts: Vec<String>| WriterResult {
+            is_sequence: true,
+            media_urn: "media:enc=utf8".to_string(),
+            saved_paths: parts,
+            total_bytes: 0,
+            stream_meta: None,
+            item_metas: Vec::new(),
+            body_coordinate: Some(run(index)),
+        };
+        let result = result_of(vec![
+            PlanTerminal::Produced(ProducedTerminal {
+                output_node_id: "out_pages".to_string(),
+                items: Vec::new(),
+                is_sequence: true,
+                media_urn: "media:enc=utf8".to_string(),
+                writer_results: vec![
+                    pages(0, vec![part(".p.0.0"), part(".p.0.1")]),
+                    pages(1, vec![part(".p.1.0")]),
+                ],
+            }),
+            persisted_terminal("out_all", "media:enc=utf8", false, vec![part(".p.all")]),
+        ]);
+        let output_names = [("out_pages", "pages"), ("out_all", "all")]
+            .into_iter()
+            .map(|(id, name)| (id.to_string(), name.to_string()))
+            .collect();
+        let written = emit_terminals(
+            &result,
+            &EmitOptions { output_dir: Some(dir.path().to_path_buf()), force: false, naming, output_names },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let names: Vec<String> = written.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            names,
+            vec!["letter · 1.pages.txt", "letter · 2.pages.txt", "invoice.pages.txt", "letter + invoice.all.txt"]
+        );
     }
 
     // TEST12792: a produced file is named for the name the notation gives the
@@ -481,7 +630,7 @@ mod tests {
         let options = |output_names: &[(&str, &str)]| EmitOptions {
             output_dir: Some(dir.path().to_path_buf()),
             force: false,
-            input_stem: "doc".to_string(),
+            naming: naming("doc"),
             output_names: output_names
                 .iter()
                 .map(|(id, name)| (id.to_string(), name.to_string()))
@@ -499,7 +648,7 @@ mod tests {
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         names.sort();
-        assert_eq!(names, vec!["doc.pages.0.png", "doc.pages.1.png", "doc.summary.md"]);
+        assert_eq!(names, vec!["doc · 1.pages.png", "doc · 2.pages.png", "doc.summary.md"]);
 
         let other = tempfile::tempdir().unwrap();
         let mut unnamed = options(&[("output_7", "summary")]);
@@ -524,7 +673,7 @@ mod tests {
         let options = |dir: Option<&Path>| EmitOptions {
             output_dir: dir.map(Path::to_path_buf),
             force: false,
-            input_stem: "doc".to_string(),
+            naming: naming("doc"),
             output_names: names(),
         };
 
@@ -582,14 +731,14 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "cam".to_string(),
+                naming: naming("cam"),
                 output_names: names(),
             },
             &mut stdout,
         )
         .unwrap();
         assert_eq!(written.len(), 2);
-        assert!(written[0].ends_with("cam.output.0.png"), "{written:?}");
+        assert!(written[0].ends_with("cam · 1.output.png"), "{written:?}");
         assert_eq!(std::fs::read(&written[0]).unwrap(), b"png0");
         assert_eq!(std::fs::read(&written[1]).unwrap(), b"png1");
         assert!(
@@ -615,7 +764,7 @@ mod tests {
             &EmitOptions {
                 output_dir: None,
                 force: false,
-                input_stem: "mic".to_string(),
+                naming: naming("mic"),
                 output_names: names(),
             },
             &mut stdout,
@@ -640,7 +789,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "mic".to_string(),
+                naming: naming("mic"),
                 output_names: names(),
             },
             &mut stdout,
@@ -653,7 +802,7 @@ mod tests {
         // 4. An overwrite refusal mid-emit hands back the not-yet-renamed
         //    parts, left where they are, and the error names --force.
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("mic.output.0.wav"), b"precious").unwrap();
+        std::fs::write(dir.path().join("mic · 1.output.wav"), b"precious").unwrap();
         let parts = vec![
             write_part(dir.path(), ".capdag-part.3.cap_1.0", b"a"),
             write_part(dir.path(), ".capdag-part.3.cap_1.1", b"b"),
@@ -670,7 +819,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "mic".to_string(),
+                naming: naming("mic"),
                 output_names: names(),
             },
             &mut stdout,
@@ -683,13 +832,13 @@ mod tests {
             vec![
                 UnsavedItem {
                     output_node_id: "output".to_string(),
-                    file_name: "mic.output.0.wav".to_string(),
+                    file_name: "mic · 1.output.wav".to_string(),
                     media_urn: "media:audio;ext=wav".to_string(),
                     content: UnsavedContent::Part(PathBuf::from(&parts[0])),
                 },
                 UnsavedItem {
                     output_node_id: "output".to_string(),
-                    file_name: "mic.output.1.wav".to_string(),
+                    file_name: "mic · 2.output.wav".to_string(),
                     media_urn: "media:audio;ext=wav".to_string(),
                     content: UnsavedContent::Part(PathBuf::from(&parts[1])),
                 },
@@ -700,7 +849,7 @@ mod tests {
             "the parts handed back are where the run left them"
         );
         assert_eq!(
-            std::fs::read(dir.path().join("mic.output.0.wav")).unwrap(),
+            std::fs::read(dir.path().join("mic · 1.output.wav")).unwrap(),
             b"precious",
             "the existing file is untouched"
         );
@@ -713,7 +862,7 @@ mod tests {
     #[test]
     fn test22291_a_refusal_hands_back_what_it_did_not_write() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("doc.output.1.txt"), b"an earlier page").unwrap();
+        std::fs::write(dir.path().join("doc · 2.output.txt"), b"an earlier page").unwrap();
         let result = result_of(vec![terminal(
             "output",
             "media:enc=utf8;page-text",
@@ -726,7 +875,7 @@ mod tests {
             &EmitOptions {
                 output_dir: Some(dir.path().to_path_buf()),
                 force: false,
-                input_stem: "doc".to_string(),
+                naming: naming("doc"),
                 output_names: names(),
             },
             &mut stdout,
@@ -734,18 +883,18 @@ mod tests {
         .unwrap_err();
         assert!(refusal.reason.contains("refusing to overwrite"), "{}", refusal.reason);
         assert_eq!(refusal.written.len(), 1);
-        assert!(refusal.written[0].1.ends_with("doc.output.0.txt"), "{:?}", refusal.written);
+        assert!(refusal.written[0].1.ends_with("doc · 1.output.txt"), "{:?}", refusal.written);
         let unsaved: Vec<(&str, &UnsavedContent)> =
             refusal.unsaved.iter().map(|item| (item.file_name.as_str(), &item.content)).collect();
         assert_eq!(
             unsaved,
             vec![
-                ("doc.output.1.txt", &UnsavedContent::Bytes(b"page two".to_vec())),
-                ("doc.output.2.txt", &UnsavedContent::Bytes(b"page three".to_vec())),
+                ("doc · 2.output.txt", &UnsavedContent::Bytes(b"page two".to_vec())),
+                ("doc · 3.output.txt", &UnsavedContent::Bytes(b"page three".to_vec())),
             ]
         );
-        assert_eq!(std::fs::read(dir.path().join("doc.output.1.txt")).unwrap(), b"an earlier page");
-        assert!(!dir.path().join("doc.output.2.txt").exists());
+        assert_eq!(std::fs::read(dir.path().join("doc · 2.output.txt")).unwrap(), b"an earlier page");
+        assert!(!dir.path().join("doc · 3.output.txt").exists());
 
         assert!(is_text_media("media:enc=utf8;page-text"));
         assert!(!is_text_media("media:ext=png;image"));

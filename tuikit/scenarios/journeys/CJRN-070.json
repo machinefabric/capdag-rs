@@ -1,0 +1,19 @@
+{
+  "title": "--offline with nothing of the fabric cached is refused before anything is fetched",
+  "world": "offline",
+  "args": [
+    "--offline",
+    "caps",
+    "pdf"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "the fabric is not cached on this machine, and --offline was given"
+        ]
+      }
+    }
+  }
+}

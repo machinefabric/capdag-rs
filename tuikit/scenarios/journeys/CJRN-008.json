@@ -1,9 +1,49 @@
 {
-  "title": "Pick a planned machine and save it",
+  "title": "Save the machine chosen among those that make text",
   "world": "ordinary",
-  "args": ["plan", "report.pdf", "--to", "txt", "--pick", "1", "--save", "pages.machine"],
+  "args": [
+    "plan",
+    "report.pdf",
+    "--to",
+    "txt",
+    "--save",
+    "pages.machine"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 0, "shown": ["Saved machine 1 to pages.machine", "Run it: capdag run pages.machine report.pdf"] } },
-    "json": { "expect": { "exit": 0 } }
+    "inline": {
+      "keys": [
+        {
+          "wait": "Choose the machine to save"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "shown": [
+          "Saved the machine to pages.machine",
+          "Run it: capdag run pages.machine report.pdf"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "5 options for the machine to save, and nobody to ask",
+          "narrow what --to names"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 2,
+        "stdout": [
+          "\"type\":\"choice\"",
+          "\"of\":\"the machine to save\""
+        ]
+      }
+    }
   }
 }

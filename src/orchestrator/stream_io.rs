@@ -981,6 +981,7 @@ impl IncrementalWriter for SpoolWriter {
             total_bytes: self.total_bytes,
             stream_meta: self.stream_meta,
             item_metas: Vec::new(),
+            body_coordinate: None,
         }
     }
 

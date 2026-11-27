@@ -1,6 +1,21 @@
 {
-  "title": "A world starts no cartridge binary: a run with --dev-bin is refused, saying so",
+  "title": "A world starts no cartridge binary: a run given --dev-bin says what it could not read",
   "world": "ordinary",
-  "args": ["run", "disbind-pdf", "report.pdf", "--dev-bin", "build/pdfcartridge"],
-  "modes": { "plain": { "expect": { "exit": 1, "shown": ["--dev-bin runs on the engine only"] } } }
+  "args": [
+    "run",
+    "[doc -> disbind-pdf -> pages]",
+    "report.pdf",
+    "--dev-bin",
+    "build/pdfcartridge"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": [
+          "error: --dev-bin build/pdfcartridge: what it provides could not be read"
+        ]
+      }
+    }
+  }
 }

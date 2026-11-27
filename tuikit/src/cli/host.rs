@@ -95,6 +95,10 @@ pub trait Host: Send + Sync {
     /// naming it.
     async fn open_fabric(&self, offline: bool, afresh: bool) -> Result<Arc<FabricRegistry>, FabricRegistryError>;
 
+    /// Whether the fabric this process is bound to is cached on this machine,
+    /// so a command can read it with no network. Nothing is fetched.
+    fn fabric_cached(&self) -> Result<bool, FabricRegistryError>;
+
     /// Remove the local copy of the fabric this process reads, without opening
     /// it: answers the folder it was in.
     async fn clear_fabric_cache(&self) -> Result<PathBuf, FabricRegistryError>;

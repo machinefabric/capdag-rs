@@ -69,6 +69,12 @@ pub async fn notation(registry: &FabricRegistry, notation: &str) -> Result<Strin
     machine(registry, &parsed)
 }
 
+/// The machine of one step of a cap, as a person writes it and runs it:
+/// `[in -> disbind-pdf -> out]`.
+pub fn one_step_machine(registry: &FabricRegistry, cap: &Cap) -> Result<String, String> {
+    capdag::orchestrator::one_step_machine(cap, &self::cap(registry, cap))
+}
+
 /// `[a][b][c]` as one bracketed statement per line.
 fn one_statement_per_line(notation: &str) -> String {
     let mut out = String::with_capacity(notation.len() + 8);

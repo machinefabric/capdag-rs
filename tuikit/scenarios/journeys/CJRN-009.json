@@ -1,9 +1,49 @@
 {
-  "title": "Pick a planned machine and run it at once",
+  "title": "Choose among the machines that make text, and run the one chosen",
   "world": "ordinary",
-  "args": ["plan", "report.pdf", "--to", "txt", "--pick", "1", "--run", "-o", "out"],
+  "args": [
+    "run",
+    "report.pdf",
+    "--to",
+    "txt",
+    "-o",
+    "out"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 0, "stdout": ["report.page-text.0.txt", "report.page-text.2.txt"], "shown": ["✓ report.pdf  1 step"] } },
-    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"run_finished\"", "\"outcome\":\"completed\""] } }
+    "inline": {
+      "keys": [
+        {
+          "wait": "Choose the machine"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report · 1.page-text.txt",
+          "report · 2.page-text.txt",
+          "report · 3.page-text.txt"
+        ],
+        "shown": [
+          "Run it again with: capdag run '[(input=pdf) -> disbind-pdf -> (output=page-text)]' --input pdf=@report.pdf -o out",
+          "✓ report.pdf  1 step"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 2,
+        "stdout": [
+          "\"type\":\"choice\"",
+          "\"of\":\"the machine\"",
+          "\"type\":\"error\""
+        ],
+        "absent": [
+          "\"type\":\"run_finished\""
+        ]
+      }
+    }
   }
 }

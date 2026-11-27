@@ -1,29 +1,15 @@
-//! Single-cap CLI execution helpers.
+//! A capability, as the command line shows and runs it.
 //!
-//! `capdag run <alias-or-cap-urn> …` runs ONE cap as a Unix-style tool, with the
-//! cap's OWN declared interface — exactly as if the cartridge were invoked
-//! directly:
-//!
-//! - the stdin-fed arg comes from piped stdin or an input file,
-//! - args with an [`ArgSource::CliFlag`] source are passed as native flags
-//!   (`--model-spec hf:x/y` or `--model-spec=hf:x/y`),
-//! - args with an [`ArgSource::Position`] source are passed positionally, in
-//!   declared position order,
-//! - any arg can also be addressed explicitly via
-//!   `--arg <flag-name-or-media-urn>=<value>` (with `@file` reading bytes).
-//!
-//! Execution goes through the same ForEach/Collect-aware planner
-//! (`build_plans_from_notation` + `execute_plan`) every other front-end uses
-//! — never a hand-built plan, which would duplicate planner invariants.
-//!
-//! These helpers are a lib module (not bin-private) so their contracts are
-//! pinned by numbered unit tests: token classification (TEST8043), notation
-//! synthesis (TEST8040), and invocation-arg mapping (TEST8041).
-
-use std::collections::HashSet;
+//! What the command line runs is always a machine; a capability runs as a
+//! machine of one step, `[in -> disbind-pdf -> out]` ([`one_step_machine`]).
+//! Its options are the step options a run gives with `--arg <name>=<value>`,
+//! by the name its definition gives each, and [`render_cap_interface`] shows
+//! them so. A command that drives one cap itself — the model commands drive
+//! the model cartridge's caps — wraps it in the canonical one-step machine
+//! ([`synthesize_single_cap_notation`]) and runs it through the same planner
+//! every other front-end uses, never a hand-built plan.
 
 use crate::cap::definition::{ArgSource, Cap, CapArg};
-use crate::urn::cap_urn::CapUrn;
 use crate::urn::media_urn::MediaUrn;
 
 /// The node names of the synthesized one-edge machine. The executor keys the
@@ -33,73 +19,35 @@ pub const SINGLE_CAP_INPUT_NODE: &str = "input";
 pub const SINGLE_CAP_STEP_NAME: &str = "step";
 pub const SINGLE_CAP_OUTPUT_NODE: &str = "output";
 
-/// How the CLI's first token names a cap.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CapToken {
-    /// Contains `:` — parsed strictly as a cap URN. An invalid URN is a hard
-    /// error, never re-interpreted as an alias.
-    Urn(String),
-    /// No `:` — resolved as a registry alias.
-    Alias(String),
-}
-
-/// Classify a CLI token as cap URN vs alias. The discriminator is the
-/// presence of `:` (a URN always has one; an alias never does — see the
-/// alias rules in MACHINEFABRIC.md). A token with `:` that fails to parse
-/// as a cap URN is a hard error naming the parse failure — it does NOT fall
-/// through to alias resolution, which would mask typos in URNs.
-pub fn classify_cap_token(token: &str) -> Result<CapToken, String> {
-    if token.contains(':') {
-        let parsed = CapUrn::from_string(token).map_err(|e| {
-            format!(
-                "'{token}' contains ':' so it must be a cap URN, but it does not parse as \
-                 one: {e}. (Aliases never contain ':'.)"
-            )
-        })?;
-        Ok(CapToken::Urn(parsed.to_string()))
-    } else {
-        Ok(CapToken::Alias(token.to_string()))
-    }
-}
-
 fn has_stdin_source(arg: &CapArg) -> bool {
     arg.sources
         .iter()
         .any(|s| matches!(s, ArgSource::Stdin { .. }))
 }
 
-fn flag_names(arg: &CapArg) -> Vec<String> {
-    arg.sources
-        .iter()
-        .filter_map(|s| match s {
-            ArgSource::CliFlag { cli_flag } => Some(cli_flag.trim_start_matches('-').to_string()),
-            _ => None,
-        })
-        .collect()
+/// Whether a cap takes an input: its `in=` is not `media:void`.
+fn takes_input(cap: &Cap) -> Result<bool, String> {
+    let void = MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID).expect("MEDIA_VOID is a valid MediaUrn");
+    Ok(!cap
+        .urn
+        .in_media_urn()
+        .map_err(|e| format!("cap {} declares an invalid input: {e}", cap.urn))?
+        .is_equivalent(&void))
 }
 
-fn declared_position(arg: &CapArg) -> Option<usize> {
-    arg.sources.iter().find_map(|s| s.position())
+/// The machine of one step of a cap, as a person writes it: `[in -> alias ->
+/// out]`, with `()` for the input of a cap that takes none and for the output
+/// of one that gives none. Its input is named `in` and its output `out`.
+pub fn one_step_machine(cap: &Cap, alias: &str) -> Result<String, String> {
+    let sources = if takes_input(cap)? { "in" } else { "()" };
+    let targets = if cap.main_output().is_some() { "out" } else { "()" };
+    Ok(format!("[{sources} -> {alias} -> {targets}]"))
 }
 
-/// How a non-main arg is passed on the CLI: its first declared flag, else its
-/// declared position, else the universal `--arg` form. Shared by the cap
-/// interface rendering and the missing-required-options error so both name
-/// an option the same way.
-fn arg_invocation_form(arg: &CapArg) -> String {
-    if let Some(flag) = flag_names(arg).first() {
-        format!("--{flag} <value>")
-    } else if let Some(position) = declared_position(arg) {
-        format!("positional #{position}")
-    } else {
-        format!("--arg '{}=<value>'", arg.media_urn)
-    }
-}
-
-/// One rendered option line: how it's passed, its media URN, its description,
-/// plus a trailing qualifier (default value / optional / sequence).
+/// One rendered option line: how a run gives it, its media, its description,
+/// and its default, or that it is optional.
 fn render_option_line(arg: &CapArg, names: &InterfaceNames<'_>) -> String {
-    let mut line = format!("  {}  ({})", arg_invocation_form(arg), names.media_with_urn(&arg.media_urn));
+    let mut line = format!("  --arg {}=<value>  ({})", arg.name, names.media_with_urn(&arg.media_urn));
     if let Some(description) = arg
         .arg_description
         .as_deref()
@@ -140,17 +88,16 @@ impl InterfaceNames<'_> {
     }
 }
 
-/// Render a cap's declared interface for humans — the presentation the CLI
-/// (and every other front-end) uses, structured by argument ROLE rather than
-/// as a flat arg list:
+/// Render a cap's declared interface for a person, by argument role:
 ///
-/// - **Input** — the MAIN input (the arg whose `Stdin` source URN is the cap
+/// - **Input** — the main input (the arg whose `Stdin` source URN is the cap
 ///   URN's `in=` spec, by tagged-URN equivalence — see
-///   [`CapArg::is_main_input`]): how the cap is fed, via piped stdin or input
-///   file path(s). Validation RULE15 guarantees every non-void cap declares it.
-/// - **Required options** — non-main args that are required and defaultless:
-///   these MUST be supplied on every invocation.
-/// - **Options** — the remaining non-main args, with their default values.
+///   [`CapArg::is_main_input`]): what the step is fed.
+/// - **Options it must be given** — the other args that are required and
+///   have no default: a run that leaves one open is asked for it, or names it.
+/// - **Options** — the rest, with their defaults.
+///
+/// Each option is shown as the `--arg <name>=<value>` a run gives it by.
 pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<String, String> {
     let in_spec = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
         format!(
@@ -182,7 +129,9 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
         .into_iter()
         .partition(|arg| arg.required && arg.default_value.is_none());
 
-    out.push_str("\nInput (piped stdin, or input file path(s)):\n");
+    if !main_inputs.is_empty() {
+        out.push_str("\nInput:\n");
+    }
     for arg in &main_inputs {
         let mut line = format!("  {}", names.media_with_urn(&arg.stream_urn().to_string()));
         if let Some(description) = arg
@@ -195,24 +144,12 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
         if arg.is_sequence {
             line.push_str(" [sequence]");
         }
-        // The main input may ALSO be addressable by flag/position — stdin is
-        // the defining route, the rest are conveniences worth surfacing.
-        let mut extra_routes = flag_names(arg)
-            .into_iter()
-            .map(|flag| format!("--{flag}"))
-            .collect::<Vec<_>>();
-        if let Some(position) = declared_position(arg) {
-            extra_routes.push(format!("positional #{position}"));
-        }
-        if !extra_routes.is_empty() {
-            line.push_str(&format!(" (also: {})", extra_routes.join(", ")));
-        }
         out.push_str(&line);
         out.push('\n');
     }
 
     if !required.is_empty() {
-        out.push_str("\nRequired options (must be supplied):\n");
+        out.push_str("\nOptions it must be given:\n");
         for arg in &required {
             out.push_str(&render_option_line(arg, names));
             out.push('\n');
@@ -227,8 +164,8 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
         }
     }
 
-    // The main output first, as the one a piped invocation writes; then any
-    // others, by the name a machine takes them with.
+    // The main output first; then any others, by the name a machine takes
+    // them with.
     let main = cap.main_output();
     for output in main.into_iter().chain(
         cap.get_outputs()
@@ -265,13 +202,7 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
 /// - A cap that declares an output gives it at `output`; one that declares
 ///   none is a sink: `… -> step -> ()`, run for what it does.
 pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
-    let void = crate::MediaUrn::from_string(crate::urn::media_urn::MEDIA_VOID)
-        .expect("MEDIA_VOID is a valid MediaUrn");
-    let takes_input = !cap
-        .urn
-        .in_media_urn()
-        .map_err(|e| format!("cap {} declares an invalid input: {e}", cap.urn))?
-        .is_equivalent(&void);
+    let takes_input = takes_input(cap)?;
     let stdin_count = cap
         .get_args()
         .iter()
@@ -314,220 +245,10 @@ pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
     ))
 }
 
-/// The fully mapped invocation of a single cap.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CapInvocation {
-    /// Executor arg-stream bytes: `(arg media URN, raw bytes)`.
-    pub cap_arguments: Vec<(String, Vec<u8>)>,
-    /// Leftover positional tokens = input file paths (for the stdin arg).
-    pub input_paths: Vec<String>,
-}
-
-/// Map an invocation's remaining tokens + explicit `--arg` pairs onto the
-/// cap's declared interface:
-///
-/// - a token starting with `-` must match a declared `cli_flag` (dashes
-///   normalized); its value is the following token, or the `=`-suffix in
-///   `--flag=value` form. An unknown flag is a hard error listing the cap's
-///   flags and arg media URNs — never silently ignored.
-/// - bare tokens first fill the cap's `Position`-declared args in declared
-///   position order (that is the cap's OWN interface — exactly as when the
-///   cartridge is invoked directly); tokens beyond the declared positions
-///   are input file paths for the stdin arg.
-/// - explicit `--arg <name-or-media-urn>=<value>` pairs address any
-///   non-stdin arg (media URNs compared by equivalence, not string
-///   equality); `@<path>` values read the file's bytes (binary args).
-///
-/// Pre-flight: every REQUIRED non-stdin arg without a default must end up
-/// supplied — the error enumerates exactly what is missing and how to pass
-/// it, instead of letting the cartridge fail mid-execution.
-pub fn map_invocation(
-    cap: &Cap,
-    tokens: &[String],
-    explicit_pairs: &[(String, String)],
-    names: &InterfaceNames<'_>,
-) -> Result<CapInvocation, String> {
-    let non_stdin_args: Vec<&CapArg> = cap
-        .get_args()
-        .iter()
-        .filter(|arg| !has_stdin_source(arg))
-        .collect();
-
-    let mut cap_arguments: Vec<(String, Vec<u8>)> = Vec::new();
-    let mut supplied: HashSet<String> = HashSet::new();
-    let mut positionals: Vec<String> = Vec::new();
-
-    // Pass 1: native flags + bare tokens.
-    let mut idx = 0usize;
-    while idx < tokens.len() {
-        let token = &tokens[idx];
-        if let Some(stripped) = token.strip_prefix('-') {
-            let stripped = stripped.trim_start_matches('-');
-            let (flag, inline_value) = match stripped.split_once('=') {
-                Some((flag, value)) => (flag.to_string(), Some(value.to_string())),
-                None => (stripped.to_string(), None),
-            };
-            let arg = resolve_flag(cap, &non_stdin_args, &flag)?;
-            let value = match inline_value {
-                Some(value) => value,
-                None => {
-                    idx += 1;
-                    tokens
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| format!("flag '--{flag}' requires a value"))?
-                }
-            };
-            supplied.insert(arg.media_urn.clone());
-            cap_arguments.push((arg.media_urn.clone(), value.into_bytes()));
-        } else {
-            positionals.push(token.clone());
-        }
-        idx += 1;
-    }
-
-    // Pass 2: bare tokens fill the declared positional args in position
-    // order; the rest are input paths.
-    let mut positional_args: Vec<&CapArg> = non_stdin_args
-        .iter()
-        .copied()
-        .filter(|arg| declared_position(arg).is_some())
-        .collect();
-    positional_args.sort_by_key(|arg| declared_position(arg).expect("filtered above"));
-    let mut input_paths: Vec<String> = Vec::new();
-    let mut positional_iter = positionals.into_iter();
-    for arg in &positional_args {
-        // A positional already satisfied by a flag/--arg keeps its slot open
-        // for input paths rather than double-binding.
-        if supplied.contains(&arg.media_urn) {
-            continue;
-        }
-        match positional_iter.next() {
-            Some(value) => {
-                supplied.insert(arg.media_urn.clone());
-                cap_arguments.push((arg.media_urn.clone(), value.into_bytes()));
-            }
-            None => break, // required-check below reports if it mattered
-        }
-    }
-    input_paths.extend(positional_iter);
-
-    // Pass 3: explicit --arg pairs (flag name or media URN, @file values).
-    for (name, value) in explicit_pairs {
-        let arg = if name.contains(':') {
-            resolve_media_urn(cap, &non_stdin_args, name)?
-        } else {
-            resolve_flag(cap, &non_stdin_args, name.trim_start_matches('-'))?
-        };
-        let bytes: Vec<u8> = if let Some(path) = value.strip_prefix('@') {
-            std::fs::read(path)
-                .map_err(|e| format!("--arg {name}=@{path}: failed to read file: {e}"))?
-        } else {
-            value.as_bytes().to_vec()
-        };
-        supplied.insert(arg.media_urn.clone());
-        cap_arguments.push((arg.media_urn.clone(), bytes));
-    }
-
-    // Pre-flight: required, defaultless, unsupplied args are an error now,
-    // not a cartridge failure later. Only the REQUIRED OPTIONS (required,
-    // defaultless, non-main) are demanded — defaulted options are never
-    // mentioned; each missing one is named the way the interface rendering
-    // names it: invocation form, media URN, description.
-    let missing: Vec<String> = non_stdin_args
-        .iter()
-        .filter(|arg| {
-            arg.required && arg.default_value.is_none() && !supplied.contains(&arg.media_urn)
-        })
-        .map(|arg| render_option_line(arg, names))
-        .collect();
-    if !missing.is_empty() {
-        return Err(format!(
-            "{} is missing required options:\n{}",
-            names.cap,
-            missing.join("\n")
-        ));
-    }
-
-    Ok(CapInvocation {
-        cap_arguments,
-        input_paths,
-    })
-}
-
-fn resolve_flag<'a>(
-    cap: &Cap,
-    non_stdin_args: &[&'a CapArg],
-    wanted: &str,
-) -> Result<&'a CapArg, String> {
-    let matches: Vec<&&CapArg> = non_stdin_args
-        .iter()
-        .filter(|arg| flag_names(arg).iter().any(|flag| flag == wanted))
-        .collect();
-    match matches.as_slice() {
-        [single] => Ok(**single),
-        [] => {
-            let known: Vec<String> = non_stdin_args
-                .iter()
-                .flat_map(|a| flag_names(a).into_iter().map(|f| format!("--{f}")))
-                .collect();
-            Err(format!(
-                "cap {} has no arg with CLI flag '--{wanted}'. Known flags: [{}]; any arg \
-                 can also be addressed as --arg <media-urn>=<value>. Valid media URNs: [{}]",
-                cap.urn,
-                known.join(", "),
-                non_stdin_args
-                    .iter()
-                    .map(|a| a.media_urn.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        }
-        several => Err(format!(
-            "flag '--{wanted}' is ambiguous: {} args of cap {} declare it; address the arg \
-             by its media URN via --arg instead",
-            several.len(),
-            cap.urn
-        )),
-    }
-}
-
-fn resolve_media_urn<'a>(
-    cap: &Cap,
-    non_stdin_args: &[&'a CapArg],
-    name: &str,
-) -> Result<&'a CapArg, String> {
-    let requested = MediaUrn::from_string(name)
-        .map_err(|e| format!("--arg name '{name}' is not a valid media URN: {e}"))?;
-    let matches: Vec<&&CapArg> = non_stdin_args
-        .iter()
-        .filter(|arg| {
-            MediaUrn::from_string(&arg.media_urn)
-                .is_ok_and(|declared| declared.is_equivalent(&requested))
-        })
-        .collect();
-    match matches.as_slice() {
-        [single] => Ok(**single),
-        [] => Err(format!(
-            "cap {} has no non-stdin arg with media URN '{name}'. Valid arg media URNs: {}",
-            cap.urn,
-            non_stdin_args
-                .iter()
-                .map(|a| a.media_urn.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        several => Err(format!(
-            "--arg '{name}' is ambiguous: {} args of cap {} share that media URN",
-            several.len(),
-            cap.urn
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::urn::cap_urn::CapUrn;
     use crate::cap::definition::CapOutput;
 
     fn arg(
@@ -615,6 +336,35 @@ mod tests {
         cap
     }
 
+    // TEST8071: a cap runs as a machine of one step, written as a person
+    // writes it: its input `in` and output `out`, `()` where it takes or
+    // gives nothing.
+    #[test]
+    fn test8071_one_step_machine() {
+        let cap = test_cap();
+        assert_eq!(one_step_machine(&cap, "summarize").unwrap(), "[in -> summarize -> out]");
+        let mut sink = test_cap();
+        sink.outputs.clear();
+        assert_eq!(one_step_machine(&sink, "summarize").unwrap(), "[in -> summarize -> ()]");
+        let mut source = test_cap();
+        source.urn = crate::CapUrn::from_string(&format!(r#"cap:in="media:void";now;out="{}""#, source.urn.out_spec())).unwrap();
+        assert_eq!(one_step_machine(&source, "now").unwrap(), "[() -> now -> out]");
+    }
+
+    // TEST8072: a cap's options are shown as the `--arg <name>=<value>` a run
+    // gives them by: those it must be given apart from those with a default.
+    #[test]
+    fn test8072_options_are_shown_as_a_run_gives_them() {
+        let text = render_cap_interface(&test_cap(), &urn_names()).unwrap();
+        let must = text.find("Options it must be given:").expect("a required option is shown apart");
+        let rest = text.find("\nOptions:\n").expect("the other options are shown");
+        assert!(must < rest, "{text}");
+        assert!(!text.contains("positional #"), "a cap's own command line is not shown: {text}");
+        for line in text.lines().filter(|l| l.trim_start().starts_with("--")) {
+            assert!(line.trim_start().starts_with("--arg "), "every option is given by --arg: {line}");
+        }
+    }
+
     // TEST8040: notation synthesis wraps a resolved cap in the canonical
     // one-edge machine. A cap that takes no input is wired as a source and
     // one that gives no output as a sink; a cap that declares an input with
@@ -667,128 +417,5 @@ mod tests {
         contradictory.urn = source.urn.clone();
         let err = synthesize_single_cap_notation(&contradictory).unwrap_err();
         assert!(err.contains("contradicts itself"), "{err}");
-    }
-
-    // TEST8041: invocation mapping — the cap's OWN interface works exactly
-    // as when invoking the cartridge directly: native declared flags (space
-    // and `=` forms), declared positional args in position order (leftover
-    // bare tokens become input paths), plus the explicit `--arg` addressing
-    // by flag name or media URN with `@file` values; unknown flags error
-    // listing candidates; a missing required defaultless arg fails the
-    // pre-flight with an actionable message.
-    #[test]
-    fn test8041_cap_invocation_mapping() {
-        let cap = test_cap();
-
-        // Native flag (space form) + positional arg + leftover input path.
-        let invocation = map_invocation(
-            &cap,
-            &[
-                "--model-spec".to_string(),
-                "hf:foo/bar".to_string(),
-                "focus on costs".to_string(),
-                "doc.pdf".to_string(),
-            ],
-            &[],
-            &urn_names(),
-        )
-        .unwrap();
-        assert_eq!(
-            invocation.cap_arguments,
-            vec![
-                (
-                    "media:enc=utf8;model-spec".to_string(),
-                    b"hf:foo/bar".to_vec()
-                ),
-                (
-                    "media:criterion;enc=utf8".to_string(),
-                    b"focus on costs".to_vec()
-                ),
-            ]
-        );
-        assert_eq!(invocation.input_paths, vec!["doc.pdf".to_string()]);
-
-        // `--flag=value` form is equivalent.
-        let eq_form = map_invocation(
-            &cap,
-            &[
-                "--model-spec=hf:foo/bar".to_string(),
-                "focus on costs".to_string(),
-                "doc.pdf".to_string(),
-            ],
-            &[],
-            &urn_names(),
-        )
-        .unwrap();
-        assert_eq!(invocation, eq_form);
-
-        // Unknown flag: hard error listing the cap's flags and media URNs.
-        let err = map_invocation(&cap, &["--bogus".to_string(), "v".to_string()], &[], &urn_names()).unwrap_err();
-        assert!(err.contains("no arg with CLI flag '--bogus'"), "{err}");
-        assert!(err.contains("--model-spec"), "{err}");
-
-        // Explicit --arg by media URN (tag order irrelevant — equivalence)
-        // and @file bytes.
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("payload.bin");
-        std::fs::write(&file, b"\x00\x01binary").unwrap();
-        let invocation = map_invocation(
-            &cap,
-            &[],
-            &[(
-                "media:model-spec;enc=utf8".to_string(),
-                format!("@{}", file.display()),
-            )],
-            &urn_names(),
-        )
-        .unwrap();
-        assert_eq!(invocation.cap_arguments[0].0, "media:enc=utf8;model-spec");
-        assert_eq!(invocation.cap_arguments[0].1, b"\x00\x01binary");
-
-        // Missing required defaultless arg fails pre-flight naming the flag;
-        // the optional defaulted `--budget` and the optional positional are
-        // NOT demanded.
-        let err = map_invocation(&cap, &[], &[], &urn_names()).unwrap_err();
-        assert!(err.contains("missing required options"), "{err}");
-        assert!(err.contains("--model-spec"), "{err}");
-        assert!(
-            err.contains("media:enc=utf8;model-spec"),
-            "missing options are named with their media URN: {err}"
-        );
-        assert!(
-            !err.contains("budget"),
-            "defaulted args not required: {err}"
-        );
-        assert!(
-            !err.contains("criterion"),
-            "optional args not required: {err}"
-        );
-
-        // A flag missing its value is a hard error, not a silent empty.
-        let err = map_invocation(&cap, &["--model-spec".to_string()], &[], &urn_names()).unwrap_err();
-        assert!(err.contains("requires a value"), "{err}");
-    }
-
-    // TEST8043: token classification — ':' means URN, strictly (an invalid
-    // URN with ':' errors rather than falling through to alias); no ':'
-    // means alias.
-    #[test]
-    fn test8043_cap_token_classification() {
-        assert_eq!(
-            classify_cap_token("pdf2summary").unwrap(),
-            CapToken::Alias("pdf2summary".to_string())
-        );
-        match classify_cap_token(r#"cap:in="media:document;ext=pdf";summarize;out="media:enc=utf8""#)
-            .unwrap()
-        {
-            CapToken::Urn(urn) => assert!(urn.contains("summarize")),
-            other => panic!("expected Urn, got {other:?}"),
-        }
-        // ':' present but not a parseable cap URN — hard error, no alias
-        // fall-through.
-        let err = classify_cap_token("media:document;ext=pdf").unwrap_err();
-        assert!(err.contains("does not parse"), "{err}");
-        let err = classify_cap_token("cap:no way this parses\u{7f}").unwrap_err();
-        assert!(err.contains("does not parse"), "{err}");
     }
 }

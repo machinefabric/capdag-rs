@@ -13,9 +13,9 @@
       "expect": {
         "exit": 0,
         "screen": [
-          "{dir}/out/report.summary.0.txt",
-          "{dir}/out/report.summary.1.txt",
-          "{dir}/out/report.summary.2.txt",
+          "{dir}/out/report · 1.summary.txt",
+          "{dir}/out/report · 2.summary.txt",
+          "{dir}/out/report · 3.summary.txt",
           "✓ report.pdf  2 steps · 3 items · {*} s"
         ]
       }
@@ -24,14 +24,14 @@
       "expect": {
         "exit": 0,
         "stdout": [
-          "report.summary.0.txt",
-          "report.summary.2.txt"
+          "report · 1.summary.txt",
+          "report · 3.summary.txt"
         ],
         "screen": [
           "✓ report.pdf  2 steps · 3 items · {*} s",
-          "  → {dir}/out/report.summary.0.txt",
-          "  → {dir}/out/report.summary.1.txt",
-          "  → {dir}/out/report.summary.2.txt"
+          "  → {dir}/out/report · 1.summary.txt",
+          "  → {dir}/out/report · 2.summary.txt",
+          "  → {dir}/out/report · 3.summary.txt"
         ]
       }
     },
@@ -39,7 +39,7 @@
       "expect": {
         "exit": 0,
         "stdout": [
-          "report.summary.0.txt"
+          "report · 1.summary.txt"
         ],
         "shown": [
           "[2/2] summarize-en  0/1 pages",

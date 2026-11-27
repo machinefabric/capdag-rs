@@ -1,0 +1,40 @@
+{
+  "title": "Installing for a capability several cartridges provide asks which",
+  "world": "ordinary",
+  "args": [
+    "cartridge",
+    "install",
+    "convert-image"
+  ],
+  "modes": {
+    "inline": {
+      "keys": [
+        {
+          "wait": "Choose the cartridge to install for convert-image"
+        },
+        {
+          "type": "pixel"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "shown": [
+          "Installed and verified pixelcartridge"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "2 options for the cartridge to install for convert-image, and nobody to ask",
+          "capdag cartridge install imagecartridge",
+          "capdag cartridge install pixelcartridge"
+        ]
+      }
+    }
+  }
+}

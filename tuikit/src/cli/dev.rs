@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use super::ctx::{self, Ctx};
 use super::error::{CliError, CliResult, Exit};
-use super::term::emit_record;
-use super::term::outln;
+use super::formal as f;
+use super::term::{emit_record, outln};
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -63,7 +63,45 @@ fn languages() -> clap::builder::PossibleValuesParser {
     clap::builder::PossibleValuesParser::new(capdag::dev::stub_languages().iter().map(|l| l.id))
 }
 
+/// The command as the model knows it, before its own facts are known.
+pub fn placeholder(command: &Command) -> f::Command {
+    match command {
+        Command::New { .. } => f::Command::DevNew { nameable: true },
+        Command::Install { .. } => f::Command::DevInstall,
+        Command::HashDir { .. } => f::Command::DevHashDir { dir_there: true },
+        Command::BundleManifest { .. } => f::Command::DevBundleManifest { root_there: true },
+        Command::BundleRehash { .. } => f::Command::DevBundleRehash { root_there: true },
+    }
+}
+
+/// What the model decides of a `dev` command with its facts.
+fn decided(ctx: &Ctx, command: &Command) -> CliResult<()> {
+    let modelled = match command {
+        Command::New { path, .. } => f::Command::DevNew { nameable: path.file_name().is_some() },
+        Command::Install { .. } => f::Command::DevInstall,
+        Command::HashDir { dir } => f::Command::DevHashDir { dir_there: dir.is_dir() },
+        Command::BundleManifest { root, .. } => f::Command::DevBundleManifest { root_there: root.is_dir() },
+        Command::BundleRehash { root, .. } => f::Command::DevBundleRehash { root_there: root.is_dir() },
+    };
+    let verdict = ctx.decide(modelled, false);
+    let subject = match command {
+        Command::New { path, .. } => path.display().to_string(),
+        Command::Install { dir } | Command::HashDir { dir } => dir.display().to_string(),
+        Command::BundleManifest { root, .. } | Command::BundleRehash { root, .. } => format!("--root {}", root.display()),
+    };
+    match &verdict {
+        f::CliVerdict::Refused { r } => {
+            Err(super::say::with_exit(CliError::usage(format!("{subject}: {}", f::says(r))), &verdict))
+        }
+        other => match super::ends(other) {
+            Some(error) => Err(error),
+            None => Ok(()),
+        },
+    }
+}
+
 pub async fn dev(ctx: &Ctx, command: Command) -> CliResult<Exit> {
+    decided(ctx, &command)?;
     match command {
         Command::New { path, lang } => new(ctx, &path, &lang),
         Command::Install { dir } => install(ctx, &dir).await,
@@ -84,7 +122,7 @@ fn new(ctx: &Ctx, path: &std::path::Path, lang: &str) -> CliResult<Exit> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| CliError::usage(format!("'{}' names no directory to make", path.display())))?;
+        .expect("the model refuses a path with no last part to name the directory after");
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
@@ -102,7 +140,7 @@ fn new(ctx: &Ctx, path: &std::path::Path, lang: &str) -> CliResult<Exit> {
         eprintln!("  {}", step.replace(capdag::dev::stubs_generated::STUB_PLACEHOLDER, &name));
     }
     eprintln!("  capdag dev install");
-    eprintln!("  echo \"I love this\" | capdag run {name}");
+    eprintln!("  echo \"I love this\" | capdag run '[in -> {name} -> out]' -");
     outln!("{}", project.display());
     Ok(Exit::Ok)
 }
@@ -131,12 +169,12 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
         .host
         .install_dev_cartridge(dir, &manifest)
         .map_err(|e| ctx::host_failure("the cartridge could not be installed", e))?;
-    let alias = manifest
+    let runnable = manifest
         .cap_groups
         .iter()
         .flat_map(|g| g.caps.iter())
         .filter(|c| !c.get_aliases().iter().any(|a| a == "identity"))
-        .find_map(|c| c.get_aliases().first().cloned());
+        .find_map(|c| c.get_aliases().first().cloned().map(|alias| (alias, c.clone())));
     if ctx.term.json {
         emit_record(&serde_json::json!({
             "type": "cartridge", "id": manifest.name, "version": manifest.version, "state": "dev",
@@ -145,8 +183,10 @@ async fn install(ctx: &Ctx, dir: &std::path::Path) -> CliResult<Exit> {
         return Ok(Exit::Ok);
     }
     eprintln!("Installed the dev cartridge '{}' {} at {}", manifest.name, manifest.version, version_dir.display());
-    if let Some(alias) = alias {
-        eprintln!("Run it: capdag run {alias} <input>");
+    if let Some((alias, cap)) = runnable {
+        let machine = capdag::orchestrator::one_step_machine(&cap, &alias)
+            .map_err(|e| CliError::failed(format!("the machine of {alias}'s one step could not be written")).context(e))?;
+        eprintln!("Run it: capdag run {} <input>", super::shell_word(&machine));
     }
     outln!("{}", version_dir.display());
     Ok(Exit::Ok)
@@ -256,9 +296,6 @@ fn staged_cartridge(dir: &std::path::Path, record: &capdag::CartridgeJson) -> ca
 /// directory path says it is. A root holding none is refused: a manifest
 /// listing nothing would describe a bundle that verifies and hosts nothing.
 fn staged_dirs(root: &std::path::Path) -> CliResult<std::collections::BTreeMap<capdag::StagedKey, PathBuf>> {
-    if !root.is_dir() {
-        return Err(CliError::usage(format!("--root {}: no such directory", root.display())));
-    }
     let mut dirs = std::collections::BTreeMap::new();
     collect_staged(root, &mut dirs)?;
     if dirs.is_empty() {

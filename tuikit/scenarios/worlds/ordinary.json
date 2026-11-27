@@ -11,7 +11,10 @@
     { "id": "ggufcartridge", "version": "2.7.1", "caps": ["summarize-en", "ocr-gguf"] },
     { "id": "notecartridge", "version": "0.1.0", "caps": ["concat"], "dev": true }
   ],
-  "store": [{ "id": "imagecartridge", "version": "1.9.0", "caps": ["convert-image"], "install_ms": 1500 }],
+  "store": [
+    { "id": "imagecartridge", "version": "1.9.0", "caps": ["convert-image"], "install_ms": 1500 },
+    { "id": "pixelcartridge", "version": "0.4.0", "caps": ["convert-image"], "install_ms": 500 }
+  ],
   "files": {
     "report.pdf": "%PDF-1.7 a report of three pages\n",
     "minutes.pdf": "%PDF-1.7 the minutes of a meeting, two pages\n",
@@ -19,8 +22,8 @@
     "build/pdfcartridge": "a pdf cartridge built from its project\n",
     "summaries.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary]\n",
     "broken.machine": "[doc -> disbind-pdf -> pages]\n[(pages, for=\"a reader in a hurry\") -> summarize-en -> summary\n",
-    "earlier/report.output.0.txt": "The first page, from an earlier run.\n",
-    "earlier/report.output.png": "an image from an earlier run\n"
+    "earlier/report · 1.pages.txt": "The first page, from an earlier run.\n",
+    "earlier/report.image.png": "an image from an earlier run\n"
   },
   "refused_machines": ["broken.machine"],
   "runs": {
@@ -177,6 +180,14 @@
       "end": {
         "completed": {
           "outputs": { "model-delete-result": "{\"model_spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF\",\"removed_bytes\":2497281312}" }
+        }
+      }
+    },
+    "list-models": {
+      "signals": [{ "wait": 100 }],
+      "end": {
+        "completed": {
+          "outputs": { "model-list": "{\"models\":[{\"model_spec\":\"hf:unsloth/Qwen3-4B-Instruct-2507-GGUF?include=Qwen3-4B-Instruct-2507-Q4_K_M.gguf\",\"state\":\"ready\",\"local_available\":true,\"remote_available\":true,\"size_bytes\":2497281312}]}" }
         }
       }
     }

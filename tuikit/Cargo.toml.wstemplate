@@ -29,6 +29,18 @@ tokio = { version = "1.0", features = ["full"] }
 unicode-segmentation = "1"
 unicode-width = "0.2"
 
+# The runtime the code generated from ../../tuikit-formal runs on (see its
+# lungo.toml): what the command decides of every command line. The generated
+# code is lungo's of the same version, so the runtime is pinned exactly.
+[dependencies.lungo]
+{%- if env.MFR_LOCAL_LIBS %}
+# MFR_LOCAL_LIBS: the working copy in this workspace rather than a published
+# release. Re-render without it before committing or releasing.
+path = "{{ projects.lungo_rs.path_from_here }}/crates/lungo"
+{%- else %}
+version = "={{ projects.lungo_rs.latest_remote_version }}"
+{%- endif %}
+
 # The terminal a journey is played on, read as a person sees it.
 [target.'cfg(unix)'.dependencies]
 vt100 = "0.15"

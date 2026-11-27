@@ -1,31 +1,36 @@
 //! The `capdag` command.
 //!
-//! Verbs for the daily loop — find a capability, run it, plan and run a
-//! machine — and nouns for what is managed — cartridges, models, the fabric
-//! cache, cartridge development — as cargo and gh arrange theirs. Every
-//! command has help with an example (`capdag help <command>`, `-h` short,
-//! `--help` long), takes the same global flags, prints what a person reads on
-//! stderr and what a program reads on stdout, and fails with what is wrong and
-//! what to type next ([`error`]).
+//! Verbs for the daily loop — find a capability, run a machine, see what
+//! files can become — and nouns for what is managed — cartridges, models, the
+//! fabric cache, cartridge development — as cargo and gh arrange theirs. What
+//! every line comes to is the model's decision ([`formal`]): the argument
+//! definitions here name exactly the commands and flags its table names, and
+//! a test holds them to it. Every command has help with an example
+//! (`capdag help <command>`, `-h` short, `--help` long), takes the same global
+//! flags, prints what a person reads on stderr and what a program reads on
+//! stdout, and fails with what is wrong and what to type next ([`error`]).
 
+pub mod ask;
 pub mod caps;
 pub mod cartridge;
 pub mod check;
-pub mod choose;
 pub mod ctx;
 pub mod dev;
 pub mod error;
+pub mod formal;
 pub mod graph;
 pub mod host;
 pub mod info;
 pub mod inline;
 pub mod inputs;
 pub mod inspect;
+pub mod line;
 pub mod live;
 pub mod model;
 pub mod names;
 pub mod plan;
 pub mod run;
+pub mod say;
 pub mod term;
 pub mod watch;
 
@@ -33,10 +38,11 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use self::ctx::Ctx;
 use self::error::{CliError, CliResult, Exit};
+use self::formal as f;
 use self::host::Host;
 use self::term::{ColorChoice, Term};
 
-/// Find capabilities, run them on files, and plan and run machines of them.
+/// Run machines of capabilities on files, find capabilities, and see what files can become.
 #[derive(Debug, Parser)]
 #[command(
     name = "capdag",
@@ -47,10 +53,11 @@ use self::term::{ColorChoice, Term};
     propagate_version = true,
     max_term_width = 100,
     after_help = "Start here:\n  \
-        capdag caps pdf                                   find capabilities that take or give PDF\n  \
-        capdag run disbind-pdf report.pdf -o pages        run one on a file\n  \
-        capdag plan report.pdf --to txt                   find machines that make text of it\n  \
-        capdag run pages.machine report.pdf               run a machine\n\n\
+        capdag caps pdf                                        find capabilities that take or give PDF\n  \
+        capdag plan report.pdf                                 what report.pdf can become\n  \
+        capdag run report.pdf --to txt                         make text of it, choosing a machine\n  \
+        capdag run '[doc -> disbind-pdf -> pages]' report.pdf  run a machine of one step\n  \
+        capdag run pages.machine report.pdf                    run a machine saved in a file\n\n\
         `capdag help <command>` shows a command's help with examples."
 )]
 pub struct Cli {
@@ -96,8 +103,8 @@ pub enum Command {
             capdag caps                       every capability\n  \
             capdag caps pdf                   capabilities whose name, title or media mention pdf\n  \
             capdag caps --in pdf --out png    capabilities that make PNG of PDF\n  \
-            capdag caps --pick pdf            choose one; its alias is printed\n  \
-            capdag run $(capdag caps --pick pdf) report.pdf"
+            capdag caps --pick pdf            choose one; the machine of its one step is printed\n  \
+            capdag run \"$(capdag caps --pick pdf)\" report.pdf"
     )]
     Caps(caps::Args),
     /// Show a capability or a media type: what it takes, gives and needs
@@ -106,30 +113,34 @@ pub enum Command {
         capdag info pdf                   a media type: its URN, extensions, the caps that take it\n  \
         capdag info disbind-pdf --json    the capability's definition, as the fabric publishes it")]
     Info(info::Args),
-    /// Run a capability or a machine on files
+    /// Run a machine on inputs: one written inline or in a file, or one planned to --to
     #[command(after_help = "Examples:\n  \
-        capdag run csv2json people.csv                       one cap; the result on stdout\n  \
-        cat report.pdf | capdag run disbind-pdf -o pages     piped input; pages written to pages/\n  \
-        capdag run disbind-pdf report.pdf --index-range 1-5  the cap's own options, as it declares them\n  \
-        capdag run pages.machine report.pdf -o out           a machine\n  \
-        capdag run pages.machine --input doc=@report.pdf     an input by its name in the machine\n\n\
+        capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages    a machine of one step\n  \
+        capdag run pages.machine report.pdf                    a machine saved in a file\n  \
+        capdag run pages.machine --input doc=@report.pdf       an input by its name in the machine\n  \
+        cat notes.txt | capdag run summary.machine -           stdin as an input\n  \
+        capdag run report.pdf --to txt                         plan a machine that makes text of it\n  \
+        capdag run '[doc -> disbind-pdf -> pages]' report.pdf --arg index-range=1-5\n\n\
+        What a line leaves open is asked at a terminal, and named with the flag that gives it\n\
+        in a script. A run that settled anything prints the line to run it again, asking nothing.\n\n\
         A single result goes to stdout; several results are written as files, whose\n\
         paths are listed on stdout. Progress, logs and errors go to stderr.\n\n\
         Ctrl-C stops the run: nothing new starts, what started finishes and is written.\n\
         Ctrl-C again aborts it.\n\n\
-        `capdag run <cap> --help` shows that cap's own options.")]
+        `capdag run <machine> --help` shows the machine's inputs, steps and the options it leaves\n\
+        to the run; `capdag info <cap>` a capability's own options.")]
     Run(run::Args),
-    /// Find machines that turn files into a target, and save or run one
+    /// What inputs can become, the machines that make it, and saving one
     #[command(after_help = "Examples:\n  \
-        capdag plan report.pdf                            what report.pdf can become\n  \
-        capdag plan report.pdf --to txt                   machines that make text of it\n  \
-        capdag plan report.pdf --to txt --pick 1 --save pages.machine\n  \
-        capdag plan report.pdf --to txt --pick 1 --run -o out\n\n\
-        On a terminal, a target or machine not given by --to or --pick is chosen from a list.")]
+        capdag plan report.pdf                                 what report.pdf can become\n  \
+        capdag plan report.pdf --to txt                        the machines that make text of it\n  \
+        capdag plan report.pdf --to txt --save pages.machine   save the one chosen\n\n\
+        A plan runs nothing: run a machine with capdag run.")]
     Plan(plan::Args),
-    /// Check a machine file without running it
+    /// Check a machine without running it
     #[command(after_help = "Examples:\n  \
-        capdag check pages.machine        its inputs, steps and outputs, or what is wrong and where")]
+        capdag check pages.machine        its inputs, steps and outputs, or what is wrong and where\n  \
+        capdag check '[doc -> disbind-pdf -> pages]'")]
     Check(check::Args),
     /// Draw a machine: as text, Mermaid or Graphviz
     #[command(after_help = "Examples:\n  \
@@ -139,10 +150,11 @@ pub enum Command {
     Graph(graph::GraphArgs),
     /// Look at a machine in the terminal: its graph, steps and arguments
     #[command(after_help = "Examples:\n  \
-        capdag view pages.machine\n\n\
+        capdag view pages.machine\n  \
+        capdag view pages.machine report.pdf      run it from the view\n\n\
         Needs a terminal; without one it prints the machine as `capdag graph` does.")]
     View(graph::ViewArgs),
-    /// Edit a machine in the terminal, checking every change against the fabric
+    /// Edit a machine file in the terminal, checking every change against the fabric
     #[command(after_help = "Examples:\n  \
         capdag edit pages.machine\n\n\
         Needs a terminal. Without one, edit the file in any editor and run `capdag check` on it.")]
@@ -199,14 +211,17 @@ pub async fn run(host: std::sync::Arc<dyn Host>) -> i32 {
 /// Run `argv` as the command line on `host`, and return the process's exit
 /// status.
 pub async fn run_command_line(argv: Vec<String>, host: std::sync::Arc<dyn Host>) -> i32 {
-    let argv = run::separate_cap_tokens(Cli::command(), argv);
-    let matches = match Cli::command().try_get_matches_from(&argv) {
-        Ok(matches) => matches,
-        Err(error) => return clap_error(error),
-    };
-    let cli = match Cli::from_arg_matches(&matches) {
+    let parsed = Cli::command()
+        .try_get_matches_from(&argv)
+        .and_then(|matches| Cli::from_arg_matches(&matches));
+    let cli = match parsed {
         Ok(cli) => cli,
-        Err(error) => return clap_error(error),
+        Err(error) => return parse_outcome(&argv, error),
+    };
+    let reads_stdin = match &cli.command {
+        Command::Run(args) => args.reads_stdin(),
+        Command::Plan(args) => args.reads_stdin(),
+        _ => false,
     };
     let term = Term::decide(
         cli.global.json,
@@ -214,12 +229,13 @@ pub async fn run_command_line(argv: Vec<String>, host: std::sync::Arc<dyn Host>)
         cli.global.color,
         cli.global.verbose,
         cli.global.quiet,
+        reads_stdin,
     );
     let style = term.style;
     let json = term.json;
-    let outcome = match one_fabric(&cli.global.fabric).and_then(|flag| ctx::bind_fabric(host.as_ref(), flag)) {
+    let outcome = match ctx::bind_fabric(host.as_ref(), cli.global.fabric.first().map(String::as_str)) {
         Ok(()) => {
-            let ctx = Ctx::new(term, cli.global.offline, host);
+            let ctx = Ctx::new(term, cli.global.offline, host, cli.global.fabric.clone());
             dispatch(&ctx, cli.command).await
         }
         Err(error) => Err(error),
@@ -236,32 +252,90 @@ pub async fn run_command_line(argv: Vec<String>, host: std::sync::Arc<dyn Host>)
     }
 }
 
-/// The one fabric `--fabric` names: given twice, it must name the same one —
-/// a run resolves against exactly one fabric.
-fn one_fabric(given: &[String]) -> CliResult<Option<&str>> {
-    match given {
-        [] => Ok(None),
-        [first, rest @ ..] => match rest.iter().find(|other| *other != first) {
-            Some(other) => Err(CliError::usage(format!("--fabric was given twice, as '{first}' and '{other}'"))
-                .context("a command resolves against exactly one fabric")
-                .hint("give --fabric once")),
-            None => Ok(Some(first.as_str())),
+/// A line the argument parser did not hand over as a command: help or the
+/// version asked for, no command named, or a line it could not read. clap
+/// says what, and the model what it comes to.
+fn parse_outcome(argv: &[String], error: clap::Error) -> i32 {
+    let invocation = invocation_of(argv, error.kind());
+    let _ = error.print();
+    exit_without_world(invocation)
+}
+
+/// What a line the parser did not hand over is, as the model knows it.
+fn invocation_of(argv: &[String], kind: clap::error::ErrorKind) -> f::Invocation {
+    use clap::error::ErrorKind;
+    match kind {
+        ErrorKind::DisplayVersion => f::Invocation::Version,
+        ErrorKind::DisplayHelp => f::Invocation::HelpFlag {
+            topic: if command_words(argv).is_empty() { f::HelpTopic::Overview } else { f::HelpTopic::Command },
         },
+        ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => match command_words(argv).first().map(String::as_str) {
+            None => f::Invocation::Bare,
+            Some("cartridge") => f::Invocation::Group { g: f::Group::Cartridge },
+            Some("model") => f::Invocation::Group { g: f::Group::Model },
+            Some("cache") => f::Invocation::Group { g: f::Group::Cache },
+            Some("dev") => f::Invocation::Group { g: f::Group::Dev },
+            Some("self") => f::Invocation::Group { g: f::Group::Self_ },
+            Some(_) => f::Invocation::Unreadable,
+        },
+        _ => f::Invocation::Unreadable,
     }
 }
 
-/// clap's own errors — an unknown flag, a missing value, no command at all —
-/// exit 2 with clap's message on stderr, which names the problem and the
-/// usage; `--help` and `--version` print on stdout and exit 0.
-fn clap_error(error: clap::Error) -> i32 {
-    let _ = error.print();
-    match error.kind() {
-        clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => 0,
-        _ => 2,
+/// The exit status of a line decided before any command runs: the model
+/// reads nothing of the world for help, the version, a line with no command,
+/// a help command, or a line the parser could not read.
+fn exit_without_world(invocation: f::Invocation) -> i32 {
+    f::exit_of(&f::cli(ctx_free_world(), invocation)).expect("help, the version and a line not read each end the command")
+}
+
+/// The words of a line that name its command: every word before the first
+/// flag, after the program's name, skipping the values of the flags every
+/// command takes.
+fn command_words(argv: &[String]) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut tokens = argv.iter().skip(1);
+    while let Some(token) = tokens.next() {
+        if token == "--fabric" || token == "--color" {
+            tokens.next();
+            continue;
+        }
+        if token.starts_with('-') {
+            continue;
+        }
+        words.push(token.clone());
     }
+    words
 }
 
 async fn dispatch(ctx: &Ctx, command: Command) -> CliResult<Exit> {
+    let none = || f::no_world(ctx.term.model());
+    let placeholder = match &command {
+        Command::Caps(args) => Some(f::Command::Caps { pick: args.pick, types_known: true, found: f::Choices::None }),
+        Command::Info(args) => Some(f::Command::Info { all_known: true, no_cache: args.no_cache }),
+        Command::Run(_) => Some(f::Command::Run { l: f::no_run_line(), planning_flags: false, w: none() }),
+        Command::Plan(_) => Some(f::Command::Plan { l: plan::no_plan_line(), w: none(), save_there: false }),
+        Command::Check(_) => Some(f::Command::Check { m: f::Written { base: f::nat(0), inline: false }, w: none() }),
+        Command::Graph(_) => {
+            Some(f::Command::Graph { m: f::Written { base: f::nat(0), inline: false }, text: true, width: false, w: none() })
+        }
+        Command::View(_) => {
+            Some(f::Command::View { m: f::Written { base: f::nat(0), inline: false }, inputs: f::list(Vec::new()), w: none() })
+        }
+        Command::Edit(_) => {
+            Some(f::Command::Edit { m: f::Written { base: f::nat(0), inline: false }, inputs: f::list(Vec::new()), w: none() })
+        }
+        Command::Cartridge(command) => Some(cartridge::placeholder(command)),
+        Command::Model(command) => Some(model::placeholder(command)),
+        Command::Cache(CacheCommand::Refresh) => Some(f::Command::CacheRefresh),
+        Command::Cache(CacheCommand::Clear) => Some(f::Command::CacheClear),
+        Command::Dev(command) => Some(dev::placeholder(command)),
+        Command::SelfCmd(SelfCommand::Update) => Some(f::Command::SelfUpdate),
+        Command::Help { .. } | Command::Unknown(_) => None,
+    };
+    if let Some(placeholder) = placeholder {
+        ctx.preflight(placeholder).await?;
+    }
     match command {
         Command::Caps(args) => caps::caps(ctx, args).await,
         Command::Info(args) => info::info(ctx, args).await,
@@ -281,66 +355,138 @@ async fn dispatch(ctx: &Ctx, command: Command) -> CliResult<Exit> {
     }
 }
 
-/// `capdag help <command> [<subcommand>]`: that command's long help.
-fn help(path: &[String]) -> CliResult<Exit> {
-    let mut command = Cli::command();
-    command.build();
-    let mut at = &mut command;
-    for (depth, name) in path.iter().enumerate() {
-        let known: Vec<String> = at.get_subcommands().map(|c| c.get_name().to_string()).collect();
-        at = match at.find_subcommand_mut(name) {
-            Some(sub) => sub,
-            None => {
-                let so_far = path[..depth].join(" ");
-                let mut error = CliError::usage(format!(
-                    "there is no command `capdag {}{name}`",
-                    if so_far.is_empty() { String::new() } else { format!("{so_far} ") }
-                ));
-                if let Some(near) = nearest(name, known.iter().map(String::as_str)) {
-                    error = error.hint(format!("did you mean `{near}`?"));
-                } else {
-                    error = error.context(format!("the commands are: {}", known.join(", ")));
-                }
-                return Err(error);
-            }
-        };
+/// What a command's own verdict comes to, when it is not to go on: the error
+/// it ends with. `answers` and `opens` go on, and are the caller's.
+pub fn ends(verdict: &f::CliVerdict) -> Option<CliError> {
+    match verdict {
+        f::CliVerdict::Is { v: f::Verdict::Answers } | f::CliVerdict::Is { v: f::Verdict::Opens } => None,
+        f::CliVerdict::Refused { r } => Some(say::with_exit(say::cli_refusal(r), verdict)),
+        f::CliVerdict::Is { v } => Some(say::with_exit(
+            CliError::failed(format!("the command came to {v:?}")).hint("report it: the command says what each verdict means"),
+            verdict,
+        )),
     }
-    let _ = at.print_long_help();
-    Ok(Exit::Ok)
 }
 
-/// A first word that is no command: a capability, a machine file, or a typo.
+/// The command `path` names, as clap knows it.
+fn command_at(path: &[&str]) -> Option<clap::Command> {
+    let mut command = Cli::command();
+    command.build();
+    let mut at = command;
+    for name in path {
+        at = at.find_subcommand(name)?.clone();
+    }
+    Some(at)
+}
+
+/// A command's long help, on stdout.
+pub fn print_command_help(path: &[&str]) -> CliResult<()> {
+    let mut command = command_at(path).ok_or_else(|| CliError::failed(format!("there is no command {}", path.join(" "))))?;
+    command
+        .print_long_help()
+        .map_err(|e| CliError::failed("the help could not be written").context(e.to_string()))
+}
+
+/// `capdag help <command> [<subcommand>]`: that command's long help.
+fn help(path: &[String]) -> CliResult<Exit> {
+    let words: Vec<&str> = path.iter().map(String::as_str).collect();
+    let known = command_at(&words).is_some();
+    let verdict = f::cli(ctx_free_world(), f::Invocation::HelpCommand { known });
+    if let f::CliVerdict::Is { v: f::Verdict::Help } = verdict {
+        if words.is_empty() {
+            Cli::command()
+                .print_long_help()
+                .map_err(|e| CliError::failed("the help could not be written").context(e.to_string()))?;
+        } else {
+            print_command_help(&words)?;
+        }
+        return Ok(Exit::Ok);
+    }
+    let mut error = ends(&verdict).expect("help names a command, or is refused");
+    error.problem = format!("there is no command `capdag {}`: {}", words.join(" "), error.problem);
+    let depth = (1..=words.len()).rev().find(|n| command_at(&words[..n - 1]).is_some()).unwrap_or(1);
+    if let Some(parent) = command_at(&words[..depth - 1]) {
+        let known: Vec<String> = parent.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name().to_string()).collect();
+        error = match nearest(words[depth - 1], known.iter().map(String::as_str)) {
+            Some(near) => error.hint(format!("did you mean `{near}`?")),
+            None => error.context(format!("the commands are: {}", known.join(", "))),
+        };
+    }
+    Err(error)
+}
+
+/// A first word that is no command: a machine, a file, a word close to a
+/// command, a capability, or nothing.
 async fn unknown(ctx: &Ctx, words: Vec<String>) -> CliResult<Exit> {
     let word = words.first().cloned().unwrap_or_default();
-    let rest = shell_words(&words[1..]);
+    let rest: String = words[1..].iter().map(|w| format!(" {}", shell_word(w))).collect();
     let commands: Vec<String> = Cli::command()
         .get_subcommands()
         .filter(|c| !c.is_hide_set())
         .map(|c| c.get_name().to_string())
         .collect();
-    if word.ends_with(".machine") {
-        return Err(CliError::usage(format!("'{word}' is a machine file, not a command"))
-            .hint(format!("run it with: capdag run {word}{rest}")));
-    }
-    if let Some(near) = nearest(&word, commands.iter().map(String::as_str)) {
-        return Err(CliError::usage(format!("there is no command `{word}`"))
-            .hint(format!("did you mean `capdag {near}`?")));
-    }
-    // A capability's name: the bare form is not a command. Say how to run it.
-    // Whether it names one is the registry's to say: when the registry
-    // cannot be asked, that is said, not "no capability".
-    let registry = ctx.registry().await?;
-    match registry.get_cap(&word).await {
-        Ok(cap) => {
-            return Err(CliError::usage(format!("'{word}' is a capability, not a command"))
-                .context(format!("{} — {}", names::cap(&registry, &cap), cap.title))
-                .hint(format!("run it with: capdag run {word}{rest}")));
+    let mut capability: Option<capdag::Cap> = None;
+    let kind = if word.ends_with(".machine") {
+        f::WordKind::MachineFile
+    } else if word.starts_with('[') {
+        f::WordKind::InlineMachine
+    } else if std::path::Path::new(&word).is_file() {
+        f::WordKind::File
+    } else if nearest(&word, commands.iter().map(String::as_str)).is_some() {
+        f::WordKind::NearCommand
+    } else {
+        // Whether it names a capability is the registry's to say: when the
+        // registry cannot be asked, that is said, not "no capability".
+        let registry = ctx.registry().await?;
+        match registry.get_cap(&word).await {
+            Ok(cap) => {
+                capability = Some(cap);
+                f::WordKind::Capability
+            }
+            Err(e) => {
+                ctx::nothing_by_that_name(e)?;
+                f::WordKind::Unknown
+            }
         }
-        Err(e) => ctx::nothing_by_that_name(e)?,
+    };
+    let verdict = f::cli(ctx_free_world(), f::Invocation::Unknown { kind: kind.clone() });
+    let error = ends(&verdict).expect("a word that is no command is refused");
+    let error = match kind {
+        f::WordKind::MachineFile => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
+        f::WordKind::InlineMachine => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
+        f::WordKind::File => {
+            error.hint(format!("capdag plan {0}, or capdag run {0} --to <type>", shell_word(&word)))
+        }
+        f::WordKind::NearCommand => {
+            let near = nearest(&word, commands.iter().map(String::as_str)).expect("a near command was found above");
+            error.context(format!("there is no command `{word}`")).hint(format!("did you mean `capdag {near}`?"))
+        }
+        f::WordKind::Capability => {
+            let cap = capability.expect("a capability was found above");
+            let registry = ctx.registry().await?;
+            let alias = names::cap(&registry, &cap);
+            let machine = names::one_step_machine(&registry, &cap)
+                .map_err(|e| CliError::failed(format!("the machine of {alias}'s one step could not be written")).context(e))?;
+            error
+                .context(format!("{alias} — {}", cap.title))
+                .hint(format!("capdag run {}{}", shell_word(&machine), if rest.is_empty() { " <input>".to_string() } else { rest }))
+        }
+        f::WordKind::Unknown => error
+            .context(format!("the commands are: {}", commands.join(", ")))
+            .hint(format!("look for a capability with: capdag caps {}", shell_word(&word))),
+    };
+    Err(error)
+}
+
+/// The world the model decides a line on that reads nothing of it: help, the
+/// version, a line with no command, one the parser could not read, and a
+/// first word that is no command.
+fn ctx_free_world() -> f::CliWorld {
+    f::CliWorld {
+        terminal: f::Terminal { reachable: false, no_input: true, json: false, ci: false, dumb: false },
+        screen: false,
+        fabric_cached: true,
     }
-    Err(CliError::usage(format!("there is no command or capability named `{word}`"))
-        .context(format!("the commands are: {}", commands.join(", ")))
-        .hint(format!("look for a capability with: capdag caps {word}")))
 }
 
 /// The command closest to `word`, when one is close enough to be what was meant.
@@ -352,21 +498,29 @@ pub fn nearest<'a>(word: &str, candidates: impl Iterator<Item = &'a str>) -> Opt
         .map(|(_, candidate)| candidate)
 }
 
-/// Arguments as they would be typed again: ` a 'b c'`.
-fn shell_words(words: &[String]) -> String {
-    words
-        .iter()
-        .map(|word| {
-            if word.is_empty() || word.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;<>()*?".contains(c)) {
-                format!(" '{}'", word.replace('\'', "'\\''"))
-            } else {
-                format!(" {word}")
-            }
-        })
-        .collect()
+/// A word as a shell reads it back: quoted when it holds anything a shell
+/// would read otherwise.
+pub fn shell_word(word: &str) -> String {
+    if word.is_empty() || word.chars().any(|c| c.is_whitespace() || "'\"$`\\|&;<>()*?[]{}#~!".contains(c)) {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    } else {
+        word.to_string()
+    }
+}
+
+/// Words as a shell reads them back, on one line.
+pub fn shell_line(words: &[String]) -> String {
+    words.iter().map(|w| shell_word(w)).collect::<Vec<_>>().join(" ")
 }
 
 async fn cache(ctx: &Ctx, command: CacheCommand) -> CliResult<Exit> {
+    let decided = match command {
+        CacheCommand::Refresh => f::Command::CacheRefresh,
+        CacheCommand::Clear => f::Command::CacheClear,
+    };
+    if let Some(error) = ends(&ctx.decide(decided, false)) {
+        return Err(error);
+    }
     // Cleared without opening a registry on it: a cache holding a corrupt
     // entry is one a registry refuses to open, and clearing is what that
     // refusal says to do.
@@ -406,8 +560,8 @@ async fn cache(ctx: &Ctx, command: CacheCommand) -> CliResult<Exit> {
 /// beside it, with its channel's latest release — installed only when the
 /// release's manifest chains to this build's roots ([`capdag::self_update`]).
 async fn self_update(ctx: &Ctx) -> CliResult<Exit> {
-    if ctx.offline {
-        return Err(CliError::usage("capdag cannot update itself offline").hint("drop --offline"));
+    if let Some(error) = ends(&ctx.decide(f::Command::SelfUpdate, false)) {
+        return Err(error);
     }
     let updated = ctx
         .host
@@ -431,6 +585,7 @@ async fn self_update(ctx: &Ctx) -> CliResult<Exit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     // TEST20113: the command tree is well formed: clap's own checks pass, and
     // every command a person sees has help with at least one example.
@@ -467,5 +622,109 @@ mod tests {
         assert_eq!(nearest("cpas", commands.iter().copied()), Some("caps"));
         assert_eq!(nearest("plna", commands.iter().copied()), Some("plan"));
         assert_eq!(nearest("summarize-en", commands.iter().copied()), None);
+    }
+
+    /// Every command the argument definitions have, by the words that name
+    /// it, with the long flags it takes beside the global ones; and whether
+    /// it is hidden.
+    fn defined() -> (BTreeSet<(Vec<String>, BTreeSet<String>)>, BTreeSet<Vec<String>>, BTreeSet<String>, BTreeSet<(String, String)>, Vec<(String, Vec<String>)>) {
+        let mut command = Cli::command();
+        command.build();
+        let globals: BTreeSet<String> = command
+            .get_arguments()
+            .filter(|a| a.is_global_set())
+            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+            .chain(["--help".to_string(), "--version".to_string()])
+            .collect();
+        let mut commands = BTreeSet::new();
+        let mut hidden = BTreeSet::new();
+        let mut shorts = BTreeSet::new();
+        let mut aliases = Vec::new();
+        fn walk(
+            at: &clap::Command,
+            path: Vec<String>,
+            globals: &BTreeSet<String>,
+            commands: &mut BTreeSet<(Vec<String>, BTreeSet<String>)>,
+            hidden: &mut BTreeSet<Vec<String>>,
+            shorts: &mut BTreeSet<(String, String)>,
+            aliases: &mut Vec<(String, Vec<String>)>,
+        ) {
+            for arg in at.get_arguments() {
+                if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
+                    shorts.insert((format!("-{short}"), format!("--{long}")));
+                }
+            }
+            for sub in at.get_subcommands() {
+                let mut here = path.clone();
+                here.push(sub.get_name().to_string());
+                for alias in sub.get_visible_aliases() {
+                    aliases.push((alias.to_string(), here.clone()));
+                }
+                if sub.is_hide_set() {
+                    hidden.insert(here.clone());
+                }
+                if sub.has_subcommands() {
+                    walk(sub, here, globals, commands, hidden, shorts, aliases);
+                    continue;
+                }
+                for arg in sub.get_arguments() {
+                    if let (Some(short), Some(long)) = (arg.get_short(), arg.get_long()) {
+                        shorts.insert((format!("-{short}"), format!("--{long}")));
+                    }
+                }
+                let flags: BTreeSet<String> = sub
+                    .get_arguments()
+                    .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+                    .filter(|flag| !globals.contains(flag))
+                    .collect();
+                commands.insert((here, flags));
+            }
+        }
+        walk(&command, Vec::new(), &globals, &mut commands, &mut hidden, &mut shorts, &mut aliases);
+        (commands, hidden, globals, shorts, aliases)
+    }
+
+    // TEST20131: the argument definitions name exactly the commands and flags
+    // the model's table names: every command by its words with the flags it
+    // takes, the flags every command takes, the hidden commands, the aliases,
+    // and the short forms. A command or flag the model does not decide is a
+    // line the model never saw.
+    #[test]
+    fn test20131_the_argument_definitions_are_the_models_table() {
+        let (commands, hidden, globals, shorts, aliases) = defined();
+        let table: BTreeSet<(Vec<String>, BTreeSet<String>)> = f::command_table()
+            .0
+            .into_iter()
+            .map(|(words, flags)| (words.0, flags.0.into_iter().collect()))
+            .collect();
+        assert_eq!(commands, table, "the commands and their flags");
+        let model_hidden: BTreeSet<Vec<String>> = f::hidden_commands().0.into_iter().map(|words| words.0).collect();
+        assert_eq!(hidden, model_hidden, "the hidden commands");
+        let model_globals: BTreeSet<String> = f::global_flags().0.into_iter().collect();
+        assert_eq!(globals, model_globals, "the flags every command takes");
+        let model_shorts: BTreeSet<(String, String)> = f::short_flags().0.into_iter().collect();
+        assert_eq!(shorts, model_shorts, "the short forms");
+        let model_aliases: Vec<(String, Vec<String>)> =
+            f::command_aliases().0.into_iter().map(|(alias, words)| (alias, words.0)).collect();
+        assert_eq!(aliases, model_aliases, "the aliases");
+    }
+
+    // TEST20132: a line the parser hands over as no command ends as the model
+    // says: help and the version 0, no command or a group without its command
+    // 2, a line it could not read 2.
+    #[test]
+    fn test20132_lines_the_parser_decides_exit_as_the_model_says() {
+        let status = |line: &str| {
+            let argv: Vec<String> = line.split(' ').map(str::to_string).collect();
+            let error = Cli::command().try_get_matches_from(&argv).expect_err("the parser does not hand it over");
+            exit_without_world(invocation_of(&argv, error.kind()))
+        };
+        assert_eq!(status("capdag --help"), 0);
+        assert_eq!(status("capdag run --version"), 0);
+        assert_eq!(status("capdag caps --help"), 0);
+        assert_eq!(status("capdag"), 2);
+        assert_eq!(status("capdag cartridge"), 2);
+        assert_eq!(status("capdag caps --bogus"), 2);
+        assert_eq!(status("capdag -v -q caps"), 2);
     }
 }

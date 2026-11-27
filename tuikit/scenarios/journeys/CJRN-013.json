@@ -1,14 +1,32 @@
 {
   "title": "Stop a run with Ctrl-C: what started finishes",
   "world": "ordinary",
-  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "-o",
+    "out"
+  ],
   "modes": {
     "inline": {
-      "keys": [{ "wait": "summarize-en" }, { "press": "Ctrl-C" }],
+      "keys": [
+        {
+          "wait": "summarize-en"
+        },
+        {
+          "press": "Ctrl-C"
+        }
+      ],
       "expect": {
         "exit": 130,
-        "stdout": ["report.summary.2.txt"],
-        "shown": ["Stopping: nothing new starts; what started finishes and is written.", "· stopped"]
+        "stdout": [
+          "report · 3.summary.txt"
+        ],
+        "shown": [
+          "Stopping: nothing new starts; what started finishes and is written.",
+          "· stopped"
+        ]
       }
     }
   }

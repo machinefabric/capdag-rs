@@ -1,14 +1,31 @@
 {
   "title": "An encrypted PDF is refused as input",
   "world": "failing",
-  "args": ["run", "disbind-pdf", "locked.pdf", "-o", "pages"],
+  "args": [
+    "run",
+    "[doc -> disbind-pdf -> pages]",
+    "locked.pdf",
+    "-o",
+    "pages"
+  ],
   "modes": {
     "plain": {
       "expect": {
         "exit": 1,
-        "shown": ["✗ locked.pdf  1 step", "disbind-pdf refused its input", "the document is encrypted, and no password was given"]
+        "shown": [
+          "✗ locked.pdf  1 step",
+          "disbind-pdf refused its input",
+          "the document is encrypted, and no password was given"
+        ]
       }
     },
-    "json": { "expect": { "exit": 1, "stdout": ["\"problem\":\"disbind-pdf refused its input\""] } }
+    "json": {
+      "expect": {
+        "exit": 1,
+        "stdout": [
+          "\"problem\":\"disbind-pdf refused its input\""
+        ]
+      }
+    }
   }
 }

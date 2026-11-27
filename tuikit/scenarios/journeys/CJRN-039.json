@@ -1,21 +1,54 @@
 {
   "title": "A page's summary fails, its policy tolerates it, and the run ends with what it has",
   "world": "tolerant",
-  "args": ["run", "summaries.machine", "report.pdf", "-o", "out"],
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "-o",
+    "out"
+  ],
   "modes": {
-    "inline": { "expect": { "exit": 3, "stdout": ["report.summary.1.txt"], "shown": ["tolerated"], "absent": ["report.summary.2.txt"] } },
+    "inline": {
+      "expect": {
+        "exit": 3,
+        "stdout": [
+          "report · 2.summary.txt"
+        ],
+        "shown": [
+          "tolerated"
+        ],
+        "absent": [
+          "report · 3.summary.txt"
+        ]
+      }
+    },
     "plain": {
       "expect": {
         "exit": 3,
-        "stdout": ["report.summary.0.txt", "report.summary.1.txt"],
+        "stdout": [
+          "report · 1.summary.txt",
+          "report · 2.summary.txt"
+        ],
         "shown": [
           "warn: page 2: the model ran out of memory",
           "failed, and tolerated: summarize-en (item 2) [resource] — the model ran out of memory on page 2",
           "· tolerated"
         ],
-        "absent": ["report.summary.2.txt"]
+        "absent": [
+          "report · 3.summary.txt"
+        ]
       }
     },
-    "json": { "expect": { "exit": 3, "stdout": ["\"type\":\"tolerated\"", "\"item\":1", "\"outcome\":\"tolerated\""] } }
+    "json": {
+      "expect": {
+        "exit": 3,
+        "stdout": [
+          "\"type\":\"tolerated\"",
+          "\"item\":1",
+          "\"outcome\":\"tolerated\""
+        ]
+      }
+    }
   }
 }

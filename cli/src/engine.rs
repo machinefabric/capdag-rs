@@ -154,6 +154,14 @@ impl Host for EngineHost {
         Ok(Arc::new(registry))
     }
 
+    fn fabric_cached(&self) -> Result<bool, FabricRegistryError> {
+        // A test's registry is opened already: it is the fabric.
+        if self.registry.is_some() {
+            return Ok(true);
+        }
+        FabricRegistry::is_cached(&RegistryConfig::default(), capdag::FABRIC_MANIFEST_VERSION)
+    }
+
     async fn clear_fabric_cache(&self) -> Result<PathBuf, FabricRegistryError> {
         // Cleared without opening a registry on it: a cache holding a corrupt
         // entry is one a registry refuses to open, and clearing is what that

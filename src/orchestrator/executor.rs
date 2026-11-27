@@ -197,6 +197,13 @@ pub enum ExecutionError {
     #[error("Cartridge not found for cap: {cap_urn}")]
     CartridgeNotFound { cap_urn: String },
 
+    /// Several of the registry's cartridges provide a cap, and which one runs
+    /// it was not chosen: none of them is installed, or several are. Which
+    /// one is the person's to say — by installing it — and is never taken
+    /// for them.
+    #[error("several cartridges provide {cap_urn} ({}), and {}", providers.join(", "), if *installed { "several of them are installed" } else { "none of them is installed" })]
+    CartridgeNotChosen { cap_urn: String, providers: Vec<String>, installed: bool },
+
     #[error("Cartridge download failed: {0}")]
     CartridgeDownloadFailed(String),
 
@@ -349,6 +356,7 @@ impl ExecutionError {
             ExecutionError::ZipLengthMismatch { .. } => AttributionClass::Input,
             ExecutionError::CartridgeNotFound { .. }
             | ExecutionError::CartridgeDownloadFailed(_)
+            | ExecutionError::CartridgeNotChosen { .. }
             | ExecutionError::CartridgeRefused { .. }
             | ExecutionError::CartridgeUnavailable { .. }
             | ExecutionError::FabricRegistryError(_) => AttributionClass::Environment,
@@ -1188,17 +1196,63 @@ impl CartridgeManager {
             }
         }
 
-        // Fall back to registry
+        // Else the registry's: the one cartridge that provides it, installed
+        // when it is not; or, of several, the one installed.
         let suggestions = self.cartridge_repo.get_suggestions_for_cap(cap_urn).await;
-        if suggestions.is_empty() {
-            return Err(ExecutionError::CartridgeNotFound {
-                cap_urn: cap_urn.to_string(),
-            });
-        }
+        let cartridge_id = match suggestions.as_slice() {
+            [] => {
+                return Err(ExecutionError::CartridgeNotFound {
+                    cap_urn: cap_urn.to_string(),
+                })
+            }
+            [only] => only.cartridge_id.clone(),
+            several => {
+                let mut installed = Vec::new();
+                for suggestion in several {
+                    if self.installed_path(&suggestion.cartridge_id).await?.is_some() {
+                        installed.push(suggestion.cartridge_id.clone());
+                    }
+                }
+                match installed.as_slice() {
+                    [one] => one.clone(),
+                    [] => {
+                        return Err(ExecutionError::CartridgeNotChosen {
+                            cap_urn: cap_urn.to_string(),
+                            providers: several.iter().map(|s| s.cartridge_id.clone()).collect(),
+                            installed: false,
+                        })
+                    }
+                    _ => {
+                        return Err(ExecutionError::CartridgeNotChosen {
+                            cap_urn: cap_urn.to_string(),
+                            providers: installed,
+                            installed: true,
+                        })
+                    }
+                }
+            }
+        };
+        let bin_path = self.get_cartridge_path(&cartridge_id).await?;
+        Ok((bin_path, cartridge_id))
+    }
 
-        let cartridge_id = &suggestions[0].cartridge_id;
-        let bin_path = self.get_cartridge_path(cartridge_id).await?;
-        Ok((bin_path, cartridge_id.clone()))
+    /// The entry point of cartridge `cartridge_id`'s installed version from
+    /// this manager's registry, or `None` when no version is installed.
+    /// Nothing is verified, downloaded or replaced: what is installed is only
+    /// looked at.
+    async fn installed_path(&self, cartridge_id: &str) -> Result<Option<PathBuf>, ExecutionError> {
+        let (registry_url, charter) = self.registry_charter(cartridge_id).await?;
+        let folder = crate::bifaci::charter::RegistryFolder::Chartered(charter);
+        let name_dir = self
+            .cartridge_dir
+            .join(folder.slug())
+            .join(format!("v{}", crate::CARTRIDGE_REGISTRY_VERSION))
+            .join(self.channel.as_str())
+            .join(cartridge_id);
+        if !name_dir.is_dir() {
+            return Ok(None);
+        }
+        self.installed_entry_point(cartridge_id, &name_dir, &folder, &registry_url)
     }
 
     pub async fn get_cartridge_path(&self, cartridge_id: &str) -> Result<PathBuf, ExecutionError> {

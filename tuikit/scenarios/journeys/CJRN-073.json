@@ -1,0 +1,19 @@
+{
+  "title": "Removing a model that is not downloaded is refused",
+  "world": "ordinary",
+  "args": [
+    "model",
+    "remove",
+    "hf:Qwen/Qwen3-8B-GGUF"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "'hf:Qwen/Qwen3-8B-GGUF': no model of that spec is downloaded"
+        ]
+      }
+    }
+  }
+}

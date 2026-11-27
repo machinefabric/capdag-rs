@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 
 use super::error::{CliError, CliResult};
+use super::formal::{self as f, nat};
 use super::host::{Host, HostError};
 use super::term::Term;
 use capdag::fabric::registry::{FabricRegistry, FabricRegistryError, FetchCause};
@@ -22,17 +23,89 @@ pub struct Ctx {
     pub offline: bool,
     /// The engine the command runs on.
     pub host: Arc<dyn Host>,
+    /// `--fabric`, as given: each time it was given.
+    pub fabrics: Vec<String>,
     registry: OnceCell<Arc<FabricRegistry>>,
+    /// Whether the fabric is cached on this machine: known once the command
+    /// passed its preflight ([`Ctx::preflight`]).
+    fabric_cached: std::sync::OnceLock<bool>,
 }
 
 impl Ctx {
-    pub fn new(term: Term, offline: bool, host: Arc<dyn Host>) -> Self {
+    pub fn new(term: Term, offline: bool, host: Arc<dyn Host>, fabrics: Vec<String>) -> Self {
         Self {
             term,
             offline,
             host,
+            fabrics,
             registry: OnceCell::new(),
+            fabric_cached: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The flags every command takes, as the model knows them: the fabrics
+    /// `--fabric` names, each by the first time it was given, and `--offline`.
+    pub fn globals(&self) -> f::Globals {
+        let fabrics = self
+            .fabrics
+            .iter()
+            .map(|given| nat(self.fabrics.iter().position(|first| first == given).expect("it is among them")))
+            .collect();
+        f::Globals { fabrics, offline: self.offline }
+    }
+
+    /// What the command is decided on beside its own facts. `screen`: stdout
+    /// is a terminal a full-screen view can be drawn on.
+    pub fn cli_world(&self, screen: bool) -> f::CliWorld {
+        f::CliWorld {
+            terminal: self.term.model(),
+            screen,
+            fabric_cached: *self.fabric_cached.get().expect("every command passes its preflight before it is decided"),
+        }
+    }
+
+    /// Whether the command is refused for the flags every command takes,
+    /// before anything of its own is looked at (`globalRefusal`): `c` is the
+    /// command, whose own facts play no part. Learns whether the fabric is
+    /// cached, which `--offline` decides by.
+    pub async fn preflight(&self, c: f::Command) -> CliResult<()> {
+        let fetches = f::command::fetches(c.clone());
+        let reads = f::command::reads_fabric(c);
+        let cached = self.host.fabric_cached().map_err(|e| {
+            CliError::failed(format!("whether the fabric of {} is cached could not be read", self.host.fabric_anchor()))
+                .context(e.to_string())
+        })?;
+        let _ = self.fabric_cached.set(cached);
+        match f::global_refusal(self.cli_world(false), self.globals(), fetches, reads) {
+            Some(refusal) => {
+                let verdict = f::CliVerdict::Refused { r: refusal.clone() };
+                let mut error = super::say::with_exit(super::say::cli_refusal(&refusal), &verdict);
+                if let f::CliRefusal::TwoFabrics = refusal {
+                    error = error.context(format!("--fabric was given as {}", self.fabrics.join(" and ")));
+                }
+                Err(error)
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Ask the model what a command comes to, with its facts.
+    pub fn decide(&self, c: f::Command, screen: bool) -> f::CliVerdict {
+        f::cli(self.cli_world(screen), f::Invocation::Command { g: self.globals(), c })
+    }
+
+    /// The flags every command takes that a line to run again keeps: the
+    /// fabric it resolved against, and `--offline`.
+    pub fn global_words(&self) -> Vec<String> {
+        let mut words = Vec::new();
+        if let Some(fabric) = self.fabrics.first() {
+            words.push("--fabric".to_string());
+            words.push(fabric.clone());
+        }
+        if self.offline {
+            words.push("--offline".to_string());
+        }
+        words
     }
 
     /// The fabric registry, opened on first use.
@@ -46,10 +119,6 @@ impl Ctx {
     /// A registry that fetches everything afresh, for `capdag cache refresh`
     /// and `capdag info --no-cache`.
     pub async fn fresh_registry(&self) -> CliResult<Arc<FabricRegistry>> {
-        if self.offline {
-            return Err(CliError::usage("--offline cannot fetch the fabric afresh")
-                .hint("drop --offline, or leave out --no-cache"));
-        }
         self.open_registry(true).await
     }
 

@@ -1,9 +1,27 @@
 {
-  "title": "List the downloaded models (today: refused, the fabric's model-list alias names a media type)",
+  "title": "List the downloaded models",
   "world": "ordinary",
-  "args": ["model", "list"],
+  "args": [
+    "model",
+    "list"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 1, "shown": ["alias 'model-list' resolves to a media URN"] } },
-    "json": { "expect": { "exit": 1, "stdout": ["\"type\":\"error\""] } }
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "hf:unsloth/Qwen3-4B-Instruct-2507-GGUF?include=Qwen3-4B-Instruct-2507-Q4_K_M.gguf  ready  2.5 GB"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"model\"",
+          "\"local_available\":true"
+        ]
+      }
+    }
   }
 }

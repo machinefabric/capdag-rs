@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::orchestrator::cli_output::{emit_terminals_by_output, EmitOptions, EmitRefusal, UnsavedContent};
+use crate::orchestrator::cli_output::{emit_terminals_by_output, EmitOptions, EmitRefusal, OutputNaming, UnsavedContent};
 use crate::orchestrator::cli_runtime::{CliRuntime, TransientSink};
 use crate::orchestrator::execute_plan::{
     execute_plan, EngineRuntime, PipelineResult, PlanInput, RunVerdict, StepFailure, StepOutcome,
@@ -106,8 +106,14 @@ pub struct EmitTarget {
     /// fast path, which only a run that can produce one scalar result takes.
     pub output_dir: Option<PathBuf>,
     pub force: bool,
-    /// What the produced files are named for: the input's stem.
-    pub stem: String,
+    /// What the run gave each input slot of the strand: positions among
+    /// `sources`, in the order given.
+    pub slots: Vec<(String, Vec<usize>)>,
+    /// What each source of the run is called — a file by its stem — by
+    /// position: what the produced files are named after.
+    pub sources: Vec<String>,
+    /// What a file that reads no input is called: the machine's name.
+    pub machine_name: String,
 }
 
 /// What became of one output of a finished strand.
@@ -135,6 +141,10 @@ pub enum StrandNote {
     Retried { cap_urn: String, item: Option<usize>, attempt: usize, failure: StepFailure },
     /// A step failed for good and its policy tolerated that.
     Tolerated { cap_urn: String, item: Option<usize>, failure: StepFailure, earlier_attempts: usize },
+    /// An item of a map failed and was dropped: the map collected the rest,
+    /// and the run went on. `cap_urn` is the step that failed; `message` what
+    /// it said.
+    Dropped { cap_urn: String, item: usize, message: String },
 }
 
 /// A finished strand, reported: the failure that ended it, whether a step's
@@ -208,7 +218,12 @@ pub fn emit_strand(
     let options = EmitOptions {
         output_dir: target.output_dir.clone(),
         force: target.force,
-        input_stem: target.stem.clone(),
+        naming: OutputNaming {
+            plan: strand.plan.clone(),
+            slots: target.slots.clone(),
+            sources: target.sources.clone(),
+            machine_name: target.machine_name.clone(),
+        },
         output_names: strand.output_names(),
     };
     let written = match emit_terminals_by_output(&result, &options, stdout) {
@@ -307,6 +322,27 @@ pub fn emit_strand(
                 earlier_attempts: failed_attempts.len(),
             }),
         }
+    }
+    // An item of a map that failed and was dropped is said by its run of the
+    // map, unless its step's own policy tolerated the failure, which is said
+    // above.
+    for body in result.body_outcomes.iter().filter(|body| !body.success && body.foreach_token_id.is_some()) {
+        let said = notes.iter().any(|note| matches!(note, StrandNote::Tolerated { item: Some(item), .. } if *item == body.body_index));
+        if said {
+            continue;
+        }
+        let cap_urn = body
+            .failed_token_id
+            .as_ref()
+            .and_then(|token| {
+                strand.plan.nodes.values().find_map(|node| match &node.node_type {
+                    ExecutionNodeType::Cap { token_id, cap_urn, .. } if token_id == token => Some(cap_urn.clone()),
+                    _ => None,
+                })
+            })
+            .or_else(|| body.cap_urns.last().cloned())
+            .unwrap_or_default();
+        notes.push(StrandNote::Dropped { cap_urn, item: body.body_index, message: body.error.clone().unwrap_or_default() });
     }
     StrandReport {
         failure: None,

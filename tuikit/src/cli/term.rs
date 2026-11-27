@@ -1,21 +1,28 @@
 //! Who is on the other end: a person at a terminal, or a pipe.
 //!
-//! Every choice between a person's output and a program's is made here, once,
-//! from what is attached and what was asked:
+//! Every choice between a person's output and a program's is made from what
+//! is attached and what was asked:
 //!
-//! - **Interactive** (a picker may open, the live view may draw) only when
-//!   stdin and stderr are both terminals, `--json` is not given, `--no-input`
-//!   is not given, `CI` is not set, and `TERM` is not `dumb`. Otherwise
-//!   nothing prompts: a choice that was not made is an error naming the flag
-//!   that makes it, as gh does. stdout may go anywhere: the picker and the
-//!   live view draw on stderr, as fzf and cargo do, so `$(capdag …)` still
-//!   lets a person choose.
+//! - **Asking** (a picker or a prompt may open, the live view may draw and
+//!   read keys) is the model's `Terminal.canAsk`: stderr is a terminal, keys
+//!   can be read, and neither `--no-input`, `--json`, `CI` (set and not
+//!   empty) nor `TERM=dumb` says not to. Keys come from stdin when it is a
+//!   terminal; otherwise from the controlling terminal (`/dev/tty`; the
+//!   console's `CONIN$` on Windows), but only when stdin is the data `-`
+//!   reads (`reachableFor`). A pipe that is not `-`'s data means a script, so
+//!   `ls *.pdf | xargs -n1 capdag run m.machine` never stops at a picker.
+//!   Where nobody can be asked, a choice not made is an error naming the
+//!   flag that makes it. stdout may go anywhere: the picker and the live view
+//!   draw on stderr, as fzf and cargo do, so `$(capdag …)` still lets a
+//!   person choose.
 //! - **Colour** follows `--color auto|always|never`; `auto` colours a terminal
 //!   that is not `dumb` and nothing else, and `NO_COLOR` turns it off
 //!   (no-color.org), as cargo does.
 //! - **Machine output** (`--json`) is JSON Lines on stdout: one record per line.
 
 use std::io::IsTerminal;
+
+use super::formal as f;
 
 /// `--color`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -29,13 +36,24 @@ pub enum ColorChoice {
 /// What is attached and what was asked, decided once per command.
 #[derive(Debug, Clone)]
 pub struct Term {
-    /// A picker may open and the live view may draw.
+    /// A person can be asked: a picker or prompt may open, and the live view
+    /// may draw and read keys.
     pub interactive: bool,
+    /// stdin is a terminal.
+    pub stdin_is_terminal: bool,
     /// stderr is a terminal: progress may redraw in place.
     pub stderr_is_terminal: bool,
     /// stdout is a terminal: what the command writes for a program is read
     /// by a person, on the terminal its progress is drawn on.
     pub stdout_is_terminal: bool,
+    /// A controlling terminal can be opened to read keys from.
+    pub controlling_terminal: bool,
+    /// stdin is the data `-` reads.
+    pub stdin_is_data: bool,
+    /// `--no-input`.
+    pub no_input: bool,
+    /// `CI` is set to something not empty.
+    pub ci: bool,
     /// `TERM=dumb`: a terminal that cannot move its cursor or colour text.
     pub dumb: bool,
     /// Records, not prose, on stdout.
@@ -46,13 +64,13 @@ pub struct Term {
 }
 
 impl Term {
-    pub fn decide(json: bool, no_input: bool, color: ColorChoice, verbose: u8, quiet: bool) -> Self {
+    /// `stdin_is_data`: the line gives `-`, so stdin is what it reads.
+    pub fn decide(json: bool, no_input: bool, color: ColorChoice, verbose: u8, quiet: bool, stdin_is_data: bool) -> Self {
         let stdin_is_terminal = std::io::stdin().is_terminal();
         let stderr_is_terminal = std::io::stderr().is_terminal();
         let stdout_is_terminal = std::io::stdout().is_terminal();
         let ci = std::env::var_os("CI").is_some_and(|value| !value.is_empty());
         let dumb = std::env::var_os("TERM").is_some_and(|value| value == "dumb");
-        let interactive = stdin_is_terminal && stderr_is_terminal && !json && !no_input && !ci && !dumb;
         let colour = match color {
             ColorChoice::Always => true,
             ColorChoice::Never => false,
@@ -60,10 +78,15 @@ impl Term {
                 stderr_is_terminal && !dumb && std::env::var_os("NO_COLOR").map_or(true, |v| v.is_empty())
             }
         };
-        Self {
-            interactive,
+        let mut term = Self {
+            interactive: false,
+            stdin_is_terminal,
             stderr_is_terminal,
             stdout_is_terminal,
+            controlling_terminal: !stdin_is_terminal && stdin_is_data && controlling_terminal(),
+            stdin_is_data,
+            no_input,
+            ci,
             dumb,
             json,
             verbosity: if quiet { -1 } else { verbose.min(2) as i8 },
@@ -71,8 +94,43 @@ impl Term {
                 colour,
                 unicode: crate::tui::theme::GlyphSet::from_environment() == crate::tui::theme::GlyphSet::Unicode,
             },
+        };
+        term.interactive = f::terminal::can_ask(term.model());
+        term
+    }
+
+    /// Where the command runs, as the model knows it.
+    pub fn model(&self) -> f::Terminal {
+        f::Terminal {
+            reachable: f::reachable_for(
+                self.stderr_is_terminal,
+                self.stdin_is_terminal,
+                self.controlling_terminal,
+                self.stdin_is_data,
+            ),
+            no_input: self.no_input,
+            json: self.json,
+            ci: self.ci,
+            dumb: self.dumb,
         }
     }
+}
+
+/// Whether the controlling terminal can be opened for keys.
+#[cfg(unix)]
+fn controlling_terminal() -> bool {
+    std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty").is_ok()
+}
+
+/// Whether the console's input can be opened for keys.
+#[cfg(windows)]
+fn controlling_terminal() -> bool {
+    std::fs::OpenOptions::new().read(true).write(true).open("CONIN$").is_ok()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn controlling_terminal() -> bool {
+    false
 }
 
 /// How words are marked: in colour on a terminal that wants it, plain

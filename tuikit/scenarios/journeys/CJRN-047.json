@@ -1,20 +1,37 @@
 {
   "title": "Start a cartridge project in Rust",
   "world": "builder",
-  "args": ["dev", "new", "sentiment2", "--lang", "rust"],
+  "args": [
+    "dev",
+    "new",
+    "sentiment2",
+    "--lang",
+    "rust"
+  ],
   "modes": {
     "plain": {
       "expect": {
         "exit": 0,
-        "stdout": ["./sentiment2"],
+        "stdout": [
+          "./sentiment2"
+        ],
         "shown": [
           "Made the Rust cartridge 'sentiment2' at ./sentiment2",
           "cargo build --release",
           "capdag dev install",
-          "echo \"I love this\" | capdag run sentiment2"
+          "echo \"I love this\" | capdag run '[in -> sentiment2 -> out]' -"
         ]
       }
     },
-    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"project\"", "\"language\":\"rust\"", "\"dir\":\"./sentiment2\""] } }
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"project\"",
+          "\"language\":\"rust\"",
+          "\"dir\":\"./sentiment2\""
+        ]
+      }
+    }
   }
 }

@@ -696,6 +696,7 @@ impl EngineRuntime for CliRuntime {
                 sink,
                 tag,
                 parts.clone(),
+                coordinate,
             ))
         }))
     }
@@ -705,9 +706,11 @@ impl EngineRuntime for CliRuntime {
     }
 
     async fn map_failure_policy(&self) -> Result<MapFailurePolicy, ExecutionError> {
-        // Reference regime: expose failures. A machine that wants a failed
-        // item dropped says so on the step (`on_error=absent`).
-        Ok(MapFailurePolicy::Fail)
+        // As the app's default: an item of a map that fails is dropped, the
+        // rest are collected and written, and the run ends completed with
+        // tolerated failures (exit 3), saying which item was dropped and why.
+        // Every item failing still fails the run.
+        Ok(MapFailurePolicy::DropItem)
     }
 }
 

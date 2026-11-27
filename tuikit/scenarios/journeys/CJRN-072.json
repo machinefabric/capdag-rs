@@ -1,0 +1,22 @@
+{
+  "title": "A width for a picture that is not text is refused",
+  "world": "ordinary",
+  "args": [
+    "graph",
+    "summaries.machine",
+    "--format",
+    "dot",
+    "--width",
+    "60"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "--width fits a text picture, and another format was asked for"
+        ]
+      }
+    }
+  }
+}

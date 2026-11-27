@@ -1,17 +1,49 @@
 {
-  "title": "Plan, pick and run a machine at the terminal",
+  "title": "Choose what a file is to become at the terminal, and run the machine that makes it",
   "world": "ordinary",
-  "args": ["plan", "report.pdf", "-o", "out"],
+  "args": [
+    "run",
+    "report.pdf",
+    "-o",
+    "out"
+  ],
   "modes": {
     "inline": {
       "keys": [
-        { "wait": "page-text" },
-        { "type": "page-text" },
-        { "press": "Enter" },
-        { "wait": "Choose what to do with it" },
-        { "press": "Enter" }
+        {
+          "wait": "Choose what to make"
+        },
+        {
+          "type": "page-text"
+        },
+        {
+          "press": "Enter"
+        }
       ],
-      "expect": { "exit": 0, "stdout": ["report.page-text.0.txt", "report.page-text.2.txt"], "shown": ["✓ report.pdf  1 step"] }
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report · 1.page-text.txt",
+          "report · 2.page-text.txt",
+          "report · 3.page-text.txt"
+        ],
+        "shown": [
+          "Run it again with: capdag run '[(input=pdf) -> disbind-pdf -> (output=page-text)]' --input pdf=@report.pdf -o out",
+          "✓ report.pdf  1 step"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "options for what to make, and nobody to ask",
+          "--to page-text"
+        ],
+        "absent": [
+          "disbind-pdf  done"
+        ]
+      }
     }
   }
 }

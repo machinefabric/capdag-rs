@@ -20,6 +20,7 @@
 
 pub mod cbor_util;
 pub mod cli_cap;
+pub mod lineage;
 pub mod cli_output;
 pub mod cli_runtime;
 pub mod cli_session;
@@ -58,12 +59,12 @@ pub use execute_plan::{
 };
 
 pub use cli_cap::{
-    classify_cap_token, map_invocation, render_cap_interface, synthesize_single_cap_notation,
-    InterfaceNames,
-    CapInvocation, CapToken, SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
+    one_step_machine, render_cap_interface, synthesize_single_cap_notation, InterfaceNames,
+    SINGLE_CAP_INPUT_NODE, SINGLE_CAP_OUTPUT_NODE, SINGLE_CAP_STEP_NAME,
 };
 pub use cli_output::{
-    emit_terminals, emit_terminals_by_output, extension_for_media, is_text_media, EmitOptions, EmitRefusal, UnsavedContent,
+    emit_terminals, emit_terminals_by_output, extension_for_media, is_text_media, EmitOptions, EmitRefusal, OutputNaming,
+    UnsavedContent,
     UnsavedItem,
 };
 pub use cli_runtime::{CliRunScope, CliRuntime, TransientSink, CLI_PEER_HOLD, CLI_UNSCOPED_FLOW};

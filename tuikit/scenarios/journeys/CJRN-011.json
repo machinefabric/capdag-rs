@@ -1,9 +1,9 @@
 {
-  "title": "Run a capability on a file",
+  "title": "Run a machine of one step on a file",
   "world": "ordinary",
   "args": [
     "run",
-    "disbind-pdf",
+    "[doc -> disbind-pdf -> pages]",
     "report.pdf",
     "-o",
     "pages"
@@ -13,9 +13,9 @@
       "expect": {
         "exit": 0,
         "screen": [
-          "{dir}/pages/report.output.0.txt",
-          "{dir}/pages/report.output.1.txt",
-          "{dir}/pages/report.output.2.txt",
+          "{dir}/pages/report · 1.pages.txt",
+          "{dir}/pages/report · 2.pages.txt",
+          "{dir}/pages/report · 3.pages.txt",
           "✓ report.pdf  1 step · {*} s"
         ]
       }
@@ -24,14 +24,14 @@
       "expect": {
         "exit": 0,
         "stdout": [
-          "report.output.0.txt",
-          "report.output.2.txt"
+          "report · 1.pages.txt",
+          "report · 3.pages.txt"
         ],
         "screen": [
           "✓ report.pdf  1 step · {*} s",
-          "  → {dir}/pages/report.output.0.txt",
-          "  → {dir}/pages/report.output.1.txt",
-          "  → {dir}/pages/report.output.2.txt"
+          "  → {dir}/pages/report · 1.pages.txt",
+          "  → {dir}/pages/report · 2.pages.txt",
+          "  → {dir}/pages/report · 3.pages.txt"
         ]
       }
     },
@@ -39,7 +39,7 @@
       "expect": {
         "exit": 0,
         "stdout": [
-          "report.output.0.txt"
+          "report · 1.pages.txt"
         ],
         "shown": [
           "[1/1] disbind-pdf    0%",

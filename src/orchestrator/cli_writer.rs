@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
-use super::execute_plan::WriterResult;
+use super::execute_plan::{ForEachBodyCoordinate, WriterResult};
 use super::stream_io::{unwrap_cbor_value, IncrementalWriter, StreamIoError};
 use crate::StreamMeta;
 
@@ -106,10 +106,18 @@ pub struct CliDiskWriter {
     media_urn: String,
     stream_meta: Option<StreamMeta>,
     state: State,
+    /// The run of a map's body whose segment this writer persists.
+    body_coordinate: Option<ForEachBodyCoordinate>,
 }
 
 impl CliDiskWriter {
-    pub fn new(dir: PathBuf, sink: &str, tag: String, parts: PartFiles) -> Self {
+    pub fn new(
+        dir: PathBuf,
+        sink: &str,
+        tag: String,
+        parts: PartFiles,
+        body_coordinate: Option<ForEachBodyCoordinate>,
+    ) -> Self {
         Self {
             dir,
             sink: sink.to_string(),
@@ -118,6 +126,7 @@ impl CliDiskWriter {
             media_urn: String::new(),
             stream_meta: None,
             state: State::Idle,
+            body_coordinate,
         }
     }
 
@@ -321,6 +330,7 @@ impl IncrementalWriter for CliDiskWriter {
                 total_bytes: 0,
                 stream_meta: self.stream_meta,
                 item_metas: Vec::new(),
+                body_coordinate: self.body_coordinate,
             },
             State::Blob { path, bytes, .. } => WriterResult {
                 is_sequence: false,
@@ -329,6 +339,7 @@ impl IncrementalWriter for CliDiskWriter {
                 total_bytes: bytes,
                 stream_meta: self.stream_meta,
                 item_metas: Vec::new(),
+                body_coordinate: self.body_coordinate,
             },
             State::Sequence {
                 saved_paths,
@@ -342,6 +353,7 @@ impl IncrementalWriter for CliDiskWriter {
                 total_bytes,
                 stream_meta: None,
                 item_metas,
+                body_coordinate: self.body_coordinate,
             },
         }
     }
@@ -377,7 +389,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let parts = PartFiles::default();
         let writer = |sink: &str, tag: &str| {
-            Box::new(CliDiskWriter::new(dir.path().to_path_buf(), sink, tag.to_string(), parts.clone()))
+            Box::new(CliDiskWriter::new(dir.path().to_path_buf(), sink, tag.to_string(), parts.clone(), None))
         };
         let mut blob = writer("step_a", "0.step_a");
         blob.on_stream_start(Some(false), "media:x", None, None).await.unwrap();
@@ -438,6 +450,7 @@ mod tests {
             "cap_1",
             "t.cap_1".to_string(),
             PartFiles::default(),
+            None,
         ));
         w.on_stream_start(Some(false), "media:audio;ext=wav", None, None)
             .await
@@ -466,6 +479,7 @@ mod tests {
             "cap_1",
             "t.cap_2".to_string(),
             PartFiles::default(),
+            None,
         ));
         w.on_stream_start(Some(true), "media:image;ext=png", None, None)
             .await
@@ -493,6 +507,7 @@ mod tests {
             "cap_1",
             "t.cap_3".to_string(),
             PartFiles::default(),
+            None,
         ));
         w2.on_stream_start(Some(true), "media:image;ext=png", None, None)
             .await
@@ -513,6 +528,7 @@ mod tests {
             "cap_1",
             "t.cap_4".to_string(),
             PartFiles::default(),
+            None,
         ));
         let err = w
             .on_chunk_payload(&cbor_bytes(b"x"), None)
@@ -533,6 +549,7 @@ mod tests {
             "cap_1",
             "t.cap_5".to_string(),
             PartFiles::default(),
+            None,
         ));
         let result = (idle as Box<dyn IncrementalWriter>).finish();
         assert!(!result.is_sequence);

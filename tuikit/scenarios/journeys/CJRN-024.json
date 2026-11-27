@@ -1,11 +1,28 @@
 {
   "title": "A bundled cartridge cannot be removed",
   "world": "ordinary",
-  "args": ["cartridge", "remove", "pdfcartridge"],
+  "args": [
+    "cartridge",
+    "remove",
+    "pdfcartridge"
+  ],
   "modes": {
     "plain": {
-      "expect": { "exit": 2, "shown": ["no installed cartridge is called 'pdfcartridge'", "a bundled cartridge cannot be removed"] }
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "'pdfcartridge': no installed cartridge has that id",
+          "pdfcartridge is bundled with capdag, and a bundled cartridge cannot be removed"
+        ]
+      }
     },
-    "json": { "expect": { "exit": 2, "stdout": ["\"type\":\"error\""] } }
+    "json": {
+      "expect": {
+        "exit": 2,
+        "stdout": [
+          "\"type\":\"error\""
+        ]
+      }
+    }
   }
 }

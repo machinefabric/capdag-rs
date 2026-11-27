@@ -1,0 +1,47 @@
+{
+  "title": "A machine's input given nothing is asked at the terminal, and the line that gives it is printed",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "summaries.machine",
+    "-o",
+    "out"
+  ],
+  "modes": {
+    "inline": {
+      "keys": [
+        {
+          "wait": "A value for the input doc"
+        },
+        {
+          "type": "@report.pdf"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "report · 1.summary.txt"
+        ],
+        "shown": [
+          "Run it again with: capdag run summaries.machine --input doc=@report.pdf -o out",
+          "✓ report.pdf  2 steps"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "the input doc (pdf) is given nothing, and nobody to ask",
+          "--input doc=<value>, where the value is @<file>, - for stdin, or text"
+        ],
+        "absent": [
+          "disbind-pdf  done"
+        ]
+      }
+    }
+  }
+}

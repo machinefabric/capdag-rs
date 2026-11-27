@@ -1,35 +1,33 @@
 {
-  "title": "Choose among the machines that make text, and print one",
+  "title": "List the machines that make text of a file",
   "world": "ordinary",
-  "args": ["plan", "report.pdf", "--to", "txt"],
+  "args": [
+    "plan",
+    "report.pdf",
+    "--to",
+    "txt"
+  ],
   "modes": {
-    "full_screen": {
-      "keys": [
-        { "wait": "ocr-gguf" },
-        { "press": "Down" },
-        { "press": "Enter" },
-        { "wait": "Choose what to do with it" },
-        { "type": "print" },
-        { "press": "Enter" }
-      ],
+    "plain": {
       "expect": {
         "exit": 0,
-        "screen": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"]
+        "stdout": [
+          "5 machines make txt of 1 pdf:",
+          "[(input=pdf) -> disbind-pdf -> (output=page-text)]",
+          "[(input=png) -> ocr-gguf -> (output=digitized-text)]"
+        ],
+        "shown": [
+          "Run one:  capdag run '<machine>' report.pdf"
+        ]
       }
     },
-    "inline": {
-      "keys": [
-        { "wait": "ocr-gguf" },
-        { "press": "Down" },
-        { "press": "Enter" },
-        { "wait": "Choose what to do with it" },
-        { "type": "print" },
-        { "press": "Enter" }
-      ],
+    "json": {
       "expect": {
         "exit": 0,
-        "stdout": ["[(input=pdf) -> pdf2png -> (output=png)]", "[(input=png) -> ocr-gguf -> (output=digitized-text)]"],
-        "screen": []
+        "stdout": [
+          "\"type\":\"machine\"",
+          "\"index\":5"
+        ]
       }
     }
   }

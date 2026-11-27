@@ -5,105 +5,162 @@ use std::sync::Arc;
 
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
+use super::formal::{self as f, index, nat};
+use super::inspect::Inspection;
+use super::line::{Extras, MachineEntry, MachineFacts, PlanningFlags, Resolved, Tables, World};
 use super::names;
-use super::term::emit_record;
+use super::term::{emit_record, outln};
 use capdag::fabric::registry::FabricRegistry;
 use capdag::orchestrator::machine_plan::ResolvedNotation;
-use super::term::outln;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The machine file
+    /// The machine: a .machine file, or written inline ('[doc -> disbind-pdf -> pages]')
     #[arg(value_name = "MACHINE")]
-    pub machine: PathBuf,
+    pub machine: String,
+}
+
+/// A machine named on a line that shows it: a file, or written inline when
+/// it starts with `[`.
+pub fn machine_entry(tables: &mut Tables, given: &str) -> f::Written {
+    let inline = given.starts_with('[');
+    let entry = if inline { MachineEntry::Inline(given.to_string()) } else { MachineEntry::File(PathBuf::from(given)) };
+    f::Written { base: nat(tables.add_machine(entry)), inline }
+}
+
+/// A world of one machine named for showing, for `check`, `graph`, `view`
+/// and `edit`.
+pub async fn showing_world<'a>(ctx: &'a Ctx, given: &str) -> CliResult<(World<'a>, f::Written)> {
+    let registry = ctx.registry().await?;
+    let mut tables = Tables::default();
+    let m = machine_entry(&mut tables, given);
+    let inspection = Inspection::new(ctx, super::run::inspection_runtime(ctx, &registry)?, registry.clone());
+    let world = World::new(ctx, registry, inspection, tables, Extras::default(), PlanningFlags::default());
+    Ok((world, m))
+}
+
+/// The verdict of a command that shows a machine, said: the machine is not
+/// there, or does not resolve.
+pub fn showing_error(world: &World<'_>, m: &f::Written, verdict: &f::CliVerdict) -> CliError {
+    let base = index(&m.base);
+    match verdict {
+        f::CliVerdict::Is { v: f::Verdict::Unresolved } => match world.machine(base) {
+            Some(MachineFacts::Unresolved(error)) => super::say::with_exit(error.clone(), verdict),
+            _ => super::say::with_exit(CliError::failed("the machine does not resolve"), verdict),
+        },
+        f::CliVerdict::Refused { r: f::CliRefusal::Line { r: f::Refusal::NoSuchMachine } } => super::say::with_exit(
+            CliError::usage(format!(
+                "{}: {}",
+                world.tables.machines[base].shown(),
+                f::refusal::says(f::Refusal::NoSuchMachine)
+            ))
+            .hint("`capdag plan <files> --to <type> --save <file>` writes one"),
+            verdict,
+        ),
+        other => super::ends(other)
+            .unwrap_or_else(|| CliError::failed("a machine was shown, and said to have failed").hint("report it")),
+    }
 }
 
 pub async fn check(ctx: &Ctx, args: Args) -> CliResult<Exit> {
-    let notation = read_machine(&args.machine)?;
-    let registry = ctx.registry().await?;
-    show(ctx, &registry, &args.machine, &notation).await
-}
-
-/// Read a machine file, or say why not.
-pub fn read_machine(path: &Path) -> CliResult<String> {
-    if !path.is_file() {
-        return Err(CliError::usage(format!("the machine file '{}' does not exist", path.display()))
-            .hint("`capdag plan <files> --to <type> --save <file>` writes one"));
+    let (mut world, m) = showing_world(ctx, &args.machine).await?;
+    let verdict = world.settle(&[], |w| ctx.decide(f::Command::Check { m: m.clone(), w }, false)).await?;
+    if let f::CliVerdict::Is { v: f::Verdict::Answers } = verdict {
+        let base = index(&m.base);
+        let resolved = world.machine(base).and_then(MachineFacts::resolved).expect("a machine shown resolves");
+        show(ctx, &world.registry, &world.tables.machines[base], resolved)?;
+        return Ok(Exit::Ok);
     }
-    std::fs::read_to_string(path).map_err(|e| {
-        CliError::failed(format!("the machine file '{}' could not be read", path.display())).context(e.to_string())
-    })
+    Err(showing_error(&world, &m, &verdict))
 }
 
-/// Resolve a machine file's notation against the fabric, or say what is wrong
-/// and where. Machines it includes are read relative to it.
-pub async fn resolve(registry: &Arc<FabricRegistry>, path: &Path, notation: &str) -> CliResult<ResolvedNotation> {
-    let working = std::env::current_dir()
-        .map_err(|e| CliError::failed("the working directory could not be read").context(e.to_string()))?;
-    let id = capdag::FileMachineSource::id_of(path).map_err(|e| {
-        CliError::failed(format!("the machine file '{}' could not be read", path.display())).context(e.to_string())
+/// Why a machine does not resolve: a name the fabric does not define (which a
+/// dev cartridge may), or anything else.
+pub enum Unresolved {
+    UndefinedAlias { alias: String, error: CliError },
+    Other(CliError),
+}
+
+/// Resolve a machine's notation against the fabric, or say what is wrong and
+/// where. Machines it includes are read relative to its file, or to the
+/// working directory for one written inline.
+pub async fn resolve_notation(
+    registry: &Arc<FabricRegistry>,
+    path: Option<&Path>,
+    notation: &str,
+) -> Result<ResolvedNotation, Unresolved> {
+    let shown = path.map(|p| p.display().to_string()).unwrap_or_else(|| "the machine".to_string());
+    let working = std::env::current_dir().map_err(|e| {
+        Unresolved::Other(CliError::failed("the working directory could not be read").context(e.to_string()))
     })?;
+    let id = match path {
+        Some(path) => Some(capdag::FileMachineSource::id_of(path).map_err(|e| {
+            Unresolved::Other(CliError::failed(format!("the machine file '{shown}' could not be read")).context(e.to_string()))
+        })?),
+        None => None,
+    };
     let machines = capdag::FileMachineSource::new(working);
     // Parsed first on its own, so a mistake in it is told by what it is — a
     // name that is no capability, a statement that does not parse — not by
     // the message it would be flattened into.
-    if let Err(error) =
-        capdag::machine::parse_machine_with_sources_async(notation, registry, &machines, Some(&id)).await
+    if let Err(error) = capdag::machine::parse_machine_with_sources_async(notation, registry, &machines, id.as_deref()).await
     {
-        return Err(not_a_machine(registry, path, &error));
+        return Err(not_a_machine(registry, &shown, &error));
     }
-    ResolvedNotation::resolve_from(notation, registry.clone(), &machines, Some(&id))
-        .await
-        .map_err(|e| {
-            CliError::failed(format!("{} is not a machine that can run", path.display())).context(e.to_string())
-        })
+    ResolvedNotation::resolve_from(notation, registry.clone(), &machines, id.as_deref()).await.map_err(|e| {
+        Unresolved::Other(CliError::failed(format!("{shown} is not a machine that can run")).context(e.to_string()))
+    })
 }
 
 /// A machine that does not parse: what is wrong, and — for a name that is no
 /// capability — the capability it most likely meant.
-fn not_a_machine(registry: &FabricRegistry, path: &Path, error: &capdag::machine::MachineParseError) -> CliError {
+fn not_a_machine(registry: &FabricRegistry, shown: &str, error: &capdag::machine::MachineParseError) -> Unresolved {
     use capdag::machine::{MachineParseError, MachineSyntaxError};
-    let failed = CliError::failed(format!("{} is not a machine that can run", path.display())).context(error.to_string());
+    let failed = CliError::failed(format!("{shown} is not a machine that can run")).context(error.to_string());
     match error {
         MachineParseError::Syntax(MachineSyntaxError::UndefinedAlias { alias }) => {
             let aliases: Vec<String> = registry.cached_cap_aliases().into_iter().map(|(alias, _)| alias).collect();
-            match super::nearest(alias, aliases.iter().map(String::as_str)) {
+            let error = match super::nearest(alias, aliases.iter().map(String::as_str)) {
                 Some(near) => failed.hint(format!("did you mean `{near}`? Find capabilities with: capdag caps {alias}")),
                 None => failed.hint(format!("find the capability you meant with: capdag caps {alias}")),
-            }
+            };
+            Unresolved::UndefinedAlias { alias: alias.clone(), error }
         }
-        _ => failed.hint("`capdag check` on a machine that works shows the form; the notation is in the CapDAG docs, §Machine notation"),
+        _ => Unresolved::Other(failed.hint(
+            "`capdag check` on a machine that works shows the form; the notation is in the CapDAG docs, §Machine notation",
+        )),
     }
 }
 
-/// A machine, shown: its inputs, its steps in alias form, its outputs.
-pub async fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, path: &Path, notation: &str) -> CliResult<Exit> {
-    let resolved = resolve(registry, path, notation).await?;
-    let failed = |e: capdag::orchestrator::ParseOrchestrationError| {
-        CliError::failed(format!("{} is not a machine that can run", path.display())).context(e.to_string())
-    };
-    let inputs = resolved.inputs().map_err(failed)?;
-    let outputs = resolved.outputs().map_err(failed)?;
-    let aliased = names::machine(registry, resolved.machine())
-        .map_err(|e| CliError::failed(format!("{} could not be written in alias form", path.display())).context(e))?;
+/// A machine, shown: its inputs, its steps in alias form, its outputs, and
+/// the options it leaves to the run, as `--arg` gives them.
+pub fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &MachineEntry, resolved: &Resolved) -> CliResult<()> {
+    let shown = entry.shown();
+    let aliased = names::machine(registry, resolved.resolution.machine())
+        .map_err(|e| CliError::failed(format!("{shown} could not be written in alias form")).context(e))?;
+    let option_names: Vec<String> = (0..resolved.options.len()).map(|j| resolved.flag_name(j)).collect();
     if ctx.term.json {
         emit_record(&serde_json::json!({
             "type": "machine",
-            "file": path.display().to_string(),
+            "file": match entry { MachineEntry::File(path) => Some(path.display().to_string()), MachineEntry::Inline(_) => None },
             "notation": aliased,
-            "canonical": resolved.machine().to_machine_notation().ok(),
-            "strands": resolved.strand_count(),
-            "inputs": inputs.iter().map(|i| serde_json::json!({
+            "canonical": resolved.resolution.machine().to_machine_notation().ok(),
+            "strands": resolved.resolution.strand_count(),
+            "inputs": resolved.inputs.iter().map(|i| serde_json::json!({
                 "name": i.name, "media": names::media(registry, &i.media_urn), "urn": i.media_urn.to_string(), "strand": i.strand,
             })).collect::<Vec<_>>(),
-            "outputs": outputs.iter().map(|o| serde_json::json!({
+            "outputs": resolved.outputs.iter().map(|o| serde_json::json!({
                 "name": o.name, "media": names::media(registry, &o.media_urn), "urn": o.media_urn.to_string(), "strand": o.strand,
             })).collect::<Vec<_>>(),
+            "options": resolved.options.iter().zip(&option_names).map(|(o, flag)| serde_json::json!({
+                "arg": flag, "step": o.step, "name": o.name, "media": names::media_urn(registry, &o.media_urn),
+                "urn": o.media_urn, "values": o.allowed,
+            })).collect::<Vec<_>>(),
         }));
-        return Ok(Exit::Ok);
+        return Ok(());
     }
     let style = &ctx.term.style;
-    outln!("{} {}", style.good("✓"), style.name(&path.display().to_string()));
+    outln!("{} {}", style.good("✓"), style.name(&shown));
     let anchor = |a: &capdag::orchestrator::machine_plan::MachineAnchor| {
         let mut line = format!("{} ({})", a.name, names::media(registry, &a.media_urn));
         if ctx.term.verbosity >= 1 {
@@ -111,18 +168,47 @@ pub async fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, path: &Path, notati
         }
         line
     };
-    outln!("  inputs:  {}", if inputs.is_empty() { "none".into() } else { inputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
-    outln!("  outputs: {}", if outputs.is_empty() { "none".into() } else { outputs.iter().map(anchor).collect::<Vec<_>>().join(", ") });
+    let listed = |anchors: &[capdag::orchestrator::machine_plan::MachineAnchor]| {
+        if anchors.is_empty() {
+            "none".to_string()
+        } else {
+            anchors.iter().map(anchor).collect::<Vec<_>>().join(", ")
+        }
+    };
+    outln!("  inputs:  {}", listed(&resolved.inputs));
+    outln!("  outputs: {}", listed(&resolved.outputs));
+    if !resolved.options.is_empty() {
+        outln!("  left to the run:");
+        for (option, flag) in resolved.options.iter().zip(&option_names) {
+            let values = match &option.allowed {
+                Some(values) => format!("  one of {}", values.join(", ")),
+                None => String::new(),
+            };
+            outln!("    --arg {flag}=<{}>{values}", names::media_urn(registry, &option.media_urn));
+        }
+    }
     outln!();
     for line in aliased.lines() {
         outln!("  {line}");
     }
     if ctx.term.verbosity >= 1 {
-        if let Ok(canonical) = resolved.machine().to_machine_notation() {
+        if let Ok(canonical) = resolved.resolution.machine().to_machine_notation() {
             outln!("\n  canonical: {}", style.dim(&canonical));
         }
     }
-    let example: Vec<String> = inputs.iter().map(|i| format!("<{}>", i.name)).collect();
-    outln!("\nRun it: capdag run {} {}", path.display(), example.join(" "));
-    Ok(Exit::Ok)
+    let example: String = resolved.inputs.iter().map(|i| format!(" <{}>", i.name)).collect();
+    outln!("\nRun it: capdag run {}{example}", super::shell_word(&entry.argument()));
+    Ok(())
+}
+
+/// The state of a line that gives nothing but its machine: what a command
+/// that shows a machine says its verdict with.
+pub fn showing_state(m: &f::Written) -> super::line::RunState {
+    super::line::RunState {
+        line: f::RunLine { machine: Some(m.clone()), ..f::no_run_line() },
+        texts: Vec::new(),
+        arg_values: Vec::new(),
+        unknown_inputs: Vec::new(),
+        unknown_options: Vec::new(),
+    }
 }

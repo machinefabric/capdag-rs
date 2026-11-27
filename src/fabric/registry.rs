@@ -2558,6 +2558,21 @@ impl FabricRegistry {
     /// corrupt entry, which a registry refuses to open, can still be cleared.
     /// The registry's charter is the stored one when it still verifies, else
     /// fetched, as a registry finds it. Answers the folder cleared.
+    /// Whether the fabric `config` anchors is cached on this machine at
+    /// `manifest_version`: its charter is stored and verifies, and its pinned
+    /// manifest is in the cache. Nothing is fetched: this is what a command
+    /// that may use no network reads before it opens the fabric.
+    pub fn is_cached(config: &RegistryConfig, manifest_version: u32) -> Result<bool, FabricRegistryError> {
+        let capdag_cache = Self::capdag_cache_root()?;
+        let Some(charter) =
+            stored_charter(&capdag_cache, &config.anchor, &crate::bifaci::trust::charter_trust(), mg_srel::unix_now())
+        else {
+            return Ok(false);
+        };
+        let cache_dir = cache::version_dir(&capdag_cache.join(&charter.charter.slug), manifest_version);
+        Ok(cache_dir.join(cache::MANIFEST_FILE).is_file())
+    }
+
     pub async fn clear_cache_of(
         config: &RegistryConfig,
         manifest_version: u32,
@@ -3843,6 +3858,24 @@ pub(crate) fn layout_locations(anchor: &str) -> FabricLocations {
 /// stored in the folder its slug names. A stored charter that no longer
 /// verifies (its certificate expired at a key rotation, say) is not used; the
 /// registry's current one is fetched in its place.
+/// The charter of the fabric `anchor` names stored in the cache, when one is
+/// and it verifies. Nothing is fetched.
+fn stored_charter(capdag_cache: &Path, anchor: &str, trust: &CharterTrust, now: u64) -> Option<VerifiedCharter> {
+    let entries = fs::read_dir(capdag_cache).ok()?;
+    for entry in entries.flatten() {
+        let folder = entry.path();
+        if !folder.join(mg_srel::CHARTER_FILE).is_file() {
+            continue;
+        }
+        match crate::bifaci::charter::verify_stored(&folder, trust, RegistryKind::Fabric, None, now) {
+            Ok(verified) if verified.charter.anchor == anchor => return Some(verified),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("the charter stored in {:?} is not used: {}", folder, e),
+        }
+    }
+    None
+}
+
 async fn resolve_charter(
     client: &reqwest::Client,
     capdag_cache: &Path,
@@ -3852,28 +3885,8 @@ async fn resolve_charter(
     now: u64,
 ) -> Result<VerifiedCharter, FabricRegistryError> {
     if !bypass_cache {
-        if let Ok(entries) = fs::read_dir(capdag_cache) {
-            for entry in entries.flatten() {
-                let folder = entry.path();
-                if !folder.join(mg_srel::CHARTER_FILE).is_file() {
-                    continue;
-                }
-                match crate::bifaci::charter::verify_stored(
-                    &folder,
-                    trust,
-                    RegistryKind::Fabric,
-                    None,
-                    now,
-                ) {
-                    Ok(verified) if verified.charter.anchor == anchor => return Ok(verified),
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!(
-                        "the charter stored in {:?} is not used: {}",
-                        folder,
-                        e
-                    ),
-                }
-            }
+        if let Some(verified) = stored_charter(capdag_cache, anchor, trust, now) {
+            return Ok(verified);
         }
     }
     let verified = crate::bifaci::charter::fetch(

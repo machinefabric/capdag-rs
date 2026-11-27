@@ -1,0 +1,29 @@
+{
+  "title": "--pick with one capability matching prints the machine of its one step, asking nothing",
+  "world": "ordinary",
+  "args": [
+    "caps",
+    "--pick",
+    "render",
+    "page",
+    "images"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "[in -> pdf2png -> out]"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"machine\":\"[in -> pdf2png -> out]\""
+        ]
+      }
+    }
+  }
+}

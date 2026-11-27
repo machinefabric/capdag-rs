@@ -1,7 +1,13 @@
 {
   "title": "An image a run made that cannot be written where asked is kept, not dumped on the terminal, and its path given",
   "world": "ordinary",
-  "args": ["run", "pdf2png", "report.pdf", "-o", "earlier"],
+  "args": [
+    "run",
+    "[doc -> pdf2png -> image]",
+    "report.pdf",
+    "-o",
+    "earlier"
+  ],
   "modes": {
     "full_screen": {
       "expect": {
@@ -9,18 +15,24 @@
         "screen": [
           "✗ report.pdf  1 step · {*} s · failed",
           "error: the run's results could not be written",
-          "  refusing to overwrite existing file \"earlier/report.output.png\" (pass --force to allow)",
-          "  kept instead: {*}/report.output.png",
+          "  refusing to overwrite existing file \"earlier/report.image.png\" (pass --force to allow)",
+          "  kept instead: {*}/report.image.png",
           "hint: pass --force to overwrite them, or -o <dir> to write them elsewhere"
         ],
-        "absent": ["the first page, as an image"]
+        "absent": [
+          "the first page, as an image"
+        ]
       }
     },
     "plain": {
       "expect": {
         "exit": 1,
-        "stdout": ["PNG the first page, as an image"],
-        "shown": ["written to stdout instead: report.output.png"]
+        "stdout": [
+          "PNG the first page, as an image"
+        ],
+        "shown": [
+          "written to stdout instead: report.image.png"
+        ]
       }
     }
   }

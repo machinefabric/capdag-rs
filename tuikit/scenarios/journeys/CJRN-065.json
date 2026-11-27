@@ -1,0 +1,24 @@
+{
+  "title": "Under --json, the line to run a planned machine again is a record of its arguments",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "report.pdf",
+    "--to",
+    "page-text",
+    "-o",
+    "out"
+  ],
+  "modes": {
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"rerun\"",
+          "\"argv\":[\"capdag\",\"run\",\"[(input=pdf) -> disbind-pdf -> (output=page-text)]\",\"--input\",\"pdf=@report.pdf\",\"-o\",\"out\"]",
+          "\"type\":\"run_finished\""
+        ]
+      }
+    }
+  }
+}

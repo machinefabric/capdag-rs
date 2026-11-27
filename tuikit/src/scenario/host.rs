@@ -177,6 +177,12 @@ impl Host for ScenarioHost {
         }
     }
 
+    /// A world the network cannot reach has nothing of the fabric cached; a
+    /// world it can reach is served from its snapshot, as from a cache.
+    fn fabric_cached(&self) -> Result<bool, FabricRegistryError> {
+        Ok(self.world.unreachable.is_none())
+    }
+
     async fn clear_fabric_cache(&self) -> Result<PathBuf, FabricRegistryError> {
         Ok(self.root.join("fabric-cache"))
     }

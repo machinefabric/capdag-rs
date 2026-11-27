@@ -241,6 +241,10 @@ pub struct WriterResult {
     pub stream_meta: Option<StreamMeta>,
     /// Sequence-mode per-item meta; empty in blob mode.
     pub item_metas: Vec<Option<StreamMeta>>,
+    /// The run of a map's body whose segment this writer persisted; `None`
+    /// outside every map. What its files descend from is read from it
+    /// ([`crate::orchestrator::lineage::RunLineage::sources_of`]).
+    pub body_coordinate: Option<ForEachBodyCoordinate>,
 }
 
 /// One value a plan execution — or one segment of it — is given.

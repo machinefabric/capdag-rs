@@ -1,15 +1,36 @@
 {
   "title": "An output directory that is a file is refused before anything runs",
   "world": "ordinary",
-  "args": ["run", "disbind-pdf", "report.pdf", "-o", "notes.txt"],
+  "args": [
+    "run",
+    "[doc -> disbind-pdf -> pages]",
+    "report.pdf",
+    "-o",
+    "notes.txt"
+  ],
   "modes": {
     "plain": {
       "expect": {
         "exit": 2,
-        "shown": ["error: the output directory 'notes.txt' is a file", "hint: give -o a directory, or a path where one can be made"],
-        "absent": ["disbind-pdf  done", "Quarterly report."]
+        "shown": [
+          "error: notes.txt: -o names a file: give a directory, or a path where one can be made"
+        ],
+        "absent": [
+          "disbind-pdf  done",
+          "Quarterly report."
+        ]
       }
     },
-    "json": { "expect": { "exit": 2, "stdout": ["the output directory 'notes.txt' is a file"], "absent": ["\"type\":\"step\""] } }
+    "json": {
+      "expect": {
+        "exit": 2,
+        "stdout": [
+          "-o names a file"
+        ],
+        "absent": [
+          "\"type\":\"step\""
+        ]
+      }
+    }
   }
 }

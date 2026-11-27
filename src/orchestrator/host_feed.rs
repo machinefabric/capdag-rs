@@ -227,6 +227,7 @@ impl IncrementalWriter for FeedWriter {
             total_bytes: 0,
             stream_meta: None,
             item_metas: Vec::new(),
+            body_coordinate: None,
         }
     }
 

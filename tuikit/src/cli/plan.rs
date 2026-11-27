@@ -1,370 +1,288 @@
-//! `capdag plan <files…> [--to <type>]…`: what files can become, and the
-//! machines that make it.
+//! `capdag plan INPUT… [--from TYPE] [--to TYPE…] [--save FILE [--force]]`:
+//! what inputs can become, the machines that make it, and saving one.
 //!
-//! Without `--to` it says what the files can become. With one it lists the
+//! Without `--to` it says what the inputs can become. With it, it lists the
 //! machines that make it — every machine whose result is inside it, the
-//! nearest to it first — each in alias form, numbered from 1, with its step
-//! count and whether a step needs a model — and `--pick <n>` chooses one to
-//! `--save` or `--run`. On a terminal, a target or machine not given is chosen
-//! from a list, and so is what to do with the machine.
+//! nearest to it first — each in alias form, with its step count and whether
+//! a step runs a model. With `--save` it writes the one it settles on: asked
+//! at a terminal when several make it, named in a script. A plan never runs
+//! anything; a machine is run with `capdag run`. What each line comes to is
+//! the model's decision (`planVerdict`).
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use super::choose::{choose, Choice, Question};
+use super::ask::{self, Answered, Choice, Question};
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
-use super::inputs;
-use super::live::ProgressChoice;
-use super::names;
+use super::formal::{self as f, index, list, nat};
 use super::inspect::Inspection;
-use super::term::emit_record;
+use super::line::{self, Extras, PlanFacts, PlanningFlags, RunState, Tables, World};
+use super::names;
+use super::term::{emit_record, outln};
 use capdag::fabric::registry::FabricRegistry;
 use capdag::planner as p;
-use capdag::{CapUrn, MediaUrn};
-use super::term::outln;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The files, directories or globs to plan for
-    #[arg(value_name = "FILES", required = true)]
-    pub files: Vec<String>,
-    /// What to make: a media alias (`txt`, `png`), an extension or a media URN (repeatable)
+    /// What to plan from: files, directories or globs (their files, sorted), live
+    /// sources, or - (stdin)
+    #[arg(value_name = "INPUT")]
+    pub inputs: Vec<String>,
+    /// What to make: a media alias (txt, png), an extension or a media URN; several name
+    /// what one machine makes together (repeatable)
     #[arg(long, value_name = "TYPE")]
     pub to: Vec<String>,
-    /// The machine to use, by its number in the list
-    #[arg(long, value_name = "N")]
-    pub pick: Option<usize>,
-    /// Write the chosen machine to this file
+    /// What - holds
+    #[arg(long, value_name = "TYPE")]
+    pub from: Option<String>,
+    /// Write the machine that makes what --to names to this file
     #[arg(long, value_name = "FILE")]
     pub save: Option<PathBuf>,
-    /// Run the chosen machine on the files
-    #[arg(long)]
-    pub run: bool,
-    /// List every machine, not only the first 10
-    #[arg(long)]
-    pub all: bool,
-    /// Where files of several types meet: combine them, or treat each on its own
-    #[arg(long, value_name = "HOW", value_parser = ["auto", "combine", "independent"], default_value = "auto")]
-    pub converge: String,
-    /// Where converging paths meet
-    #[arg(long = "where", value_name = "WHERE", default_value = "auto")]
-    pub location: String,
-    /// How converging paths are joined
-    #[arg(long, value_name = "HOW", value_parser = ["any", "generalize", "collect", "merge"], default_value = "any")]
-    pub mechanism: String,
-    /// The order machines are listed in
-    #[arg(long, value_name = "ORDER", value_parser = ["intent", "shortest", "cost"], default_value = "intent")]
-    pub rank: String,
-    /// How many steps a machine may have at most
-    #[arg(long, value_name = "N")]
-    pub depth: Option<usize>,
-    /// How many paths are searched at most
-    #[arg(long, value_name = "N")]
-    pub max_paths: Option<usize>,
-    /// Where results of --run are written (default: the working directory)
-    #[arg(short, long, value_name = "DIR")]
-    pub output: Option<PathBuf>,
-    /// Overwrite result files that exist (with --run), or the --save file
+    /// Replace the --save file when it is there
     #[arg(long)]
     pub force: bool,
-    /// How a --run is shown while it goes
-    #[arg(long, value_enum, default_value_t = ProgressChoice::Auto, value_name = "HOW")]
-    pub progress: ProgressChoice,
-    /// Use this cartridge binary, or every binary in this directory (repeatable, with --run)
-    #[arg(long = "dev-bin", value_name = "PATH")]
-    pub dev_bins: Vec<PathBuf>,
+    #[command(flatten)]
+    pub planning: PlanningFlags,
 }
 
-/// How many machines are listed without --all.
-const LISTED: usize = 10;
+impl Args {
+    /// Whether the line reads stdin as data.
+    pub fn reads_stdin(&self) -> bool {
+        self.inputs.iter().any(|a| a == "-")
+    }
+}
+
+/// A `plan` line that gives nothing: the stand-in for a line's own facts.
+pub fn no_plan_line() -> f::PlanLine {
+    f::PlanLine { inputs: list(Vec::new()), has_from: false, targets: nat(0), save: false, force: false }
+}
+
+/// A plan's inputs, read: `-`, live sources, and the files each path names.
+fn read_inputs(tables: &mut Tables, given: &[String]) -> CliResult<Vec<f::Positional>> {
+    let mut inputs = Vec::new();
+    for token in given {
+        if token == "-" {
+            inputs.push(f::Positional::Stdin);
+        } else if line::is_live_urn(token) {
+            inputs.push(f::Positional::Live { r: nat(tables.add_live(token.clone())) });
+        } else {
+            for p in line::files_of(tables, token)? {
+                inputs.push(f::Positional::Path { p: nat(p) });
+            }
+        }
+    }
+    Ok(inputs)
+}
+
+/// The state a plan's verdict is said with: a line of its inputs and no
+/// machine.
+fn said_state(inputs: &[f::Positional]) -> RunState {
+    RunState {
+        line: f::RunLine { inputs: list(inputs.to_vec()), ..f::no_run_line() },
+        texts: Vec::new(),
+        arg_values: Vec::new(),
+        unknown_inputs: Vec::new(),
+        unknown_options: Vec::new(),
+    }
+}
 
 pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
     let registry = ctx.registry().await?;
-    let mut files: Vec<PathBuf> = Vec::new();
-    for given in &args.files {
-        files.extend(inputs::expand(given)?);
-    }
-    files.sort();
-    // Files of one type are one sequence; each type is its own source. The
-    // cartridges started to tell what the files are stop when they are told:
-    // a plan run with `--run` starts its own.
+    let mut tables = Tables::default();
+    let inputs = read_inputs(&mut tables, &args.inputs)?;
+    let extras = Extras { to: args.to.clone(), from: args.from.clone(), selector: None, output: None };
     let inspection = Inspection::new(ctx, super::run::inspection_runtime(ctx, &registry)?, registry.clone());
-    let mut groups: Vec<(MediaUrn, usize)> = Vec::new();
-    for file in &files {
-        let media = inputs::detect(file, &inspection).await?;
-        if ctx.term.json {
-            emit_record(&serde_json::json!({
-                "type": "input", "file": file.display().to_string(),
-                "alias": names::media(&registry, &media), "urn": media.to_string(),
-            }));
-        }
-        match groups.iter_mut().find(|(m, _)| m.is_equivalent(&media)) {
-            Some((_, count)) => *count += 1,
-            None => groups.push((media, 1)),
+    let mut world = World::new(ctx, registry.clone(), inspection, tables, extras, args.planning.clone());
+    world.learn_line(&[]).await?;
+    let save_there = args.save.as_ref().is_some_and(|path| path.exists());
+    let mut chosen: Option<usize> = None;
+    loop {
+        let line = f::PlanLine {
+            inputs: list(inputs.clone()),
+            has_from: world.extras.from.is_some(),
+            targets: nat(world.extras.to.len()),
+            save: args.save.is_some(),
+            force: args.force,
+        };
+        let verdict = world
+            .settle(&inputs, |w| ctx.decide(f::Command::Plan { l: line.clone(), w, save_there }, false))
+            .await?;
+        match verdict {
+            f::CliVerdict::Is { v: f::Verdict::Answers } => break,
+            f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::StdinType } } => {
+                let typed = loop {
+                    match ask::value(ctx, &ask::ValueQuestion::stdin_type()).await? {
+                        Answered::Declined => return Err(ask::declined()),
+                        Answered::Given(text) => {
+                            if line::media_type(&registry, &text).await?.is_some() {
+                                break text;
+                            }
+                            ask::say_retry(ctx, &format!("'{text}' names no media type: see capdag caps"));
+                        }
+                    }
+                };
+                world.extras.from = Some(typed);
+                world.learn_types().await?;
+            }
+            // Which machine to save: once it is chosen, saving it is what is
+            // left of the line.
+            f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::Machine } } => {
+                let plan = world.plan(&inputs).cloned().expect("the machine is asked once it is planned");
+                let choices = machine_choices(&plan);
+                match ask::pick(ctx, &Question { what: "the machine to save".into(), flag: String::new() }, &choices).await? {
+                    Answered::Given(k) => {
+                        chosen = Some(k);
+                        break;
+                    }
+                    Answered::Declined => return Err(ask::declined()),
+                }
+            }
+            f::CliVerdict::Is { v: f::Verdict::Names { s: f::Stage::Machine } } => {
+                let plan = world.plan(&inputs).cloned().expect("the machines are named once they are planned");
+                let error = ask::named(
+                    ctx,
+                    &Question { what: "the machine to save".into(), flag: String::new() },
+                    &machine_choices(&plan),
+                );
+                return Err(super::say::with_exit(
+                    error.hint(format!(
+                        "narrow what --to names or the planning flags until one machine makes it, or write one to {}",
+                        args.save.as_ref().map(|p| p.display().to_string()).unwrap_or_default()
+                    )),
+                    &verdict,
+                ));
+            }
+            f::CliVerdict::Refused { r: f::CliRefusal::Line { r: f::Refusal::SaveExists } } => {
+                let path = args.save.as_ref().expect("a --save file is there").display().to_string();
+                return Err(super::say::with_exit(
+                    CliError::usage(format!("{path}: {}", f::refusal::says(f::Refusal::SaveExists))),
+                    &verdict,
+                ));
+            }
+            other => {
+                return Err(super::say::line_verdict_error(ctx, &mut world, &said_state(&inputs), &inputs, &other).await);
+            }
         }
     }
-    drop(inspection);
-    let sources: Vec<p::SourceSpec> = groups
-        .iter()
-        .map(|(media, count)| if *count > 1 { p::SourceSpec::sequence(media.clone()) } else { p::SourceSpec::single(media.clone()) })
-        .collect();
-    let what = groups
-        .iter()
-        .map(|(media, count)| format!("{count} {}", names::media(&registry, media)))
-        .collect::<Vec<_>>()
-        .join(" and ");
-    let fab = cap_graph(ctx, &registry).await?;
-    let max_depth = args.depth.unwrap_or(p::PlanRequest::DEFAULT_MAX_DEPTH);
-    let discovered = fab
-        .discover_convergent_targets(&sources, max_depth)
-        .map_err(|e| CliError::failed(format!("what {what} can become could not be worked out")).context(e.to_string()))?;
-    if discovered.targets.is_empty() {
-        return Err(CliError::failed(format!("no capability takes {what}"))
-            .hint("see which capabilities there are: capdag caps"));
-    }
-    let wants_machine = args.save.is_some() || args.run || args.pick.is_some();
-
-    // ── The target ──
-    // A `--to` is searched as it is given: every route whose output is inside
-    // it reaches it, listed nearest to it first.
-    let targets: Vec<MediaUrn> = if !args.to.is_empty() {
-        let mut out = Vec::new();
-        for token in &args.to {
-            out.push(target_media(&registry, token).await?);
-        }
-        out
-    } else if ctx.term.interactive || wants_machine {
-        let choices: Vec<Choice> = discovered.targets.iter().map(|t| target_choice(&registry, t)).collect();
-        let index = choose(ctx, &Question { what: "what to make", flag: "--to" }, &choices).await?;
-        vec![discovered.targets[index].media_def.clone()]
-    } else {
-        print_targets(ctx, &registry, &discovered.targets, &what, &args.files);
+    say_inputs(ctx, &world, &inputs);
+    let plan = world.plan(&inputs).cloned();
+    if world.extras.to.is_empty() {
+        let plan = plan.expect("what the inputs can become is answered once they are planned");
+        print_targets(ctx, &registry, &plan, &args.inputs);
         return Ok(Exit::Ok);
-    };
-
-    // ── The machines ──
-    let request = request(&args, sources.clone(), targets.clone())?;
-    let outcome = fab
-        .plan(&request, registry.as_ref())
-        .map_err(|e| CliError::failed("no machine could be planned").context(e.to_string()))?;
-    let target_names = targets.iter().map(|t| names::media(&registry, t)).collect::<Vec<_>>().join(", ");
-    if outcome.candidates.is_empty() {
-        // Strands were found and none could be written: they are named, with
-        // why, rather than reported as no plan.
-        for excluded in &outcome.excluded {
-            say_excluded(ctx, excluded);
-        }
-        let mut error = CliError::failed(format!("no machine makes {target_names} of {what}"));
-        if !outcome.excluded.is_empty() {
-            error = error.context(match outcome.excluded.len() {
-                1 => "a way was found and not offered: it is named above".to_string(),
-                n => format!("{n} ways were found and not offered: each is named above"),
-            });
-        }
-        return Err(error.hint(format!("see what it can become: capdag plan {}", args.files.join(" "))));
     }
-    // Reading the bundled cartridges verifies each of them: once per command,
-    // not once per machine.
-    let bundled = super::cartridge::bundled_caps(ctx).await?;
-    let mut machines = Vec::with_capacity(outcome.candidates.len());
-    for candidate in &outcome.candidates {
-        machines.push(describe(&registry, &bundled, candidate).await?);
-    }
-    let chosen: Option<usize> = match args.pick {
-        Some(n) if n >= 1 && n <= machines.len() => Some(n - 1),
-        Some(n) => {
-            return Err(CliError::usage(format!("--pick {n}: there are {} machines, numbered from 1", machines.len()))
-                .hint(format!("choose one of 1 to {}", machines.len())))
-        }
-        None if machines.len() == 1 => Some(0),
-        None if ctx.term.interactive || wants_machine => {
-            let choices: Vec<Choice> = machines.iter().enumerate().map(|(i, m)| m.choice(i)).collect();
-            Some(choose(ctx, &Question { what: "the machine", flag: "--pick" }, &choices).await?)
-        }
-        None => None,
-    };
-    // The strands not offered are named under the machines that are.
-    let Some(chosen) = chosen else {
-        print_machines(ctx, &machines, &target_names, &what, args.all, &args.files);
-        for excluded in &outcome.excluded {
-            say_excluded(ctx, excluded);
-        }
-        return Ok(Exit::Ok);
-    };
-    for excluded in &outcome.excluded {
+    let plan = plan.expect("the machines are listed once they are planned");
+    for excluded in &plan.excluded {
         say_excluded(ctx, excluded);
     }
-    let machine = &machines[chosen];
-
-    // ── What to do with it ──
-    let (save, run) = if args.save.is_some() || args.run {
-        (args.save.clone(), args.run)
-    } else if ctx.term.interactive {
-        let default_file = PathBuf::from(format!(
-            "{}-to-{}.machine",
-            inputs::stem(&files[0]),
-            inputs::file_safe(&names::media(&registry, &targets[0]))
-        ));
-        let actions = [
-            Choice { label: "run".into(), detail: format!("run it on {}", args.files.join(" ")), urn: None, value: "--run".into() },
-            Choice { label: "save".into(), detail: format!("save it as {}", default_file.display()), urn: None, value: format!("--save {}", default_file.display()) },
-            Choice { label: "print".into(), detail: "print it, and do nothing else".into(), urn: None, value: String::new() },
-        ];
-        match choose(ctx, &Question { what: "what to do with it", flag: "--run or --save" }, &actions).await? {
-            0 => (None, true),
-            1 => (Some(default_file), false),
-            _ => (None, false),
-        }
-    } else {
-        (None, false)
-    };
-    if let Some(path) = &save {
-        if path.exists() && !args.force {
-            return Err(CliError::usage(format!("{} exists", path.display()))
-                .hint("pass --force to replace it, or --save another file"));
-        }
-        std::fs::write(path, format!("{}\n", machine.notation)).map_err(|e| {
-            CliError::failed(format!("the machine could not be saved to {}", path.display())).context(e.to_string())
-        })?;
-        if ctx.term.json {
-            emit_record(&serde_json::json!({ "type": "saved", "file": path.display().to_string(), "notation": machine.notation }));
-        } else {
-            eprintln!("Saved machine {} to {}", chosen + 1, path.display());
-            if !run {
-                eprintln!("Run it: capdag run {} {}", path.display(), args.files.join(" "));
-            }
-        }
-    }
-    if !run {
-        if save.is_none() {
-            if ctx.term.json {
-                emit_record(&machine.record(chosen));
-            } else {
-                outln!("{}", machine.notation);
-            }
-        }
+    let Some(save) = &args.save else {
+        print_machines(ctx, &plan, &world.extras.to.join(", "), &args.inputs);
         return Ok(Exit::Ok);
-    }
-    // Run it: from the saved file, or from a file of its own, removed after.
-    let (file, scratch) = match save {
-        Some(path) => (path, None),
-        None => {
-            let dir = std::env::temp_dir().join(format!("capdag-plan-{}", std::process::id()));
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| CliError::failed("a place for the planned machine could not be made").context(e.to_string()))?;
-            let path = dir.join(format!("{}.machine", inputs::stem(&files[0])));
-            std::fs::write(&path, &machine.notation)
-                .map_err(|e| CliError::failed("the planned machine could not be written").context(e.to_string()))?;
-            (path, Some(dir))
-        }
     };
-    let run_args = super::run::Args {
-        target: file.display().to_string(),
-        rest: files.iter().map(|f| f.display().to_string()).collect(),
-        output: args.output,
-        force: args.force,
-        inputs: Vec::new(),
-        args: Vec::new(),
-        to: None,
-        selector: None,
-        progress: args.progress,
-        trace: None,
-        dev_bins: args.dev_bins,
-    };
-    let ran = super::run::run(ctx, run_args).await;
-    if let Some(dir) = scratch {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-    ran
-}
-
-/// The graph plans are found in: every cap of the fabric, its bookends marked
-/// by their media definitions (`LiveCapFab::from_fabric`).
-async fn cap_graph(ctx: &Ctx, registry: &FabricRegistry) -> CliResult<p::LiveCapFab> {
-    p::LiveCapFab::from_fabric(registry).await.map_err(|e| ctx.caps_unreadable(e))
-}
-
-fn request(args: &Args, sources: Vec<p::SourceSpec>, targets: Vec<MediaUrn>) -> CliResult<p::PlanRequest> {
-    let presence = match args.converge.as_str() {
-        "combine" => p::ConvergencePresence::Converged,
-        "independent" => p::ConvergencePresence::Independent,
-        _ => p::ConvergencePresence::Auto,
-    };
-    let location = match args.location.as_str() {
-        "auto" => p::ConvergenceLocation::Auto,
-        "earliest" => p::ConvergenceLocation::Earliest,
-        "latest" => p::ConvergenceLocation::Latest,
-        "source" => p::ConvergenceLocation::AtSource,
-        "target" => p::ConvergenceLocation::AtTarget,
-        other => match other.strip_prefix("depth=").map(str::parse::<usize>) {
-            Some(Ok(depth)) => p::ConvergenceLocation::AtDepth(depth),
-            _ => {
-                return Err(CliError::usage(format!("--where '{other}' is not a place converging paths meet"))
-                    .context("it is auto, earliest, latest, source, target or depth=<n>"))
-            }
-        },
-    };
-    let mechanism = match args.mechanism.as_str() {
-        "generalize" => p::ConvergenceMechanism::Generalize,
-        "collect" => p::ConvergenceMechanism::Collect,
-        "merge" => p::ConvergenceMechanism::Merge,
-        _ => p::ConvergenceMechanism::Any,
-    };
-    let ranking = match args.rank.as_str() {
-        "shortest" => p::RankPolicy::Shortest,
-        "cost" => p::RankPolicy::Cost,
-        _ => p::RankPolicy::Intent,
-    };
-    let configured = args.converge != "auto" || args.location != "auto" || args.mechanism != "any";
-    Ok(p::PlanRequest {
-        sources,
-        targets: p::TargetSpec::Exact(targets),
-        convergence: p::ConvergencePolicy {
-            presence,
-            location,
-            mechanism,
-            at_type: None,
-            arity: p::ConvergenceArity::Auto,
-        },
-        divergence: p::DivergencePolicy::default(),
-        ranking,
-        search: p::SearchDirection::Auto,
-        mode: if configured { p::PlanMode::Configured } else { p::PlanMode::Auto },
-        max_depth: args.depth.unwrap_or(p::PlanRequest::DEFAULT_MAX_DEPTH),
-        max_paths: args.max_paths.unwrap_or(p::PlanRequest::DEFAULT_MAX_PATHS),
-        max_candidates: p::PlanRequest::DEFAULT_MAX_CANDIDATES,
-    })
-}
-
-/// A `--to` token as a media type: a media alias, a URN (with `:`), or an
-/// extension (`png` → `media:ext=png`).
-pub async fn target_media(registry: &FabricRegistry, token: &str) -> CliResult<MediaUrn> {
-    let urn = if token.contains(':') {
-        token.to_string()
+    let k = chosen.unwrap_or(0);
+    let machine = &plan.described[k];
+    std::fs::write(save, format!("{}\n", machine.notation)).map_err(|e| {
+        CliError::failed(format!("the machine could not be saved to {}", save.display())).context(e.to_string())
+    })?;
+    if ctx.term.json {
+        emit_record(&serde_json::json!({ "type": "saved", "file": save.display().to_string(), "notation": machine.notation }));
     } else {
-        match registry
-            .resolve_alias_typed(token, Some(capdag::fabric::alias::AliasTargetKind::Media))
-            .await
-        {
-            Ok(target) => target,
-            Err(e) => {
-                super::ctx::nothing_by_that_name(e)?;
-                format!("media:ext={token}")
+        eprintln!("Saved the machine to {}", save.display());
+        eprintln!(
+            "Run it: capdag run {}{}",
+            super::shell_word(&save.display().to_string()),
+            args.inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect::<String>()
+        );
+    }
+    Ok(Exit::Ok)
+}
+
+/// Each planned machine as a choice: written as it is run.
+fn machine_choices(plan: &PlanFacts) -> Vec<Choice> {
+    plan.described
+        .iter()
+        .map(|d| Choice {
+            label: d.notation.replace('\n', " "),
+            detail: d.summary(),
+            urn: Some(d.canonical.clone()),
+            value: d.notation.replace('\n', ""),
+        })
+        .collect()
+}
+
+/// Under `--json`, what each file planned from was detected as.
+fn say_inputs(ctx: &Ctx, world: &World<'_>, inputs: &[f::Positional]) {
+    if !ctx.term.json {
+        return;
+    }
+    for x in inputs {
+        if let f::Positional::Path { p } = x {
+            if let Some(media) = world.media_of(index(p)) {
+                emit_record(&serde_json::json!({
+                    "type": "input", "file": world.tables.files[index(p)].path.display().to_string(),
+                    "alias": names::media(&world.registry, media), "urn": media.to_string(),
+                }));
             }
         }
-    };
-    MediaUrn::from_string(&urn).map_err(|e| {
-        CliError::usage(format!("--to '{token}' is not a media type"))
-            .context(e.to_string())
-            .hint("give a media alias such as txt or png, an extension, or a media URN")
-    })
+    }
+}
+
+fn print_targets(ctx: &Ctx, registry: &FabricRegistry, plan: &PlanFacts, inputs: &[String]) {
+    let choices: Vec<Choice> = plan.targets.iter().map(|t| target_choice(registry, t)).collect();
+    if ctx.term.json {
+        for choice in &choices {
+            emit_record(&serde_json::json!({
+                "type": "target", "alias": choice.label, "detail": choice.detail, "urn": choice.urn,
+            }));
+        }
+        return;
+    }
+    outln!("{} can become:", plan.what);
+    let width = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(28);
+    for choice in &choices {
+        let urn = if ctx.term.verbosity >= 1 { format!("  {}", choice.urn.as_deref().unwrap_or("")) } else { String::new() };
+        outln!("  {:<width$}  {}{urn}", choice.label, choice.detail);
+    }
+    let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
+    eprintln!("\nThe machines that make one: capdag plan{given} --to {}", choices[0].label);
+    eprintln!("Make one:                   capdag run{given} --to {}", choices[0].label);
+}
+
+fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, inputs: &[String]) {
+    if ctx.term.json {
+        for (k, machine) in plan.described.iter().enumerate() {
+            emit_record(&serde_json::json!({
+                "type": "machine",
+                "index": k + 1,
+                "notation": machine.notation,
+                "canonical": machine.canonical,
+                "steps": machine.steps,
+                "model": machine.model,
+                "downloads": machine.downloads,
+            }));
+        }
+        return;
+    }
+    let n = plan.described.len();
+    outln!("{n} machine{} make{} {target} of {}:", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }, plan.what);
+    for (k, machine) in plan.described.iter().enumerate() {
+        outln!("\n {:>2}. {}", k + 1, ctx.term.style.dim(&machine.summary()));
+        for line in machine.notation.lines() {
+            outln!("     {line}");
+        }
+        if ctx.term.verbosity >= 1 {
+            outln!("     {}", ctx.term.style.dim(&machine.canonical));
+        }
+    }
+    let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
+    eprintln!("\nRun one:  capdag run '<machine>'{given}");
+    eprintln!("Save one: capdag plan{given} --to {target} --save <file>");
 }
 
 /// A strand the planner found and no machine could hold: not offered, said
 /// so by its steps' titles, and why. `-v` adds the strand's URNs and the
 /// resolver's own words.
-fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
+pub fn say_excluded(ctx: &Ctx, excluded: &p::ExcludedCandidate) {
     if ctx.term.json {
         let titled = |media: &p::TitledMedia| match &media.title {
             p::MediaTitle::Defined(title) => serde_json::json!({ "urn": media.urn, "title": title }),
@@ -488,155 +406,27 @@ fn media_named(media: &p::TitledMedia) -> String {
     }
 }
 
-fn target_choice(registry: &FabricRegistry, target: &p::ConvergentTargetInfo) -> Choice {
+pub fn target_choice(registry: &FabricRegistry, target: &p::ConvergentTargetInfo) -> Choice {
     let alias = names::media(registry, &target.media_def);
     let title = registry
         .get_cached_media_def(&target.media_def.to_string())
         .map(|d| d.title)
         .unwrap_or_else(|_| target.display_name.clone());
     let how = if target.apex.is_some() { "combine all" } else { "each" };
+    // What --to is given to choose it: its alias, or its URN where it has none.
+    let urn = target.media_def.to_string();
+    let value = registry.display_alias_for_urn(&urn).unwrap_or_else(|| urn.clone());
     Choice {
-        label: alias.clone(),
+        label: alias,
         detail: format!("{title} · {how} · {} step{}", target.min_total_steps, if target.min_total_steps == 1 { "" } else { "s" }),
-        urn: Some(target.media_def.to_string()),
-        value: alias,
+        urn: Some(urn),
+        value,
     }
-}
-
-fn print_targets(ctx: &Ctx, registry: &FabricRegistry, targets: &[p::ConvergentTargetInfo], what: &str, files: &[String]) {
-    let choices: Vec<Choice> = targets.iter().map(|t| target_choice(registry, t)).collect();
-    if ctx.term.json {
-        for choice in &choices {
-            emit_record(&serde_json::json!({
-                "type": "target", "alias": choice.label, "detail": choice.detail, "urn": choice.urn,
-            }));
-        }
-        return;
-    }
-    outln!("{what} can become:");
-    let width = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0).min(28);
-    for choice in &choices {
-        let urn = if ctx.term.verbosity >= 1 { format!("  {}", choice.urn.as_deref().unwrap_or("")) } else { String::new() };
-        outln!("  {:<width$}  {}{urn}", choice.label, choice.detail);
-    }
-    eprintln!("\nFind machines that make one: capdag plan {} --to {}", files.join(" "), choices[0].label);
-}
-
-/// A planned machine, as it is shown.
-struct Planned {
-    notation: String,
-    canonical: String,
-    steps: usize,
-    model: bool,
-    downloads: bool,
-}
-
-impl Planned {
-    fn summary(&self) -> String {
-        let mut parts = vec![format!("{} step{}", self.steps, if self.steps == 1 { "" } else { "s" })];
-        if self.model {
-            parts.push("runs a model".into());
-        }
-        if self.downloads {
-            parts.push("needs a cartridge download".into());
-        }
-        parts.join(" · ")
-    }
-
-    /// The machine as an option: `--pick <its number>`.
-    fn choice(&self, index: usize) -> Choice {
-        Choice {
-            label: self.notation.replace('\n', " "),
-            detail: self.summary(),
-            urn: Some(self.canonical.clone()),
-            value: (index + 1).to_string(),
-        }
-    }
-
-    fn record(&self, index: usize) -> serde_json::Value {
-        serde_json::json!({
-            "type": "machine",
-            "pick": index + 1,
-            "notation": self.notation,
-            "canonical": self.canonical,
-            "steps": self.steps,
-            "model": self.model,
-            "downloads": self.downloads,
-        })
-    }
-}
-
-/// A planned machine as it is shown: `bundled` is every cap the cartridges
-/// bundled with capdag provide.
-async fn describe(registry: &Arc<FabricRegistry>, bundled: &[CapUrn], candidate: &p::PlanCandidate) -> CliResult<Planned> {
-    let machine = capdag::machine::parse_machine_async(&candidate.notation, registry)
-        .await
-        .map_err(|e| CliError::failed("a planned machine could not be read back").context(e.to_string()))?;
-    let notation = names::machine(registry, &machine)
-        .map_err(|e| CliError::failed("a planned machine could not be written in alias form").context(e))?;
-    let mut model = false;
-    let mut downloads = false;
-    for strand in machine.strands() {
-        for edge in strand.edges() {
-            let cap = registry
-                .get_cap(&edge.cap_urn.to_string())
-                .await
-                .map_err(super::ctx::registry_failure)?;
-            // A cap that takes a model spec runs a model, default or not.
-            model |= cap
-                .model_spec_arg()
-                .map_err(|e| CliError::failed("a planned machine could not be described").context(e.to_string()))?
-                .is_some();
-            downloads |= !bundled.iter().any(|b| b.is_equivalent(&edge.cap_urn));
-        }
-    }
-    Ok(Planned {
-        notation,
-        canonical: candidate.notation.clone(),
-        steps: candidate.cost.cap_steps,
-        model,
-        downloads,
-    })
-}
-
-fn print_machines(ctx: &Ctx, machines: &[Planned], target: &str, what: &str, all: bool, files: &[String]) {
-    if ctx.term.json {
-        for (index, machine) in machines.iter().enumerate() {
-            emit_record(&machine.record(index));
-        }
-        return;
-    }
-    outln!("{} machine{} make{} {target} of {what}:", machines.len(), if machines.len() == 1 { "" } else { "s" }, if machines.len() == 1 { "s" } else { "" });
-    let shown = if all { machines.len() } else { machines.len().min(LISTED) };
-    for (index, machine) in machines.iter().take(shown).enumerate() {
-        outln!("\n {:>2}. {}", index + 1, ctx.term.style.dim(&machine.summary()));
-        for line in machine.notation.lines() {
-            outln!("     {line}");
-        }
-        if ctx.term.verbosity >= 1 {
-            outln!("     {}", ctx.term.style.dim(&machine.canonical));
-        }
-    }
-    if shown < machines.len() {
-        outln!("\n … and {} more: --all lists them", machines.len() - shown);
-    }
-    eprintln!(
-        "\nSave one: capdag plan {} --to <type> --pick <n> --save <file>\nRun one:  capdag plan {} --to <type> --pick <n> --run",
-        files.join(" "),
-        files.join(" ")
-    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `capdag plan`'s arguments, as the command line gives them.
-    #[derive(clap::Parser)]
-    struct Command {
-        #[command(flatten)]
-        args: Args,
-    }
 
     // TEST8211: plan --to lists the machines of every route whose result is
     // inside the --to, nearest to it first and then with fewer steps: a YAML
@@ -647,7 +437,6 @@ mod tests {
     #[tokio::test]
     async fn test8211_a_to_lists_every_route_inside_it_nearest_first() {
         use capdag::machine::test_fixtures::{build_cap, cap, media, registry_with};
-        use clap::Parser;
 
         const TO_ANY_JSON: &str =
             r#"cap:in="media:enc=utf8;fmt=yaml;record";out="media:enc=utf8;ext=json;fmt=json;?list;?record";to-json"#;
@@ -674,12 +463,11 @@ mod tests {
         let mut fab = p::LiveCapFab::new();
         fab.sync_from_caps(&caps, &bookends);
         let registry = registry_with(caps);
-        let args = Command::try_parse_from(["plan", "rec.yaml", "--to", "media:ext=json"]).unwrap().args;
-        let target = target_media(&registry, &args.to[0]).await.unwrap();
+        let target = line::media_type(&registry, "media:ext=json").await.unwrap().expect("a URN names a type");
         assert!(target.is_equivalent(&media("media:ext=json")), "the --to is the media it gives");
 
         let outcome = fab
-            .plan(&request(&args, vec![p::SourceSpec::single(source)], vec![target]).unwrap(), &registry)
+            .plan(&PlanningFlags::default().request(vec![p::SourceSpec::single(source)], vec![target]).unwrap(), &registry)
             .unwrap();
         assert!(outcome.excluded.is_empty(), "every route found is offered: {:?}", outcome.excluded);
         let last_caps: Vec<&str> = outcome
