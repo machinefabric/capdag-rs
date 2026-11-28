@@ -95,7 +95,7 @@ fn not_a_spec(spec: &str, verdict: &f::CliVerdict) -> CliError {
 /// lists them: HuggingFace's, the one kind of model repository.
 async fn downloaded(ctx: &Ctx) -> CliResult<Vec<serde_json::Value>> {
     let request = serde_json::json!({ "kind": "huggingface" });
-    let bytes = cap_value(ctx, "list-models", Some(request.to_string().into_bytes()), None).await?;
+    let bytes = cap_value(ctx, "list-models", Some(request.to_string().into_bytes()), Vec::new(), None).await?;
     let response = json("list-models", &bytes)?;
     response["models"]
         .as_array()
@@ -138,7 +138,7 @@ async fn search(ctx: &Ctx, query: String, limit: u32, pick: bool) -> CliResult<E
     } else {
         serde_json::json!({ "query": query, "limit": limit })
     };
-    let bytes = cap_value(ctx, "search-models", Some(request.to_string().into_bytes()), None).await?;
+    let bytes = cap_value(ctx, "search-models", Some(request.to_string().into_bytes()), Vec::new(), None).await?;
     let response = json("search-models", &bytes)?;
     let models = response["models"].as_array().cloned().unwrap_or_default();
     let spec_of = |m: &serde_json::Value| format!("hf:{}", m["id"].as_str().unwrap_or(""));
@@ -212,7 +212,12 @@ async fn pull(ctx: &Ctx, spec: &str) -> CliResult<Exit> {
     if let Some(error) = super::ends(&verdict) {
         return Err(error);
     }
-    let bytes = cap_value(ctx, "model-download", Some(spec.as_bytes().to_vec()), Some(ProgressChoice::Auto)).await?;
+    // The model a capability downloads is held to the pattern of model it
+    // takes; one pulled for no capability is held to none beyond being a
+    // model spec.
+    let pattern = (capdag::MEDIA_MEDIA_URN.to_string(), capdag::urn::media_urn::MEDIA_MODEL_SPEC.as_bytes().to_vec());
+    let bytes =
+        cap_value(ctx, "model-download", Some(spec.as_bytes().to_vec()), vec![pattern], Some(ProgressChoice::Auto)).await?;
     let response = json("model-download", &bytes)?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "model_downloaded", "spec": spec, "result": response }));
@@ -248,7 +253,7 @@ async fn remove(ctx: &Ctx, spec: &str) -> CliResult<Exit> {
             }
         }
     }
-    let bytes = cap_value(ctx, "model-delete", Some(spec.as_bytes().to_vec()), None).await?;
+    let bytes = cap_value(ctx, "model-delete", Some(spec.as_bytes().to_vec()), Vec::new(), None).await?;
     let response = json("model-delete", &bytes)?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "model_removed", "spec": spec, "result": response }));

@@ -453,6 +453,46 @@ struct ScenarioRuns {
     speed: f64,
 }
 
+/// The first required argument of a step of `strand` that neither the machine
+/// binds nor the run gives a value, refused as the step's cartridge refuses
+/// it.
+async fn missing_argument(
+    registry: &Arc<FabricRegistry>,
+    strand: &StrandPlan,
+    given: &std::collections::HashMap<String, Vec<(String, Vec<u8>)>>,
+) -> Result<(), ExecutionError> {
+    let requirements = capdag::planner::MachinePlanBuilder::new(registry.clone())
+        .analyze_plan_arguments(&strand.plan)
+        .await
+        .map_err(|e| ExecutionError::HostError(format!("the plan's arguments could not be read: {e}")))?;
+    for step in &requirements.steps {
+        let node = strand
+            .plan
+            .nodes
+            .iter()
+            .find(|(_, node)| matches!(&node.node_type, ExecutionNodeType::Cap { token_id, .. } if token_id == &step.token_id))
+            .map(|(id, _)| id.as_str())
+            .unwrap_or_default();
+        let values = given.get(node).map(Vec::as_slice).unwrap_or_default();
+        for slot in &step.slots {
+            let open = slot.is_required && slot.resolution == capdag::planner::ArgumentResolution::RequiresUserInput;
+            if open && !values.iter().any(|(urn, _)| urn == &slot.media_urn) {
+                return Err(ExecutionError::StepFailed {
+                    step_token_id: step.token_id.clone(),
+                    source: Box::new(ExecutionError::CartridgeExecutionFailed {
+                        cap_urn: step.cap_urn.clone(),
+                        code: None,
+                        class: capdag::failure::AttributionClass::Input,
+                        details: format!("Missing required arg: {}", slot.media_urn),
+                        arg_urn: Some(slot.media_urn.clone()),
+                    }),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl RunHost for ScenarioRuns {
     fn spawn(
@@ -472,6 +512,7 @@ impl RunHost for ScenarioRuns {
             Ok(names) => names,
             Err(e) => return refused(strand, format!("the world '{}' scripts a run of {run} its plan cannot make: {e}", self.world)),
         };
+        let given = planned.cap_arguments.clone();
         let ledger = match RunArgumentLedger::new(&strand.plan, planned.cap_arguments) {
             Ok(ledger) => Arc::new(ledger),
             Err(e) => return refused(strand, format!("argument values refused: {e}")),
@@ -479,7 +520,13 @@ impl RunHost for ScenarioRuns {
         let callbacks = observer.callbacks(key);
         let observer = observer.clone();
         let speed = self.speed;
+        let registry = self.registry.clone();
         let task = tokio::spawn(async move {
+            // A cartridge refuses a request that gives a required argument
+            // no value: so does the world, before it plays anything.
+            if let Err(refused) = missing_argument(&registry, &strand, &given).await {
+                return (strand, Err(refused));
+            }
             let result: Result<PipelineResult, ExecutionError> = script::play(script, names, callbacks, control, speed).await;
             if observer.lost() {
                 return (

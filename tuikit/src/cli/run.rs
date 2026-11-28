@@ -929,9 +929,16 @@ fn new_runtime(
         .map_err(|e| ctx::host_failure("the cartridges could not be hosted", e))
 }
 
-/// Run one cap on one value, and return what it gave: how the model commands
-/// drive the model cartridge's own caps. The run is shown as any run is.
-pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress: Option<ProgressChoice>) -> CliResult<Vec<u8>> {
+/// Run one cap on one value, with `args` given to its other arguments by
+/// their media URNs, and return what it gave: how the model commands drive
+/// the model cartridge's own caps. The run is shown as any run is.
+pub async fn cap_value(
+    ctx: &Ctx,
+    alias: &str,
+    input: Option<Vec<u8>>,
+    args: Vec<(String, Vec<u8>)>,
+    progress: Option<ProgressChoice>,
+) -> CliResult<Vec<u8>> {
     let registry = ctx.registry().await?;
     let cap = registry.get_cap(alias).await.map_err(|e| match e {
         capdag::FabricRegistryError::NotFound(_) => {
@@ -948,6 +955,17 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
         .plan(0, &RunInputs::declared())
         .await
         .map_err(|e| CliError::failed(format!("'{alias}' could not be planned")).context(e.to_string()))?;
+    let mut cap_arguments: HashMap<String, Vec<(String, Vec<u8>)>> = HashMap::new();
+    if !args.is_empty() {
+        let step = strand
+            .plan
+            .nodes
+            .iter()
+            .find(|(_, node)| matches!(node.node_type, ExecutionNodeType::Cap { .. }))
+            .map(|(id, _)| id.clone())
+            .ok_or_else(|| CliError::failed(format!("the machine of '{alias}' has no step")).hint("report it"))?;
+        cap_arguments.insert(step, args);
+    }
     let mut plan_inputs = HashMap::new();
     let mut is_sequence = HashMap::new();
     let mut slots = Vec::new();
@@ -958,7 +976,7 @@ pub async fn cap_value(ctx: &Ctx, alias: &str, input: Option<Vec<u8>>, progress:
     }
     let run = PlannedRun {
         label: alias.to_string(),
-        strands: vec![PlannedStrand { strand, inputs: plan_inputs, is_sequence, cap_arguments: HashMap::new() }],
+        strands: vec![PlannedStrand { strand, inputs: plan_inputs, is_sequence, cap_arguments }],
         sources: if slots.is_empty() { Vec::new() } else { vec![inputs::file_safe(alias)] },
         slots: vec![slots],
         machine_name: inputs::file_safe(alias),
