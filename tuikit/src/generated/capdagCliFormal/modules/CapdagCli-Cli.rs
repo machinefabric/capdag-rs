@@ -3417,32 +3417,32 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                     'b39: {
                                         let mut x_46: u8;
                                         'b45: {
-                                            let x_184: Obj = rt::nat::lean_usize_to_nat(1);
-                                            let x_185: Obj = l_List_deraseDups_d__at___dCapdagCli_dglobalRefusal_dspec__0(x_37);
-                                            let x_186: Obj = l_List_dlengthTR_d__redArg(x_185);
-                                            rt::lean_dec(x_185);
-                                            let x_187: u8 = l_Nat_ddecLt(x_184, x_186);
+                                            let x_185: Obj = rt::nat::lean_usize_to_nat(1);
+                                            let x_186: Obj = l_List_deraseDups_d__at___dCapdagCli_dglobalRefusal_dspec__0(x_37);
+                                            let x_187: Obj = l_List_dlengthTR_d__redArg(x_186);
                                             rt::lean_dec(x_186);
-                                            let mut x_189: u8;
-                                            'b188: {
-                                                match x_187 {
+                                            let x_188: u8 = l_Nat_ddecLt(x_185, x_187);
+                                            rt::lean_dec(x_187);
+                                            let mut x_190: u8;
+                                            'b189: {
+                                                match x_188 {
                                                     0 => {
                                                         match x_38 {
                                                             0 => {
-                                                                x_189 = x_187;
-                                                                break 'b188;
+                                                                x_190 = x_188;
+                                                                break 'b189;
                                                             }
                                                             _ => {
-                                                                let x_192: u8 = l_CapdagCli_dCommand_dfetches(x_3);
-                                                                match x_192 {
+                                                                let x_193: u8 = l_CapdagCli_dCommand_dfetches(x_3);
+                                                                match x_193 {
                                                                     0 => {
-                                                                        x_189 = x_192;
-                                                                        break 'b188;
+                                                                        x_190 = x_193;
+                                                                        break 'b189;
                                                                     }
                                                                     _ => {
                                                                         rt::lean_dec(x_3);
-                                                                        let x_193: Obj = l_CapdagCli_dcommand_d__closed__21();
-                                                                        return x_193;
+                                                                        let x_194: Obj = l_CapdagCli_dcommand_d__closed__21();
+                                                                        return x_194;
                                                                     }
                                                                 }
                                                             }
@@ -3450,34 +3450,34 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                     }
                                                     _ => {
                                                         rt::lean_dec(x_3);
-                                                        let x_194: Obj = l_CapdagCli_dcommand_d__closed__22();
-                                                        return x_194;
+                                                        let x_195: Obj = l_CapdagCli_dcommand_d__closed__22();
+                                                        return x_195;
                                                     }
                                                 }
                                             }
                                             match x_38 {
                                                 0 => {
-                                                    x_46 = x_187;
+                                                    x_46 = x_188;
                                                     break 'b45;
                                                 }
                                                 _ => {
-                                                    let x_190: u8 = l_CapdagCli_dCommand_dreadsFabric(x_3);
-                                                    match x_190 {
+                                                    let x_191: u8 = l_CapdagCli_dCommand_dreadsFabric(x_3);
+                                                    match x_191 {
                                                         0 => {
-                                                            x_46 = x_187;
+                                                            x_46 = x_188;
                                                             break 'b45;
                                                         }
                                                         _ => {
-                                                            let x_191: u8 = rt::lean_ctor_get_uint8(x_1, ::core::mem::size_of::<usize>() + 1);
-                                                            match x_191 {
+                                                            let x_192: u8 = rt::lean_ctor_get_uint8(x_1, ::core::mem::size_of::<usize>() + 1);
+                                                            match x_192 {
                                                                 0 => {
                                                                     rt::lean_dec(x_3);
                                                                     break 'b30;
                                                                 }
                                                                 _ => {
-                                                                    match x_189 {
+                                                                    match x_190 {
                                                                         0 => {
-                                                                            x_46 = x_189;
+                                                                            x_46 = x_190;
                                                                             break 'b45;
                                                                         }
                                                                         _ => {
@@ -3557,8 +3557,8 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                         let x_65: Obj = rt::lean_ctor_get(x_3, 1);
                                                         rt::lean_inc_ref(x_65);
                                                         rt::lean_dec_ref(x_3);
-                                                        x_40 = x_65;
-                                                        x_41 = x_64;
+                                                        x_40 = x_64;
+                                                        x_41 = x_65;
                                                         break 'b39;
                                                     }
                                                     _ => {
@@ -3572,8 +3572,8 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                                         let x_68: Obj = rt::lean_ctor_get(x_3, 1);
                                                                         rt::lean_inc_ref(x_68);
                                                                         rt::lean_dec_ref(x_3);
-                                                                        x_40 = x_68;
-                                                                        x_41 = x_66;
+                                                                        x_40 = x_66;
+                                                                        x_41 = x_68;
                                                                         break 'b39;
                                                                     }
                                                                     _ => {
@@ -3603,11 +3603,11 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                 let x_73: Obj = rt::lean_ctor_get(x_69, 1);
                                                 let x_74: Obj = rt::lean_ctor_get(x_69, 2);
                                                 let x_75: Obj = rt::lean_ctor_get(x_69, 3);
-                                                let x_76: u8 = rt::lean_ctor_get_uint8(x_69, 14 * ::core::mem::size_of::<usize>());
-                                                let x_77: u8 = rt::lean_ctor_get_uint8(x_69, 14 * ::core::mem::size_of::<usize>() + 1);
+                                                let x_76: u8 = rt::lean_ctor_get_uint8(x_69, 15 * ::core::mem::size_of::<usize>());
+                                                let x_77: u8 = rt::lean_ctor_get_uint8(x_69, 15 * ::core::mem::size_of::<usize>() + 1);
                                                 let x_78: Obj = rt::lean_ctor_get(x_69, 4);
-                                                let x_79: u8 = rt::lean_ctor_get_uint8(x_69, 14 * ::core::mem::size_of::<usize>() + 2);
-                                                let x_80: u8 = rt::lean_ctor_get_uint8(x_69, 14 * ::core::mem::size_of::<usize>() + 3);
+                                                let x_79: u8 = rt::lean_ctor_get_uint8(x_69, 15 * ::core::mem::size_of::<usize>() + 2);
+                                                let x_80: u8 = rt::lean_ctor_get_uint8(x_69, 15 * ::core::mem::size_of::<usize>() + 3);
                                                 let x_81: Obj = rt::lean_ctor_get(x_69, 5);
                                                 let x_82: Obj = rt::lean_ctor_get(x_69, 6);
                                                 let x_83: Obj = rt::lean_ctor_get(x_69, 7);
@@ -3617,19 +3617,21 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                 let x_87: Obj = rt::lean_ctor_get(x_69, 11);
                                                 let x_88: Obj = rt::lean_ctor_get(x_69, 12);
                                                 let x_89: Obj = rt::lean_ctor_get(x_69, 13);
-                                                let mut x_91: Obj;
-                                                let mut x_92: u8;
-                                                'b90: {
-                                                    let x_98: u8 = (!rt::lean_is_exclusive(x_69)) as u8;
-                                                    match x_98 {
+                                                let x_90: Obj = rt::lean_ctor_get(x_69, 14);
+                                                let mut x_92: Obj;
+                                                let mut x_93: u8;
+                                                'b91: {
+                                                    let x_99: u8 = (!rt::lean_is_exclusive(x_69)) as u8;
+                                                    match x_99 {
                                                         0 => {
-                                                            let x_99: Obj = rt::lean_ctor_get(x_69, 0);
-                                                            rt::lean_dec(x_99);
-                                                            x_91 = x_69;
-                                                            x_92 = x_98;
-                                                            break 'b90;
+                                                            let x_100: Obj = rt::lean_ctor_get(x_69, 0);
+                                                            rt::lean_dec(x_100);
+                                                            x_92 = x_69;
+                                                            x_93 = x_99;
+                                                            break 'b91;
                                                         }
                                                         _ => {
+                                                            rt::lean_inc(x_90);
                                                             rt::lean_inc(x_89);
                                                             rt::lean_inc(x_88);
                                                             rt::lean_inc(x_87);
@@ -3644,76 +3646,77 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                             rt::lean_inc(x_74);
                                                             rt::lean_inc(x_73);
                                                             rt::lean_dec(x_69);
-                                                            x_91 = rt::lean_box(0);
-                                                            x_92 = x_98;
-                                                            break 'b90;
+                                                            x_92 = rt::lean_box(0);
+                                                            x_93 = x_99;
+                                                            break 'b91;
                                                         }
                                                     }
                                                 }
                                                 rt::lean_inc_ref(x_72);
-                                                let mut x_94: Obj;
-                                                'b93: {
-                                                    match x_92 {
+                                                let mut x_95: Obj;
+                                                'b94: {
+                                                    match x_93 {
                                                         0 => {
-                                                            rt::lean_ctor_set(x_91, 0, x_72);
-                                                            x_94 = x_91;
-                                                            break 'b93;
+                                                            rt::lean_ctor_set(x_92, 0, x_72);
+                                                            x_95 = x_92;
+                                                            break 'b94;
                                                         }
                                                         _ => {
-                                                            let x_97: Obj = rt::lean_alloc_ctor(0, 14, 4);
-                                                            rt::lean_ctor_set(x_97, 0, x_72);
-                                                            rt::lean_ctor_set(x_97, 1, x_73);
-                                                            rt::lean_ctor_set(x_97, 2, x_74);
-                                                            rt::lean_ctor_set(x_97, 3, x_75);
-                                                            rt::lean_ctor_set(x_97, 4, x_78);
-                                                            rt::lean_ctor_set(x_97, 5, x_81);
-                                                            rt::lean_ctor_set(x_97, 6, x_82);
-                                                            rt::lean_ctor_set(x_97, 7, x_83);
-                                                            rt::lean_ctor_set(x_97, 8, x_84);
-                                                            rt::lean_ctor_set(x_97, 9, x_85);
-                                                            rt::lean_ctor_set(x_97, 10, x_86);
-                                                            rt::lean_ctor_set(x_97, 11, x_87);
-                                                            rt::lean_ctor_set(x_97, 12, x_88);
-                                                            rt::lean_ctor_set(x_97, 13, x_89);
-                                                            rt::lean_ctor_set_uint8(x_97, 14 * ::core::mem::size_of::<usize>(), x_76);
-                                                            rt::lean_ctor_set_uint8(x_97, 14 * ::core::mem::size_of::<usize>() + 1, x_77);
-                                                            rt::lean_ctor_set_uint8(x_97, 14 * ::core::mem::size_of::<usize>() + 2, x_79);
-                                                            rt::lean_ctor_set_uint8(x_97, 14 * ::core::mem::size_of::<usize>() + 3, x_80);
-                                                            x_94 = x_97;
-                                                            break 'b93;
+                                                            let x_98: Obj = rt::lean_alloc_ctor(0, 15, 4);
+                                                            rt::lean_ctor_set(x_98, 0, x_72);
+                                                            rt::lean_ctor_set(x_98, 1, x_73);
+                                                            rt::lean_ctor_set(x_98, 2, x_74);
+                                                            rt::lean_ctor_set(x_98, 3, x_75);
+                                                            rt::lean_ctor_set(x_98, 4, x_78);
+                                                            rt::lean_ctor_set(x_98, 5, x_81);
+                                                            rt::lean_ctor_set(x_98, 6, x_82);
+                                                            rt::lean_ctor_set(x_98, 7, x_83);
+                                                            rt::lean_ctor_set(x_98, 8, x_84);
+                                                            rt::lean_ctor_set(x_98, 9, x_85);
+                                                            rt::lean_ctor_set(x_98, 10, x_86);
+                                                            rt::lean_ctor_set(x_98, 11, x_87);
+                                                            rt::lean_ctor_set(x_98, 12, x_88);
+                                                            rt::lean_ctor_set(x_98, 13, x_89);
+                                                            rt::lean_ctor_set(x_98, 14, x_90);
+                                                            rt::lean_ctor_set_uint8(x_98, 15 * ::core::mem::size_of::<usize>(), x_76);
+                                                            rt::lean_ctor_set_uint8(x_98, 15 * ::core::mem::size_of::<usize>() + 1, x_77);
+                                                            rt::lean_ctor_set_uint8(x_98, 15 * ::core::mem::size_of::<usize>() + 2, x_79);
+                                                            rt::lean_ctor_set_uint8(x_98, 15 * ::core::mem::size_of::<usize>() + 3, x_80);
+                                                            x_95 = x_98;
+                                                            break 'b94;
                                                         }
                                                     }
                                                 }
-                                                let x_95: Obj = l_CapdagCli_dplanVerdict(x_94, x_71, x_70);
-                                                let x_96: Obj = l_CapdagCli_dofLine(x_95);
-                                                return x_96;
+                                                let x_96: Obj = l_CapdagCli_dplanVerdict(x_95, x_71, x_70);
+                                                let x_97: Obj = l_CapdagCli_dofLine(x_96);
+                                                return x_97;
                                             }
                                             4 => {
-                                                let x_100: Obj = rt::lean_ctor_get(x_3, 0);
-                                                rt::lean_inc_ref(x_100);
-                                                let x_101: Obj = rt::lean_ctor_get(x_3, 1);
+                                                let x_101: Obj = rt::lean_ctor_get(x_3, 0);
                                                 rt::lean_inc_ref(x_101);
+                                                let x_102: Obj = rt::lean_ctor_get(x_3, 1);
+                                                rt::lean_inc_ref(x_102);
                                                 rt::lean_dec_ref(x_3);
-                                                let x_102: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                let x_103: Obj = l_CapdagCli_dshowing(x_101, x_100, x_102);
-                                                return x_103;
+                                                let x_103: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                let x_104: Obj = l_CapdagCli_dshowing(x_102, x_101, x_103);
+                                                return x_104;
                                             }
                                             5 => {
-                                                let x_104: u8 = rt::lean_ctor_get_uint8(x_3, 2 * ::core::mem::size_of::<usize>() + 1);
-                                                match x_104 {
+                                                let x_105: u8 = rt::lean_ctor_get_uint8(x_3, 2 * ::core::mem::size_of::<usize>() + 1);
+                                                match x_105 {
                                                     0 => {
-                                                        let x_105: Obj = rt::lean_ctor_get(x_3, 0);
-                                                        rt::lean_inc_ref(x_105);
-                                                        let x_106: Obj = rt::lean_ctor_get(x_3, 1);
+                                                        let x_106: Obj = rt::lean_ctor_get(x_3, 0);
                                                         rt::lean_inc_ref(x_106);
+                                                        let x_107: Obj = rt::lean_ctor_get(x_3, 1);
+                                                        rt::lean_inc_ref(x_107);
                                                         rt::lean_dec_ref(x_3);
-                                                        x_33 = x_105;
+                                                        x_33 = x_107;
                                                         x_34 = x_106;
                                                         break 'b32;
                                                     }
                                                     _ => {
-                                                        let x_107: u8 = rt::lean_ctor_get_uint8(x_3, 2 * ::core::mem::size_of::<usize>());
-                                                        match x_107 {
+                                                        let x_108: u8 = rt::lean_ctor_get_uint8(x_3, 2 * ::core::mem::size_of::<usize>());
+                                                        match x_108 {
                                                             0 => {
                                                                 rt::lean_dec_ref(x_3);
                                                                 break 'b4;
@@ -3721,12 +3724,12 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                             _ => {
                                                                 match x_46 {
                                                                     0 => {
-                                                                        let x_108: Obj = rt::lean_ctor_get(x_3, 0);
-                                                                        rt::lean_inc_ref(x_108);
-                                                                        let x_109: Obj = rt::lean_ctor_get(x_3, 1);
+                                                                        let x_109: Obj = rt::lean_ctor_get(x_3, 0);
                                                                         rt::lean_inc_ref(x_109);
+                                                                        let x_110: Obj = rt::lean_ctor_get(x_3, 1);
+                                                                        rt::lean_inc_ref(x_110);
                                                                         rt::lean_dec_ref(x_3);
-                                                                        x_33 = x_108;
+                                                                        x_33 = x_110;
                                                                         x_34 = x_109;
                                                                         break 'b32;
                                                                     }
@@ -3741,133 +3744,133 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                 }
                                             }
                                             6 => {
-                                                let x_110: Obj = rt::lean_ctor_get(x_3, 0);
-                                                rt::lean_inc_ref_n(x_110, 2);
-                                                let x_111: Obj = rt::lean_ctor_get(x_3, 1);
-                                                rt::lean_inc_n(x_111, 2);
-                                                let x_112: Obj = rt::lean_ctor_get(x_3, 2);
-                                                rt::lean_inc_ref_n(x_112, 2);
+                                                let x_111: Obj = rt::lean_ctor_get(x_3, 0);
+                                                rt::lean_inc_ref_n(x_111, 2);
+                                                let x_112: Obj = rt::lean_ctor_get(x_3, 1);
+                                                rt::lean_inc_n(x_112, 2);
+                                                let x_113: Obj = rt::lean_ctor_get(x_3, 2);
+                                                rt::lean_inc_ref_n(x_113, 2);
                                                 rt::lean_dec_ref(x_3);
-                                                let x_113: Obj = l_CapdagCli_dviewLine(x_110, x_111);
-                                                let x_114: Obj = l_CapdagCli_dmissingThing(x_112, x_38, x_113);
-                                                match rt::lean_obj_tag(x_114) {
+                                                let x_114: Obj = l_CapdagCli_dviewLine(x_111, x_112);
+                                                let x_115: Obj = l_CapdagCli_dmissingThing(x_113, x_38, x_114);
+                                                match rt::lean_obj_tag(x_115) {
                                                     0 => {
-                                                        let x_115: u8 = l_CapdagCli_dCliWorld_dfullScreen(x_1);
-                                                        match x_115 {
+                                                        let x_116: u8 = l_CapdagCli_dCliWorld_dfullScreen(x_1);
+                                                        match x_116 {
                                                             0 => {
-                                                                let x_116: u8 = l_List_disEmpty_d__redArg(x_111);
-                                                                rt::lean_dec(x_111);
-                                                                match x_116 {
+                                                                let x_117: u8 = l_List_disEmpty_d__redArg(x_112);
+                                                                rt::lean_dec(x_112);
+                                                                match x_117 {
                                                                     0 => {
-                                                                        let x_117: Obj = l_CapdagCli_dCliWorld_dnoScreen(x_1);
-                                                                        let x_118: Obj = rt::lean_box(9);
-                                                                        let x_119: u8 = l_CapdagCli_dinstDecidableEqCliRefusal_ddecEq(x_117, x_118);
-                                                                        rt::lean_dec(x_117);
-                                                                        match x_119 {
+                                                                        let x_118: Obj = l_CapdagCli_dCliWorld_dnoScreen(x_1);
+                                                                        let x_119: Obj = rt::lean_box(9);
+                                                                        let x_120: u8 = l_CapdagCli_dinstDecidableEqCliRefusal_ddecEq(x_118, x_119);
+                                                                        rt::lean_dec(x_118);
+                                                                        match x_120 {
                                                                             0 => {
-                                                                                let x_120: Obj = l_CapdagCli_dcommand_d__closed__11();
-                                                                                let x_121: Obj = l_CapdagCli_dshowing(x_112, x_110, x_120);
-                                                                                return x_121;
+                                                                                let x_121: Obj = l_CapdagCli_dcommand_d__closed__11();
+                                                                                let x_122: Obj = l_CapdagCli_dshowing(x_113, x_111, x_121);
+                                                                                return x_122;
                                                                             }
                                                                             _ => {
-                                                                                let x_122: Obj = l_CapdagCli_dcommand_d__closed__12();
-                                                                                let x_123: Obj = l_CapdagCli_dshowing(x_112, x_110, x_122);
-                                                                                return x_123;
+                                                                                let x_123: Obj = l_CapdagCli_dcommand_d__closed__12();
+                                                                                let x_124: Obj = l_CapdagCli_dshowing(x_113, x_111, x_123);
+                                                                                return x_124;
                                                                             }
                                                                         }
                                                                     }
                                                                     _ => {
-                                                                        let x_124: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                                        let x_125: Obj = l_CapdagCli_dshowing(x_112, x_110, x_124);
-                                                                        return x_125;
+                                                                        let x_125: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                                        let x_126: Obj = l_CapdagCli_dshowing(x_113, x_111, x_125);
+                                                                        return x_126;
                                                                     }
                                                                 }
                                                             }
                                                             _ => {
-                                                                rt::lean_dec(x_111);
-                                                                let x_126: Obj = l_CapdagCli_dcommand_d__closed__4();
-                                                                let x_127: Obj = l_CapdagCli_dshowing(x_112, x_110, x_126);
-                                                                return x_127;
+                                                                rt::lean_dec(x_112);
+                                                                let x_127: Obj = l_CapdagCli_dcommand_d__closed__4();
+                                                                let x_128: Obj = l_CapdagCli_dshowing(x_113, x_111, x_127);
+                                                                return x_128;
                                                             }
                                                         }
                                                     }
                                                     _ => {
-                                                        rt::lean_dec(x_111);
-                                                        let x_128: Obj = rt::lean_ctor_get(x_114, 0);
-                                                        let mut x_130: Obj;
-                                                        let mut x_131: u8;
-                                                        'b129: {
-                                                            let x_137: u8 = (!rt::lean_is_exclusive(x_114)) as u8;
-                                                            match x_137 {
+                                                        rt::lean_dec(x_112);
+                                                        let x_129: Obj = rt::lean_ctor_get(x_115, 0);
+                                                        let mut x_131: Obj;
+                                                        let mut x_132: u8;
+                                                        'b130: {
+                                                            let x_138: u8 = (!rt::lean_is_exclusive(x_115)) as u8;
+                                                            match x_138 {
                                                                 0 => {
-                                                                    x_130 = x_114;
-                                                                    x_131 = x_137;
-                                                                    break 'b129;
+                                                                    x_131 = x_115;
+                                                                    x_132 = x_138;
+                                                                    break 'b130;
                                                                 }
                                                                 _ => {
-                                                                    rt::lean_inc(x_128);
-                                                                    rt::lean_dec(x_114);
-                                                                    x_130 = rt::lean_box(0);
-                                                                    x_131 = x_137;
-                                                                    break 'b129;
+                                                                    rt::lean_inc(x_129);
+                                                                    rt::lean_dec(x_115);
+                                                                    x_131 = rt::lean_box(0);
+                                                                    x_132 = x_138;
+                                                                    break 'b130;
                                                                 }
                                                             }
                                                         }
-                                                        let mut x_133: Obj;
-                                                        'b132: {
-                                                            match x_131 {
+                                                        let mut x_134: Obj;
+                                                        'b133: {
+                                                            match x_132 {
                                                                 0 => {
-                                                                    rt::lean_ctor_set_tag(x_130, 25);
-                                                                    x_133 = x_130;
-                                                                    break 'b132;
+                                                                    rt::lean_ctor_set_tag(x_131, 25);
+                                                                    x_134 = x_131;
+                                                                    break 'b133;
                                                                 }
                                                                 _ => {
-                                                                    let x_136: Obj = rt::lean_alloc_ctor(25, 1, 0);
-                                                                    rt::lean_ctor_set(x_136, 0, x_128);
-                                                                    x_133 = x_136;
-                                                                    break 'b132;
+                                                                    let x_137: Obj = rt::lean_alloc_ctor(25, 1, 0);
+                                                                    rt::lean_ctor_set(x_137, 0, x_129);
+                                                                    x_134 = x_137;
+                                                                    break 'b133;
                                                                 }
                                                             }
                                                         }
-                                                        let x_134: Obj = rt::lean_alloc_ctor(0, 1, 0);
-                                                        rt::lean_ctor_set(x_134, 0, x_133);
-                                                        let x_135: Obj = l_CapdagCli_dshowing(x_112, x_110, x_134);
-                                                        rt::lean_dec_ref(x_134);
-                                                        return x_135;
+                                                        let x_135: Obj = rt::lean_alloc_ctor(0, 1, 0);
+                                                        rt::lean_ctor_set(x_135, 0, x_134);
+                                                        let x_136: Obj = l_CapdagCli_dshowing(x_113, x_111, x_135);
+                                                        rt::lean_dec_ref(x_135);
+                                                        return x_136;
                                                     }
                                                 }
                                             }
                                             7 => {
-                                                let x_138: Obj = rt::lean_ctor_get(x_3, 0);
-                                                rt::lean_inc_ref(x_138);
-                                                let x_139: u8 = rt::lean_ctor_get_uint8(x_138, ::core::mem::size_of::<usize>());
-                                                match x_139 {
+                                                let x_139: Obj = rt::lean_ctor_get(x_3, 0);
+                                                rt::lean_inc_ref(x_139);
+                                                let x_140: u8 = rt::lean_ctor_get_uint8(x_139, ::core::mem::size_of::<usize>());
+                                                match x_140 {
                                                     0 => {
-                                                        let x_140: Obj = rt::lean_ctor_get(x_3, 1);
-                                                        rt::lean_inc(x_140);
-                                                        let x_141: Obj = rt::lean_ctor_get(x_3, 2);
-                                                        rt::lean_inc_ref(x_141);
+                                                        let x_141: Obj = rt::lean_ctor_get(x_3, 1);
+                                                        rt::lean_inc(x_141);
+                                                        let x_142: Obj = rt::lean_ctor_get(x_3, 2);
+                                                        rt::lean_inc_ref(x_142);
                                                         rt::lean_dec_ref(x_3);
-                                                        let x_142: Obj = l_CapdagCli_dviewLine(x_138, x_140);
-                                                        let x_143: Obj = l_CapdagCli_dmissingThing(x_141, x_38, x_142);
-                                                        match rt::lean_obj_tag(x_143) {
+                                                        let x_143: Obj = l_CapdagCli_dviewLine(x_139, x_141);
+                                                        let x_144: Obj = l_CapdagCli_dmissingThing(x_142, x_38, x_143);
+                                                        match rt::lean_obj_tag(x_144) {
                                                             0 => {
-                                                                x_20 = x_143;
+                                                                x_20 = x_144;
                                                                 break 'b19;
                                                             }
                                                             _ => {
-                                                                let x_144: Obj = rt::lean_ctor_get(x_143, 0);
-                                                                rt::lean_inc(x_144);
-                                                                let x_145: Obj = rt::lean_box(19);
-                                                                let x_146: u8 = l_CapdagCli_dinstDecidableEqRefusal_ddecEq(x_144, x_145);
-                                                                rt::lean_dec(x_144);
-                                                                match x_146 {
+                                                                let x_145: Obj = rt::lean_ctor_get(x_144, 0);
+                                                                rt::lean_inc(x_145);
+                                                                let x_146: Obj = rt::lean_box(19);
+                                                                let x_147: u8 = l_CapdagCli_dinstDecidableEqRefusal_ddecEq(x_145, x_146);
+                                                                rt::lean_dec(x_145);
+                                                                match x_147 {
                                                                     0 => {
-                                                                        x_20 = x_143;
+                                                                        x_20 = x_144;
                                                                         break 'b19;
                                                                     }
                                                                     _ => {
-                                                                        rt::lean_dec_ref(x_143);
+                                                                        rt::lean_dec_ref(x_144);
                                                                         break 'b14;
                                                                     }
                                                                 }
@@ -3875,157 +3878,157 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                                         }
                                                     }
                                                     _ => {
+                                                        rt::lean_dec_ref(x_139);
                                                         rt::lean_dec_ref(x_3);
-                                                        rt::lean_dec_ref(x_138);
-                                                        let x_147: Obj = l_CapdagCli_dcommand_d__closed__13();
-                                                        return x_147;
+                                                        let x_148: Obj = l_CapdagCli_dcommand_d__closed__13();
+                                                        return x_148;
                                                     }
                                                 }
                                             }
                                             9 => {
-                                                let x_148: Obj = rt::lean_ctor_get(x_3, 0);
-                                                rt::lean_inc(x_148);
+                                                let x_149: Obj = rt::lean_ctor_get(x_3, 0);
+                                                rt::lean_inc(x_149);
                                                 rt::lean_dec_ref(x_3);
-                                                match rt::lean_obj_tag(x_148) {
+                                                match rt::lean_obj_tag(x_149) {
                                                     2 => {
-                                                        let x_149: u8 = rt::lean_ctor_get_uint8(x_148, 0);
-                                                        rt::lean_dec_ref(x_148);
-                                                        let x_150: Obj = rt::lean_box(9);
-                                                        let x_151: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        let x_152: Obj = l_CapdagCli_ddecide__(x_1, x_150, x_149, x_151);
-                                                        return x_152;
-                                                    }
-                                                    3 => {
-                                                        let x_153: Obj = l_CapdagCli_dcommand_d__closed__10();
+                                                        let x_150: u8 = rt::lean_ctor_get_uint8(x_149, 0);
+                                                        rt::lean_dec_ref(x_149);
+                                                        let x_151: Obj = rt::lean_box(9);
+                                                        let x_152: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        let x_153: Obj = l_CapdagCli_ddecide__(x_1, x_151, x_150, x_152);
                                                         return x_153;
                                                     }
+                                                    3 => {
+                                                        let x_154: Obj = l_CapdagCli_dcommand_d__closed__10();
+                                                        return x_154;
+                                                    }
                                                     _ => {
-                                                        rt::lean_dec(x_148);
+                                                        rt::lean_dec(x_149);
                                                         break 'b6;
                                                     }
                                                 }
                                             }
                                             10 => {
-                                                let x_154: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                let x_155: u8 = rt::lean_ctor_get_uint8(x_3, 0);
                                                 rt::lean_dec_ref(x_3);
-                                                match x_154 {
+                                                match x_155 {
                                                     0 => {
-                                                        let x_155: Obj = l_CapdagCli_dcommand_d__closed__14();
-                                                        return x_155;
+                                                        let x_156: Obj = l_CapdagCli_dcommand_d__closed__14();
+                                                        return x_156;
                                                     }
                                                     _ => {
-                                                        let x_156: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        return x_156;
+                                                        let x_157: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        return x_157;
                                                     }
                                                 }
                                             }
                                             12 => {
-                                                let x_157: u8 = rt::lean_ctor_get_uint8(x_3, 0);
-                                                match x_157 {
+                                                let x_158: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                match x_158 {
                                                     0 => {
-                                                        let x_158: u8 = rt::lean_ctor_get_uint8(x_3, 1);
+                                                        let x_159: u8 = rt::lean_ctor_get_uint8(x_3, 1);
                                                         rt::lean_dec_ref(x_3);
-                                                        let x_159: Obj = l_CapdagCli_dChoices_dctorIdx(x_158);
-                                                        let x_160: Obj = l_CapdagCli_dcommand_d__closed__7();
-                                                        let x_161: u8 = l_Nat_ddecEq(x_159, x_160);
-                                                        rt::lean_dec(x_159);
-                                                        match x_161 {
+                                                        let x_160: Obj = l_CapdagCli_dChoices_dctorIdx(x_159);
+                                                        let x_161: Obj = l_CapdagCli_dcommand_d__closed__7();
+                                                        let x_162: u8 = l_Nat_ddecEq(x_160, x_161);
+                                                        rt::lean_dec(x_160);
+                                                        match x_162 {
                                                             0 => {
-                                                                let x_162: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                                return x_162;
+                                                                let x_163: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                                return x_163;
                                                             }
                                                             _ => {
-                                                                let x_163: Obj = l_CapdagCli_dcommand_d__closed__16();
-                                                                return x_163;
+                                                                let x_164: Obj = l_CapdagCli_dcommand_d__closed__16();
+                                                                return x_164;
                                                             }
                                                         }
                                                     }
                                                     _ => {
-                                                        let x_164: u8 = rt::lean_ctor_get_uint8(x_3, 1);
+                                                        let x_165: u8 = rt::lean_ctor_get_uint8(x_3, 1);
                                                         rt::lean_dec_ref(x_3);
-                                                        let x_165: Obj = rt::lean_box(8);
-                                                        let x_166: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        let x_167: Obj = l_CapdagCli_ddecide__(x_1, x_165, x_164, x_166);
-                                                        return x_167;
+                                                        let x_166: Obj = rt::lean_box(8);
+                                                        let x_167: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        let x_168: Obj = l_CapdagCli_ddecide__(x_1, x_166, x_165, x_167);
+                                                        return x_168;
                                                     }
                                                 }
                                             }
                                             13 => {
-                                                let x_168: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                let x_169: u8 = rt::lean_ctor_get_uint8(x_3, 0);
                                                 rt::lean_dec_ref(x_3);
-                                                match x_168 {
+                                                match x_169 {
                                                     0 => {
-                                                        let x_169: Obj = l_CapdagCli_dcommand_d__closed__17();
-                                                        return x_169;
+                                                        let x_170: Obj = l_CapdagCli_dcommand_d__closed__17();
+                                                        return x_170;
                                                     }
                                                     _ => {
-                                                        let x_170: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        return x_170;
+                                                        let x_171: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        return x_171;
                                                     }
                                                 }
                                             }
                                             14 => {
-                                                let x_171: u8 = rt::lean_ctor_get_uint8(x_3, 0);
-                                                match x_171 {
+                                                let x_172: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                match x_172 {
                                                     0 => {
                                                         rt::lean_dec_ref(x_3);
-                                                        let x_172: Obj = l_CapdagCli_dcommand_d__closed__17();
-                                                        return x_172;
+                                                        let x_173: Obj = l_CapdagCli_dcommand_d__closed__17();
+                                                        return x_173;
                                                     }
                                                     _ => {
-                                                        let x_173: u8 = rt::lean_ctor_get_uint8(x_3, 1);
+                                                        let x_174: u8 = rt::lean_ctor_get_uint8(x_3, 1);
                                                         rt::lean_dec_ref(x_3);
-                                                        match x_173 {
+                                                        match x_174 {
                                                             0 => {
-                                                                let x_174: Obj = l_CapdagCli_dcommand_d__closed__18();
-                                                                return x_174;
+                                                                let x_175: Obj = l_CapdagCli_dcommand_d__closed__18();
+                                                                return x_175;
                                                             }
                                                             _ => {
-                                                                let x_175: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                                return x_175;
+                                                                let x_176: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                                return x_176;
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
                                             17 => {
-                                                let x_176: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                let x_177: u8 = rt::lean_ctor_get_uint8(x_3, 0);
                                                 rt::lean_dec_ref(x_3);
-                                                match x_176 {
+                                                match x_177 {
                                                     0 => {
-                                                        let x_177: Obj = l_CapdagCli_dcommand_d__closed__19();
-                                                        return x_177;
+                                                        let x_178: Obj = l_CapdagCli_dcommand_d__closed__19();
+                                                        return x_178;
                                                     }
                                                     _ => {
-                                                        let x_178: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        return x_178;
+                                                        let x_179: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        return x_179;
                                                     }
                                                 }
                                             }
                                             19 => {
-                                                let x_179: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                let x_180: u8 = rt::lean_ctor_get_uint8(x_3, 0);
                                                 rt::lean_dec_ref(x_3);
-                                                match x_179 {
+                                                match x_180 {
                                                     0 => {
-                                                        let x_180: Obj = l_CapdagCli_dcommand_d__closed__20();
-                                                        return x_180;
+                                                        let x_181: Obj = l_CapdagCli_dcommand_d__closed__20();
+                                                        return x_181;
                                                     }
                                                     _ => {
-                                                        let x_181: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                                        return x_181;
+                                                        let x_182: Obj = l_CapdagCli_dcommand_d__closed__1();
+                                                        return x_182;
                                                     }
                                                 }
                                             }
                                             20 => {
-                                                let x_182: u8 = rt::lean_ctor_get_uint8(x_3, 0);
-                                                rt::lean_dec_ref(x_3);
-                                                x_9 = x_182;
-                                                break 'b8;
-                                            }
-                                            21 => {
                                                 let x_183: u8 = rt::lean_ctor_get_uint8(x_3, 0);
                                                 rt::lean_dec_ref(x_3);
                                                 x_9 = x_183;
+                                                break 'b8;
+                                            }
+                                            21 => {
+                                                let x_184: u8 = rt::lean_ctor_get_uint8(x_3, 0);
+                                                rt::lean_dec_ref(x_3);
+                                                x_9 = x_184;
                                                 break 'b8;
                                             }
                                             _ => {
@@ -4035,12 +4038,12 @@ pub(crate) unsafe extern "C" fn l_CapdagCli_dcommand(x_1: Obj, x_2: Obj, x_3: Ob
                                         }
                                     }
                                     let x_42: u8 = l_CapdagCli_dCliWorld_dcanAsk(x_1);
-                                    let x_43: Obj = l_CapdagCli_dresolveC(x_42, x_40, x_38, x_41);
+                                    let x_43: Obj = l_CapdagCli_dresolveC(x_42, x_41, x_38, x_40);
                                     let x_44: Obj = l_CapdagCli_dofLine(x_43);
                                     return x_44;
                                 }
                                 let x_35: Obj = l_CapdagCli_dcommand_d__closed__1();
-                                let x_36: Obj = l_CapdagCli_dshowing(x_34, x_33, x_35);
+                                let x_36: Obj = l_CapdagCli_dshowing(x_33, x_34, x_35);
                                 return x_36;
                             }
                             let x_31: Obj = l_CapdagCli_dcommand_d__closed__5();

@@ -304,6 +304,8 @@ async fn named(ctx: &Ctx, world: &mut World<'_>, state: &RunState, positionals: 
         f::Stage::Capability | f::Stage::Model => {
             CliError::failed("a line named a choice of another command").hint("report it")
         }
+        f::Stage::Live { .. } => CliError::failed("a live source its input does not take was named as a choice")
+            .hint("report it: a live source that does not fit has no way, and nothing to choose"),
     }
 }
 
@@ -367,6 +369,29 @@ fn nothing(world: &World<'_>, state: &RunState, positionals: &[f::Positional], s
                 }
             }
             error.hint("report it: its type lists no values")
+        }
+        f::Stage::Live { r } => {
+            let r = index(r);
+            let reference = &world.tables.lives[r];
+            let content =
+                world.live_media(r).map(|media| format!(" ({})", names::media(&world.registry, media))).unwrap_or_default();
+            let named_to = state.line.named.iter().find_map(|(j, value)| match value {
+                f::Value::Live { r: given } if index(given) == r => Some(index(j)),
+                _ => None,
+            });
+            let resolved = machine_of(world, state, positionals).and_then(|m| world.machine(m)).and_then(MachineFacts::resolved);
+            let input = match (named_to, resolved) {
+                (Some(j), Some(resolved)) => resolved.inputs.get(j).map(|input| input.name.clone()),
+                _ => None,
+            };
+            let mut error = CliError::failed(match input {
+                Some(name) => format!("the live source {reference}{content} is not what the input {name} takes"),
+                None => format!("the live source {reference}{content} is not what this machine takes"),
+            });
+            if let Some(m) = machine_of(world, state, positionals) {
+                error = error.context(format!("its inputs: {}", inputs_said(world, m)));
+            }
+            error.hint("name it to an input that takes what it gives: --live <input>=<urn>; capdag check <machine> shows what each input takes")
         }
         f::Stage::Provider => {
             let mut error = CliError::failed("the run needs a cartridge no registry provides");

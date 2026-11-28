@@ -1,0 +1,32 @@
+{
+  "title": "A live source named to an input that does not take what it gives ends the line before any device opens",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "[doc -> disbind-pdf -> pages]",
+    "--live",
+    "doc=media:audio;live;microphone"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": [
+          "error: the live source media:audio;live;microphone (",
+          ") is not what the input doc takes",
+          "its inputs: doc (pdf)",
+          "hint: name it to an input that takes what it gives: --live <input>=<urn>"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 1,
+        "stdout": [
+          "\"type\":\"error\"",
+          "is not what the input doc takes"
+        ]
+      }
+    }
+  }
+}

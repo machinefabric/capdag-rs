@@ -65,6 +65,7 @@ pub fn no_world(terminal: Terminal) -> World {
         planned_input: lungo::LeanClosure::from_fn(|_: lungo::Nat, _: Positional| nat(0)),
         inputs: lungo::LeanClosure::from_fn(|_: lungo::Nat| nat(0)),
         fit: lungo::LeanClosure::from_fn(|_: lungo::Nat, _: lungo::Nat| list(Vec::new())),
+        live_fit: lungo::LeanClosure::from_fn(|_: lungo::Nat, _: lungo::Nat| list(Vec::new())),
         options: lungo::LeanClosure::from_fn(|_: lungo::Nat| nat(0)),
         option_shared: lungo::LeanClosure::from_fn(|_: lungo::Nat, _: lungo::Nat| false),
         option_choices: lungo::LeanClosure::from_fn(|_: lungo::Nat, _: lungo::Nat| Choices::Free),

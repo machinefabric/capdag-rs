@@ -1650,6 +1650,18 @@
     "renamed": true
   },
   {
+    "lean_name": "CapdagCli.Stage.live",
+    "kind": "constructor",
+    "rust_path": "Stage::Live",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.Stage.live.r",
+    "kind": "field",
+    "rust_path": "Stage::Live.r",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Terminal.mk",
     "kind": "constructor",
     "rust_path": "Terminal",
@@ -1954,6 +1966,12 @@
     "kind": "field",
     "rust_path": "World.fit",
     "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.World.liveFit",
+    "kind": "field",
+    "rust_path": "World.live_fit",
+    "renamed": true
   },
   {
     "lean_name": "CapdagCli.World.options",

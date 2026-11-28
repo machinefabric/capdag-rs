@@ -558,6 +558,10 @@ async fn answer(ctx: &Ctx, world: &mut World<'_>, positionals: &[f::Positional],
             return Err(CliError::failed("a run was asked a question of another command")
                 .hint("report it: a run asks only what its line leaves open"))
         }
+        f::Stage::Live { .. } => {
+            return Err(CliError::failed("a run was asked about a live source its input does not take")
+                .hint("report it: a live source that does not fit has no way, and nothing to ask"))
+        }
     };
     let option_answer = matches!(s, f::Stage::Option { .. });
     let given_line = {

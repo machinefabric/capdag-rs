@@ -977,6 +977,10 @@ impl<'a> World<'a> {
             list(c.fit(index(&m), index(&p)).into_iter().map(nat))
         });
         let c = s.clone();
+        let live_fit = lungo::LeanClosure::from_fn(move |m: lungo::Nat, r: lungo::Nat| {
+            list(c.live_fit(index(&m), index(&r)).into_iter().map(nat))
+        });
+        let c = s.clone();
         let options =
             lungo::LeanClosure::from_fn(move |m: lungo::Nat| nat(c.resolved(index(&m)).map(|r| r.options.len()).unwrap_or(0)));
         let c = s.clone();
@@ -1021,6 +1025,7 @@ impl<'a> World<'a> {
             planned_input,
             inputs: inputs_of,
             fit,
+            live_fit,
             options,
             option_shared,
             option_choices,
@@ -1118,6 +1123,29 @@ impl Snapshot {
             return Vec::new();
         };
         nearest_inputs(media, resolved.inputs.iter().enumerate().map(|(j, input)| (j, &input.media_urn)))
+    }
+
+    /// The inputs of machine `m` what live source `r` gives fits: those the
+    /// content the fabric pairs with it satisfies.
+    fn live_fit(&self, m: usize, r: usize) -> Vec<usize> {
+        let Some(resolved) = self.resolved(m) else {
+            return Vec::new();
+        };
+        let content = match self.lives.get(&r) {
+            Some(Some(content)) => content,
+            Some(None) => return Vec::new(),
+            None => {
+                self.want(Want::Live(r));
+                return Vec::new();
+            }
+        };
+        resolved
+            .inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, input)| content.satisfies(&input.media_urn))
+            .map(|(j, _)| j)
+            .collect()
     }
 
     /// The `k`th machine planning found, by its number in the tables.
