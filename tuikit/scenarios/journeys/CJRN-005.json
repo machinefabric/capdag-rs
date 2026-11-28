@@ -1,9 +1,34 @@
 {
-  "title": "See what a file can become",
+  "title": "See what a file can become, running nothing",
   "world": "ordinary",
-  "args": ["plan", "report.pdf"],
+  "args": [
+    "run",
+    "report.pdf",
+    "--dry-run"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 0, "stdout": ["1 pdf can become:", "page-text", "txt"] } },
-    "json": { "expect": { "exit": 0, "stdout": ["\"type\":\"input\"", "\"type\":\"target\"", "\"alias\":\"page-text\""] } }
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "1 pdf can become:",
+          "page-text",
+          "txt"
+        ],
+        "shown": [
+          "The machines that make one: capdag run report.pdf --to"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"input\"",
+          "\"type\":\"target\"",
+          "\"alias\":\"page-text\""
+        ]
+      }
+    }
   }
 }

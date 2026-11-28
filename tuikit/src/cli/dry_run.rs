@@ -1,218 +1,188 @@
-//! `capdag plan INPUT… [--from TYPE] [--to TYPE…] [--save FILE [--force]]`:
-//! what inputs can become, the machines that make it, and saving one.
+//! `capdag run … --dry-run`: everything the run would decide, decided, and
+//! nothing run.
 //!
-//! Without `--to` it says what the inputs can become. With it, it lists the
-//! machines that make it — every machine whose result is inside it, the
-//! nearest to it first — each in alias form, with its step count and whether
-//! a step runs a model. With `--save` it writes the one it settles on: asked
-//! at a terminal when several make it, named in a script. A plan never runs
-//! anything; a machine is run with `capdag run`. What each line comes to is
-//! the model's decision (`planVerdict`).
+//! A dry run settles its line as the run does — asking at a terminal what the
+//! run would ask — and installs nothing and runs nothing. It then says what
+//! the run would do, as the run decides it: the machine it would run, alone on
+//! stdout so it can be kept in a file, with the line that runs it on stderr;
+//! or, where nobody can be asked, what is still open — what the inputs can
+//! become, the machines that make what `--to` names, or the input or option
+//! a value is wanted for — and exits 0. What a line comes to is the model's
+//! decision (`dryRun`).
 
-use std::path::PathBuf;
-
-use super::ask::{self, Answered, Choice, Question};
+use super::ask::{self, Choice, Question};
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
-use super::formal::{self as f, index, list, nat};
-use super::inspect::Inspection;
-use super::line::{self, Extras, PlanFacts, PlanningFlags, RunState, Tables, World};
+use super::formal::{self as f, index};
+use super::line::{self, MachineFacts, PlanFacts, RunState, World};
 use super::names;
+use super::run;
 use super::term::{emit_record, outln};
 use capdag::fabric::registry::FabricRegistry;
 use capdag::planner as p;
 
-#[derive(Debug, clap::Args)]
-pub struct Args {
-    /// What to plan from: files, directories or globs (their files, sorted), live
-    /// sources, or - (stdin)
-    #[arg(value_name = "INPUT")]
-    pub inputs: Vec<String>,
-    /// What to make: a media alias (txt, png), an extension or a media URN; several name
-    /// what one machine makes together (repeatable)
-    #[arg(long, value_name = "TYPE")]
-    pub to: Vec<String>,
-    /// What - holds
-    #[arg(long, value_name = "TYPE")]
-    pub from: Option<String>,
-    /// Write the machine that makes what --to names to this file
-    #[arg(long, value_name = "FILE")]
-    pub save: Option<PathBuf>,
-    /// Replace the --save file when it is there
-    #[arg(long)]
-    pub force: bool,
-    #[command(flatten)]
-    pub planning: PlanningFlags,
-}
-
-impl Args {
-    /// Whether the line reads stdin as data.
-    pub fn reads_stdin(&self) -> bool {
-        self.inputs.iter().any(|a| a == "-")
-    }
-}
-
-/// A `plan` line that gives nothing: the stand-in for a line's own facts.
-pub fn no_plan_line() -> f::PlanLine {
-    f::PlanLine { inputs: list(Vec::new()), has_from: false, targets: nat(0), save: false, force: false }
-}
-
-/// A plan's inputs, read: `-`, live sources, and the files each path names.
-fn read_inputs(tables: &mut Tables, given: &[String]) -> CliResult<Vec<f::Positional>> {
-    let mut inputs = Vec::new();
-    for token in given {
-        if token == "-" {
-            inputs.push(f::Positional::Stdin);
-        } else if line::is_live_urn(token) {
-            inputs.push(f::Positional::Live { r: nat(tables.add_live(token.clone())) });
-        } else {
-            for p in line::files_of(tables, token)? {
-                inputs.push(f::Positional::Path { p: nat(p) });
-            }
+/// What a dry run answers once its line is settled as far as it can be here:
+/// what the run would do with it, decided as the run decides it.
+pub async fn report(
+    ctx: &Ctx,
+    world: &mut World<'_>,
+    state: &RunState,
+    positionals: &[f::Positional],
+    planning_flags: bool,
+    args: &run::Args,
+) -> CliResult<Exit> {
+    say_inputs(ctx, world, positionals);
+    let line = state.line.clone();
+    let cli_world = ctx.cli_world(false);
+    let globals = ctx.globals();
+    let verdict = world
+        .settle(positionals, |w| {
+            f::cli(
+                cli_world.clone(),
+                f::Invocation::Command {
+                    g: globals.clone(),
+                    c: f::Command::Run { l: line.clone(), planning_flags, mode: f::RunMode::Run, w },
+                },
+            )
+        })
+        .await?;
+    // The inputs as they were typed, for the lines it says to type next: a
+    // line that lists what to make or the machines has no machine of its own.
+    let typed: Vec<String> = args.args.iter().chain(args.after.iter()).cloned().collect();
+    match &verdict {
+        f::CliVerdict::Is { v: f::Verdict::Runs } => settled(ctx, world, state, positionals, args).await,
+        f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::Provider } }
+        | f::CliVerdict::Is { v: f::Verdict::Names { s: f::Stage::Provider } } => {
+            let exit = settled(ctx, world, state, positionals, args).await?;
+            say_provider(ctx, world, state, positionals).await?;
+            Ok(exit)
         }
+        f::CliVerdict::Is { v: f::Verdict::Names { s: f::Stage::Target } } => {
+            let plan = world.plan(positionals).cloned().expect("what to make is named once the inputs are planned");
+            print_targets(ctx, &world.registry, &plan, &typed);
+            Ok(Exit::Ok)
+        }
+        f::CliVerdict::Is { v: f::Verdict::Names { s: f::Stage::Machine } } => {
+            let plan = world.plan(positionals).cloned().expect("the machines are named once they are planned");
+            for excluded in &plan.excluded {
+                say_excluded(ctx, excluded);
+            }
+            let mut made = Vec::with_capacity(world.extras.to.len());
+            for token in &world.extras.to {
+                let media = line::media_type(&world.registry, token).await?.expect("the model refuses a --to that is no type");
+                made.push(names::media(&world.registry, &media));
+            }
+            print_machines(ctx, &plan, &made.join(", "), &typed);
+            Ok(Exit::Ok)
+        }
+        f::CliVerdict::Is { v: f::Verdict::Names { .. } } => open(ctx, world, state, positionals, &verdict).await,
+        other => Err(CliError::failed(format!("a dry run came to answers, and the run it stands for to {other:?}"))
+            .hint("report it: a dry run answers where the run runs, names a choice or asks for a cartridge")),
     }
-    Ok(inputs)
 }
 
-/// The state a plan's verdict is said with: a line of its inputs and no
-/// machine.
-fn said_state(inputs: &[f::Positional]) -> RunState {
-    RunState {
-        line: f::RunLine { inputs: list(inputs.to_vec()), ..f::no_run_line() },
-        texts: Vec::new(),
-        arg_values: Vec::new(),
-        unknown_inputs: Vec::new(),
-        unknown_options: Vec::new(),
-    }
-}
-
-pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
-    let registry = ctx.registry().await?;
-    let mut tables = Tables::default();
-    let inputs = read_inputs(&mut tables, &args.inputs)?;
-    let extras = Extras { to: args.to.clone(), from: args.from.clone(), selector: None, output: None };
-    let inspection = Inspection::new(ctx, super::run::inspection_runtime(ctx, &registry)?, registry.clone());
-    let mut world = World::new(ctx, registry.clone(), inspection, tables, extras, args.planning.clone());
-    world.learn_line(&[]).await?;
-    let save_there = args.save.as_ref().is_some_and(|path| path.exists());
-    let mut chosen: Option<usize> = None;
-    loop {
-        let line = f::PlanLine {
-            inputs: list(inputs.clone()),
-            has_from: world.extras.from.is_some(),
-            targets: nat(world.extras.to.len()),
-            save: args.save.is_some(),
-            force: args.force,
-        };
-        let verdict = world
-            .settle(&inputs, |w| ctx.decide(f::Command::Plan { l: line.clone(), w, save_there }, false))
-            .await?;
-        match verdict {
-            f::CliVerdict::Is { v: f::Verdict::Answers } => break,
-            f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::StdinType } } => {
-                let typed = loop {
-                    match ask::value(ctx, &ask::ValueQuestion::stdin_type()).await? {
-                        Answered::Declined => return Err(ask::declined()),
-                        Answered::Given(text) => {
-                            if line::media_type(&registry, &text).await?.is_some() {
-                                break text;
-                            }
-                            ask::say_retry(ctx, &format!("'{text}' names no media type: see capdag caps"));
-                        }
-                    }
-                };
-                world.extras.from = Some(typed);
-                world.learn_types().await?;
-            }
-            // Which machine to save: once it is chosen, saving it is what is
-            // left of the line.
-            f::CliVerdict::Is { v: f::Verdict::Asks { s: f::Stage::Machine } } => {
-                let plan = world.plan(&inputs).cloned().expect("the machine is asked once it is planned");
-                let choices = machine_choices(&plan);
-                match ask::pick(ctx, &Question { what: "the machine to save".into(), flag: String::new() }, &choices).await? {
-                    Answered::Given(k) => {
-                        chosen = Some(k);
-                        break;
-                    }
-                    Answered::Declined => return Err(ask::declined()),
-                }
-            }
-            f::CliVerdict::Is { v: f::Verdict::Names { s: f::Stage::Machine } } => {
-                let plan = world.plan(&inputs).cloned().expect("the machines are named once they are planned");
-                let error = ask::named(
-                    ctx,
-                    &Question { what: "the machine to save".into(), flag: String::new() },
-                    &machine_choices(&plan),
-                );
-                return Err(super::say::with_exit(
-                    error.hint(format!(
-                        "narrow what --to names or the planning flags until one machine makes it, or write one to {}",
-                        args.save.as_ref().map(|p| p.display().to_string()).unwrap_or_default()
-                    )),
-                    &verdict,
-                ));
-            }
-            f::CliVerdict::Refused { r: f::CliRefusal::Line { r: f::Refusal::SaveExists } } => {
-                let path = args.save.as_ref().expect("a --save file is there").display().to_string();
-                return Err(super::say::with_exit(
-                    CliError::usage(format!("{path}: {}", f::refusal::says(f::Refusal::SaveExists))),
-                    &verdict,
-                ));
-            }
-            other => {
-                return Err(super::say::line_verdict_error(ctx, &mut world, &said_state(&inputs), &inputs, &other).await);
-            }
-        }
-    }
-    say_inputs(ctx, &world, &inputs);
-    let plan = world.plan(&inputs).cloned();
-    if world.extras.to.is_empty() {
-        let plan = plan.expect("what the inputs can become is answered once they are planned");
-        print_targets(ctx, &registry, &plan, &args.inputs);
-        return Ok(Exit::Ok);
-    }
-    let plan = plan.expect("the machines are listed once they are planned");
-    for excluded in &plan.excluded {
-        say_excluded(ctx, excluded);
-    }
-    let Some(save) = &args.save else {
-        let mut made = Vec::with_capacity(world.extras.to.len());
-        for token in &world.extras.to {
-            let media = line::media_type(&registry, token).await?.expect("the model refuses a --to that is no type");
-            made.push(names::media(&registry, &media));
-        }
-        print_machines(ctx, &plan, &made.join(", "), &world.extras.to, &args.inputs);
-        return Ok(Exit::Ok);
-    };
-    let k = chosen.unwrap_or(0);
-    let machine = &plan.described[k];
-    std::fs::write(save, format!("{}\n", machine.notation)).map_err(|e| {
-        CliError::failed(format!("the machine could not be saved to {}", save.display())).context(e.to_string())
-    })?;
-    if ctx.term.json {
-        emit_record(&serde_json::json!({ "type": "saved", "file": save.display().to_string(), "notation": machine.notation }));
-    } else {
-        eprintln!("Saved the machine to {}", save.display());
-        eprintln!(
-            "Run it: capdag run {}{}",
-            super::shell_word(&save.display().to_string()),
-            args.inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect::<String>()
-        );
-    }
+/// The machine the run would run: alone on stdout in alias form (under
+/// `--json` a `machine` record), and the line that runs it, asking nothing,
+/// on stderr (a `rerun` record).
+async fn settled(
+    ctx: &Ctx,
+    world: &mut World<'_>,
+    state: &RunState,
+    positionals: &[f::Positional],
+    args: &run::Args,
+) -> CliResult<Exit> {
+    let line = state.line.clone();
+    let rerun = world.settle(positionals, |w| f::rerun(w, line.clone())).await?;
+    let rerun_state = run::carried(world, state, rerun)?;
+    let m = index(&rerun_state.line.machine.as_ref().expect("the line that runs writes its machine").base);
+    say_machine(ctx, world, m)?;
+    run::say_rerun(ctx, world, &rerun_state, args, "Run it with")?;
     Ok(Exit::Ok)
 }
 
-/// Each planned machine as a choice: written as it is run.
-fn machine_choices(plan: &PlanFacts) -> Vec<Choice> {
-    plan.described
-        .iter()
-        .map(|d| Choice {
-            label: d.notation.replace('\n', " "),
-            detail: d.summary(),
-            urn: Some(d.canonical.clone()),
-            value: d.notation.replace('\n', ""),
-        })
-        .collect()
+/// A machine the line settled on, on stdout: in alias form, or under
+/// `--json` the record `--explain` gives.
+fn say_machine(ctx: &Ctx, world: &World<'_>, m: usize) -> CliResult<()> {
+    let resolved = world
+        .machine(m)
+        .and_then(MachineFacts::resolved)
+        .ok_or_else(|| CliError::failed("the machine the line settled on is not known").hint("report it"))?;
+    let entry = &world.tables.machines[m];
+    if ctx.term.json {
+        return super::explain::show(ctx, &world.registry, entry, resolved);
+    }
+    let aliased = names::machine(&world.registry, resolved.resolution.machine())
+        .map_err(|e| CliError::failed(format!("{} could not be written in alias form", entry.shown())).context(e))?;
+    outln!("{}", aliased.trim_end());
+    Ok(())
+}
+
+/// Which cartridge the run would ask to install, said: a dry run installs
+/// nothing.
+async fn say_provider(ctx: &Ctx, world: &mut World<'_>, state: &RunState, positionals: &[f::Positional]) -> CliResult<()> {
+    let line = state.line.clone();
+    let written = world.settle(positionals, |w| f::run_line::written(w, line.clone())).await?;
+    let m = index(&written.machine.as_ref().expect("the line that runs writes its machine").base);
+    world.resolve_machine(m).await?;
+    let (cap, providers) = world
+        .needs(m)
+        .and_then(|needs| needs.missing.iter().find(|(_, providers)| providers.len() > 1).cloned())
+        .ok_or_else(|| CliError::failed("a cartridge was to be chosen and none was known").hint("report it"))?;
+    let cap_name = names::cap_urn(&world.registry, &cap.to_string());
+    if ctx.term.json {
+        let choices: Vec<Choice> = providers
+            .iter()
+            .map(|id| Choice { label: id.clone(), detail: format!("provides {cap_name}"), urn: None, value: id.clone() })
+            .collect();
+        // The records only: what the run would ask is no error of the dry run.
+        let _ = ask::named(
+            ctx,
+            &Question { what: format!("the cartridge to install for {cap_name}"), flag: "capdag cartridge install ".into() },
+            &choices,
+        );
+    } else if ctx.term.verbosity >= 0 {
+        eprintln!("The run asks which cartridge to install for {cap_name}: {}", providers.join(", "));
+    }
+    Ok(())
+}
+
+/// What is still open where nobody can be asked: the machine, when the line
+/// has settled on one, as a settled one is said; then what it wants a value
+/// or a choice for, and the flag that gives it (`choice` records and an
+/// `open` record under `--json`).
+async fn open(
+    ctx: &Ctx,
+    world: &mut World<'_>,
+    state: &RunState,
+    positionals: &[f::Positional],
+    verdict: &f::CliVerdict,
+) -> CliResult<Exit> {
+    let line = state.line.clone();
+    let written = world.settle(positionals, |w| f::run_line::written(w, line.clone())).await?;
+    if let Some(machine) = &written.machine {
+        let m = index(&machine.base);
+        world.resolve_machine(m).await?;
+        if world.machine(m).and_then(MachineFacts::resolved).is_some() {
+            say_machine(ctx, world, m)?;
+        }
+    }
+    let wanted = super::say::line_verdict_error(ctx, world, state, positionals, verdict).await;
+    if ctx.term.json {
+        emit_record(&serde_json::json!({
+            "type": "open", "what": wanted.problem, "context": wanted.context, "hint": wanted.hint,
+        }));
+    } else if ctx.term.verbosity >= 0 {
+        let style = &ctx.term.style;
+        let mut said = format!("{} {}\n", style.hint("open:"), wanted.problem);
+        for line in &wanted.context {
+            said.push_str(&format!("  {line}\n"));
+        }
+        if let Some(hint) = &wanted.hint {
+            said.push_str(&format!("{} {hint}\n", style.hint("hint:")));
+        }
+        eprint!("{said}");
+    }
+    Ok(Exit::Ok)
 }
 
 /// Under `--json`, what each file planned from was detected as.
@@ -250,11 +220,11 @@ fn print_targets(ctx: &Ctx, registry: &FabricRegistry, plan: &PlanFacts, inputs:
     }
     let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
     let to = super::shell_word(&choices[0].value);
-    eprintln!("\nThe machines that make one: capdag plan{given} --to {to}");
+    eprintln!("\nThe machines that make one: capdag run{given} --to {to} --dry-run");
     eprintln!("Make one:                   capdag run{given} --to {to}");
 }
 
-fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, to: &[String], inputs: &[String]) {
+fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, inputs: &[String]) {
     if ctx.term.json {
         for (k, machine) in plan.described.iter().enumerate() {
             emit_record(&serde_json::json!({
@@ -281,9 +251,8 @@ fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, to: &[String], inpu
         }
     }
     let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
-    let to: String = to.iter().map(|t| format!(" --to {}", super::shell_word(t))).collect();
     eprintln!("\nRun one:  capdag run '<machine>'{given}");
-    eprintln!("Save one: capdag plan{given}{to} --save <file>");
+    eprintln!("Keep one: echo '<machine>' > <name>.machine");
 }
 
 /// A strand the planner found and no machine could hold: not offered, said
@@ -434,6 +403,7 @@ pub fn target_choice(registry: &FabricRegistry, target: &p::ConvergentTargetInfo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::line::PlanningFlags;
 
     // TEST8211: plan --to lists the machines of every route whose result is
     // inside the --to, nearest to it first and then with fewer steps: a YAML

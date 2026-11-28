@@ -1,0 +1,35 @@
+{
+  "title": "A dry run of a settled line prints the machine alone on stdout, and the line that runs it",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "--dry-run"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "[(input=pdf) -> "
+        ],
+        "shown": [
+          "Run it with: capdag run summaries.machine report.pdf"
+        ],
+        "absent": [
+          "✓ report.pdf"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"machine\"",
+          "\"type\":\"rerun\""
+        ]
+      }
+    }
+  }
+}

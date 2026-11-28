@@ -1,4 +1,4 @@
-//! A `capdag run` or `capdag plan` line, as the model knows it, and the world
+//! A `capdag run` line, as the model knows it, and the world
 //! it is decided in.
 //!
 //! The model (`CapdagCli.Line`) names what a line gives by number: files,
@@ -517,7 +517,7 @@ pub struct RunState {
     pub unknown_options: Vec<String>,
 }
 
-/// One `capdag run` or `capdag plan` command's view of the world.
+/// One `capdag run` command's view of the world.
 pub struct World<'a> {
     pub ctx: &'a Ctx,
     pub registry: Arc<FabricRegistry>,
@@ -1256,7 +1256,7 @@ pub async fn resolve_entry(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &Ma
             if !path.is_file() {
                 return Ok(MachineFacts::Unresolved(
                     CliError::usage(format!("the machine file '{}' is not there", path.display()))
-                        .hint("`capdag plan <files> --to <type> --save <file>` writes one"),
+                        .hint(super::explain::NO_SUCH_MACHINE_HINT),
                 ));
             }
             let notation = std::fs::read_to_string(path).map_err(|e| {
@@ -1275,9 +1275,9 @@ pub async fn resolve_entry(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &Ma
     let mut declared = String::new();
     let mut found: HashSet<String> = HashSet::new();
     let resolution = loop {
-        match super::check::resolve_notation(registry, path, &format!("{declared}{notation}")).await {
+        match super::explain::resolve_notation(registry, path, &format!("{declared}{notation}")).await {
             Ok(resolution) => break resolution,
-            Err(super::check::Unresolved::UndefinedAlias { alias, error }) => {
+            Err(super::explain::Unresolved::UndefinedAlias { alias, error }) => {
                 if !found.insert(alias.clone()) {
                     return Err(CliError::failed(format!(
                         "the dev cartridge's cap '{alias}' was declared, and the machine still does not name it"
@@ -1303,7 +1303,7 @@ pub async fn resolve_entry(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &Ma
                     }
                 }
             }
-            Err(super::check::Unresolved::Other(error)) => return Ok(MachineFacts::Unresolved(error)),
+            Err(super::explain::Unresolved::Other(error)) => return Ok(MachineFacts::Unresolved(error)),
         }
     };
     let shown = entry.shown();

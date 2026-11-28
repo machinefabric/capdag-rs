@@ -89,6 +89,13 @@ Options:
       --dev-bin <PATH>
           Use this cartridge binary, or every binary in this directory (repeatable)
 
+      --dry-run
+          Decide everything the run would, asking what it would ask, and run nothing: print the
+          machine it would run (stdout) and the line that runs it, or what is still open
+
+      --explain
+          Show the machine: its inputs, steps, outputs and the options it leaves to the run
+
       --converge <HOW>
           Where inputs of several types meet: combine them, or treat each on its own
 
@@ -114,8 +121,7 @@ Options:
           How many paths are searched at most
 
   -h, --help
-          Print help; with a machine, the machine's own: its inputs, steps and the options it leaves
-          to the run
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version
@@ -132,6 +138,13 @@ Examples:
   cat notes.txt | capdag run summary.machine -
   # plan a machine that makes text of it, and run it
   capdag run report.pdf --to txt
+  # what it can become, and the machines that make text of it, running nothing
+  capdag run report.pdf --dry-run
+  capdag run report.pdf --to txt --dry-run
+  # keep the machine chosen in a file
+  capdag run report.pdf --to txt --dry-run > pages.machine
+  # a machine's inputs, steps and the options it leaves to the run
+  capdag run pages.machine --explain
 
 What a line leaves open is asked at a terminal, and named with the flag that gives it
 in a script. A run that settled anything prints the line to run it again, asking nothing.
@@ -142,6 +155,9 @@ paths are listed on stdout. Progress, logs and errors go to stderr.
 Ctrl-C stops the run: nothing new starts, what started finishes and is written.
 Ctrl-C again aborts it.
 
-`capdag run <machine> --help` shows the machine's inputs, steps and the options it leaves
-to the run; `capdag info <cap>` a capability's own options.
+--dry-run decides what the run would, asking what it would ask, and runs and installs
+nothing: the machine it would run goes to stdout, and the line that runs it to stderr.
+Where nobody can be asked it lists what is still open and exits 0.
+
+`capdag info <cap>` shows a capability's own options.
 --- stderr ---

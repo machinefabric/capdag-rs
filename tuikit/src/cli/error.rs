@@ -7,7 +7,7 @@
 //! ```text
 //! error: people.csv is not a PDF
 //!   disbind-pdf takes a PDF; pdfium could not read people.csv as one (format error)
-//! hint: see what people.csv can become: capdag plan people.csv
+//! hint: see what people.csv can become: capdag run people.csv --dry-run
 //! ```
 //!
 //! The shape is rustc's and cargo's (`error:` and `help:`/`hint:`). Under
@@ -147,11 +147,11 @@ mod tests {
     fn test20110_an_error_names_the_problem_its_context_and_the_next_step() {
         let error = CliError::failed("people.csv is not a PDF")
             .context("disbind-pdf takes a PDF; pdfium could not read people.csv as one")
-            .hint("see what people.csv can become: capdag plan people.csv");
+            .hint("see what people.csv can become: capdag run people.csv --dry-run");
         assert_eq!(
             error.render(&super::super::term::Style::plain()),
             "error: people.csv is not a PDF\n  disbind-pdf takes a PDF; pdfium could not read \
-             people.csv as one\nhint: see what people.csv can become: capdag plan people.csv\n"
+             people.csv as one\nhint: see what people.csv can become: capdag run people.csv --dry-run\n"
         );
         let record = error.record();
         assert_eq!(record["type"], "error");

@@ -1,9 +1,29 @@
 {
-  "title": "Check a machine without running it",
+  "title": "Explain a machine: its inputs, steps, outputs and what it leaves to the run",
   "world": "ordinary",
-  "args": ["check", "summaries.machine"],
+  "args": [
+    "run",
+    "summaries.machine",
+    "--explain"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 0, "stdout": ["✓ summaries.machine", "inputs:  doc (pdf)", "outputs: summary (txt)"] } },
-    "json": { "expect": { "exit": 0, "stdout": ["\"canonical\""] } }
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "✓ summaries.machine",
+          "inputs:  doc (pdf)",
+          "outputs: summary (txt)"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"canonical\""
+        ]
+      }
+    }
   }
 }

@@ -1,0 +1,5 @@
+$ capdag --json run loud.machine --explain
+exit: 0
+--- stdout ---
+{"canonical":"[edge_0 cap:in=\"media:enc=utf8\";out=\"media:dag-word;enc=utf8\";test-dag-words][edge_1 cap:in=\"media:enc=utf8\";out=\"media:dag-shout;enc=utf8\";test-dag-shout][(input=n0) -> edge_0 -> (output=n1)][(input=n1) -> edge_1 -> (output=n2)]","file":"loud.machine","inputs":[{"media":"enc=utf8","name":"doc","strand":0,"urn":"media:enc=utf8"}],"notation":"[(input=value) -> words -> (output=value_2)]\n[(input=value_2) -> shout -> (output=value_3)]","options":[],"outputs":[{"media":"dag-shout;enc=utf8","name":"loud","strand":0,"urn":"media:dag-shout;enc=utf8"}],"steps":2,"strands":1,"type":"machine"}
+--- stderr ---

@@ -1,5 +1,5 @@
 {
-  "build_key": "8e97f5f47ca62497bffa98b0e567b832e0f5a9e3af6d06396d5d322b3e749e1d",
+  "build_key": "92ed2504ec520f6bb0ea7f35659849a7cc577e2c7ee042637cdc17fb27f103e2",
   "lean_version": "4.35.0",
   "lean_githash": "eb6cafb7290e8bd5f2937522d8d804f58f02bafc",
   "bir_version": 3,
@@ -23,10 +23,10 @@
     "<package:lungo>/Lungo/Spec/State.lean": "a5a5aa8ccb208f06dd45005e5740c4e7096b1a7f8d484f6cc19d4835e816979e",
     "<package:lungo>/Lungo/Trace.lean": "f6f0735df8f533ef42e71cc5f5be73462fcac902c38f56f3d3411b28816a57bf",
     "<package:lungo>/lakefile.toml": "57abcf8dfaafd1339335d30216342b7f7892b1cecea42ee0a9f4056673f53b73",
-    "CapdagCli/Cli.lean": "4d34338aabde660f848d83c69fe771d2117ca6ae28d30b391c7ca5e2cb9aa6ce",
-    "CapdagCli/Laws/Cli.lean": "59b465f1dc4c71c4fafe19aadadf9fc837c5e57f99379a68112426b43eaf5107",
-    "CapdagCli/Laws/Line.lean": "801a24d0ab0e7df05fd107c2f678d5116e925a169df0873ed65cde28469dc1a6",
-    "CapdagCli/Line.lean": "3a6ade325e92e58281e3491902d05749f4ba0ca12b8d3cd7dc0a83d699d1bf49",
+    "CapdagCli/Cli.lean": "3dab6d59bfbc1b440d90640470f93815a2e00964632cce97d04efa3414fa4db5",
+    "CapdagCli/Laws/Cli.lean": "1bce335d8411184e9684097e607f14d6b6c6755213d61d77e935499817079c8d",
+    "CapdagCli/Laws/Line.lean": "9847601fa538926a3be357bc91d688c6dfdef8e1e4199611b80af42e81bb8f9a",
+    "CapdagCli/Line.lean": "c48f16504ac8e309cd502b3130385bfa4e946d7dafa20d06a013a5fe4195fa26",
     "lake-manifest.json": "f72279f9bc8fcee4623cde001ddeadbaa4cd91278d69a2a438804f2a5f03a532",
     "lakefile.lean": "ba288f34d8ff55b23939f80c3e24b364ed36d474c30adef65b4e53051216d072",
     "lean-toolchain": "7d198f1c652dedd9eeb8206a56c9c3b88a4a2a1aeddcffc5d30dd7c587b1db78"
@@ -34,12 +34,12 @@
   "project": ".",
   "link_directives": [],
   "output_digests": {
-    "assurance.json": "0dfc2520a812ee2e9292a16e1370891913ad11320ac98b8fbc0e161bd6a3d6c4",
-    "capdagCliFormal.rs": "32c4f270cba5e5c5d73f4045ca9dda3b6dddf1f0c33de5ccb1e405e0e4c1bd98",
+    "assurance.json": "b68e9afa74dc3b108b7442801e1f8bc52d412c5dde8636b958d0831df1d9f01c",
+    "capdagCliFormal.rs": "033cf5894012648aae6a03079e38a6f870dc69242b26f3bb9332486e2cf0ff31",
     "externs.json": "33811348ca40a11dfcefd90b2756a3483349689eb7bc37fc9c041153ced65e48",
-    "manifest.json": "4e06464263ea9f8faa079171fcc6c25d194a7fb2c6e65ff903d6bf7f251e8552",
-    "modules/CapdagCli-Cli.rs": "f05cea391f5df8584a13332011c2cde30424757829bb096a7cc77be07190a49f",
-    "modules/CapdagCli-Line.rs": "6b724ae5ed00028f750779728f410352bba01e27d7c025b8f1c51b18a5e77d08",
+    "manifest.json": "a7bfa8295b6be209d08ff0f54130177d22f80ac537905c4d879a1e626748483a",
+    "modules/CapdagCli-Cli.rs": "a22f6a46a8d03687c7512aa3b3fe2bf60c74221e794c1a4f580fb576d411bb36",
+    "modules/CapdagCli-Line.rs": "710a7086f57000aa8e5a94241b9856da3bcff3143760331052907170aff6fc43",
     "modules/Init-Core.rs": "97cf4629d1b8ad8e2726027254994015d4d6d028e600f6088698d8f2bd18595e",
     "modules/Init-Data-ByteArray-Basic.rs": "069f7e2a4d36a9b61b5767337e69d9d2c4b0f6d711013b8ad56d065dfc4b29da",
     "modules/Init-Data-ByteArray-Extra.rs": "256cc68f2fe213c539f0a7f7f527e574615ef5b5becf81bfd90c73cfc72a1497",
@@ -63,8 +63,8 @@
     "modules/Init-System-IOError.rs": "571bfa120a03d0a9f4245ebd5f517da7712b7188ad57b531df166df5298c8eae",
     "modules/Init-System-ST.rs": "92e357592c341026c8b701142f9ce1483fc5a0aa8cbcbf16114fdeb8d585c8f5",
     "modules/Init-Util.rs": "2b252f393d91282a20eb110a80b816b07a3b2b7ae4cccdbb288a069b57a5849f",
-    "names.json": "07a121be0a63aa02ee6f0569ac6a1183186cefa31a71ed11c6df77010b83fe31",
-    "sources.json": "0ab054c825e21107d66cefef665d187a69b218a9f963e33f47e054014ea00f5a"
+    "names.json": "a02cc1e9d201ec96231c67b166c9b6c85d17d959fe44c5bd81bb4cd911d9b89b",
+    "sources.json": "b6cd475ca46db3734f5c0eebfa77a9b4d138178756541450d71ab1d5a61d2bcc"
   },
   "platform_products": []
 }

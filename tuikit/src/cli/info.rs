@@ -240,7 +240,7 @@ async fn show_media(ctx: &Ctx, registry: &capdag::FabricRegistry, media: &capdag
         outln!("\nNo capability takes it.");
     } else {
         outln!("\nTaken by {} capabilit{}: {}", takes.len(), if takes.len() == 1 { "y" } else { "ies" }, takes.join(", "));
-        outln!("\nWhat a file of it can become: capdag plan <file>");
+        outln!("\nWhat a file of it can become: capdag run <file> --dry-run");
     }
     Ok(())
 }

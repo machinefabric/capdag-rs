@@ -1,9 +1,29 @@
 {
   "title": "A machine with a mistake is refused, saying where",
   "world": "ordinary",
-  "args": ["check", "broken.machine"],
+  "args": [
+    "run",
+    "broken.machine",
+    "--explain"
+  ],
   "modes": {
-    "plain": { "expect": { "exit": 1, "shown": ["broken.machine is not a machine that can run", "expected target_group"] } },
-    "json": { "expect": { "exit": 1, "stdout": ["\"type\":\"error\"", "\"exit\":1"] } }
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": [
+          "broken.machine is not a machine that can run",
+          "expected target_group"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 1,
+        "stdout": [
+          "\"type\":\"error\"",
+          "\"exit\":1"
+        ]
+      }
+    }
   }
 }

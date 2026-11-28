@@ -1,22 +1,33 @@
 {
-  "title": "Nothing makes what --to names: plan and a planned run say no machine makes it, with exit 1",
+  "title": "Nothing makes what --to names: a dry run says no machine makes it, with exit 1",
   "world": "ordinary",
-  "args": ["plan", "report.pdf", "--to", "flac"],
+  "args": [
+    "run",
+    "report.pdf",
+    "--to",
+    "flac",
+    "--dry-run"
+  ],
   "modes": {
     "plain": {
       "expect": {
         "exit": 1,
         "shown": [
           "error: no machine makes flac of 1 pdf",
-          "hint: see what the inputs can become: capdag plan <inputs>"
+          "hint: see what the inputs can become: capdag run <inputs> --dry-run"
         ],
-        "absent": ["no machine could be planned"]
+        "absent": [
+          "no machine could be planned"
+        ]
       }
     },
     "json": {
       "expect": {
         "exit": 1,
-        "stdout": ["\"type\":\"error\"", "no machine makes flac of 1 pdf"]
+        "stdout": [
+          "\"type\":\"error\"",
+          "no machine makes flac of 1 pdf"
+        ]
       }
     }
   }

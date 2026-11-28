@@ -1,0 +1,51 @@
+{
+  "title": "A dry run of a machine given no input names the input still open, with exit 0; at a terminal it asks",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "summaries.machine",
+    "--dry-run"
+  ],
+  "modes": {
+    "inline": {
+      "keys": [
+        {
+          "wait": "A value for the input doc"
+        },
+        {
+          "type": "@report.pdf"
+        },
+        {
+          "press": "Enter"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "shown": [
+          "Run it with: capdag run summaries.machine --input doc=@report.pdf"
+        ],
+        "absent": [
+          "✓ report.pdf"
+        ]
+      }
+    },
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "shown": [
+          "open: the input doc (pdf) is given nothing, and nobody to ask",
+          "--input doc=<value>"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 0,
+        "stdout": [
+          "\"type\":\"choice\"",
+          "\"type\":\"open\""
+        ]
+      }
+    }
+  }
+}

@@ -108,7 +108,7 @@ description = "Core capability URN and definition system for CapDAG"
 edition = "2021"
 license = "MIT"
 name = "capdag"
-version = "1.1097.416"
+version = "1.1098.443"
 # The command and its terminal interface are crates of their own, beside the
 # library in this repository's workspace.
 exclude = ["tuikit", "cli"]

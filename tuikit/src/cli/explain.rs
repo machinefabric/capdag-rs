@@ -1,4 +1,7 @@
-//! `capdag check <machine>`: is the machine one that can run, and what is it.
+//! `capdag run <machine> --explain`: the machine shown — its inputs, its
+//! steps in alias form, its outputs and the options it leaves to the run —
+//! or what is wrong with it and where. The commands that show a machine
+//! (`graph`, `view`, `edit`) name and resolve it the same way.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,18 +10,11 @@ use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
 use super::formal::{self as f, index, nat};
 use super::inspect::Inspection;
-use super::line::{Extras, MachineEntry, MachineFacts, PlanningFlags, Resolved, Tables, World};
+use super::line::{Extras, MachineEntry, MachineFacts, PlanningFlags, Resolved, RunState, Tables, World};
 use super::names;
 use super::term::{emit_record, outln};
 use capdag::fabric::registry::FabricRegistry;
 use capdag::orchestrator::machine_plan::ResolvedNotation;
-
-#[derive(Debug, clap::Args)]
-pub struct Args {
-    /// The machine: a .machine file, or written inline ('[doc -> disbind-pdf -> pages]')
-    #[arg(value_name = "MACHINE")]
-    pub machine: String,
-}
 
 /// A machine named on a line that shows it: a file, or written inline when
 /// it starts with `[`.
@@ -28,8 +24,8 @@ pub fn machine_entry(tables: &mut Tables, given: &str) -> f::Written {
     f::Written { base: nat(tables.add_machine(entry)), inline }
 }
 
-/// A world of one machine named for showing, for `check`, `graph`, `view`
-/// and `edit`.
+/// A world of one machine named for showing, for `graph`, `view` and
+/// `edit`.
 pub async fn showing_world<'a>(ctx: &'a Ctx, given: &str) -> CliResult<(World<'a>, f::Written)> {
     let registry = ctx.registry().await?;
     let mut tables = Tables::default();
@@ -54,7 +50,7 @@ pub fn showing_error(world: &World<'_>, m: &f::Written, verdict: &f::CliVerdict)
                 world.tables.machines[base].shown(),
                 f::refusal::says(f::Refusal::NoSuchMachine)
             ))
-            .hint("`capdag plan <files> --to <type> --save <file>` writes one"),
+            .hint(NO_SUCH_MACHINE_HINT),
             verdict,
         ),
         other => super::ends(other)
@@ -62,16 +58,41 @@ pub fn showing_error(world: &World<'_>, m: &f::Written, verdict: &f::CliVerdict)
     }
 }
 
-pub async fn check(ctx: &Ctx, args: Args) -> CliResult<Exit> {
-    let (mut world, m) = showing_world(ctx, &args.machine).await?;
-    let verdict = world.settle(&[], |w| ctx.decide(f::Command::Check { m: m.clone(), w }, false)).await?;
-    if let f::CliVerdict::Is { v: f::Verdict::Answers } = verdict {
-        let base = index(&m.base);
-        let resolved = world.machine(base).and_then(MachineFacts::resolved).expect("a machine shown resolves");
-        show(ctx, &world.registry, &world.tables.machines[base], resolved)?;
-        return Ok(Exit::Ok);
+/// What a machine file that is not there is answered with: the line that
+/// writes one.
+pub const NO_SUCH_MACHINE_HINT: &str = "write one: capdag run <files> --to <type> --dry-run > <file>.machine";
+
+/// `capdag run <machine> --explain`: the line is the machine alone, or it is
+/// refused; the machine is shown when it resolves, and what is wrong with it
+/// is said when it does not.
+pub async fn explain(ctx: &Ctx, world: &mut World<'_>, state: &RunState, planning_flags: bool) -> CliResult<Exit> {
+    let line = state.line.clone();
+    let cli_world = ctx.cli_world(false);
+    let globals = ctx.globals();
+    let verdict = world
+        .settle(&[], |w| {
+            f::cli(
+                cli_world.clone(),
+                f::Invocation::Command {
+                    g: globals.clone(),
+                    c: f::Command::Run { l: line.clone(), planning_flags, mode: f::RunMode::Explain, w },
+                },
+            )
+        })
+        .await?;
+    match (&verdict, &state.line.machine) {
+        (f::CliVerdict::Is { v: f::Verdict::Answers }, Some(m)) => {
+            let base = index(&m.base);
+            let resolved = world.machine(base).and_then(MachineFacts::resolved).expect("a machine shown resolves");
+            show(ctx, &world.registry, &world.tables.machines[base], resolved)?;
+            Ok(Exit::Ok)
+        }
+        (f::CliVerdict::Is { v: f::Verdict::Unresolved }, Some(m))
+        | (f::CliVerdict::Refused { r: f::CliRefusal::Line { r: f::Refusal::NoSuchMachine } }, Some(m)) => {
+            Err(showing_error(world, m, &verdict))
+        }
+        _ => Err(super::say::line_verdict_error(ctx, world, state, &[], &verdict).await),
     }
-    Err(showing_error(&world, &m, &verdict))
 }
 
 /// Why a machine does not resolve: a name the fabric does not define (which a
@@ -127,7 +148,7 @@ fn not_a_machine(registry: &FabricRegistry, shown: &str, error: &capdag::machine
             Unresolved::UndefinedAlias { alias: alias.clone(), error }
         }
         _ => Unresolved::Other(failed.hint(
-            "`capdag check` on a machine that works shows the form; the notation is in the CapDAG docs, §Machine notation",
+            "`capdag run <machine> --explain` on a machine that works shows the form; the notation is in the CapDAG docs, §Machine notation",
         )),
     }
 }
@@ -146,6 +167,7 @@ pub fn show(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &MachineEntry, res
             "notation": aliased,
             "canonical": resolved.resolution.machine().to_machine_notation().ok(),
             "strands": resolved.resolution.strand_count(),
+            "steps": resolved.resolution.machine().strands().iter().map(|strand| strand.edges().len()).sum::<usize>(),
             "inputs": resolved.inputs.iter().map(|i| serde_json::json!({
                 "name": i.name, "media": names::media(registry, &i.media_urn), "urn": i.media_urn.to_string(), "strand": i.strand,
             })).collect::<Vec<_>>(),

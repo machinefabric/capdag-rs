@@ -6,13 +6,13 @@
 //! terminal cells ([`crate::tui`]). `view` and `edit` take the whole terminal
 //! (the alternate screen), because a graph a person moves around in needs it;
 //! without a terminal `view` prints the picture as `graph` does, and `edit`
-//! says to edit the file and `capdag check` it.
+//! says to edit the file and `capdag run <machine> --explain` it.
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::check;
+use super::explain;
 use super::ctx::Ctx;
 use super::error::{CliError, CliResult, Exit};
 use super::formal::{self as f, index, list};
@@ -75,7 +75,7 @@ pub struct EditArgs {
 }
 
 pub async fn graph(ctx: &Ctx, args: GraphArgs) -> CliResult<Exit> {
-    let (mut world, m) = check::showing_world(ctx, &args.machine).await?;
+    let (mut world, m) = explain::showing_world(ctx, &args.machine).await?;
     let (text, width) = (args.format == Format::Text, args.width.is_some());
     let verdict = world.settle(&[], |w| ctx.decide(f::Command::Graph { m: m.clone(), text, width, w }, false)).await?;
     match &verdict {
@@ -86,7 +86,7 @@ pub async fn graph(ctx: &Ctx, args: GraphArgs) -> CliResult<Exit> {
                 &verdict,
             ))
         }
-        other => return Err(check::showing_error(&world, &m, other)),
+        other => return Err(explain::showing_error(&world, &m, other)),
     }
     let resolved = world.machine(index(&m.base)).and_then(MachineFacts::resolved).expect("a machine shown resolves");
     draw(ctx, &world.registry, resolved, args.format, args.width).await
@@ -187,7 +187,7 @@ fn settings(ctx: &Ctx) -> TuiSettings {
 /// A machine and the inputs to run it on from a view or editor, as the model
 /// knows them.
 async fn opened<'a>(ctx: &'a Ctx, machine: &str, inputs: &[String]) -> CliResult<(super::line::World<'a>, f::Written, Vec<f::Positional>)> {
-    let (mut world, m) = check::showing_world(ctx, machine).await?;
+    let (mut world, m) = explain::showing_world(ctx, machine).await?;
     let (_, positionals) = super::line::read_positionals(&mut world.tables, &[], inputs)?;
     world.learn_lives().await?;
     Ok((world, m, positionals))
@@ -208,13 +208,13 @@ pub async fn view(ctx: &Ctx, args: ViewArgs) -> CliResult<Exit> {
             return draw(ctx, &world.registry, resolved, Format::Text, None).await;
         }
         f::CliVerdict::Refused { r: f::CliRefusal::Line { r } } if !matches!(r, f::Refusal::NoSuchMachine) => {
-            let state = super::check::showing_state(&m);
+            let state = super::explain::showing_state(&m);
             return Err(super::say::line_verdict_error(ctx, &mut world, &state, &inputs, &verdict).await);
         }
         f::CliVerdict::Refused { r: r @ (f::CliRefusal::AskingOff | f::CliRefusal::ViewInputsWithoutTerminal) } => {
             return Err(super::say::with_exit(super::say::cli_refusal(r).hint(run_hint(&args.machine, &args.inputs)), &verdict));
         }
-        other => return Err(check::showing_error(&world, &m, other)),
+        other => return Err(explain::showing_error(&world, &m, other)),
     }
     let entry = world.tables.machines[index(&m.base)].clone();
     let text = match &entry {
@@ -243,13 +243,13 @@ pub async fn edit(ctx: &Ctx, args: EditArgs) -> CliResult<Exit> {
     match &verdict {
         f::CliVerdict::Is { v: f::Verdict::Opens } => {}
         f::CliVerdict::Refused { r: f::CliRefusal::Line { .. } } => {
-            let state = super::check::showing_state(&m);
+            let state = super::explain::showing_state(&m);
             return Err(super::say::line_verdict_error(ctx, &mut world, &state, &inputs, &verdict).await);
         }
         f::CliVerdict::Refused { r: r @ (f::CliRefusal::NeedsTerminal | f::CliRefusal::AskingOff) } => {
             return Err(super::say::with_exit(
                 super::say::cli_refusal(r).hint(format!(
-                    "edit {0} in any editor, then: capdag check {0}",
+                    "edit {0} in any editor, then: capdag run {0} --explain",
                     super::shell_word(&args.machine)
                 )),
                 &verdict,
@@ -310,7 +310,8 @@ async fn run_from_view(ctx: &Ctx, machine: &str, inputs: Vec<String>, output: Op
             trace: None,
             dev_bins: Vec::new(),
             planning: super::line::PlanningFlags::default(),
-            help: false,
+            dry_run: false,
+            explain: false,
         },
     )
     .await

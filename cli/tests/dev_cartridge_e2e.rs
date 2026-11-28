@@ -203,7 +203,7 @@ fn test8110_dev_cartridge_create_install_run_update() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-/// The media `capdag plan --json` took each file as, from its `input`
+/// The media a `capdag run <file> --dry-run --json` took each file as, from its `input`
 /// records, by file.
 fn planned_inputs(stdout: &str) -> std::collections::BTreeMap<String, String> {
     stdout
@@ -250,9 +250,9 @@ fn test8107_the_command_asks_the_cartridge_that_inspects_a_file() {
     }
     let plan = |file: &str| -> std::collections::BTreeMap<String, String> {
         let path = files.join(file).display().to_string();
-        let (out, _, err) = run_capdag(&home, &["--json", "--no-input", "plan", &path], None);
+        let (out, _, err) = run_capdag(&home, &["--json", "--no-input", "run", &path, "--dry-run"], None);
         let found = planned_inputs(&out);
-        assert!(found.contains_key(file), "`capdag plan {file}` named no input for it; stdout:\n{out}\nstderr:\n{err}");
+        assert!(found.contains_key(file), "`capdag run {file} --dry-run` named no input for it; stdout:\n{out}\nstderr:\n{err}");
         found
     };
 

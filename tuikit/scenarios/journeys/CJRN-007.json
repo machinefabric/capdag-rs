@@ -1,11 +1,12 @@
 {
-  "title": "List the machines that make text of a file",
+  "title": "List the machines that make text of a file, running nothing",
   "world": "ordinary",
   "args": [
-    "plan",
+    "run",
     "report.pdf",
     "--to",
-    "txt"
+    "txt",
+    "--dry-run"
   ],
   "modes": {
     "plain": {
@@ -17,7 +18,8 @@
           "[(input=png) -> ocr-gguf -> (output=digitized-text)]"
         ],
         "shown": [
-          "Run one:  capdag run '<machine>' report.pdf"
+          "Run one:  capdag run '<machine>' report.pdf",
+          "Keep one: echo '<machine>' > <name>.machine"
         ]
       }
     },

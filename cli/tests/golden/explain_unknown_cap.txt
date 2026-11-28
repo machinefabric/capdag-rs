@@ -1,4 +1,4 @@
-$ capdag check unknown.machine
+$ capdag run unknown.machine --explain
 exit: 1
 --- stdout ---
 --- stderr ---

@@ -84,12 +84,6 @@
     "renamed": false
   },
   {
-    "lean_name": "CapdagCli.PlanLine",
-    "kind": "type",
-    "rust_path": "PlanLine",
-    "renamed": false
-  },
-  {
     "lean_name": "CapdagCli.Positional",
     "kind": "type",
     "rust_path": "Positional",
@@ -105,6 +99,12 @@
     "lean_name": "CapdagCli.RunLine",
     "kind": "type",
     "rust_path": "RunLine",
+    "renamed": false
+  },
+  {
+    "lean_name": "CapdagCli.RunMode",
+    "kind": "type",
+    "rust_path": "RunMode",
     "renamed": false
   },
   {
@@ -294,12 +294,6 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.planVerdict",
-    "kind": "function",
-    "rust_path": "plan_verdict",
-    "renamed": true
-  },
-  {
     "lean_name": "CapdagCli.printsRerun",
     "kind": "function",
     "rust_path": "prints_rerun",
@@ -477,6 +471,18 @@
     "lean_name": "CapdagCli.CliRefusal.planningWithMachine",
     "kind": "constructor",
     "rust_path": "CliRefusal::PlanningWithMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.explainWithoutMachine",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::ExplainWithoutMachine",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.CliRefusal.explainWithLine",
+    "kind": "constructor",
+    "rust_path": "CliRefusal::ExplainWithLine",
     "renamed": true
   },
   {
@@ -720,51 +726,15 @@
     "renamed": true
   },
   {
+    "lean_name": "CapdagCli.Command.run.mode",
+    "kind": "field",
+    "rust_path": "Command::Run.mode",
+    "renamed": false
+  },
+  {
     "lean_name": "CapdagCli.Command.run.w",
     "kind": "field",
     "rust_path": "Command::Run.w",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.Command.plan",
-    "kind": "constructor",
-    "rust_path": "Command::Plan",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Command.plan.l",
-    "kind": "field",
-    "rust_path": "Command::Plan.l",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.Command.plan.w",
-    "kind": "field",
-    "rust_path": "Command::Plan.w",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.Command.plan.saveThere",
-    "kind": "field",
-    "rust_path": "Command::Plan.save_there",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Command.check",
-    "kind": "constructor",
-    "rust_path": "Command::Check",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Command.check.m",
-    "kind": "field",
-    "rust_path": "Command::Check.m",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.Command.check.w",
-    "kind": "field",
-    "rust_path": "Command::Check.w",
     "renamed": false
   },
   {
@@ -1062,24 +1032,6 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.HelpTopic.machine",
-    "kind": "constructor",
-    "rust_path": "HelpTopic::Machine",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.HelpTopic.machine.m",
-    "kind": "field",
-    "rust_path": "HelpTopic::Machine.m",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.HelpTopic.machine.w",
-    "kind": "field",
-    "rust_path": "HelpTopic::Machine.w",
-    "renamed": false
-  },
-  {
     "lean_name": "CapdagCli.InstallTarget.cartridge",
     "kind": "constructor",
     "rust_path": "InstallTarget::Cartridge",
@@ -1210,42 +1162,6 @@
     "kind": "constructor",
     "rust_path": "OutputDir::Unwritable",
     "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.mk",
-    "kind": "constructor",
-    "rust_path": "PlanLine",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.inputs",
-    "kind": "field",
-    "rust_path": "PlanLine.inputs",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.hasFrom",
-    "kind": "field",
-    "rust_path": "PlanLine.has_from",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.targets",
-    "kind": "field",
-    "rust_path": "PlanLine.targets",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.save",
-    "kind": "field",
-    "rust_path": "PlanLine.save",
-    "renamed": false
-  },
-  {
-    "lean_name": "CapdagCli.PlanLine.force",
-    "kind": "field",
-    "rust_path": "PlanLine.force",
-    "renamed": false
   },
   {
     "lean_name": "CapdagCli.Positional.path",
@@ -1434,24 +1350,6 @@
     "renamed": true
   },
   {
-    "lean_name": "CapdagCli.Refusal.nothingToPlan",
-    "kind": "constructor",
-    "rust_path": "Refusal::NothingToPlan",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.saveWithoutTo",
-    "kind": "constructor",
-    "rust_path": "Refusal::SaveWithoutTo",
-    "renamed": true
-  },
-  {
-    "lean_name": "CapdagCli.Refusal.saveExists",
-    "kind": "constructor",
-    "rust_path": "Refusal::SaveExists",
-    "renamed": true
-  },
-  {
     "lean_name": "CapdagCli.RunLine.mk",
     "kind": "constructor",
     "rust_path": "RunLine",
@@ -1503,6 +1401,24 @@
     "lean_name": "CapdagCli.RunLine.selectorReads",
     "kind": "field",
     "rust_path": "RunLine.selector_reads",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.RunMode.run",
+    "kind": "constructor",
+    "rust_path": "RunMode::Run",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.RunMode.dryRun",
+    "kind": "constructor",
+    "rust_path": "RunMode::DryRun",
+    "renamed": true
+  },
+  {
+    "lean_name": "CapdagCli.RunMode.explain",
+    "kind": "constructor",
+    "rust_path": "RunMode::Explain",
     "renamed": true
   },
   {

@@ -1,0 +1,5 @@
+$ capdag run loud.machine in.txt --explain
+exit: 2
+--- stdout ---
+--- stderr ---
+error: --explain shows the machine alone: to see how inputs bind, capdag run <machine> <inputs> --dry-run

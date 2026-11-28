@@ -1,4 +1,4 @@
-$ capdag --json plan in.txt
+$ capdag --json run in.txt --dry-run
 exit: 0
 --- stdout ---
 {"alias":"txt","file":"in.txt","type":"input","urn":"media:enc=utf8;ext=txt"}

@@ -147,7 +147,7 @@ fn test22290_a_closed_stdout_ends_the_command_quietly() {
     let scenarios = Scenarios::bundled();
     let dir = tempfile::tempdir().expect("a working directory");
     scenarios.world("ordinary").expect("the ordinary world").write_files(dir.path()).expect("its files are written");
-    for args in [&["caps"][..], &["info", "disbind-pdf"], &["plan", "report.pdf", "--to", "txt"]] {
+    for args in [&["caps"][..], &["info", "disbind-pdf"], &["run", "report.pdf", "--to", "txt", "--dry-run"]] {
         let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_capdag-tuikit"))
             .arg("--scenarios")
             .arg(&scenarios.dir)

@@ -1,0 +1,7 @@
+$ capdag run loud.machine in.txt --dry-run --dev-bin <cartridge>
+exit: 0
+--- stdout ---
+[(input=value) -> words -> (output=value_2)]
+[(input=value_2) -> shout -> (output=value_3)]
+--- stderr ---
+Run it with: capdag run loud.machine in.txt --dev-bin <cartridge>

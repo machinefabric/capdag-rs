@@ -1,4 +1,4 @@
-$ capdag plan in.txt --to 'media:dag-shout;enc=utf8'
+$ capdag run in.txt --to 'media:dag-shout;enc=utf8' --dry-run
 exit: 0
 --- stdout ---
 32 machines make dag-shout;enc=utf8 of 1 txt:
@@ -174,4 +174,4 @@ exit: 0
 --- stderr ---
 
 Run one:  capdag run '<machine>' in.txt
-Save one: capdag plan in.txt --to 'media:dag-shout;enc=utf8' --save <file>
+Keep one: echo '<machine>' > <name>.machine

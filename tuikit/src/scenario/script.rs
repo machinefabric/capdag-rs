@@ -135,7 +135,7 @@ impl Failure {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum End {
     /// It completed: what each output holds, by the media type it is, as
-    /// `capdag check` names it (`page-text`, `txt`) — a text is one value, a
+    /// `capdag run <machine> --explain` names it (`page-text`, `txt`) — a text is one value, a
     /// list of texts a sequence, `null` not produced. The same caps run as a
     /// machine file, as a cap on its own and as a plan's pick label their
     /// outputs differently; what the outputs hold is the same.

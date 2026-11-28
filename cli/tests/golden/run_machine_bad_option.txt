@@ -8,3 +8,5 @@ error: unexpected argument '--shout' found
   tip: to pass '--shout' as a value, use '-- --shout'
 
 Usage: capdag run --output <DIR> <MACHINE|INPUT>... [-- <INPUT>...]
+
+For more information, try '--help'.

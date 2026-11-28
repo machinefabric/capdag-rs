@@ -1,0 +1,20 @@
+{
+  "title": "--explain shows a machine alone: beside inputs, or with no machine, it is refused",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "summaries.machine",
+    "report.pdf",
+    "--explain"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "--explain shows the machine alone: to see how inputs bind, capdag run <machine> <inputs> --dry-run"
+        ]
+      }
+    }
+  }
+}

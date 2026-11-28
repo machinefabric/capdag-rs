@@ -10,8 +10,6 @@ Commands:
   caps       List and search capabilities [alias: search]
   info       Show a capability or a media type: what it takes, gives and needs
   run        Run a machine on inputs: one written inline or in a file, or one planned to --to
-  plan       What inputs can become, the machines that make it, and saving one
-  check      Check a machine without running it
   graph      Draw a machine: as text, Mermaid or Graphviz
   view       Look at a machine in the terminal: its graph, steps and arguments
   edit       Edit a machine file in the terminal, checking every change against the fabric
@@ -40,7 +38,7 @@ Options:
 
 Start here:
   capdag caps pdf                                        find capabilities that take or give PDF
-  capdag plan report.pdf                                 what report.pdf can become
+  capdag run report.pdf --dry-run                        what report.pdf can become
   capdag run report.pdf --to txt                         make text of it, choosing a machine
   capdag run '[doc -> disbind-pdf -> pages]' report.pdf  run a machine of one step
   capdag run pages.machine report.pdf                    run a machine saved in a file

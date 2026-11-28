@@ -1,4 +1,4 @@
-//! What a `run` or `plan` line that does not run is told: the model's verdict,
+//! What a `run` line that does not run is told: the model's verdict,
 //! said with the file, input, option or machine it is about, and what to type
 //! next. The exit status is the model's (`CliVerdict.exit`).
 
@@ -71,7 +71,7 @@ fn unresolved(world: &World<'_>, state: &RunState, positionals: &[f::Positional]
             error.exit = Exit::Failed;
             error
         }
-        _ => CliError::failed("the machine does not resolve").hint("check it with: capdag check <machine>"),
+        _ => CliError::failed("the machine does not resolve").hint("see what is wrong with it: capdag run <machine> --explain"),
     }
 }
 
@@ -125,7 +125,7 @@ fn line_refusal(world: &World<'_>, state: &RunState, refusal: &f::Refusal) -> Cl
             .hint("`capdag info <type>` shows a media type"),
         f::Refusal::NoSuchMachine => {
             let shown = m.map(|m| world.tables.machines[m].shown()).unwrap_or_default();
-            CliError::usage(format!("{shown}: {says}")).hint("`capdag plan <files> --to <type> --save <file>` writes one")
+            CliError::usage(format!("{shown}: {says}")).hint(super::explain::NO_SUCH_MACHINE_HINT)
         }
         f::Refusal::NoSuchInput { j } => {
             let known = m
@@ -209,7 +209,7 @@ async fn named(ctx: &Ctx, world: &mut World<'_>, state: &RunState, positionals: 
         f::Stage::Target => {
             let choices: Vec<Choice> = world
                 .plan(positionals)
-                .map(|plan| plan.targets.iter().map(|t| super::plan::target_choice(&world.registry, t)).collect())
+                .map(|plan| plan.targets.iter().map(|t| super::dry_run::target_choice(&world.registry, t)).collect())
                 .unwrap_or_default();
             ask::named(ctx, &Question { what: "what to make".into(), flag: "--to ".into() }, &choices)
         }
@@ -335,7 +335,7 @@ fn nothing(world: &World<'_>, state: &RunState, positionals: &[f::Positional], s
         f::Stage::Machine => {
             if let Some(plan) = world.plan(positionals) {
                 for excluded in &plan.excluded {
-                    super::plan::say_excluded(world.ctx, excluded);
+                    super::dry_run::say_excluded(world.ctx, excluded);
                 }
             }
             let mut error = CliError::failed(format!("no machine makes {} of {what}", world.extras.to.join(", ")));
@@ -347,7 +347,7 @@ fn nothing(world: &World<'_>, state: &RunState, positionals: &[f::Positional], s
                     });
                 }
             }
-            error.hint("see what the inputs can become: capdag plan <inputs>")
+            error.hint("see what the inputs can become: capdag run <inputs> --dry-run")
         }
         f::Stage::Path { p } => {
             let file = &world.tables.files[index(p)].path;
@@ -359,7 +359,7 @@ fn nothing(world: &World<'_>, state: &RunState, positionals: &[f::Positional], s
             if let Some(m) = machine_of(world, state, positionals) {
                 error = error.context(format!("its inputs: {}", inputs_said(world, m)));
             }
-            error.hint(format!("see what it can become: capdag plan {}", super::shell_word(&file.display().to_string())))
+            error.hint(format!("see what it can become: capdag run {} --dry-run", super::shell_word(&file.display().to_string())))
         }
         f::Stage::Option { j } => {
             let mut error = CliError::failed("a step option the machine leaves to the run has no value it can take");
@@ -391,7 +391,7 @@ fn nothing(world: &World<'_>, state: &RunState, positionals: &[f::Positional], s
             if let Some(m) = machine_of(world, state, positionals) {
                 error = error.context(format!("its inputs: {}", inputs_said(world, m)));
             }
-            error.hint("name it to an input that takes what it gives: --live <input>=<urn>; capdag check <machine> shows what each input takes")
+            error.hint("name it to an input that takes what it gives: --live <input>=<urn>; capdag run <machine> --explain shows what each input takes")
         }
         f::Stage::Provider => {
             let mut error = CliError::failed("the run needs a cartridge no registry provides");

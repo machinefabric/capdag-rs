@@ -1,19 +1,18 @@
 {
-  "title": "Save the machine chosen among those that make text",
+  "title": "Choose the machine that makes text, run nothing, and keep it in a file",
   "world": "ordinary",
   "args": [
-    "plan",
+    "run",
     "report.pdf",
     "--to",
     "txt",
-    "--save",
-    "pages.machine"
+    "--dry-run"
   ],
   "modes": {
     "inline": {
       "keys": [
         {
-          "wait": "Choose the machine to save"
+          "wait": "Choose the machine"
         },
         {
           "press": "Enter"
@@ -21,27 +20,23 @@
       ],
       "expect": {
         "exit": 0,
+        "stdout": [
+          "[(input=pdf) -> "
+        ],
         "shown": [
-          "Saved the machine to pages.machine",
-          "Run it: capdag run pages.machine report.pdf"
-        ]
-      }
-    },
-    "plain": {
-      "expect": {
-        "exit": 2,
-        "shown": [
-          "5 options for the machine to save, and nobody to ask",
-          "narrow what --to names"
+          "Run it with: capdag run '[(input=pdf) -> "
+        ],
+        "absent": [
+          "disbind-pdf  done"
         ]
       }
     },
     "json": {
       "expect": {
-        "exit": 2,
+        "exit": 0,
         "stdout": [
-          "\"type\":\"choice\"",
-          "\"of\":\"the machine to save\""
+          "\"type\":\"machine\"",
+          "\"index\":1"
         ]
       }
     }

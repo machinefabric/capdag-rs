@@ -293,12 +293,13 @@ static CASES: &[Case] = &[
     Case::pipes("info_cap_json", &["--json", "info", "shout"]),
     Case::pipes("info_media", &["info", "txt"]),
     Case::pipes("info_unknown", &["info", "nosuch"]),
-    // ── check, graph, view, edit ──
-    Case::pipes("check", &["check", "loud.machine"]),
-    Case::pipes("check_json", &["--json", "check", "loud.machine"]),
-    Case::pipes("check_broken", &["check", "broken.machine"]),
-    Case::pipes("check_unknown_cap", &["check", "unknown.machine"]),
-    Case::pipes("check_missing", &["check", "absent.machine"]),
+    // ── run --explain, graph, view, edit ──
+    Case::pipes("explain", &["run", "loud.machine", "--explain"]),
+    Case::pipes("explain_json", &["--json", "run", "loud.machine", "--explain"]),
+    Case::pipes("explain_broken", &["run", "broken.machine", "--explain"]),
+    Case::pipes("explain_unknown_cap", &["run", "unknown.machine", "--explain"]),
+    Case::pipes("explain_missing", &["run", "absent.machine", "--explain"]),
+    Case::pipes("explain_with_inputs", &["run", "loud.machine", "in.txt", "--explain"]),
     Case::pipes("graph", &["graph", "loud.machine"]),
     Case::pipes("graph_width", &["graph", "say.machine", "--width", "60"]),
     Case::pipes("graph_mermaid", &["graph", "loud.machine", "--format", "mermaid"]),
@@ -364,7 +365,7 @@ static CASES: &[Case] = &[
     Case::pipes("run_machine_bad_option", &["run", "loud.machine", "in.txt", "--shout", DEV, CARTRIDGE]),
     Case::pipes("run_one_step", &["run", "[doc -> shout -> loud]", "in.txt", DEV, CARTRIDGE]),
     Case::pipes("run_option_unknown", &["run", "[doc -> shout -> loud]", "in.txt", "--arg", "fail-on=x", DEV, CARTRIDGE]),
-    Case::pipes("run_machine_help", &["run", "[doc -> shout -> loud]", "--help"]),
+    Case::pipes("explain_inline", &["run", "[doc -> shout -> loud]", "--explain"]),
     Case::pipes("run_unknown_flag", &["run", "[doc -> shout -> loud]", "in.txt", "--loudness", "9", DEV, CARTRIDGE]),
     Case::pipes("run_unknown_step", &["run", "[doc -> shuot -> loud]", "in.txt"]),
     Case::pipes("run_missing_machine_file", &["run", "absent.machine", "in.txt"]),
@@ -403,16 +404,29 @@ static CASES: &[Case] = &[
         stdin: None,
         steps: &[Step::Wait("shout"), Step::Press(CTRL_C), Step::Wait("Stopping"), Step::Press(CTRL_C)],
     },
-    // ── plan ──
-    Case::pipes("plan_targets", &["plan", "in.txt"]),
-    Case::pipes("plan_targets_json", &["--json", "plan", "in.txt"]),
-    Case::pipes("plan_machines", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8"]),
-    Case::pipes("plan_save_named", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--save", "made.machine"]),
-    Case::pipes("plan_save_exists", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--save", "loud.machine"]),
+    // ── planning, and run --dry-run ──
+    Case::pipes("dry_run_targets", &["run", "in.txt", "--dry-run"]),
+    Case::pipes("dry_run_targets_json", &["--json", "run", "in.txt", "--dry-run"]),
+    Case::pipes("dry_run_machines", &["run", "in.txt", "--to", "media:dag-shout;enc=utf8", "--dry-run"]),
+    Case::pipes("dry_run_settled", &["run", "loud.machine", "in.txt", "--dry-run", DEV, CARTRIDGE]),
+    Case::pipes("dry_run_open_input", &["run", "loud.machine", "--dry-run", DEV, CARTRIDGE]),
     Case::pipes("run_planned_no_input", &["--no-input", "run", "in.txt"]),
-    Case::pipes("plan_machines_json", &["--json", "plan", "in.txt", "--to", "media:dag-shout;enc=utf8"]),
+    Case::pipes("dry_run_machines_json", &["--json", "run", "in.txt", "--to", "media:dag-shout;enc=utf8", "--dry-run"]),
     Case::pipes("run_planned_named", &["run", "in.txt", "--to", "media:dag-shout;enc=utf8", DEV, CARTRIDGE]),
-    Case::pipes("plan_unknown_extension", &["plan", "in.unknown"]),
+    Case::pipes("dry_run_unknown_extension", &["run", "in.unknown", "--dry-run"]),
+    Case {
+        name: "dry_run_inline",
+        mode: Mode::Inline,
+        args: &["run", "in.txt", "--dry-run", DEV, CARTRIDGE],
+        stdin: None,
+        steps: &[
+            Step::Wait("what to make"),
+            Step::Look("what to make"),
+            Step::Press(ENTER),
+            Step::Wait("Choose the machine"),
+            Step::Press(ENTER),
+        ],
+    },
     Case {
         name: "run_planned_inline",
         mode: Mode::Inline,
@@ -978,25 +992,25 @@ fn test22222_info_media() { golden("test22222_info_media", "info_media") }
 #[test]
 fn test22223_info_unknown() { golden("test22223_info_unknown", "info_unknown") }
 
-// TEST22224: `check` of a machine names its inputs, steps and outputs.
+// TEST22224: `run <machine> --explain` names the machine's inputs, steps and outputs.
 #[test]
-fn test22224_check() { golden("test22224_check", "check") }
+fn test22224_explain() { golden("test22224_explain", "explain") }
 
-// TEST22225: `check --json` gives the machine's record.
+// TEST22225: `run <machine> --explain --json` gives the machine's record.
 #[test]
-fn test22225_check_json() { golden("test22225_check_json", "check_json") }
+fn test22225_explain_json() { golden("test22225_explain_json", "explain_json") }
 
-// TEST22226: `check` of a machine that does not parse says where.
+// TEST22226: `--explain` of a machine that does not parse says where.
 #[test]
-fn test22226_check_broken() { golden("test22226_check_broken", "check_broken") }
+fn test22226_explain_broken() { golden("test22226_explain_broken", "explain_broken") }
 
-// TEST22227: `check` of a machine naming a cap no header declares says which.
+// TEST22227: `--explain` of a machine naming a cap no header declares says which.
 #[test]
-fn test22227_check_unknown_cap() { golden("test22227_check_unknown_cap", "check_unknown_cap") }
+fn test22227_explain_unknown_cap() { golden("test22227_explain_unknown_cap", "explain_unknown_cap") }
 
-// TEST22228: `check` of a file that does not exist says so.
+// TEST22228: `--explain` of a machine file that does not exist says so, and how to write one.
 #[test]
-fn test22228_check_missing() { golden("test22228_check_missing", "check_missing") }
+fn test22228_explain_missing() { golden("test22228_explain_missing", "explain_missing") }
 
 // TEST22229: `graph` prints the machine's picture as text.
 #[test]
@@ -1026,7 +1040,7 @@ fn test22234_graph_terminal() { golden("test22234_graph_terminal", "graph_termin
 #[test]
 fn test22235_view_without_terminal() { golden("test22235_view_without_terminal", "view_without_terminal") }
 
-// TEST22236: `edit` without a terminal says to edit the file and check it.
+// TEST22236: `edit` without a terminal says to edit the file and explain it.
 #[test]
 fn test22236_edit_without_terminal() { golden("test22236_edit_without_terminal", "edit_without_terminal") }
 
@@ -1086,9 +1100,9 @@ fn test22249_run_one_step() { golden("test22249_run_one_step", "run_one_step") }
 #[test]
 fn test22250_run_option_unknown() { golden("test22250_run_option_unknown", "run_option_unknown") }
 
-// TEST22251: `run <cap> --help` shows the cap's own interface.
+// TEST22251: `run <machine> --explain` of a machine written inline shows its own interface.
 #[test]
-fn test22251_run_machine_help() { golden("test22251_run_machine_help", "run_machine_help") }
+fn test22251_explain_inline() { golden("test22251_explain_inline", "explain_inline") }
 
 // TEST22252: a cap given an option it has not is refused, naming where its options are.
 #[test]
@@ -1122,43 +1136,43 @@ fn test22258_run_stopped_inline() { golden("test22258_run_stopped_inline", "run_
 #[test]
 fn test22259_run_aborted_inline() { golden("test22259_run_aborted_inline", "run_aborted_inline") }
 
-// TEST22260: `plan <file>` says what the file can become.
+// TEST22260: `run <file> --dry-run` without a terminal lists what the file can become, and exits 0.
 #[test]
-fn test22260_plan_targets() { golden("test22260_plan_targets", "plan_targets") }
+fn test22260_dry_run_targets() { golden("test22260_dry_run_targets", "dry_run_targets") }
 
-// TEST22261: `plan --json <file>` gives the file's type and the targets as records.
+// TEST22261: `run <file> --dry-run --json` gives the file's type and the targets as records.
 #[test]
-fn test22261_plan_targets_json() { golden("test22261_plan_targets_json", "plan_targets_json") }
+fn test22261_dry_run_targets_json() { golden("test22261_dry_run_targets_json", "dry_run_targets_json") }
 
-// TEST22262: `plan --to` lists the machines that make the target.
+// TEST22262: `run <file> --to <type> --dry-run` without a terminal lists the machines that make it.
 #[test]
-fn test22262_plan_machines() { golden("test22262_plan_machines", "plan_machines") }
+fn test22262_dry_run_machines() { golden("test22262_dry_run_machines", "dry_run_machines") }
 
-// TEST22263: `plan --pick` prints the machine chosen.
+// TEST22263: a dry run of a settled line prints the machine alone on stdout and the line that runs it on stderr.
 #[test]
-fn test22263_plan_save_named() { golden("test22263_plan_save_named", "plan_save_named") }
+fn test22263_dry_run_settled() { golden("test22263_dry_run_settled", "dry_run_settled") }
 
-// TEST22264: `plan --pick --save` writes the machine chosen and says how to run it.
+// TEST22264: a dry run of a machine given no input prints the machine and names the input still open, exit 0.
 #[test]
-fn test22264_plan_save_exists() { golden("test22264_plan_save_exists", "plan_save_exists") }
+fn test22264_dry_run_open_input() { golden("test22264_dry_run_open_input", "dry_run_open_input") }
 
-// TEST22265: `plan --pick` out of range says how many machines there are.
+// TEST22265: `run <file>` without --to and with nobody to ask names what it can become, exit 2.
 #[test]
 fn test22265_run_planned_no_input() { golden("test22265_run_planned_no_input", "run_planned_no_input") }
 
-// TEST22266: `plan --json --pick` gives the machine chosen as a record.
+// TEST22266: `run --to --dry-run --json` gives each machine that makes it as a record.
 #[test]
-fn test22266_plan_machines_json() { golden("test22266_plan_machines_json", "plan_machines_json") }
+fn test22266_dry_run_machines_json() { golden("test22266_dry_run_machines_json", "dry_run_machines_json") }
 
-// TEST22267: `plan --pick --run` runs the machine chosen on the file.
+// TEST22267: `run <file> --to <type>` where several machines make it and nobody can be asked names them, exit 2.
 #[test]
 fn test22267_run_planned_named() { golden("test22267_run_planned_named", "run_planned_named") }
 
-// TEST22268: `plan` of a file whose extension no type has says so.
+// TEST22268: a dry run of a file whose extension no type has says so.
 #[test]
-fn test22268_plan_unknown_extension() { golden("test22268_plan_unknown_extension", "plan_unknown_extension") }
+fn test22268_dry_run_unknown_extension() { golden("test22268_dry_run_unknown_extension", "dry_run_unknown_extension") }
 
-// TEST22269: `plan` on a terminal asks what to make and what to do with the machine.
+// TEST22269: `run <file>` on a terminal asks what to make and which machine, then runs it.
 #[test]
 fn test22269_run_planned_inline() { golden("test22269_run_planned_inline", "run_planned_inline") }
 
@@ -1209,6 +1223,14 @@ fn test22281_run_machine_map() { golden("test22281_run_machine_map", "run_machin
 // TEST22282: an item of a map that refuses its input fails the run, named by the step.
 #[test]
 fn test22282_run_machine_map_refused() { golden("test22282_run_machine_map_refused", "run_machine_map_refused") }
+
+// TEST22292: `--explain` beside inputs is refused, saying a dry run shows how they bind.
+#[test]
+fn test22292_explain_with_inputs() { golden("test22292_explain_with_inputs", "explain_with_inputs") }
+
+// TEST22293: a dry run at a terminal asks what the run would ask, in the same pickers, and then prints the machine it settled on.
+#[test]
+fn test22293_dry_run_inline() { golden("test22293_dry_run_inline", "dry_run_inline") }
 
 // TEST22283: an item of a map whose failure its step's policy tolerates is left out, and the run completes tolerated.
 #[test]

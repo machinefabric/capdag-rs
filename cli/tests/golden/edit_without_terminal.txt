@@ -2,5 +2,5 @@ $ capdag edit loud.machine
 exit: 2
 --- stdout ---
 --- stderr ---
-error: capdag edit needs a terminal: edit the file in any editor, then capdag check it
-hint: edit loud.machine in any editor, then: capdag check loud.machine
+error: capdag edit needs a terminal: edit the file in any editor, then capdag run <machine> --explain
+hint: edit loud.machine in any editor, then: capdag run loud.machine --explain

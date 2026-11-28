@@ -3,4 +3,4 @@ exit: 2
 --- stdout ---
 --- stderr ---
 error: 'rnu': capdag help names no command
-  the commands are: caps, info, run, plan, check, graph, view, edit, cartridge, model, cache, dev, self, help
+  the commands are: caps, info, run, graph, view, edit, cartridge, model, cache, dev, self, help

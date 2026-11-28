@@ -7,5 +7,5 @@ Files: .txt
 
 Taken by 6 capabilities: identity, flaky, join, pair, shout, words
 
-What a file of it can become: capdag plan <file>
+What a file of it can become: capdag run <file> --dry-run
 --- stderr ---

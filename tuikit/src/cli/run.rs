@@ -50,7 +50,6 @@ use capdag::ExecutionError;
 use super::term::emit_record;
 
 #[derive(Debug, clap::Args)]
-#[command(disable_help_flag = true)]
 pub struct Args {
     /// The machine — written inline, or a .machine file — and then its inputs; or only
     /// inputs, to plan a machine to what --to names. An input is a file, a directory or
@@ -96,12 +95,15 @@ pub struct Args {
     /// Use this cartridge binary, or every binary in this directory (repeatable)
     #[arg(long = "dev-bin", value_name = "PATH")]
     pub dev_bins: Vec<PathBuf>,
+    /// Decide everything the run would, asking what it would ask, and run nothing: print the
+    /// machine it would run (stdout) and the line that runs it, or what is still open
+    #[arg(long, conflicts_with = "explain")]
+    pub dry_run: bool,
+    /// Show the machine: its inputs, steps, outputs and the options it leaves to the run
+    #[arg(long, conflicts_with_all = ["output", "force", "trace"])]
+    pub explain: bool,
     #[command(flatten)]
     pub planning: PlanningFlags,
-    /// Print help; with a machine, the machine's own: its inputs, steps and the options it
-    /// leaves to the run
-    #[arg(short = 'h', long, action = clap::ArgAction::SetTrue)]
-    pub help: bool,
 }
 
 impl Args {
@@ -273,12 +275,13 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         world.know_machine(index(&m.base), facts);
     }
     world.learn_line(&args.dev_bins).await?;
-    if args.help {
-        return machine_help(ctx, &mut world, &state).await;
+    let planning_flags = args.planning.given();
+    if args.explain {
+        return super::explain::explain(ctx, &mut world, &state, planning_flags).await;
     }
+    let mode = if args.dry_run { f::RunMode::DryRun } else { f::RunMode::Run };
     let typed = state.line.clone();
     let positionals: Vec<f::Positional> = state.line.inputs.0.clone();
-    let planning_flags = args.planning.given();
     loop {
         let line_now = state.line.clone();
         let cli_world = ctx.cli_world(false);
@@ -289,13 +292,16 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
                     cli_world.clone(),
                     f::Invocation::Command {
                         g: globals.clone(),
-                        c: f::Command::Run { l: line_now.clone(), planning_flags, w },
+                        c: f::Command::Run { l: line_now.clone(), planning_flags, mode: mode.clone(), w },
                     },
                 )
             })
             .await?;
         match verdict {
             f::CliVerdict::Is { v: f::Verdict::Runs } => break,
+            f::CliVerdict::Is { v: f::Verdict::Answers } if args.dry_run => {
+                return super::dry_run::report(ctx, &mut world, &state, &positionals, planning_flags, &args).await;
+            }
             f::CliVerdict::Is { v: f::Verdict::Asks { s } } => {
                 state = answer(ctx, &mut world, &positionals, state, s).await?;
             }
@@ -316,7 +322,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
             .hint("report it: a line that runs gives every value to a named input"));
     }
     if prints {
-        say_rerun(ctx, &world, &rerun_state, &args)?;
+        say_rerun(ctx, &world, &rerun_state, &args, "Run it again with")?;
     }
     let m = index(&running.line.machine.as_ref().expect("a line that runs writes its machine").base);
     let runtime = runtime(ctx, &registry, &args, world.dev_binaries(Some(m))).await?;
@@ -335,7 +341,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> CliResult<Exit> {
 /// each `named` entry and the value of each `--arg` follow their entries. An
 /// entry the line kept keeps its value; an `--arg` the model added for an
 /// option with one value takes that value.
-fn carried(world: &World<'_>, from: &RunState, line: f::RunLine) -> CliResult<RunState> {
+pub fn carried(world: &World<'_>, from: &RunState, line: f::RunLine) -> CliResult<RunState> {
     let mut texts = Vec::with_capacity(line.named.len());
     for (at, entry) in line.named.iter().enumerate() {
         if at < from.line.named.len() && from.line.named[at] == *entry {
@@ -399,7 +405,7 @@ async fn answer(ctx: &Ctx, world: &mut World<'_>, positionals: &[f::Positional],
         }
         f::Stage::Target => {
             let plan = world.plan(positionals).cloned().expect("what to make is asked once the inputs are planned");
-            let choices: Vec<Choice> = plan.targets.iter().map(|t| super::plan::target_choice(&world.registry, t)).collect();
+            let choices: Vec<Choice> = plan.targets.iter().map(|t| super::dry_run::target_choice(&world.registry, t)).collect();
             let k = pick(ctx, &Question { what: "what to make".into(), flag: "--to ".into() }, &choices).await?;
             world.extras.to = vec![choices[k].value.clone()];
             world.learn_types().await?;
@@ -627,14 +633,14 @@ async fn running_machine(world: &mut World<'_>, positionals: &[f::Positional], l
     Ok((m, written))
 }
 
-/// The line to run the same machine again, asking nothing, as words a shell
-/// reads back: on stderr, and under `--json` as a `rerun` record.
-fn say_rerun(ctx: &Ctx, world: &World<'_>, rerun: &RunState, args: &Args) -> CliResult<()> {
+/// The line to run the same machine, asking nothing, as words a shell reads
+/// back: on stderr after `lead`, and under `--json` as a `rerun` record.
+pub fn say_rerun(ctx: &Ctx, world: &World<'_>, rerun: &RunState, args: &Args, lead: &str) -> CliResult<()> {
     let words = rerun_words(ctx, world, rerun, args)?;
     if ctx.term.json {
         emit_record(&serde_json::json!({ "type": "rerun", "argv": words }));
     } else if ctx.term.verbosity >= 0 {
-        eprintln!("Run it again with: {}", super::shell_line(&words));
+        eprintln!("{lead}: {}", super::shell_line(&words));
     }
     Ok(())
 }
@@ -719,32 +725,6 @@ pub fn rerun_words(ctx: &Ctx, world: &World<'_>, rerun: &RunState, args: &Args) 
         words.extend(after);
     }
     Ok(words)
-}
-
-/// `capdag run <machine> --help`: the machine's inputs, steps and the options
-/// it leaves to the run, as `capdag check` shows them; `capdag run --help`
-/// without a machine: run's own help.
-async fn machine_help(ctx: &Ctx, world: &mut World<'_>, state: &RunState) -> CliResult<Exit> {
-    let Some(machine) = state.line.machine.clone() else {
-        super::print_command_help(&["run"])?;
-        return Ok(Exit::Ok);
-    };
-    let m = index(&machine.base);
-    let positionals: Vec<f::Positional> = Vec::new();
-    let cli_world = ctx.cli_world(false);
-    let verdict = world
-        .settle(&positionals, |w| {
-            f::cli(cli_world.clone(), f::Invocation::HelpFlag { topic: f::HelpTopic::Machine { m: machine.clone(), w } })
-        })
-        .await?;
-    match verdict {
-        f::CliVerdict::Is { v: f::Verdict::Help } => {
-            let resolved = world.machine(m).and_then(MachineFacts::resolved).expect("help is shown for a machine that resolves");
-            super::check::show(ctx, &world.registry, &world.tables.machines[m], resolved)?;
-            Ok(Exit::Ok)
-        }
-        other => Err(super::check::showing_error(world, &machine, &other)),
-    }
 }
 
 /// The run of a settled line: every value it gives each input of its machine,

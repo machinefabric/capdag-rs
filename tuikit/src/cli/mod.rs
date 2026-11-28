@@ -13,10 +13,11 @@
 pub mod ask;
 pub mod caps;
 pub mod cartridge;
-pub mod check;
 pub mod ctx;
 pub mod dev;
+pub mod dry_run;
 pub mod error;
+pub mod explain;
 pub mod formal;
 pub mod graph;
 pub mod host;
@@ -28,7 +29,6 @@ pub mod line;
 pub mod live;
 pub mod model;
 pub mod names;
-pub mod plan;
 pub mod run;
 pub mod say;
 pub mod term;
@@ -54,7 +54,7 @@ use self::term::{ColorChoice, Term};
     max_term_width = 100,
     after_help = "Start here:\n  \
         capdag caps pdf                                        find capabilities that take or give PDF\n  \
-        capdag plan report.pdf                                 what report.pdf can become\n  \
+        capdag run report.pdf --dry-run                        what report.pdf can become\n  \
         capdag run report.pdf --to txt                         make text of it, choosing a machine\n  \
         capdag run '[doc -> disbind-pdf -> pages]' report.pdf  run a machine of one step\n  \
         capdag run pages.machine report.pdf                    run a machine saved in a file\n\n\
@@ -125,28 +125,25 @@ pub enum Command {
         # stdin as an input\n  \
         cat notes.txt | capdag run summary.machine -\n  \
         # plan a machine that makes text of it, and run it\n  \
-        capdag run report.pdf --to txt\n\n\
+        capdag run report.pdf --to txt\n  \
+        # what it can become, and the machines that make text of it, running nothing\n  \
+        capdag run report.pdf --dry-run\n  \
+        capdag run report.pdf --to txt --dry-run\n  \
+        # keep the machine chosen in a file\n  \
+        capdag run report.pdf --to txt --dry-run > pages.machine\n  \
+        # a machine's inputs, steps and the options it leaves to the run\n  \
+        capdag run pages.machine --explain\n\n\
         What a line leaves open is asked at a terminal, and named with the flag that gives it\n\
         in a script. A run that settled anything prints the line to run it again, asking nothing.\n\n\
         A single result goes to stdout; several results are written as files, whose\n\
         paths are listed on stdout. Progress, logs and errors go to stderr.\n\n\
         Ctrl-C stops the run: nothing new starts, what started finishes and is written.\n\
         Ctrl-C again aborts it.\n\n\
-        `capdag run <machine> --help` shows the machine's inputs, steps and the options it leaves\n\
-        to the run; `capdag info <cap>` a capability's own options.")]
+        --dry-run decides what the run would, asking what it would ask, and runs and installs\n\
+        nothing: the machine it would run goes to stdout, and the line that runs it to stderr.\n\
+        Where nobody can be asked it lists what is still open and exits 0.\n\n\
+        `capdag info <cap>` shows a capability's own options.")]
     Run(run::Args),
-    /// What inputs can become, the machines that make it, and saving one
-    #[command(after_help = "Examples:\n  \
-        capdag plan report.pdf                                 what report.pdf can become\n  \
-        capdag plan report.pdf --to txt                        the machines that make text of it\n  \
-        capdag plan report.pdf --to txt --save pages.machine   save the one chosen\n\n\
-        A plan runs nothing: run a machine with capdag run.")]
-    Plan(plan::Args),
-    /// Check a machine without running it
-    #[command(after_help = "Examples:\n  \
-        capdag check pages.machine        its inputs, steps and outputs, or what is wrong and where\n  \
-        capdag check '[doc -> disbind-pdf -> pages]'")]
-    Check(check::Args),
     /// Draw a machine: as text, Mermaid or Graphviz
     #[command(after_help = "Examples:\n  \
         capdag graph pages.machine                    as text, in the terminal\n  \
@@ -162,7 +159,7 @@ pub enum Command {
     /// Edit a machine file in the terminal, checking every change against the fabric
     #[command(after_help = "Examples:\n  \
         capdag edit pages.machine\n\n\
-        Needs a terminal. Without one, edit the file in any editor and run `capdag check` on it.")]
+        Needs a terminal. Without one, edit the file in any editor, then: capdag run pages.machine --explain")]
     Edit(graph::EditArgs),
     /// The cartridges that provide capabilities: list, install, remove
     #[command(subcommand)]
@@ -225,7 +222,6 @@ pub async fn run_command_line(argv: Vec<String>, host: std::sync::Arc<dyn Host>)
     };
     let reads_stdin = match &cli.command {
         Command::Run(args) => args.reads_stdin(),
-        Command::Plan(args) => args.reads_stdin(),
         _ => false,
     };
     let term = Term::decide(
@@ -318,9 +314,9 @@ async fn dispatch(ctx: &Ctx, command: Command) -> CliResult<Exit> {
     let placeholder = match &command {
         Command::Caps(args) => Some(f::Command::Caps { pick: args.pick, types_known: true, found: f::Choices::None }),
         Command::Info(args) => Some(f::Command::Info { all_known: true, no_cache: args.no_cache }),
-        Command::Run(_) => Some(f::Command::Run { l: f::no_run_line(), planning_flags: false, w: none() }),
-        Command::Plan(_) => Some(f::Command::Plan { l: plan::no_plan_line(), w: none(), save_there: false }),
-        Command::Check(_) => Some(f::Command::Check { m: f::Written { base: f::nat(0), inline: false }, w: none() }),
+        Command::Run(_) => {
+            Some(f::Command::Run { l: f::no_run_line(), planning_flags: false, mode: f::RunMode::Run, w: none() })
+        }
         Command::Graph(_) => {
             Some(f::Command::Graph { m: f::Written { base: f::nat(0), inline: false }, text: true, width: false, w: none() })
         }
@@ -345,8 +341,6 @@ async fn dispatch(ctx: &Ctx, command: Command) -> CliResult<Exit> {
         Command::Caps(args) => caps::caps(ctx, args).await,
         Command::Info(args) => info::info(ctx, args).await,
         Command::Run(args) => run::run(ctx, args).await,
-        Command::Plan(args) => plan::plan(ctx, args).await,
-        Command::Check(args) => check::check(ctx, args).await,
         Command::Graph(args) => graph::graph(ctx, args).await,
         Command::View(args) => graph::view(ctx, args).await,
         Command::Edit(args) => graph::edit(ctx, args).await,
@@ -461,7 +455,7 @@ async fn unknown(ctx: &Ctx, words: Vec<String>) -> CliResult<Exit> {
         f::WordKind::MachineFile => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
         f::WordKind::InlineMachine => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
         f::WordKind::File => {
-            error.hint(format!("capdag plan {0}, or capdag run {0} --to <type>", shell_word(&word)))
+            error.hint(format!("what it can become: capdag run {} --dry-run", shell_word(&word)))
         }
         f::WordKind::NearCommand => {
             let near = nearest(&word, commands.iter().map(String::as_str)).expect("a near command was found above");
@@ -624,9 +618,9 @@ mod tests {
     // TEST20114: a mistyped command is answered with the one it meant.
     #[test]
     fn test20114_a_mistyped_command_is_answered_with_the_one_meant() {
-        let commands = ["caps", "info", "run", "plan", "check", "graph", "cartridge"];
+        let commands = ["caps", "info", "run", "graph", "view", "edit", "cartridge"];
         assert_eq!(nearest("cpas", commands.iter().copied()), Some("caps"));
-        assert_eq!(nearest("plna", commands.iter().copied()), Some("plan"));
+        assert_eq!(nearest("grpah", commands.iter().copied()), Some("graph"));
         assert_eq!(nearest("summarize-en", commands.iter().copied()), None);
     }
 

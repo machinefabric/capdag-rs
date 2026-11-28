@@ -1,4 +1,4 @@
-$ capdag --json plan in.txt --to 'media:dag-shout;enc=utf8'
+$ capdag --json run in.txt --to 'media:dag-shout;enc=utf8' --dry-run
 exit: 0
 --- stdout ---
 {"alias":"txt","file":"in.txt","type":"input","urn":"media:enc=utf8;ext=txt"}

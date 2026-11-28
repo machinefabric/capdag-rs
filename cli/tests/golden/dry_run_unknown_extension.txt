@@ -1,4 +1,4 @@
-$ capdag plan in.unknown
+$ capdag run in.unknown --dry-run
 exit: 2
 --- stdout ---
 --- stderr ---

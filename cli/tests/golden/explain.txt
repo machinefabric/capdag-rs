@@ -1,4 +1,4 @@
-$ capdag check loud.machine
+$ capdag run loud.machine --explain
 exit: 0
 --- stdout ---
 ✓ loud.machine

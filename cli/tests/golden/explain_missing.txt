@@ -1,0 +1,6 @@
+$ capdag run absent.machine --explain
+exit: 2
+--- stdout ---
+--- stderr ---
+error: absent.machine: the machine file is not there
+hint: write one: capdag run <files> --to <type> --dry-run > <file>.machine
