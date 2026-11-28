@@ -11,4 +11,3 @@ exit: 0
   → <work>/say · 1.w.txt
   → <work>/say · 2.w.txt
   → <work>/say · 3.w.txt
-

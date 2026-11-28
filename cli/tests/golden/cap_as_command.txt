@@ -2,7 +2,6 @@ $ capdag shout in.txt
 exit: 2
 --- stdout ---
 --- stderr ---
-error: a capability is not a command: capdag run '[in -> <cap> -> out]' <input>
+error: 'shout': a capability is not a command: capdag run '[in -> <cap> -> out]' <input>
   shout — Test DAG (test-dag-shout)
 hint: capdag run '[in -> shout -> out]' in.txt
-

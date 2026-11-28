@@ -4,4 +4,3 @@ exit: 0
 FROM A PIPE--- stderr ---
 [1/1] shout  done
 ✓ the machine  1 step · <time>
-

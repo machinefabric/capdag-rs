@@ -25,4 +25,3 @@ type to filter · ↑↓ move · Enter choose · Esc cancel
 Run it again with: capdag run '[(input=value) -> join -> (output=value_2)]' --input value=@in.txt -o out --dev-bin <cartridge>
 ✓ in.txt  1 step · <time>
   → <work>/out/in.value_2.txt
-

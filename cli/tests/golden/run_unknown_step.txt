@@ -5,4 +5,3 @@ exit: 1
 error: the machine is not a machine that can run
   wiring references undefined alias 'shuot' (not a local header and not a registered cap alias)
 hint: did you mean `shout`? Find capabilities with: capdag caps shuot
-

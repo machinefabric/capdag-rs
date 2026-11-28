@@ -115,12 +115,17 @@ pub enum Command {
     Info(info::Args),
     /// Run a machine on inputs: one written inline or in a file, or one planned to --to
     #[command(after_help = "Examples:\n  \
-        capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages    a machine of one step\n  \
-        capdag run pages.machine report.pdf                    a machine saved in a file\n  \
-        capdag run pages.machine --input doc=@report.pdf       an input by its name in the machine\n  \
-        cat notes.txt | capdag run summary.machine -           stdin as an input\n  \
-        capdag run report.pdf --to txt                         plan a machine that makes text of it\n  \
-        capdag run '[(doc, index-range=\"1-5\") -> disbind-pdf -> pages]' report.pdf    an option, in the machine\n\n\
+        # a machine of one step\n  \
+        capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages\n  \
+        # a step's option, written in the machine\n  \
+        capdag run '[(doc, index-range=\"1-5\") -> disbind-pdf -> pages]' report.pdf\n  \
+        # a machine saved in a file, and an input given by its name in it\n  \
+        capdag run pages.machine report.pdf\n  \
+        capdag run pages.machine --input doc=@report.pdf\n  \
+        # stdin as an input\n  \
+        cat notes.txt | capdag run summary.machine -\n  \
+        # plan a machine that makes text of it, and run it\n  \
+        capdag run report.pdf --to txt\n\n\
         What a line leaves open is asked at a terminal, and named with the flag that gives it\n\
         in a script. A run that settled anything prints the line to run it again, asking nothing.\n\n\
         A single result goes to stdout; several results are written as files, whose\n\

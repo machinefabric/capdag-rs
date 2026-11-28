@@ -4,4 +4,3 @@ exit: 1
 --- stderr ---
 error: the capability list-models is not in this fabric
   Not found in registry: alias 'list-models' is not part of manifest v1
-

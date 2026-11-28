@@ -12,4 +12,3 @@ error: 8 options for a capability, and nobody to ask
   '[in -> test-random-parity -> out]'  Test DAG (test-random-parity) · random-number → enc=utf8;random-parity
   '[in -> words -> out]'  Test DAG (test-dag-words) · enc=utf8 → dag-word;enc=utf8
 hint: add words to the query until one matches, or leave out --pick to list them
-

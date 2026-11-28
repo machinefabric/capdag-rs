@@ -8,5 +8,3 @@ failed, and tolerated: shout (item 2) [input/SHOUT_REFUSED] — 'brave' is not s
 ✓ in.txt  2 steps · 3 items · <time> · tolerated
   → <work>/in · 1.loud.txt
   → <work>/in · 2.loud.txt
-
-

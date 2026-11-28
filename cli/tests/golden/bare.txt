@@ -29,7 +29,8 @@ Options:
                       names it
       --json          Print JSON Lines on stdout — one record per line — instead of text for a
                       person
-      --no-input      Never ask: a choice not given by a flag is an error naming the flag
+      --no-input      Never ask: what a line leaves open is an error naming the choices and the flag
+                      that gives each
       --color <WHEN>  When to colour the output [default: auto] [possible values: auto, always,
                       never]
   -v, --verbose...    Say more: -v adds the cartridges' info logs and URNs, -vv their debug logs
@@ -45,4 +46,3 @@ Start here:
   capdag run pages.machine report.pdf                    run a machine saved in a file
 
 `capdag help <command>` shows a command's help with examples.
-

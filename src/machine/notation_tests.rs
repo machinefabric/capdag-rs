@@ -484,7 +484,9 @@ fn test12738_a_constant_is_bound_and_validated() {
 // TEST7176: a constant whose arg's media definition is in the registry, and
 // whose fetch the registry refused, is reported as the refusal — the URL, the
 // status and the manifest version — not as a definition that is not
-// available.
+// available. A refusal is not retried: the URL is asked once by the fetch that
+// reports it, and at most once more by the background fetcher a failed fetch
+// is handed to, which may have asked by the time the requests are counted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test7176_a_constant_whose_definition_was_refused_reports_the_refusal() {
     use crate::fabric::registry::{FabricRegistryError, FetchCause, RegistryConfig};
@@ -503,7 +505,8 @@ async fn test7176_a_constant_whose_definition_was_refused_reports_the_refusal() 
                 FabricRegistryError::FetchFailed(refusal) => {
                     assert_eq!(refusal.cause, FetchCause::Status(403));
                     assert_eq!(refusal.manifest_version, 1);
-                    assert_eq!(stub.requests_for(stub.path_of(&refusal.url)), 1);
+                    let asked = stub.requests_for(stub.path_of(&refusal.url));
+                    assert!((1..=2).contains(&asked), "a refusal is not retried; the URL was asked {asked} times");
                 }
                 other => panic!("expected the refused fetch, got {other:?}"),
             }

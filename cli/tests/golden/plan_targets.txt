@@ -7,6 +7,5 @@ exit: 0
   dag-word;enc=utf8    dag-word;enc=utf8 · each · 1 step
 --- stderr ---
 
-The machines that make one: capdag plan in.txt --to dag-joined;enc=utf8
-Make one:                   capdag run in.txt --to dag-joined;enc=utf8
-
+The machines that make one: capdag plan in.txt --to 'media:dag-joined;enc=utf8'
+Make one:                   capdag run in.txt --to 'media:dag-joined;enc=utf8'

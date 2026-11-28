@@ -17,4 +17,3 @@ error: 32 options for the machine to save, and nobody to ask
   '[(left=value) -> pair -> (output=value_2)][(input=value_2) -> flaky -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
   … and 20 more
 hint: narrow what --to names or the planning flags until one machine makes it, or write one to made.machine
-

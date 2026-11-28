@@ -4,4 +4,4 @@ exit: 2
 --- stderr ---
 error: 'fail-on': --arg names no step option the machine leaves to the run: see capdag check
   what it leaves to the run: it leaves none
-
+hint: an option a step has a default for, or may go without, is written in the machine: [(<input>, fail-on=<value>) -> <step> -> <output>]

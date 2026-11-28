@@ -5,4 +5,3 @@ HELLO BRAVE WORLD
 --- stderr ---
 [1/1] shout  done
 ✓ in.txt  1 step · <time>
-

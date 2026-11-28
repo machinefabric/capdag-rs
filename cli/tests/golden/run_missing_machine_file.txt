@@ -4,4 +4,3 @@ exit: 2
 --- stderr ---
 error: absent.machine: the machine file is not there
 hint: `capdag plan <files> --to <type> --save <file>` writes one
-

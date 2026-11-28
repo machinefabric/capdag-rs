@@ -3,4 +3,3 @@ exit: 2
 --- stdout ---
 --- stderr ---
 error: this fetches from the network, and --offline was given: drop --offline
-

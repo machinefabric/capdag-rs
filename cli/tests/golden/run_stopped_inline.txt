@@ -8,4 +8,3 @@ Stopping: nothing new starts; what started finishes and is written. Ctrl-C again
 ■ slow.machine  1 step · 2 items · <time> · stopped
   → <work>/in.loud.txt
   → <work>/other.loud.txt
-

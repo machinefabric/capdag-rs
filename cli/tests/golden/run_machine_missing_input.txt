@@ -4,4 +4,3 @@ exit: 2
 --- stderr ---
 error: the input doc (enc=utf8) is given nothing, and nobody to ask
 hint: give it: --input doc=<value>, where the value is @<file>, - for stdin, or text
-

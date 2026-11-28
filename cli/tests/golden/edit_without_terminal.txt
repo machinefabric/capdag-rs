@@ -4,4 +4,3 @@ exit: 2
 --- stderr ---
 error: capdag edit needs a terminal: edit the file in any editor, then capdag check it
 hint: edit loud.machine in any editor, then: capdag check loud.machine
-

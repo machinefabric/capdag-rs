@@ -37,7 +37,8 @@ Options:
           Print JSON Lines on stdout — one record per line — instead of text for a person
 
       --no-input
-          Never ask: a choice not given by a flag is an error naming the flag
+          Never ask: what a line leaves open is an error naming the choices and the flag that gives
+          each
 
       --to <TYPE>
           What to make, when no machine is given: a media alias, an extension or a media URN;
@@ -120,12 +121,17 @@ Options:
           Print version
 
 Examples:
-  capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages    a machine of one step
-  capdag run pages.machine report.pdf                    a machine saved in a file
-  capdag run pages.machine --input doc=@report.pdf       an input by its name in the machine
-  cat notes.txt | capdag run summary.machine -           stdin as an input
-  capdag run report.pdf --to txt                         plan a machine that makes text of it
-  capdag run '[doc -> disbind-pdf -> pages]' report.pdf --arg index-range=1-5
+  # a machine of one step
+  capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages
+  # a step's option, written in the machine
+  capdag run '[(doc, index-range="1-5") -> disbind-pdf -> pages]' report.pdf
+  # a machine saved in a file, and an input given by its name in it
+  capdag run pages.machine report.pdf
+  capdag run pages.machine --input doc=@report.pdf
+  # stdin as an input
+  cat notes.txt | capdag run summary.machine -
+  # plan a machine that makes text of it, and run it
+  capdag run report.pdf --to txt
 
 What a line leaves open is asked at a terminal, and named with the flag that gives it
 in a script. A run that settled anything prints the line to run it again, asking nothing.
@@ -139,4 +145,3 @@ Ctrl-C again aborts it.
 `capdag run <machine> --help` shows the machine's inputs, steps and the options it leaves
 to the run; `capdag info <cap>` a capability's own options.
 --- stderr ---
-

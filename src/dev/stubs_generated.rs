@@ -62,7 +62,7 @@ manifest, one main().
 
 Develop it with:
     capdag dev install            # install/update under the local `dev` slug
-    echo "I love this" | capdag run __CARTRIDGE_NAME__
+    echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
     # edit the labels or the peer cap, then re-run `capdag dev install`
 """
 
@@ -220,7 +220,7 @@ def build_manifest() -> CapManifest:
 
     return CapManifest(
         name="__CARTRIDGE_NAME__",
-        version="1.240.2566",
+        version="1.243.2604",
         channel="nightly",          # 'nightly' or 'release'; nightly for dev.
         registry_url=None,           # None => dev cartridge (installed locally).
         description="Classify a piece of text as positive, neutral, or negative.",
@@ -256,7 +256,7 @@ pip install capdag
 capdag dev install
 
 # 3. Run your cap through the capdag host:
-echo "I love this" | capdag run __CARTRIDGE_NAME__
+echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 # => positive
 
 # 4. Edit the labels or the peer cap in cartridge.py, then re-run step 2:
@@ -269,7 +269,7 @@ This cartridge does not classify anything itself — it PEER-CALLS `classify-en`
 and a model cartridge answers. Peer calls are routed by the capdag host, so
 running the built entry directly (`./__CARTRIDGE_NAME__ __CARTRIDGE_NAME__`)
 fails with `Peer invocation not supported in this context`. That is correct, not
-a bug: run it through `capdag run __CARTRIDGE_NAME__`, which hosts the cartridge and
+a bug: run it through `capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -`, which hosts the cartridge and
 routes the call.
 
 A model cartridge providing `classify-en` must be installed. The first run
@@ -320,7 +320,7 @@ cartridge.json
 //! Develop it with:
 //!     cargo build --release --target-dir target # the entry the host launches
 //!     capdag dev install                        # install under the local `dev` slug
-//!     echo "I love this" | capdag run __CARTRIDGE_NAME__
+//!     echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 //!     # edit the labels or the peer cap, then re-run both to update
 
 use anyhow::Result;
@@ -518,7 +518,7 @@ async fn main() -> Result<()> {
                 dest: r#"Cargo.toml"#,
                 contents: r#"[package]
 name = "__CARTRIDGE_NAME__"
-version = "1.240.2566"
+version = "1.243.2604"
 edition = "2021"
 
 [dependencies]
@@ -527,7 +527,7 @@ anyhow = "1.0"
 # which is unpublishable, and cargo requires a version requirement on every
 # dependency. The tag is stamped from capdag's own version.txt, so it tracks
 # what capdag's next release tags instead of drifting until someone notices.
-capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.1062.40" }
+capdag = { git = "https://github.com/machinefabric/capdag-rs", tag = "v1.1069.31" }
 ciborium = "0.2"
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
@@ -568,7 +568,7 @@ cargo build --release --target-dir target
 capdag dev install
 
 # 3. Run your cap through the capdag host:
-echo "I love this" | capdag run __CARTRIDGE_NAME__
+echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 # => positive
 
 # 4. Edit the labels or the peer cap in src/main.rs, then re-run steps 1-2:
@@ -596,7 +596,7 @@ This cartridge does not classify anything itself — it PEER-CALLS `classify-en`
 and a model cartridge answers. Peer calls are routed by the capdag host, so
 running the built entry directly (`./__CARTRIDGE_NAME__ __CARTRIDGE_NAME__`)
 fails with `Peer invocation not supported in this context`. That is correct, not
-a bug: run it through `capdag run __CARTRIDGE_NAME__`, which hosts the cartridge and
+a bug: run it through `capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -`, which hosts the cartridge and
 routes the call.
 
 A model cartridge providing `classify-en` must be installed. The first run
@@ -645,7 +645,7 @@ cartridge.json
 //
 //	go build -buildvcs=false -o __CARTRIDGE_NAME__ .   # the entry the host launches
 //	capdag dev install                 # install/update under the local `dev` slug
-//	echo "I love this" | capdag run __CARTRIDGE_NAME__
+//	echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 //	# edit the labels or the peer cap, then rebuild + re-install to update
 package main
 
@@ -813,7 +813,7 @@ func buildManifest() *bifaci.CapManifest {
 
 	return capdag.NewCapManifest(
 		"__CARTRIDGE_NAME__",
-		"1.240.2566",
+		"1.243.2604",
 		"nightly", // 'nightly' or 'release'; nightly for dev.
 		nil,       // nil => dev cartridge (installed locally).
 		"Classify a piece of text as positive, neutral, or negative.",
@@ -849,7 +849,7 @@ go 1.21
 // always ahead of the newest tag -- asked for one no tag satisfies and
 // resolved whatever older one it could, so every fix to the mirror stayed
 // invisible to the stub suite until a release happened to catch up.
-require github.com/machinefabric/capdag-go v1.647.18
+require github.com/machinefabric/capdag-go v1.653.78
 "#,
                 executable: false,
             },
@@ -871,7 +871,7 @@ go build -buildvcs=false -o __CARTRIDGE_NAME__ .
 capdag dev install
 
 # 3. Run your cap through the capdag host:
-echo "I love this" | capdag run __CARTRIDGE_NAME__
+echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 # => positive
 
 # 4. Edit the labels or the peer cap in cartridge.go, then re-run steps 1-2:
@@ -888,7 +888,7 @@ This cartridge does not classify anything itself — it PEER-CALLS `classify-en`
 and a model cartridge answers. Peer calls are routed by the capdag host, so
 running the built entry directly (`./__CARTRIDGE_NAME__ __CARTRIDGE_NAME__`)
 fails with `Peer invocation not supported in this context`. That is correct, not
-a bug: run it through `capdag run __CARTRIDGE_NAME__`, which hosts the cartridge and
+a bug: run it through `capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -`, which hosts the cartridge and
 routes the call.
 
 A model cartridge providing `classify-en` must be installed. The first run
@@ -936,7 +936,7 @@ cartridge.json
 // Develop it with:
 //     swift build -c release                    # the entry the host launches
 //     capdag dev install                        # install under the local `dev` slug
-//     echo "I love this" | capdag run __CARTRIDGE_NAME__
+//     echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 //     # edit the labels or the peer cap, then re-run both to update
 
 import Foundation
@@ -1084,7 +1084,7 @@ func buildManifest() -> Manifest {
 
     return Manifest(
         name: "__CARTRIDGE_NAME__",
-        version: "1.240.2566",
+        version: "1.243.2604",
         channel: "nightly",   // 'nightly' or 'release'; nightly for dev.
         registryURL: nil,     // nil => dev cartridge (installed locally).
         description: "Classify a piece of text as positive, neutral, or negative.",
@@ -1118,7 +1118,7 @@ let package = Package(
         .macOS(.v13)
     ],
     dependencies: [
-        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.734.0"),
+        .package(url: "https://github.com/machinefabric/capdag-objc.git", from: "1.738.0"),
         .package(url: "https://github.com/jowharshamshiri/ops-objc.git", from: "1.19.17"),
     ],
     targets: [
@@ -1156,7 +1156,7 @@ swift build -c release
 capdag dev install
 
 # 3. Run your cap through the capdag host:
-echo "I love this" | capdag run __CARTRIDGE_NAME__
+echo "I love this" | capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -
 # => positive
 
 # 4. Edit the labels or the peer cap in Sources/main.swift, then re-run steps 1-2:
@@ -1172,7 +1172,7 @@ This cartridge does not classify anything itself — it PEER-CALLS `classify-en`
 and a model cartridge answers. Peer calls are routed by the capdag host, so
 running the built entry directly (`./__CARTRIDGE_NAME__ __CARTRIDGE_NAME__`)
 fails with `Peer invocation not supported in this context`. That is correct, not
-a bug: run it through `capdag run __CARTRIDGE_NAME__`, which hosts the cartridge and
+a bug: run it through `capdag run '[in -> __CARTRIDGE_NAME__ -> out]' -`, which hosts the cartridge and
 routes the call.
 
 A model cartridge providing `classify-en` must be installed. The first run

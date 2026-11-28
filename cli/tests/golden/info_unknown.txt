@@ -4,4 +4,3 @@ exit: 2
 --- stderr ---
 error: 'nosuch': nothing of that name: see capdag caps, capdag cartridge list
 hint: find capabilities with: capdag caps nosuch
-

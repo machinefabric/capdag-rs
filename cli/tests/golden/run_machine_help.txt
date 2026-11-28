@@ -9,4 +9,3 @@ exit: 0
 
 Run it: capdag run '[doc -> shout -> loud]' <doc>
 --- stderr ---
-

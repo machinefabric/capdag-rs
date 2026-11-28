@@ -9,4 +9,3 @@ exit: 0
   → <work>/in · 1.loud.txt
   → <work>/in · 2.loud.txt
   → <work>/in · 3.loud.txt
-

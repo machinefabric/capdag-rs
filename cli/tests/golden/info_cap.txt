@@ -7,9 +7,9 @@ Aliases: test-dag-shout
 Input:
   enc=utf8 — The text
 
-Options:
-  --arg fail-on=<value>  (dag-fail-on;enc=utf8) — A text to refuse [optional]
-  --arg delay-ms=<value>  (dag-delay-ms;numeric) — How long to take, in milliseconds [optional]
+Options, written in the machine: [(in, <name>=<value>) -> shout -> out]
+  fail-on=<value>  (dag-fail-on;enc=utf8) — A text to refuse [optional]
+  delay-ms=<value>  (dag-delay-ms;numeric) — How long to take, in milliseconds [optional]
 
 Output: dag-shout;enc=utf8
 
@@ -20,4 +20,3 @@ Its cartridge could not be looked up: this capdag is a development build, bound 
 Run it as a machine of one step:
   capdag run '[in -> shout -> out]' <input> -o <dir>
 --- stderr ---
-

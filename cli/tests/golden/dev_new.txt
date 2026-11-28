@@ -8,4 +8,3 @@ Next:
   cd ./made-cartridge
   capdag dev install
   echo "I love this" | capdag run '[in -> made-cartridge -> out]' -
-

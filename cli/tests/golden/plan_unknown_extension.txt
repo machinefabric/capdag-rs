@@ -4,4 +4,3 @@ exit: 2
 --- stderr ---
 error: in.unknown: no file has that name
 hint: check the path; inputs are files, directories or globs
-

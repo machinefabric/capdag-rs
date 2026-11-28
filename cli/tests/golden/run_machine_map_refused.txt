@@ -4,8 +4,7 @@ exit: 3
 <work>/in · 1.loud.txt
 <work>/in · 2.loud.txt
 --- stderr ---
-dropped: item 2 — shout failed: Step <token> failed: Cartridge execution failed for cap cap:in="media:enc=utf8";out="media:dag-shout;enc=utf8";test-dag-shout: 'brave' is not shouted; the other items were kept
+dropped: item 2 — shout failed: 'brave' is not shouted; the other items were kept
 ✓ in.txt  2 steps · 2 items · <time> · tolerated
   → <work>/in · 1.loud.txt
   → <work>/in · 2.loud.txt
-

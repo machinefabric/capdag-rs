@@ -15,4 +15,3 @@ Choose a capability:   8/8
 type to filter · ↑↓ move · Enter choose · Esc cancel
 --- screen: at the end ---
 
-

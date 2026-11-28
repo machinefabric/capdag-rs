@@ -15,4 +15,3 @@ exit: 0
   → <work>/other · 1.loud.txt
   → <work>/other · 2.loud.txt
   → <work>/other · 3.loud.txt
-

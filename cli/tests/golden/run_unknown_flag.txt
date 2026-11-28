@@ -7,4 +7,3 @@ error: unexpected argument '--loudness' found
   tip: to pass '--loudness' as a value, use '-- --loudness'
 
 Usage: capdag run <MACHINE|INPUT>... [-- <INPUT>...]
-
