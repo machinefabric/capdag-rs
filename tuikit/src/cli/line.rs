@@ -899,9 +899,16 @@ impl<'a> World<'a> {
             targets.push(media_type(&self.registry, token).await?.expect("the model refuses a --to that is no type"));
         }
         let request = self.planning.request(sources, targets)?;
-        let outcome = fab
-            .plan(&request, self.registry.as_ref())
-            .map_err(|e| CliError::failed("no machine could be planned").context(e.to_string()))?;
+        // No plan connecting the sources to what is asked is the answer that
+        // no machine makes it, which the model says; any other failure of the
+        // planner is a failure to plan at all.
+        let outcome = match fab.plan(&request, self.registry.as_ref()) {
+            Ok(outcome) => outcome,
+            Err(p::PlanError::NoPlan { .. }) => {
+                return Ok(PlanFacts { targets: Vec::new(), machines: Vec::new(), described: Vec::new(), excluded: Vec::new(), what })
+            }
+            Err(e) => return Err(CliError::failed("no machine could be planned").context(e.to_string())),
+        };
         let bundled = super::cartridge::bundled_caps(self.ctx).await?;
         let mut machines = Vec::with_capacity(outcome.candidates.len());
         let mut described = Vec::with_capacity(outcome.candidates.len());

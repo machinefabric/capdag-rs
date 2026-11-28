@@ -4,3 +4,4 @@ exit: 2
 --- stderr ---
 error: --fabric named two fabrics: a command resolves against one
   --fabric was given as https://a.example and https://b.example
+hint: give --fabric once

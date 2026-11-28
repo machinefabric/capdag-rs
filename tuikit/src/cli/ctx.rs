@@ -81,7 +81,9 @@ impl Ctx {
                 let verdict = f::CliVerdict::Refused { r: refusal.clone() };
                 let mut error = super::say::with_exit(super::say::cli_refusal(&refusal), &verdict);
                 if let f::CliRefusal::TwoFabrics = refusal {
-                    error = error.context(format!("--fabric was given as {}", self.fabrics.join(" and ")));
+                    error = error
+                        .context(format!("--fabric was given as {}", self.fabrics.join(" and ")))
+                        .hint("give --fabric once");
                 }
                 Err(error)
             }

@@ -1,0 +1,14 @@
+{
+  "title": "A machine that does not resolve is said so, even when the line names an input for it",
+  "world": "ordinary",
+  "args": ["run", "broken.machine", "--input", "doc=hello"],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 1,
+        "shown": ["error: broken.machine is not a machine that can run"],
+        "absent": ["names no input of the machine"]
+      }
+    }
+  }
+}
