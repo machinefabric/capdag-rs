@@ -1,7 +1,8 @@
-$ capdag run shout in.txt --dev-bin <cartridge>
+$ capdag run '[doc -> shout -> loud]' in.txt --dev-bin <cartridge>
 exit: 0
 --- stdout ---
 HELLO BRAVE WORLD
 --- stderr ---
 [1/1] shout  done
 ✓ in.txt  1 step · <time>
+

@@ -151,7 +151,9 @@ fn line_refusal(world: &World<'_>, state: &RunState, refusal: &f::Refusal) -> Cl
             if let Some(m) = m {
                 error = error.context(format!("what it leaves to the run: {}", options_said(world, m)));
             }
-            error
+            error.hint(format!(
+                "an option a step has a default for, or may go without, is written in the machine: [(<input>, {name}=<value>) -> <step> -> <output>]"
+            ))
         }
         f::Refusal::OptionShared { j } => {
             let mut error = CliError::usage(says);
@@ -181,6 +183,20 @@ fn line_refusal(world: &World<'_>, state: &RunState, refusal: &f::Refusal) -> Cl
         }
         _ => CliError::usage(says),
     }
+}
+
+/// The inputs a line gave by position, as a line that runs a machine on them
+/// gives them: files and `-` where they were, and a live source by the name of
+/// the input it feeds, which a machine gives it by.
+fn same_inputs(world: &World<'_>, positionals: &[f::Positional]) -> String {
+    positionals
+        .iter()
+        .map(|p| match p {
+            f::Positional::Path { p } => format!(" {}", super::shell_word(&world.tables.files[index(p)].path.display().to_string())),
+            f::Positional::Stdin => " -".to_string(),
+            f::Positional::Live { r } => format!(" --live <input>={}", super::shell_word(&world.tables.lives[index(r)])),
+        })
+        .collect()
 }
 
 /// What a stage that nobody can be asked is: its choices or the value it
@@ -213,6 +229,7 @@ async fn named(ctx: &Ctx, world: &mut World<'_>, state: &RunState, positionals: 
                 })
                 .unwrap_or_default();
             ask::named(ctx, &Question { what: "the machine".into(), flag: "capdag run ".into() }, &choices)
+                .hint(format!("run one of them on the same inputs: capdag run '<machine>'{}", same_inputs(world, positionals)))
         }
         f::Stage::Path { p } => match candidates(world, state, positionals, Some(index(p))).await {
             Ok((m, js)) => {

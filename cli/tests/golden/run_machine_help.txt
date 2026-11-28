@@ -1,0 +1,12 @@
+$ capdag run '[doc -> shout -> loud]' --help
+exit: 0
+--- stdout ---
+✓ the machine
+  inputs:  doc (enc=utf8)
+  outputs: loud (dag-shout;enc=utf8)
+
+  [(input=value) -> shout -> (output=value_2)]
+
+Run it: capdag run '[doc -> shout -> loud]' <doc>
+--- stderr ---
+

@@ -178,7 +178,7 @@ async fn show_cap(ctx: &Ctx, registry: &capdag::FabricRegistry, cap: &Cap) -> Cl
             .map_err(|e| CliError::failed(format!("{alias} could not be shown")).context(e.to_string()))?
             .map(|arg| arg.name.clone())
             .unwrap_or_default();
-        outln!("\nRuns a model: {model} by default (--arg {option}=<spec> chooses another)");
+        outln!("\nRuns a model: {model} by default; another is written in the machine as {option}=\"<spec>\"");
     }
     outln!();
     match (bundled.first(), installed.first()) {

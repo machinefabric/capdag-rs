@@ -2,5 +2,5 @@ $ capdag --offline self update
 exit: 2
 --- stdout ---
 --- stderr ---
-error: capdag cannot update itself offline
-hint: drop --offline
+error: this fetches from the network, and --offline was given: drop --offline
+

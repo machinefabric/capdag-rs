@@ -120,9 +120,32 @@ async fn check_world(scenarios: &Scenarios, name: &str) -> Result<(), Vec<String
         if scripted.contains(key) {
             continue;
         }
+        // A single cap: one of the fabric's, or one a dev cartridge of the
+        // world declares itself, which a run finds among the dev cartridges.
         let cap = match key.contains(" > ") {
             true => None,
-            false => registry.get_cap(key).await.ok(),
+            false => match registry.get_cap(key).await.ok() {
+                Some(cap) => Some(cap),
+                None => match world
+                    .installed
+                    .iter()
+                    .filter(|cartridge| cartridge.dev)
+                    .flat_map(|cartridge| &cartridge.own_caps)
+                    .find(|own| own.aliases.iter().any(|alias| alias == key))
+                {
+                    Some(own) => match own.cap() {
+                        Ok(cap) => {
+                            registry.add_caps_to_cache(vec![cap.clone()]);
+                            Some(cap)
+                        }
+                        Err(e) => {
+                            wrong.push(format!("world {name}: the run '{key}' is of the dev cap {e}"));
+                            continue;
+                        }
+                    },
+                    None => None,
+                },
+            },
         };
         let Some(cap) = cap else {
             wrong.push(format!(

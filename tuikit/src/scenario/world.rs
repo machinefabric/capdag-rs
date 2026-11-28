@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use capdag::fabric::alias::StoredAlias;
-use capdag::{Cap, FabricRegistry, RegistryConfig, StoredMediaDef};
+use capdag::{Cap, CapUrn, FabricRegistry, MediaUrn, RegistryConfig, StoredMediaDef};
 use serde::{Deserialize, Serialize};
 
 use super::script::RunScript;
@@ -95,7 +95,7 @@ pub enum DevProject {
     Unbuilt(String),
 }
 
-/// A cap a dev project declares itself.
+/// A cap a dev cartridge or project declares itself.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnCap {
@@ -103,6 +103,34 @@ pub struct OwnCap {
     pub title: String,
     #[serde(default)]
     pub aliases: Vec<String>,
+}
+
+impl OwnCap {
+    /// The cap it declares, as the simplest cartridge declares one: its one
+    /// input taken from the stream, when its `in=` is not `media:void`, and
+    /// its one output.
+    pub fn cap(&self) -> Result<Cap, String> {
+        let urn = CapUrn::from_string(&self.urn).map_err(|e| format!("{}: {e}", self.urn))?;
+        let void = MediaUrn::from_string(capdag::MEDIA_VOID).expect("MEDIA_VOID is a media URN");
+        let takes = urn.in_media_urn().map_err(|e| format!("{}: {e}", self.urn))?;
+        let (in_spec, out_spec) = (urn.in_spec().to_string(), urn.out_spec().to_string());
+        let args = if takes.is_equivalent(&void) {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({
+                "media_urn": in_spec, "name": "input", "required": true, "is_sequence": false,
+                "streaming": false, "sources": [{ "stdin": in_spec }],
+            })]
+        };
+        serde_json::from_value(serde_json::json!({
+            "urn": self.urn, "version": 0, "title": self.title, "aliases": self.aliases, "args": args,
+            "outputs": [{
+                "media_urn": out_spec, "name": "output", "output_description": self.title, "optional": false,
+                "is_sequence": false, "streaming": false,
+            }],
+        }))
+        .map_err(|e| format!("{}: {e}", self.urn))
+    }
 }
 
 /// A cartridge of a world.
@@ -113,6 +141,9 @@ pub struct WorldCartridge {
     pub version: String,
     /// The caps it provides, by alias.
     pub caps: Vec<String>,
+    /// Caps of its own, which the fabric need not have: a dev cartridge's.
+    #[serde(default)]
+    pub own_caps: Vec<OwnCap>,
     /// A dev cartridge (`capdag dev install`), not the registry's.
     #[serde(default)]
     pub dev: bool,

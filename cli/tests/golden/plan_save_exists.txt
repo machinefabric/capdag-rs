@@ -1,0 +1,6 @@
+$ capdag plan in.txt --to 'media:dag-shout;enc=utf8' --save loud.machine
+exit: 2
+--- stdout ---
+--- stderr ---
+error: loud.machine: the --save file is there: --force replaces it
+

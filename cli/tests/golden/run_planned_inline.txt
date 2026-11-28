@@ -1,7 +1,7 @@
-$ capdag plan in.txt
+$ capdag run in.txt -o out --dev-bin <cartridge>
 exit: 0
 --- stdout ---
-[(input=value) -> join -> (output=value_2)]
+<work>/out/in.value_2.txt
 --- screen: what to make ---
 Choose what to make:   3/3
 › dag-joined;enc=utf8  dag-joined;enc=utf8 · each · 1 step
@@ -21,11 +21,8 @@ Choose the machine:   32/32
   [(left=value) -> pair -> (output=value_2)] [(input=value_2) -> flaky -> (output=value_3)] [(input=
   [(left=value) -> pair -> (output=value_2)] [(input=value_2) -> shout -> (output=value_3)] [(input=
 type to filter · ↑↓ move · Enter choose · Esc cancel
---- screen: what to do with it ---
-Choose what to do with it:   3/3
-› run    run it on in.txt
-  save   save it as in-to-dag-joined-enc-utf8.machine
-  print  print it, and do nothing else
-type to filter · ↑↓ move · Enter choose · Esc cancel
 --- screen: at the end ---
+Run it again with: capdag run '[(input=value) -> join -> (output=value_2)]' --input value=@in.txt -o out --dev-bin <cartridge>
+✓ in.txt  1 step · <time>
+  → <work>/out/in.value_2.txt
 

@@ -1,6 +1,6 @@
 $ capdag --offline cache refresh
-exit: 1
+exit: 2
 --- stdout ---
 --- stderr ---
-error: the fabric cache of https://fabric.golden.invalid could not be cleared
-  Charter: cannot reach https://fabric.golden.invalid/charter.json: error sending request for url (https://fabric.golden.invalid/charter.json?cb=<time>)
+error: this fetches from the network, and --offline was given: drop --offline
+

@@ -14,7 +14,8 @@
         "exit": 2,
         "shown": [
           "5 options for the machine, and nobody to ask",
-          "capdag run '[(input=pdf) -> disbind-pdf -> (output=page-text)]'"
+          "capdag run '[(input=pdf) -> disbind-pdf -> (output=page-text)]'",
+          "hint: run one of them on the same inputs: capdag run '<machine>' report.pdf"
         ]
       }
     },
@@ -22,7 +23,8 @@
       "expect": {
         "exit": 2,
         "shown": [
-          "5 options for the machine, and nobody to ask"
+          "5 options for the machine, and nobody to ask",
+          "hint: run one of them on the same inputs: capdag run '<machine>' report.pdf"
         ]
       }
     }

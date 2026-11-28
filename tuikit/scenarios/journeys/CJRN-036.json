@@ -3,7 +3,7 @@
   "world": "ordinary",
   "args": ["cpas"],
   "modes": {
-    "plain": { "expect": { "exit": 2, "shown": ["there is no command `cpas`", "did you mean `capdag caps`?"] } },
+    "plain": { "expect": { "exit": 2, "shown": ["'cpas': there is no command of that name", "did you mean `capdag caps`?"] } },
     "json": { "expect": { "exit": 2, "stdout": ["\"type\":\"error\""] } }
   }
 }

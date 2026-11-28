@@ -1,18 +1,18 @@
 $ capdag run loud.machine in.txt other.txt --progress none --dev-bin <cartridge>
 exit: 0
 --- stdout ---
-<work>/in.loud.0.txt
-<work>/in.loud.1.txt
-<work>/in.loud.2.txt
-<work>/other.loud.0.txt
-<work>/other.loud.1.txt
-<work>/other.loud.2.txt
+<work>/in · 1.loud.txt
+<work>/in · 2.loud.txt
+<work>/in · 3.loud.txt
+<work>/other · 1.loud.txt
+<work>/other · 2.loud.txt
+<work>/other · 3.loud.txt
 --- stderr ---
-✓ in.txt  2 steps · 3 items · <time>
-  → <work>/in.loud.0.txt
-  → <work>/in.loud.1.txt
-  → <work>/in.loud.2.txt
-✓ other.txt  2 steps · 3 items · <time>
-  → <work>/other.loud.0.txt
-  → <work>/other.loud.1.txt
-  → <work>/other.loud.2.txt
+✓ loud.machine  1 step · 2 items · <time>
+  → <work>/in · 1.loud.txt
+  → <work>/in · 2.loud.txt
+  → <work>/in · 3.loud.txt
+  → <work>/other · 1.loud.txt
+  → <work>/other · 2.loud.txt
+  → <work>/other · 3.loud.txt
+

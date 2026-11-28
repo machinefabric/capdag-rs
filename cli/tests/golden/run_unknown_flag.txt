@@ -1,0 +1,10 @@
+$ capdag run '[doc -> shout -> loud]' in.txt --loudness 9 --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: unexpected argument '--loudness' found
+
+  tip: to pass '--loudness' as a value, use '-- --loudness'
+
+Usage: capdag run <MACHINE|INPUT>... [-- <INPUT>...]
+

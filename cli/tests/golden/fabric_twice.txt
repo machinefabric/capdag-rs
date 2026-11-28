@@ -2,6 +2,6 @@ $ capdag --fabric https://a.example --fabric https://b.example caps
 exit: 2
 --- stdout ---
 --- stderr ---
-error: --fabric was given twice, as 'https://a.example' and 'https://b.example'
-  a command resolves against exactly one fabric
-hint: give --fabric once
+error: --fabric named two fabrics: a command resolves against one
+  --fabric was given as https://a.example and https://b.example
+

@@ -1,6 +1,0 @@
-$ capdag plan in.txt --to 'media:dag-shout;enc=utf8' --pick 1 --save made.machine
-exit: 0
---- stdout ---
---- stderr ---
-Saved machine 1 to made.machine
-Run it: capdag run made.machine in.txt

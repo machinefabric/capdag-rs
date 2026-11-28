@@ -25,10 +25,18 @@ pub fn cap(registry: &FabricRegistry, cap: &Cap) -> String {
         })
 }
 
-/// A cap URN as a person names it: the cap's display alias, else the URN.
+/// A cap URN as a person names it: the cap's display alias, else — for a cap
+/// the fabric does not define, such as a dev cartridge's — the alias its own
+/// definition gives it, else the URN.
 pub fn cap_urn(registry: &FabricRegistry, urn: &str) -> String {
     registry
         .display_alias_for_urn(urn)
+        .or_else(|| {
+            registry
+                .get_cached_cap_in_memory(urn)
+                .filter(|cap| !cap.aliases.is_empty())
+                .map(|cap| cap.primary_alias().to_string())
+        })
         .unwrap_or_else(|| urn.to_string())
 }
 

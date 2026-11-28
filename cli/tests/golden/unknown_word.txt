@@ -2,6 +2,7 @@ $ capdag zzzqqq
 exit: 2
 --- stdout ---
 --- stderr ---
-error: there is no command or capability named `zzzqqq`
+error: there is no command or capability of that name: the commands are listed
   the commands are: caps, info, run, plan, check, graph, view, edit, cartridge, model, cache, dev, self, help
 hint: look for a capability with: capdag caps zzzqqq
+

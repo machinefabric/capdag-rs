@@ -1,9 +1,8 @@
-//! CLI output emission — the pipe-discipline contract shared by
-//! `capdag run <machine>` and the single-cap mode.
+//! CLI output emission — the pipe-discipline contract of `capdag run`.
 //!
 //! - Exactly ONE terminal, scalar, single item, and no `--output` dir given
 //!   → the item's raw bytes go to STDOUT (logs/progress are on stderr), so
-//!   `capdag run pdf2summary doc.pdf | wc -w` behaves like a Unix tool.
+//!   `capdag run summary.machine doc.pdf | wc -w` behaves like a Unix tool.
 //! - Anything else (sequence output, several terminals, or an explicit
 //!   `--output`) → each item is written as a FILE in the output directory
 //!   (default: the current directory), named `{title}.{node}.{ext}` —

@@ -164,7 +164,7 @@
       },
       "assumptions": [],
       "package": "capdagCliFormal",
-      "fingerprint": "3895ab0de7ffefe2a46eca337ef74f29d60b5cfde741309a9a702726457a68fa",
+      "fingerprint": "c97bfd9caffa431e1410761d44683d84cc5d9737ebf1ad95dffc076d3d6aa749",
       "source": {
         "package": "capdagCliFormal",
         "file": "CapdagCli/Laws/Cli.lean",

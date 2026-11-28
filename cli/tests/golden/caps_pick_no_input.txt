@@ -2,13 +2,14 @@ $ capdag --no-input caps --pick dag
 exit: 2
 --- stdout ---
 --- stderr ---
-error: 8 capabilities match, and --pick has no terminal to choose on
-  flaky  Test DAG (test-dag-flaky)
-  join  Test DAG (test-dag-join)
-  pair  Test DAG (test-dag-pair)
-  say  Test DAG (test-dag-say)
-  shout  Test DAG (test-dag-shout)
-  test-random-numbers  Test DAG (test-random-numbers)
-  test-random-parity  Test DAG (test-random-parity)
-  words  Test DAG (test-dag-words)
+error: 8 options for a capability, and nobody to ask
+  '[in -> flaky -> out]'  Test DAG (test-dag-flaky) · enc=utf8 → dag-flaky;enc=utf8
+  '[in -> join -> out]'  Test DAG (test-dag-join) · enc=utf8 → dag-joined;enc=utf8
+  '[in -> pair -> out]'  Test DAG (test-dag-pair) · enc=utf8 → dag-pair;enc=utf8
+  '[() -> say -> out]'  Test DAG (test-dag-say) · void → dag-said;enc=utf8
+  '[in -> shout -> out]'  Test DAG (test-dag-shout) · enc=utf8 → dag-shout;enc=utf8
+  '[in -> test-random-numbers -> out]'  Test DAG (test-random-numbers) · random-number → random-number
+  '[in -> test-random-parity -> out]'  Test DAG (test-random-parity) · random-number → enc=utf8;random-parity
+  '[in -> words -> out]'  Test DAG (test-dag-words) · enc=utf8 → dag-word;enc=utf8
 hint: add words to the query until one matches, or leave out --pick to list them
+

@@ -80,7 +80,7 @@ pub struct Global {
     /// Print JSON Lines on stdout — one record per line — instead of text for a person
     #[arg(long, global = true)]
     pub json: bool,
-    /// Never ask: a choice not given by a flag is an error naming the flag
+    /// Never ask: what a line leaves open is an error naming the choices and the flag that gives each
     #[arg(long, global = true)]
     pub no_input: bool,
     /// When to colour the output
@@ -120,7 +120,7 @@ pub enum Command {
         capdag run pages.machine --input doc=@report.pdf       an input by its name in the machine\n  \
         cat notes.txt | capdag run summary.machine -           stdin as an input\n  \
         capdag run report.pdf --to txt                         plan a machine that makes text of it\n  \
-        capdag run '[doc -> disbind-pdf -> pages]' report.pdf --arg index-range=1-5\n\n\
+        capdag run '[(doc, index-range=\"1-5\") -> disbind-pdf -> pages]' report.pdf    an option, in the machine\n\n\
         What a line leaves open is asked at a terminal, and named with the flag that gives it\n\
         in a script. A run that settled anything prints the line to run it again, asking nothing.\n\n\
         A single result goes to stdout; several results are written as files, whose\n\
@@ -403,7 +403,7 @@ fn help(path: &[String]) -> CliResult<Exit> {
         return Ok(Exit::Ok);
     }
     let mut error = ends(&verdict).expect("help names a command, or is refused");
-    error.problem = format!("there is no command `capdag {}`: {}", words.join(" "), error.problem);
+    error.problem = format!("'{}': {}", words.join(" "), error.problem);
     let depth = (1..=words.len()).rev().find(|n| command_at(&words[..n - 1]).is_some()).unwrap_or(1);
     if let Some(parent) = command_at(&words[..depth - 1]) {
         let known: Vec<String> = parent.get_subcommands().filter(|c| !c.is_hide_set()).map(|c| c.get_name().to_string()).collect();
@@ -450,7 +450,8 @@ async fn unknown(ctx: &Ctx, words: Vec<String>) -> CliResult<Exit> {
         }
     };
     let verdict = f::cli(ctx_free_world(), f::Invocation::Unknown { kind: kind.clone() });
-    let error = ends(&verdict).expect("a word that is no command is refused");
+    let mut error = ends(&verdict).expect("a word that is no command is refused");
+    error.problem = format!("'{word}': {}", error.problem);
     let error = match kind {
         f::WordKind::MachineFile => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
         f::WordKind::InlineMachine => error.hint(format!("capdag run {}{rest}", shell_word(&word))),
@@ -459,7 +460,7 @@ async fn unknown(ctx: &Ctx, words: Vec<String>) -> CliResult<Exit> {
         }
         f::WordKind::NearCommand => {
             let near = nearest(&word, commands.iter().map(String::as_str)).expect("a near command was found above");
-            error.context(format!("there is no command `{word}`")).hint(format!("did you mean `capdag {near}`?"))
+            error.hint(format!("did you mean `capdag {near}`?"))
         }
         f::WordKind::Capability => {
             let cap = capability.expect("a capability was found above");

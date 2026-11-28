@@ -1231,11 +1231,25 @@ pub async fn resolve_entry(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &Ma
         }
         MachineEntry::Inline(notation) => (notation.clone(), None),
     };
+    // A name the fabric does not define may be a dev cartridge's cap. It is
+    // declared ahead of the machine by its full URN, under that name
+    // (`[shout-words cap:…]`), so the machine names it as it would a cap of
+    // the fabric; the cap's definition is added to the registry's cache, where
+    // the planner reads it.
     let mut dev_dirs: Vec<PathBuf> = Vec::new();
+    let mut declared = String::new();
+    let mut found: HashSet<String> = HashSet::new();
     let resolution = loop {
-        match super::check::resolve_notation(registry, path, &notation).await {
+        match super::check::resolve_notation(registry, path, &format!("{declared}{notation}")).await {
             Ok(resolution) => break resolution,
             Err(super::check::Unresolved::UndefinedAlias { alias, error }) => {
+                if !found.insert(alias.clone()) {
+                    return Err(CliError::failed(format!(
+                        "the dev cartridge's cap '{alias}' was declared, and the machine still does not name it"
+                    ))
+                    .context(error.problem)
+                    .hint("report it"));
+                }
                 match ctx.host.find_dev_cap(&alias) {
                     Ok(Some((cap, dir))) => {
                         capdag::dev::check_no_fabric_conflict(registry, &cap)
@@ -1244,6 +1258,7 @@ pub async fn resolve_entry(ctx: &Ctx, registry: &Arc<FabricRegistry>, entry: &Ma
                         if ctx.term.verbosity >= 0 && !ctx.term.json {
                             eprintln!("'{alias}' is not in the fabric: running the dev cartridge at {}", dir.display());
                         }
+                        declared.push_str(&format!("[{alias} {}]\n", cap.urn));
                         registry.add_caps_to_cache(vec![cap]);
                         dev_dirs.push(dir);
                     }

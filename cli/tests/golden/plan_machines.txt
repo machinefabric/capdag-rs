@@ -1,7 +1,7 @@
 $ capdag plan in.txt --to 'media:dag-shout;enc=utf8'
 exit: 0
 --- stdout ---
-32 machines make dag-shout;enc=utf8 of 1 txt:
+32 machines make media:dag-shout;enc=utf8 of 1 txt:
 
   1. 1 step · needs a cartridge download
      [(input=value) -> shout -> (output=value_2)]
@@ -47,8 +47,132 @@ exit: 0
      [(left=value_2) -> pair -> (output=value_3)]
      [(input=value_3) -> shout -> (output=value_4)]
 
- … and 22 more: --all lists them
+ 11. 3 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 12. 3 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 13. 3 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 14. 3 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 15. 3 steps · needs a cartridge download
+     [(input=value) -> words -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 16. 3 steps · needs a cartridge download
+     [(input=value) -> words -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 17. 3 steps · needs a cartridge download
+     [(input=value) -> words -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> shout -> (output=value_4)]
+
+ 18. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(left=value_3) -> pair -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 19. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(input=value_3) -> words -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 20. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> join -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 21. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> words -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 22. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(input=value_3) -> join -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 23. 4 steps · needs a cartridge download
+     [(input=value) -> flaky -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(left=value_3) -> pair -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 24. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(left=value_3) -> pair -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 25. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> words -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 26. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> flaky -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 27. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(left=value_2) -> pair -> (output=value_3)]
+     [(input=value_3) -> words -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 28. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(input=value_3) -> flaky -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 29. 4 steps · needs a cartridge download
+     [(input=value) -> join -> (output=value_2)]
+     [(input=value_2) -> words -> (output=value_3)]
+     [(left=value_3) -> pair -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 30. 4 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> join -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 31. 4 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> flaky -> (output=value_3)]
+     [(input=value_3) -> words -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
+
+ 32. 4 steps · needs a cartridge download
+     [(left=value) -> pair -> (output=value_2)]
+     [(input=value_2) -> join -> (output=value_3)]
+     [(input=value_3) -> flaky -> (output=value_4)]
+     [(input=value_4) -> shout -> (output=value_5)]
 --- stderr ---
 
-Save one: capdag plan in.txt --to <type> --pick <n> --save <file>
-Run one:  capdag plan in.txt --to <type> --pick <n> --run
+Run one:  capdag run '<machine>' in.txt
+Save one: capdag plan in.txt --to media:dag-shout;enc=utf8 --save <file>
+

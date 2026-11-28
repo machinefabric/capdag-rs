@@ -790,8 +790,10 @@ async fn test12801_a_retryable_failure_is_attempted_again() {
 // TEST12802: `on_error=absent` tolerates a step that failed for good. In a
 // map, the item it failed on is dropped and the others are produced; the run
 // ends COMPLETED WITH TOLERATED FAILURES, with the failure — its class, its
-// code, its message — on record. Without the policy the same failure fails
-// the run.
+// code, its message — on record as the step's. Without the policy the step
+// fails, and the CLI's map drops the item it failed on: the others are
+// produced, no step tolerated anything, and the failure is on the dropped
+// run's outcome. A map every run of which failed fails the run.
 #[tokio::test]
 async fn test12802_a_tolerated_failure_drops_its_item_and_is_said() {
     let machines = Machines::new(TAG);
@@ -824,13 +826,29 @@ async fn test12802_a_tolerated_failure_drops_its_item_and_is_said() {
     assert!(failure.message.contains("'bad'"), "{failure:?}");
     assert_eq!(report.body.as_ref().expect("in the map").body_index, 1);
 
-    let error = machines
+    assert!(ran.result.body_outcomes.iter().all(|outcome| outcome.success), "the step tolerated it, not the map");
+
+    let ran = machines
         .run(&notation(""), &[("doc", Given::One(b"good bad fine"))])
         .await
+        .expect("the map drops the item that failed");
+    assert_eq!(ran.texts("s"), vec!["GOOD", "FINE"]);
+    assert_eq!(ran.result.verdict, RunVerdict::CompletedWithToleratedFailures);
+    assert!(
+        ran.result.steps.iter().all(|report| !matches!(report.outcome, StepOutcome::FailedTolerated { .. })),
+        "no step tolerated its failure"
+    );
+    let dropped: Vec<_> = ran.result.body_outcomes.iter().filter(|outcome| !outcome.success).collect();
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].body_index, 1);
+    assert!(dropped[0].error.as_deref().expect("a dropped run says why").contains("'bad'"), "{:?}", dropped[0]);
+
+    let error = machines
+        .run(&notation(""), &[("doc", Given::One(b"bad bad"))])
+        .await
         .err()
-        .expect("nothing tolerates the failure");
-    assert_eq!(error.failure_code(), Some("SHOUT_REFUSED"));
-    assert_eq!(error.attribution_class(), AttributionClass::Input);
+        .expect("every run of the map failed");
+    assert!(error.to_string().contains("every run of the map failed (2 of 2)"), "{error}");
 }
 
 // =============================================================================

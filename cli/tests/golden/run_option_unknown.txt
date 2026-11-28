@@ -1,0 +1,7 @@
+$ capdag run '[doc -> shout -> loud]' in.txt --arg fail-on=x --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 'fail-on': --arg names no step option the machine leaves to the run: see capdag check
+  what it leaves to the run: it leaves none
+

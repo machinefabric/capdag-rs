@@ -1,0 +1,32 @@
+{
+  "title": "An option that has a default is not given with --arg: the refusal says it is written in the machine",
+  "world": "ordinary",
+  "args": [
+    "run",
+    "[doc -> disbind-pdf -> pages]",
+    "report.pdf",
+    "--arg",
+    "index-range=1-2"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 2,
+        "shown": [
+          "'index-range': --arg names no step option the machine leaves to the run",
+          "what it leaves to the run: it leaves none",
+          "hint: an option a step has a default for, or may go without, is written in the machine: [(<input>, index-range=<value>) -> <step> -> <output>]"
+        ]
+      }
+    },
+    "json": {
+      "expect": {
+        "exit": 2,
+        "stdout": [
+          "\"type\":\"error\"",
+          "written in the machine: [(<input>, index-range=<value>)"
+        ]
+      }
+    }
+  }
+}

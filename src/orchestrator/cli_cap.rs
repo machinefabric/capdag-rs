@@ -2,9 +2,10 @@
 //!
 //! What the command line runs is always a machine; a capability runs as a
 //! machine of one step, `[in -> disbind-pdf -> out]` ([`one_step_machine`]).
-//! Its options are the step options a run gives with `--arg <name>=<value>`,
-//! by the name its definition gives each, and [`render_cap_interface`] shows
-//! them so. A command that drives one cap itself — the model commands drive
+//! An option it must be given — required, with no default — is left to the
+//! run, which gives it with `--arg <name>=<value>`; any other option is
+//! written into the machine as a constant, `[(in, <name>=<value>) -> alias ->
+//! out]`. [`render_cap_interface`] shows each so. A command that drives one cap itself — the model commands drive
 //! the model cartridge's caps — wraps it in the canonical one-step machine
 //! ([`synthesize_single_cap_notation`]) and runs it through the same planner
 //! every other front-end uses, never a hand-built plan.
@@ -44,10 +45,11 @@ pub fn one_step_machine(cap: &Cap, alias: &str) -> Result<String, String> {
     Ok(format!("[{sources} -> {alias} -> {targets}]"))
 }
 
-/// One rendered option line: how a run gives it, its media, its description,
-/// and its default, or that it is optional.
-fn render_option_line(arg: &CapArg, names: &InterfaceNames<'_>) -> String {
-    let mut line = format!("  --arg {}=<value>  ({})", arg.name, names.media_with_urn(&arg.media_urn));
+/// One rendered option line: how it is given (`given`, as typed up to the
+/// value), its media, its description, and its default, or that it is
+/// optional.
+fn render_option_line(arg: &CapArg, given: &str, names: &InterfaceNames<'_>) -> String {
+    let mut line = format!("  {given}{}=<value>  ({})", arg.name, names.media_with_urn(&arg.media_urn));
     if let Some(description) = arg
         .arg_description
         .as_deref()
@@ -94,10 +96,10 @@ impl InterfaceNames<'_> {
 ///   URN's `in=` spec, by tagged-URN equivalence — see
 ///   [`CapArg::is_main_input`]): what the step is fed.
 /// - **Options it must be given** — the other args that are required and
-///   have no default: a run that leaves one open is asked for it, or names it.
-/// - **Options** — the rest, with their defaults.
-///
-/// Each option is shown as the `--arg <name>=<value>` a run gives it by.
+///   have no default: the run is asked for each, or gives it with
+///   `--arg <name>=<value>`.
+/// - **Options** — the rest, with their defaults: each is written into the
+///   machine as a constant, `<name>=<value>`, as the heading shows.
 pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<String, String> {
     let in_spec = MediaUrn::from_string(cap.urn.in_spec()).map_err(|e| {
         format!(
@@ -149,17 +151,19 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
     }
 
     if !required.is_empty() {
-        out.push_str("\nOptions it must be given:\n");
+        out.push_str("\nOptions it must be given, on the run's line:\n");
         for arg in &required {
-            out.push_str(&render_option_line(arg, names));
+            out.push_str(&render_option_line(arg, "--arg ", names));
             out.push('\n');
         }
     }
 
     if !optional.is_empty() {
-        out.push_str("\nOptions:\n");
+        let group = if takes_input(cap)? { "in, <name>=<value>" } else { "<name>=<value>" };
+        let targets = if cap.main_output().is_some() { "out" } else { "()" };
+        out.push_str(&format!("\nOptions, written in the machine: [({group}) -> {} -> {targets}]\n", names.cap));
         for arg in &optional {
-            out.push_str(&render_option_line(arg, names));
+            out.push_str(&render_option_line(arg, "", names));
             out.push('\n');
         }
     }
@@ -196,9 +200,9 @@ pub fn render_cap_interface(cap: &Cap, names: &InterfaceNames<'_>) -> Result<Str
 /// alias/registry lookup happens inside the parser.
 ///
 /// - A cap that takes an input (`in=` is not `media:void`) must have exactly
-///   ONE stdin-fed arg: the single-cap CLI drives exactly one piped input,
-///   and zero or several are hard errors naming the cap. A cap that takes
-///   none is a source: `() -> step -> …`, run with nothing piped in.
+///   ONE stdin-fed arg, the one the machine's one input feeds; zero or
+///   several are hard errors naming the cap. A cap that takes none is a
+///   source: `() -> step -> …`, run with nothing fed in.
 /// - A cap that declares an output gives it at `output`; one that declares
 ///   none is a sink: `… -> step -> ()`, run for what it does.
 pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
@@ -212,16 +216,15 @@ pub fn synthesize_single_cap_notation(cap: &Cap) -> Result<String, String> {
         (true, 1) => SINGLE_CAP_INPUT_NODE.to_string(),
         (true, 0) => {
             return Err(format!(
-                "cap {} declares an input but no arg of it takes piped (stdin) input — the \
-                 single-cap CLI drives exactly one input stream. Run it inside a .machine \
-                 file instead.",
+                "cap {} declares an input but no arg of it takes a stream, so no one input \
+                 feeds it: write the machine that binds its args by name",
                 cap.urn
             ))
         }
         (true, n) => {
             return Err(format!(
-                "cap {} takes {n} piped inputs — the single-cap CLI drives exactly one. \
-                 Run it inside a .machine file instead.",
+                "cap {} takes {n} streams, so no one input feeds it: write the machine that \
+                 binds each by name",
                 cap.urn
             ))
         }
@@ -351,18 +354,25 @@ mod tests {
         assert_eq!(one_step_machine(&source, "now").unwrap(), "[() -> now -> out]");
     }
 
-    // TEST8072: a cap's options are shown as the `--arg <name>=<value>` a run
-    // gives them by: those it must be given apart from those with a default.
+    // TEST8072: a cap's options are shown as a run takes them: one it must
+    // be given — required, with no default — as the `--arg <name>=<value>`
+    // the run's line gives it by, and every other as a constant written into
+    // the machine, under the machine of one step that carries it.
     #[test]
-    fn test8072_options_are_shown_as_a_run_gives_them() {
+    fn test8072_options_are_shown_as_a_run_takes_them() {
         let text = render_cap_interface(&test_cap(), &urn_names()).unwrap();
-        let must = text.find("Options it must be given:").expect("a required option is shown apart");
-        let rest = text.find("\nOptions:\n").expect("the other options are shown");
-        assert!(must < rest, "{text}");
+        assert!(text.contains("on the run's line:\n  --arg model-spec=<value>  ("), "{text}");
+        assert!(
+            text.contains("Options, written in the machine: [(in, <name>=<value>) -> summarize -> out]\n  budget=<value>  ("),
+            "{text}"
+        );
+        assert!(!text.contains("--arg budget"), "an option with a default is not left to the run: {text}");
         assert!(!text.contains("positional #"), "a cap's own command line is not shown: {text}");
-        for line in text.lines().filter(|l| l.trim_start().starts_with("--")) {
-            assert!(line.trim_start().starts_with("--arg "), "every option is given by --arg: {line}");
-        }
+
+        let mut source = test_cap();
+        source.urn = crate::CapUrn::from_string(&format!(r#"cap:in="media:void";now;out="{}""#, source.urn.out_spec())).unwrap();
+        let text = render_cap_interface(&source, &urn_names()).unwrap();
+        assert!(text.contains("Options, written in the machine: [(<name>=<value>) -> summarize -> out]\n"), "{text}");
     }
 
     // TEST8040: notation synthesis wraps a resolved cap in the canonical
@@ -387,7 +397,7 @@ mod tests {
         let mut no_stdin = test_cap();
         no_stdin.args.retain(|a| !has_stdin_source(a));
         let err = synthesize_single_cap_notation(&no_stdin).unwrap_err();
-        assert!(err.contains("no arg of it takes piped (stdin) input"), "{err}");
+        assert!(err.contains("no arg of it takes a stream"), "{err}");
 
         // A cap that gives nothing is run for what it does: a sink.
         let mut no_output = test_cap();

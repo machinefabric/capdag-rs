@@ -70,10 +70,19 @@ impl ScenarioHost {
             for alias in &cartridge.caps {
                 if self.fabric.cap(alias).is_none() {
                     return Err(format!(
-                        "the world '{}' gives {} the cap '{alias}', which its fabric does not have",
+                        "the world '{}' gives {} the cap '{alias}', which its fabric does not have; a dev cartridge's cap of its own goes in own_caps",
                         self.name, cartridge.id
                     ));
                 }
+            }
+            if !cartridge.own_caps.is_empty() && !cartridge.dev {
+                return Err(format!(
+                    "the world '{}' gives {} caps of its own, which only a dev cartridge has",
+                    self.name, cartridge.id
+                ));
+            }
+            for own in &cartridge.own_caps {
+                own.cap().map_err(|e| format!("the world '{}' gives {} the cap {e}", self.name, cartridge.id))?;
             }
         }
         for (dir, project) in &self.world.dev_projects {
@@ -85,8 +94,7 @@ impl ScenarioHost {
                     ));
                 }
                 for own in own_caps {
-                    CapUrn::from_string(&own.urn)
-                        .map_err(|e| format!("the world '{}' gives the project {dir} the cap '{}': {e}", self.name, own.urn))?;
+                    own.cap().map_err(|e| format!("the world '{}' gives the project {dir} the cap {e}", self.name))?;
                 }
             }
         }
@@ -111,7 +119,12 @@ impl ScenarioHost {
     fn cap_groups(&self, cartridge: &WorldCartridge) -> Vec<CapGroup> {
         vec![CapGroup {
             name: cartridge.id.clone(),
-            caps: cartridge.caps.iter().filter_map(|alias| self.fabric.cap(alias).cloned()).collect(),
+            caps: cartridge
+                .caps
+                .iter()
+                .filter_map(|alias| self.fabric.cap(alias).cloned())
+                .chain(cartridge.own_caps.iter().map(|own| own.cap().expect("a world's own caps are checked when it is opened")))
+                .collect(),
             adapter_urns: Vec::new(),
         }]
     }
@@ -316,6 +329,10 @@ impl Host for ScenarioHost {
                     return Ok(Some((cap.clone(), self.cartridge_dir("dev", cartridge))));
                 }
             }
+            if let Some(own) = cartridge.own_caps.iter().find(|own| own.aliases.iter().any(|a| a == alias)) {
+                let cap = own.cap().map_err(HostError::Engine)?;
+                return Ok(Some((cap, self.cartridge_dir("dev", cartridge))));
+            }
         }
         Ok(None)
     }
@@ -334,8 +351,7 @@ impl Host for ScenarioHost {
         };
         let mut declared: Vec<Cap> = caps.iter().filter_map(|alias| self.fabric.cap(alias).cloned()).collect();
         for own in own_caps {
-            let urn = CapUrn::from_string(&own.urn).map_err(|e| HostError::Engine(format!("{}: {e}", own.urn)))?;
-            declared.push(Cap::new(urn, own.title.clone(), own.aliases.clone()));
+            declared.push(own.cap().map_err(HostError::Engine)?);
         }
         Ok(CapManifest::new(
             name.clone(),
@@ -387,8 +403,16 @@ impl Host for ScenarioHost {
 
     fn runtime(&self, setup: RunSetup) -> Result<Arc<dyn RunHost>, HostError> {
         // A world's runs are scripts: no cartridge binary is started and no
-        // protocol is spoken, so neither can be given or traced.
-        if let Some(binary) = setup.dev_binaries.first() {
+        // protocol is spoken, so neither can be given or traced. A dev
+        // cartridge of the world is hosted as the engine hosts one, by its
+        // folder, and its runs are scripts like any other cartridge's.
+        let dev_dirs: Vec<PathBuf> = self
+            .installed()
+            .into_iter()
+            .filter(|cartridge| cartridge.dev)
+            .map(|cartridge| self.cartridge_dir("dev", cartridge))
+            .collect();
+        if let Some(binary) = setup.dev_binaries.iter().find(|binary| !dev_dirs.contains(binary)) {
             return Err(HostError::Engine(format!(
                 "the world '{}' starts no cartridge binary, {} included: --dev-bin runs on the engine only",
                 self.name,

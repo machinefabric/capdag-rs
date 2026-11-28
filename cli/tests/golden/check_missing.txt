@@ -2,5 +2,6 @@ $ capdag check absent.machine
 exit: 2
 --- stdout ---
 --- stderr ---
-error: the machine file 'absent.machine' does not exist
+error: absent.machine: the machine file is not there
 hint: `capdag plan <files> --to <type> --save <file>` writes one
+

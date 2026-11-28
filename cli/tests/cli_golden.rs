@@ -362,16 +362,16 @@ static CASES: &[Case] = &[
     Case::pipes("run_machine_constant", &["run", "say.machine", DEV, CARTRIDGE]),
     Case::pipes("run_machine_missing_input", &["run", "loud.machine", DEV, CARTRIDGE]),
     Case::pipes("run_machine_bad_option", &["run", "loud.machine", "in.txt", "--shout", DEV, CARTRIDGE]),
-    Case::pipes("run_cap", &["run", "shout", "in.txt", DEV, CARTRIDGE]),
-    Case::pipes("run_cap_option", &["run", "shout", "in.txt", "--fail-on", "hello brave world\n", DEV, CARTRIDGE]),
-    Case::pipes("run_cap_help", &["run", "shout", "--help"]),
-    Case::pipes("run_cap_unknown_option", &["run", "shout", "in.txt", "--loudness", "9", DEV, CARTRIDGE]),
-    Case::pipes("run_unknown_target", &["run", "shuot", "in.txt"]),
+    Case::pipes("run_one_step", &["run", "[doc -> shout -> loud]", "in.txt", DEV, CARTRIDGE]),
+    Case::pipes("run_option_unknown", &["run", "[doc -> shout -> loud]", "in.txt", "--arg", "fail-on=x", DEV, CARTRIDGE]),
+    Case::pipes("run_machine_help", &["run", "[doc -> shout -> loud]", "--help"]),
+    Case::pipes("run_unknown_flag", &["run", "[doc -> shout -> loud]", "in.txt", "--loudness", "9", DEV, CARTRIDGE]),
+    Case::pipes("run_unknown_step", &["run", "[doc -> shuot -> loud]", "in.txt"]),
     Case::pipes("run_missing_machine_file", &["run", "absent.machine", "in.txt"]),
     Case {
-        name: "run_cap_stdin",
+        name: "run_stdin",
         mode: Mode::Pipes,
-        args: &["run", "shout", DEV, CARTRIDGE],
+        args: &["run", "[doc -> shout -> loud]", "-", DEV, CARTRIDGE],
         stdin: Some("from a pipe"),
         steps: &[],
     },
@@ -407,16 +407,16 @@ static CASES: &[Case] = &[
     Case::pipes("plan_targets", &["plan", "in.txt"]),
     Case::pipes("plan_targets_json", &["--json", "plan", "in.txt"]),
     Case::pipes("plan_machines", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8"]),
-    Case::pipes("plan_pick_print", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--pick", "1"]),
-    Case::pipes("plan_pick_save", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--pick", "1", "--save", "made.machine"]),
-    Case::pipes("plan_pick_out_of_range", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--pick", "99"]),
-    Case::pipes("plan_pick_json", &["--json", "plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--pick", "1"]),
-    Case::pipes("plan_run", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--pick", "1", "--run", DEV, CARTRIDGE]),
+    Case::pipes("plan_save_named", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--save", "made.machine"]),
+    Case::pipes("plan_save_exists", &["plan", "in.txt", "--to", "media:dag-shout;enc=utf8", "--save", "loud.machine"]),
+    Case::pipes("run_planned_no_input", &["--no-input", "run", "in.txt"]),
+    Case::pipes("plan_machines_json", &["--json", "plan", "in.txt", "--to", "media:dag-shout;enc=utf8"]),
+    Case::pipes("run_planned_named", &["run", "in.txt", "--to", "media:dag-shout;enc=utf8", DEV, CARTRIDGE]),
     Case::pipes("plan_unknown_extension", &["plan", "in.unknown"]),
     Case {
-        name: "plan_inline",
+        name: "run_planned_inline",
         mode: Mode::Inline,
-        args: &["plan", "in.txt"],
+        args: &["run", "in.txt", "-o", "out", DEV, CARTRIDGE],
         stdin: None,
         steps: &[
             Step::Wait("what to make"),
@@ -424,11 +424,6 @@ static CASES: &[Case] = &[
             Step::Press(ENTER),
             Step::Wait("Choose the machine"),
             Step::Look("the machine"),
-            Step::Press(ENTER),
-            Step::Wait("what to do with it"),
-            Step::Look("what to do with it"),
-            Step::Press(DOWN),
-            Step::Press(DOWN),
             Step::Press(ENTER),
         ],
     },
@@ -1085,23 +1080,23 @@ fn test22248_run_machine_bad_option() { golden("test22248_run_machine_bad_option
 
 // TEST22249: `run <cap> <file>` runs one capability on the file.
 #[test]
-fn test22249_run_cap() { golden("test22249_run_cap", "run_cap") }
+fn test22249_run_one_step() { golden("test22249_run_one_step", "run_one_step") }
 
 // TEST22250: a cap's own option, by its name, reaches the cap.
 #[test]
-fn test22250_run_cap_option() { golden("test22250_run_cap_option", "run_cap_option") }
+fn test22250_run_option_unknown() { golden("test22250_run_option_unknown", "run_option_unknown") }
 
 // TEST22251: `run <cap> --help` shows the cap's own interface.
 #[test]
-fn test22251_run_cap_help() { golden("test22251_run_cap_help", "run_cap_help") }
+fn test22251_run_machine_help() { golden("test22251_run_machine_help", "run_machine_help") }
 
 // TEST22252: a cap given an option it has not is refused, naming where its options are.
 #[test]
-fn test22252_run_cap_unknown_option() { golden("test22252_run_cap_unknown_option", "run_cap_unknown_option") }
+fn test22252_run_unknown_flag() { golden("test22252_run_unknown_flag", "run_unknown_flag") }
 
 // TEST22253: `run` of a name no cap has offers the names near it.
 #[test]
-fn test22253_run_unknown_target() { golden("test22253_run_unknown_target", "run_unknown_target") }
+fn test22253_run_unknown_step() { golden("test22253_run_unknown_step", "run_unknown_step") }
 
 // TEST22254: `run` of a machine file that does not exist says so.
 #[test]
@@ -1109,7 +1104,7 @@ fn test22254_run_missing_machine_file() { golden("test22254_run_missing_machine_
 
 // TEST22255: `run <cap>` reads its input from a pipe.
 #[test]
-fn test22255_run_cap_stdin() { golden("test22255_run_cap_stdin", "run_cap_stdin") }
+fn test22255_run_stdin() { golden("test22255_run_stdin", "run_stdin") }
 
 // TEST22256: a run on a terminal draws the live view inline and leaves its summary.
 #[test]
@@ -1141,23 +1136,23 @@ fn test22262_plan_machines() { golden("test22262_plan_machines", "plan_machines"
 
 // TEST22263: `plan --pick` prints the machine chosen.
 #[test]
-fn test22263_plan_pick_print() { golden("test22263_plan_pick_print", "plan_pick_print") }
+fn test22263_plan_save_named() { golden("test22263_plan_save_named", "plan_save_named") }
 
 // TEST22264: `plan --pick --save` writes the machine chosen and says how to run it.
 #[test]
-fn test22264_plan_pick_save() { golden("test22264_plan_pick_save", "plan_pick_save") }
+fn test22264_plan_save_exists() { golden("test22264_plan_save_exists", "plan_save_exists") }
 
 // TEST22265: `plan --pick` out of range says how many machines there are.
 #[test]
-fn test22265_plan_pick_out_of_range() { golden("test22265_plan_pick_out_of_range", "plan_pick_out_of_range") }
+fn test22265_run_planned_no_input() { golden("test22265_run_planned_no_input", "run_planned_no_input") }
 
 // TEST22266: `plan --json --pick` gives the machine chosen as a record.
 #[test]
-fn test22266_plan_pick_json() { golden("test22266_plan_pick_json", "plan_pick_json") }
+fn test22266_plan_machines_json() { golden("test22266_plan_machines_json", "plan_machines_json") }
 
 // TEST22267: `plan --pick --run` runs the machine chosen on the file.
 #[test]
-fn test22267_plan_run() { golden("test22267_plan_run", "plan_run") }
+fn test22267_run_planned_named() { golden("test22267_run_planned_named", "run_planned_named") }
 
 // TEST22268: `plan` of a file whose extension no type has says so.
 #[test]
@@ -1165,7 +1160,7 @@ fn test22268_plan_unknown_extension() { golden("test22268_plan_unknown_extension
 
 // TEST22269: `plan` on a terminal asks what to make and what to do with the machine.
 #[test]
-fn test22269_plan_inline() { golden("test22269_plan_inline", "plan_inline") }
+fn test22269_run_planned_inline() { golden("test22269_run_planned_inline", "run_planned_inline") }
 
 // TEST22270: `cartridge list` with none installed says so.
 #[test]

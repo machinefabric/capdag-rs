@@ -2,5 +2,6 @@ $ capdag loud.machine
 exit: 2
 --- stdout ---
 --- stderr ---
-error: 'loud.machine' is a machine file, not a command
-hint: run it with: capdag run loud.machine
+error: a machine file is not a command: capdag run <machine>
+hint: capdag run loud.machine
+

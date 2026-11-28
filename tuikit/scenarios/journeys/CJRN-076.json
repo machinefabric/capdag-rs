@@ -1,0 +1,18 @@
+{
+  "title": "A machine names a dev cartridge's own cap by its alias: the cap is found among the dev cartridges and the machine runs",
+  "world": "devcap",
+  "args": [
+    "run",
+    "[in -> shout-words -> out]",
+    "notes.txt"
+  ],
+  "modes": {
+    "plain": {
+      "expect": {
+        "exit": 0,
+        "stdout": ["BUY MILK. CALL THE BANK."],
+        "shown": ["'shout-words' is not in the fabric: running the dev cartridge at"]
+      }
+    }
+  }
+}

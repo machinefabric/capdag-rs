@@ -2200,7 +2200,9 @@ impl Run {
                             success,
                             cap_urns: cap_urns.clone(),
                             failed_token_id: error.and_then(|e| e.step_token_id().cloned()),
-                            error: error.map(|e| e.to_string()),
+                            // What the failure said: the step it is of is
+                            // `failed_token_id`, its argument `failed_arg_urn`.
+                            error: error.map(|e| e.failure_reason()),
                             failed_arg_urn: error.and_then(|e| e.failure_arg_urn().map(str::to_string)),
                             title: None,
                             saved_paths,

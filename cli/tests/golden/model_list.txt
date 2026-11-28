@@ -2,5 +2,6 @@ $ capdag --offline model list
 exit: 1
 --- stdout ---
 --- stderr ---
-error: the capability model-list is not in this fabric
-  Not found in registry: alias 'model-list' is not part of manifest v1
+error: the capability list-models is not in this fabric
+  Not found in registry: alias 'list-models' is not part of manifest v1
+

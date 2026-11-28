@@ -1,7 +1,7 @@
 $ capdag caps --pick dag
 exit: 0
 --- stdout ---
-join
+[in -> join -> out]
 --- screen: the picker ---
 Choose a capability:   8/8
 › flaky                Test DAG (test-dag-flaky) · enc=utf8 → dag-flaky;enc=utf8
@@ -14,4 +14,5 @@ Choose a capability:   8/8
   words                Test DAG (test-dag-words) · enc=utf8 → dag-word;enc=utf8
 type to filter · ↑↓ move · Enter choose · Esc cancel
 --- screen: at the end ---
+
 

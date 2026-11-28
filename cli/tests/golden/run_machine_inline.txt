@@ -1,11 +1,12 @@
 $ capdag run loud.machine in.txt --dev-bin <cartridge>
 exit: 0
 --- stdout ---
-<work>/in.loud.0.txt
-<work>/in.loud.1.txt
-<work>/in.loud.2.txt
+<work>/in · 1.loud.txt
+<work>/in · 2.loud.txt
+<work>/in · 3.loud.txt
 --- screen: at the end ---
 ✓ in.txt  2 steps · 3 items · <time>
-  → <work>/in.loud.0.txt
-  → <work>/in.loud.1.txt
-  → <work>/in.loud.2.txt
+  → <work>/in · 1.loud.txt
+  → <work>/in · 2.loud.txt
+  → <work>/in · 3.loud.txt
+

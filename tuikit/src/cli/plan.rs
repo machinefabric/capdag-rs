@@ -176,7 +176,12 @@ pub async fn plan(ctx: &Ctx, args: Args) -> CliResult<Exit> {
         say_excluded(ctx, excluded);
     }
     let Some(save) = &args.save else {
-        print_machines(ctx, &plan, &world.extras.to.join(", "), &args.inputs);
+        let mut made = Vec::with_capacity(world.extras.to.len());
+        for token in &world.extras.to {
+            let media = line::media_type(&registry, token).await?.expect("the model refuses a --to that is no type");
+            made.push(names::media(&registry, &media));
+        }
+        print_machines(ctx, &plan, &made.join(", "), &world.extras.to, &args.inputs);
         return Ok(Exit::Ok);
     };
     let k = chosen.unwrap_or(0);
@@ -244,11 +249,12 @@ fn print_targets(ctx: &Ctx, registry: &FabricRegistry, plan: &PlanFacts, inputs:
         outln!("  {:<width$}  {}{urn}", choice.label, choice.detail);
     }
     let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
-    eprintln!("\nThe machines that make one: capdag plan{given} --to {}", choices[0].label);
-    eprintln!("Make one:                   capdag run{given} --to {}", choices[0].label);
+    let to = super::shell_word(&choices[0].value);
+    eprintln!("\nThe machines that make one: capdag plan{given} --to {to}");
+    eprintln!("Make one:                   capdag run{given} --to {to}");
 }
 
-fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, inputs: &[String]) {
+fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, to: &[String], inputs: &[String]) {
     if ctx.term.json {
         for (k, machine) in plan.described.iter().enumerate() {
             emit_record(&serde_json::json!({
@@ -275,8 +281,9 @@ fn print_machines(ctx: &Ctx, plan: &PlanFacts, target: &str, inputs: &[String]) 
         }
     }
     let given: String = inputs.iter().map(|i| format!(" {}", super::shell_word(i))).collect();
+    let to: String = to.iter().map(|t| format!(" --to {}", super::shell_word(t))).collect();
     eprintln!("\nRun one:  capdag run '<machine>'{given}");
-    eprintln!("Save one: capdag plan{given} --to {target} --save <file>");
+    eprintln!("Save one: capdag plan{given}{to} --save <file>");
 }
 
 /// A strand the planner found and no machine could hold: not offered, said

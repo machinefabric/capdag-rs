@@ -791,7 +791,7 @@ pub(crate) unsafe fn l_CapdagCli_dCliRefusal_dsays_d__closed__21() -> Obj {
 // Source: CapdagCli/Cli.lean:251:1
 static C_l_CapdagCli_dCliRefusal_dsays_d__closed__22: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapdagCli_dCliRefusal_dsays_d__closed__22__init() -> Obj {
-    let x_1: Obj = rt::lean_mk_string_unchecked(b"there is no such command: the nearest is named", 46);
+    let x_1: Obj = rt::lean_mk_string_unchecked(b"there is no command of that name", 32);
     return x_1;
 }
 #[inline]
@@ -817,7 +817,7 @@ pub(crate) unsafe fn l_CapdagCli_dCliRefusal_dsays_d__closed__23() -> Obj {
 // Source: CapdagCli/Cli.lean:251:1
 static C_l_CapdagCli_dCliRefusal_dsays_d__closed__24: rt::LazyObj = rt::LazyObj::new();
 unsafe fn l_CapdagCli_dCliRefusal_dsays_d__closed__24__init() -> Obj {
-    let x_1: Obj = rt::lean_mk_string_unchecked(b"there is no command or capability of that name: the commands are listed", 71);
+    let x_1: Obj = rt::lean_mk_string_unchecked(b"there is no command or capability of that name", 46);
     return x_1;
 }
 #[inline]

@@ -1,0 +1,32 @@
+{
+  "description": "A dev cartridge installed with a cap of its own, which the fabric does not have, and a text to run it on",
+  "fabric": "capdag.json",
+  "cartridge_registry": "https://cartridges.capdag.com",
+  "installed": [
+    {
+      "id": "shoutcartridge",
+      "version": "0.1.0",
+      "caps": [],
+      "own_caps": [
+        {
+          "urn": "cap:in=\"media:enc=utf8;plain-text\";out=\"media:enc=utf8;ext=txt;plain-text\";shout-words",
+          "title": "Shout the words of a text",
+          "aliases": ["shout-words"]
+        }
+      ],
+      "dev": true
+    }
+  ],
+  "files": {
+    "notes.txt": "Buy milk. Call the bank.\n"
+  },
+  "runs": {
+    "shout-words": {
+      "signals": [
+        { "step": { "step": "shout-words", "progress": 0.0 } },
+        { "step": { "step": "shout-words", "progress": 1.0 } }
+      ],
+      "end": { "completed": { "outputs": { "txt": "BUY MILK. CALL THE BANK.\n" } } }
+    }
+  }
+}

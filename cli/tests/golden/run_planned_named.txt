@@ -1,0 +1,20 @@
+$ capdag run in.txt --to 'media:dag-shout;enc=utf8' --dev-bin <cartridge>
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 32 options for the machine, and nobody to ask
+  capdag run '[(input=value) -> shout -> (output=value_2)]'  1 step · needs a cartridge download
+  capdag run '[(input=value) -> flaky -> (output=value_2)][(input=value_2) -> shout -> (output=value_3)]'  2 steps · needs a cartridge download
+  capdag run '[(input=value) -> join -> (output=value_2)][(input=value_2) -> shout -> (output=value_3)]'  2 steps · needs a cartridge download
+  capdag run '[(left=value) -> pair -> (output=value_2)][(input=value_2) -> shout -> (output=value_3)]'  2 steps · needs a cartridge download
+  capdag run '[(input=value) -> words -> (output=value_2)][(input=value_2) -> shout -> (output=value_3)]'  2 steps · needs a cartridge download
+  capdag run '[(input=value) -> flaky -> (output=value_2)][(input=value_2) -> join -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(input=value) -> flaky -> (output=value_2)][(left=value_2) -> pair -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(input=value) -> flaky -> (output=value_2)][(input=value_2) -> words -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(input=value) -> join -> (output=value_2)][(input=value_2) -> flaky -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(input=value) -> join -> (output=value_2)][(left=value_2) -> pair -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(input=value) -> join -> (output=value_2)][(input=value_2) -> words -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  capdag run '[(left=value) -> pair -> (output=value_2)][(input=value_2) -> flaky -> (output=value_3)][(input=value_3) -> shout -> (output=value_4)]'  3 steps · needs a cartridge download
+  … and 20 more
+hint: give one with capdag run <value>
+

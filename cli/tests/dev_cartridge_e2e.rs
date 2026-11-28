@@ -127,7 +127,9 @@ fn test8110_dev_cartridge_create_install_run_update() {
         .join("tests/fixtures/e2e_classify_standin/cartridge.py")
         .display()
         .to_string();
-    let run_tagger: Vec<&str> = vec!["run", name, "--dev-bin", &classifier];
+    // A capability runs as a machine of one step; its input is stdin (`-`).
+    let machine = format!("[in -> {name} -> out]");
+    let run_tagger: Vec<&str> = vec!["run", &machine, "-", "--dev-bin", &classifier];
 
     // 1. Scaffold a new Python cartridge.
     let project_path = projects.join(name);

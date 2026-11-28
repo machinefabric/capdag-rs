@@ -1102,7 +1102,8 @@ pub struct BodyOutcome {
     /// Exact immutable strand-step token that failed.
     #[serde(deserialize_with = "deserialize_required_nullable_string")]
     pub failed_token_id: Option<StepToken>,
-    /// Error message if the body failed.
+    /// What the failure said, when the body failed: the failure's own
+    /// message, without the step it is of (`failed_token_id`).
     pub error: Option<String>,
     /// Media URN of the argument attributed by the failure's emit source.
     /// Absent when the source did not name one; downstream layers never infer it.

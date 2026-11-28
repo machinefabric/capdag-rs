@@ -1,6 +1,0 @@
-$ capdag run shout --dev-bin <cartridge>
-exit: 0
---- stdout ---
-FROM A PIPE--- stderr ---
-[1/1] shout  done
-✓ shout on stdin  1 step · <time>

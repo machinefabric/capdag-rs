@@ -1,42 +1,47 @@
 $ capdag help run
 exit: 0
 --- stdout ---
-Run a capability or a machine on files
+Run a machine on inputs: one written inline or in a file, or one planned to --to
 
-Usage: capdag run [OPTIONS] <CAP|MACHINE> [-- <INPUTS>...]
+Usage: capdag run [OPTIONS] [MACHINE|INPUT]... [-- <INPUT>...]
 
 Arguments:
-  <CAP|MACHINE>
-          A capability, by its alias or URN, or a machine file
+  [MACHINE|INPUT]...
+          The machine — written inline, or a .machine file — and then its inputs; or only inputs, to
+          plan a machine to what --to names. An input is a file, a directory or glob (its files,
+          sorted), a live source, or - (stdin)
 
-  [INPUTS]...
-          Files, directories or globs to run on; for a cap, also its own options
+  [INPUT]...
+          Inputs: after --, no argument is taken for the machine
 
 Options:
       --fabric <URL>
           Resolve caps, media and aliases against this fabric instead of the built-in one (env:
           CDG_FABRIC_REGISTRY_URL)
 
-  -o, --output <DIR>
-          Write results into this directory (default: the working directory)
+      --input <NAME=VALUE>
+          An input of the machine by its name: @<file|glob|directory>, - (stdin), or text (==<text>
+          for text that starts with @ or =, or is -) (repeatable)
 
-      --force
-          Overwrite result files that exist
+      --live <NAME=URN>
+          A live source for an input of the machine, by the input's name (repeatable)
 
       --offline
           Use the network for nothing: what is not cached or bundled is an error that names it
 
-      --input <NAME=VALUE>
-          A machine's input by its name in the notation; `@<path>` reads a file (repeatable)
+      --arg <[STEP.]OPTION=VALUE>
+          A step option the machine leaves to the run: <option>=<value> when one step has an option
+          of that name, <step>.<option>=<value> otherwise; @<file> reads a file (repeatable)
 
       --json
           Print JSON Lines on stdout — one record per line — instead of text for a person
 
-      --arg <NAME=VALUE>
-          A cap's option by its name or media URN; `@<path>` reads a file (repeatable)
-
       --no-input
           Never ask: a choice not given by a flag is an error naming the flag
+
+      --to <TYPE>
+          What to make, when no machine is given: a media alias, an extension or a media URN;
+          several name what one machine makes together (repeatable)
 
       --color <WHEN>
           When to colour the output
@@ -48,14 +53,23 @@ Options:
 
           [default: auto]
 
-      --to <TYPE>
-          For a generic cap such as convert-image: the type to make
+      --from <TYPE>
+          What - holds, when no machine is given
 
       --selector <JSON>
-          For a live source: what to capture, as JSON (`{"duration_ms":5000}`)
+          What a live source captures, as JSON ('{"duration_ms":5000}')
 
   -v, --verbose...
           Say more: -v adds the cartridges' info logs and URNs, -vv their debug logs
+
+  -o, --output <DIR>
+          Write results into this directory (default: the working directory)
+
+  -q, --quiet
+          Say only what failed
+
+      --force
+          Overwrite result files that exist
 
       --progress <HOW>
           How the run is shown while it goes
@@ -68,27 +82,53 @@ Options:
 
           [default: auto]
 
-  -q, --quiet
-          Say only what failed
-
       --trace <FILE>
           Write each segment's protocol trace to this file (JSON Lines)
 
       --dev-bin <PATH>
           Use this cartridge binary, or every binary in this directory (repeatable)
 
+      --converge <HOW>
+          Where inputs of several types meet: combine them, or treat each on its own
+
+          [possible values: auto, combine, independent]
+
+      --where <WHERE>
+          Where converging paths meet: auto, earliest, latest, source, target or depth=<n>
+
+      --mechanism <HOW>
+          How converging paths are joined
+
+          [possible values: any, generalize, collect, merge]
+
+      --rank <ORDER>
+          The order machines are listed in
+
+          [possible values: intent, shortest, cost]
+
+      --depth <N>
+          How many steps a machine may have at most
+
+      --max-paths <N>
+          How many paths are searched at most
+
   -h, --help
-          Print help (see a summary with '-h')
+          Print help; with a machine, the machine's own: its inputs, steps and the options it leaves
+          to the run
 
   -V, --version
           Print version
 
 Examples:
-  capdag run csv2json people.csv                       one cap; the result on stdout
-  cat report.pdf | capdag run disbind-pdf -o pages     piped input; pages written to pages/
-  capdag run disbind-pdf report.pdf --index-range 1-5  the cap's own options, as it declares them
-  capdag run pages.machine report.pdf -o out           a machine
-  capdag run pages.machine --input doc=@report.pdf     an input by its name in the machine
+  capdag run '[doc -> disbind-pdf -> pages]' report.pdf -o pages    a machine of one step
+  capdag run pages.machine report.pdf                    a machine saved in a file
+  capdag run pages.machine --input doc=@report.pdf       an input by its name in the machine
+  cat notes.txt | capdag run summary.machine -           stdin as an input
+  capdag run report.pdf --to txt                         plan a machine that makes text of it
+  capdag run '[doc -> disbind-pdf -> pages]' report.pdf --arg index-range=1-5
+
+What a line leaves open is asked at a terminal, and named with the flag that gives it
+in a script. A run that settled anything prints the line to run it again, asking nothing.
 
 A single result goes to stdout; several results are written as files, whose
 paths are listed on stdout. Progress, logs and errors go to stderr.
@@ -96,5 +136,7 @@ paths are listed on stdout. Progress, logs and errors go to stderr.
 Ctrl-C stops the run: nothing new starts, what started finishes and is written.
 Ctrl-C again aborts it.
 
-`capdag run <cap> --help` shows that cap's own options.
+`capdag run <machine> --help` shows the machine's inputs, steps and the options it leaves
+to the run; `capdag info <cap>` a capability's own options.
 --- stderr ---
+

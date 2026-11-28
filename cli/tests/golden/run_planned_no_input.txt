@@ -1,0 +1,10 @@
+$ capdag --no-input run in.txt
+exit: 2
+--- stdout ---
+--- stderr ---
+error: 3 options for what to make, and nobody to ask
+  --to 'media:dag-joined;enc=utf8'  dag-joined;enc=utf8 · each · 1 step
+  --to 'media:dag-shout;enc=utf8'  dag-shout;enc=utf8 · each · 1 step
+  --to 'media:dag-word;enc=utf8'  dag-word;enc=utf8 · each · 1 step
+hint: give one with --to <value>
+

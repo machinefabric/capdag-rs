@@ -1,0 +1,7 @@
+$ capdag run '[doc -> shout -> loud]' - --dev-bin <cartridge>
+exit: 0
+--- stdout ---
+FROM A PIPE--- stderr ---
+[1/1] shout  done
+✓ the machine  1 step · <time>
+

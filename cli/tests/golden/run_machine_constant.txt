@@ -1,13 +1,14 @@
 $ capdag run say.machine --dev-bin <cartridge>
 exit: 0
 --- stdout ---
-<work>/say.w.0.txt
-<work>/say.w.1.txt
-<work>/say.w.2.txt
+<work>/say · 1.w.txt
+<work>/say · 2.w.txt
+<work>/say · 3.w.txt
 --- stderr ---
 [1/2] say  done
 [2/2] words  done
 ✓ say.machine  2 steps · <time>
-  → <work>/say.w.0.txt
-  → <work>/say.w.1.txt
-  → <work>/say.w.2.txt
+  → <work>/say · 1.w.txt
+  → <work>/say · 2.w.txt
+  → <work>/say · 3.w.txt
+
